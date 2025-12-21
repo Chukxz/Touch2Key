@@ -1,0 +1,33 @@
+# --- Python Bytecode (Generated automatically, do not upload) ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# --- Virtual Environments ---
+# Ignores standard names for virtual env folders
+.venv/
+venv/
+env/
+ENV/
+
+# --- Environment Variables & Secrets ---
+# CRITICAL: Never upload API keys or passwords
+.env
+.env.local
+
+# --- Distribution / Build artifacts ---
+# If you package your project later
+build/
+dist/
+*.egg-info/
+
+# --- IDE & Editor Settings (Optional but recommended) ---
+# Keeps your personal editor settings out of the shared code
+.vscode/
+.idea/
+*.swp
+
+# --- OS Generated Files ---
+.DS_Store
+Thumbs.db
