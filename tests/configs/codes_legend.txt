@@ -1,0 +1,67 @@
+CODE   : DESCRIPTION
+------------------------------------------------------------
+ADB    : Aim Down Sights (ADS) - Toggles or holds the weapon scope.
+BAG    : Backpack / Inventory - Opens the inventory screen (BR/Zombies).
+BNR    : Banner / Notification - Zone for in-game banners or notifications.
+CAN    : Cancel - Cancels current action (grenade throw, ability).
+CFG    : Configuration - Opens settings or loadout menus.
+CHAT   : Chat - Opens the text chat window.
+CRB    : Crouch / Slide - Tap to crouch, hold while running to slide.
+DOR    : Door - Interact button to open/close doors.
+DPD    : D-Pad - Directional inputs for menus or specific scorestreaks.
+DRV    : Drive - Enter and drive a vehicle.
+EMB    : Emote - Opens the emote and spray wheel.
+EXC    : Exit Cancel - Secondary exit or cancel button.
+EXT    : Exit - Exit vehicle or turret.
+EYE    : Free Look - Rotate camera without turning character (Eye icon).
+FLB    : Fire Left Button - Secondary fire button (usually for hip fire).
+FPP    : FPP/TPP Toggle - Switches between First and Third person views.
+FRB    : Fire Right Button - Primary fire button (often engages ADS).
+GRB    : Grenade - Throws tactical or lethal equipment.
+HLP    : Help - Request help or context action.
+HPB    : Health / Armor Plate - Apply armor plates or heal.
+HUD    : HUD Zone - General Heads-Up Display area.
+INT    : Interact - General interaction (Pickup items, open crates).
+ITM    : Item - Specific item usage slot.
+JMB    : Jump / Mantle - Jump over obstacles or mantle ledges.
+JOY    : Joystick - Virtual movement stick area.
+KIL    : Kill Feed - Area displaying kill notifications.
+KNF    : Knife / Melee - Quick melee attack button.
+LGT    : Light - Toggle flashlight (Zombies/Night modes).
+MAB    : Mark / Ping - Marks enemies or locations for teammates.
+MAP    : Map - The mini-map zone (tap to enlarge).
+MED    : Medic - Use medic skill or healing item.
+MIB    : Microphone Input - Toggle own microphone mute/unmute.
+MIC_A  : Microphone A - Specific microphone channel toggle.
+MIC_B  : Microphone B - Specific microphone channel toggle.
+MYP    : Mythic Projection - Weapon inspection animation.
+OPS    : Operator Skill - Activates ultimate ability (Purifier, Gravity Spikes, etc.).
+PLB    : Plant Bomb - Plant or defuse bomb in S&D mode.
+PLT    : Player List / Scoreboard - Shows current match stats.
+PRK    : Perk - Activates specific perk ability.
+PSN    : Potion / Poison - Use antidote or specific zombie potion.
+QST    : Quest - Shows current mission or quest status.
+RAD    : Radio - Quick voice command menu.
+RES    : Rescue / Revive - Revive a downed teammate.
+RLB    : Reload - Reloads the current weapon.
+RTP    : Return / Teleport - Return to base or teleport (Zombies).
+RUN    : Sprint - Lock sprint / Auto-run button.
+SCD    : Scorestreak Down - Scroll down through scorestreaks.
+SCO    : Scope - Sniper scope toggle.
+SCR    : Screen / Scroll - General touch interaction area.
+SCS    : Scorestreak Select - Select specific scorestreak.
+SCT    : Scorestreak Trigger - Activate selected scorestreak.
+SCW    : Scorestreak Wheel - Wheel menu for scorestreaks.
+SKB    : Skill Button - Class skill (BR) or active ability.
+SRV    : Survival - Self-revive or survival kit interaction.
+SSB    : Scorestreak Bar - Zone containing scorestreak icons.
+STB    : Settings Button - Pause menu / Options.
+TMR    : Timer - Match clock display area.
+TRT    : Turret - Enter or control turret.
+TRV    : Traverse / Vehicle - Specific vehicle interaction.
+TSK    : Task - Current objective list.
+TXT    : Text - Subtitle or text display area.
+VOB    : Voice Output - Toggle team voice chat speaker mute/unmute.
+WPN    : Weapon Swap - Switches between primary and secondary weapons.
+WRC    : Wrench - Repair vehicle or turret (Zombies).
+WSP    : Weapon Swap - Dedicated weapon swap button.
