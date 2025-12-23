@@ -3,8 +3,7 @@ import threading
 import subprocess
 import re
 from mapper import Mapper
-
-DEF_DPI = 160
+from bridge import DEF_DPI
 
 class TouchReader:
     def __init__(self):
@@ -20,7 +19,7 @@ class TouchReader:
         print(f"[INFO] Using resolution: {self.width}x{self.height}")
         self.dpi = self.get_dpi()
         print(f"[INFO] Detected screen DPI: {self.dpi}")
-        self.mapper = Mapper()
+        self.mapper = Mapper(self.width, self.height, self.dpi)
         
         self.slots = {}
         self.start_slots = {}
@@ -114,14 +113,6 @@ class TouchReader:
             return int(val) if val else DEF_DPI
         except Exception:
             return DEF_DPI
-
-    def dp_to_px(self, dp):
-        """Convert dependent pixels (dp) to pixels (px)."""
-        return dp * (self.dpi / DEF_DPI)
-
-    def px_to_dp(self, px):
-        """Convert pixels (px) to dependent pixels (dp)."""
-        return px * (DEF_DPI / self.dpi)
 
     def parse_hex_signed(self, value_hex: str) -> int:
         """Convert hex string from getevent to signed integer."""

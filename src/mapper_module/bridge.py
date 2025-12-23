@@ -2,6 +2,7 @@ from interception import Interception, KeyStroke, MouseStroke
 import ctypes
 
 # Mouse event flags
+DEF_DPI = 160
 MOUSE_MOVE_RELATIVE = 0x00
 MOUSE_MOVE_ABSOLUTE = 0x01
 MOUSE_VIRTUAL_DESKTOP = 0x02
@@ -136,12 +137,20 @@ SCANCODES = {
     "E0_NUM_ENTER": 0xE01C,
 }
 
-
 class InterceptionBridge:
-    def __init__(self):
+    def __init__(self, dpi):
         self.ctx = Interception()
         self.mouse = self.ctx.mouse()
         self.keyboard = self.ctx.keyboard()
+        self.dpi = dpi
+
+    def dp_to_px(self, dp):
+        """Convert dependent pixels (dp) to pixels (px)."""
+        return dp * (self.dpi / DEF_DPI)
+
+    def px_to_dp(self, px):
+        """Convert pixels (px) to dependent pixels (dp)."""
+        return px * (DEF_DPI / self.dpi)
 
     def key_down(self, key_code):
         ks_down = KeyStroke(key_code, flags=0)
@@ -170,10 +179,8 @@ class InterceptionBridge:
         screen_h = ctypes.windll.user32.GetSystemMetrics(1)
 
         abs_x = int((x * 65535) / screen_w)
-        abs_y = int((y * 65535) / screen_h)           
+        abs_y = int((y * 65535) / screen_h)
         ms = MouseStroke(MOUSE_MOVE_ABSOLUTE | MOUSE_VIRTUAL_DESKTOP, 0, 0, abs_x, abs_y)
-        ms.x = abs_x
-        ms.y = abs_y
         self.ctx.send(self.mouse, ms)
         
     def left_click_down(self):

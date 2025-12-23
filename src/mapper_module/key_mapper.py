@@ -2,9 +2,10 @@ import wasd_mapper
 from mapper import TouchMapperEventDispatcher
 
 class KeyMapper(TouchMapperEventDispatcher):
-    def __init__(self):
+    def __init__(self, interception_bridge):
         super().__init__()
-        self.wasd_mapper = wasd_mapper.WASDMapper()
+        self.interception_bridge = interception_bridge
+        self.wasd_mapper = wasd_mapper.WASDMapper(self.interception_bridge)
 
     def is_in_circle(self, px, py, cx, cy, r):
         return (px - cx)**2 + (py - cy)**2 <= r*r

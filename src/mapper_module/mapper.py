@@ -4,6 +4,7 @@ from ctypes import wintypes
 import mouse_mapper
 import key_mapper
 import threading
+from bridge import InterceptionBridge
 
 MAX_CLASS_NAME = 256
 
@@ -30,7 +31,6 @@ class TouchMapperEvent:
         self.is_mouse = is_mouse
         self.is_wasd = is_wasd
         self.action = action # UP, DOWN, PRESSED
-        self.lock = threading.Lock()
         
 class TouchMapperEventDispatcher:
     def __init__(self):    
@@ -59,15 +59,19 @@ class TouchMapperEventDispatcher:
                 func(event_object) # Execute the callback
 
 class Mapper(TouchMapperEventDispatcher):
-    def __init__(self, window_title="Gameloop(64beta)"):
+    def __init__(self, width, height, dpi, window_title="Gameloop(64beta)"):
         super().__init__()
         self.game_window_class_name = self.get_game_window_class_name(window_title)
         self.game_window_info = self.get_game_window_info()
         self._last_window_update = 0.0
         self._window_update_interval = 0.016  # seconds
-        
-        self.mouse_mapper = mouse_mapper.MouseMapper()
-        self.key_mapper = key_mapper.KeyMapper()
+        self.device_width = width
+        self.device_height = height
+        self.dpi = dpi
+        self.lock = threading.Lock()
+        self.interception_bridge = InterceptionBridge(self.dpi)
+        self.mouse_mapper = mouse_mapper.MouseMapper(self.interception_bridge)
+        self.key_mapper = key_mapper.KeyMapper(self.interception_bridge)
 
     # Get the class name of a window
     def get_window_class_name(self, hwnd):
