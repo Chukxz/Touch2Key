@@ -1,5 +1,5 @@
 import threading
-from parse_config import AppConfig
+from mapper_project.src.mapper_module.settings_parser import AppConfig
 from touch_reader import TouchReader
 from mapper import Mapper
 from mouse_mapper import MouseMapper
