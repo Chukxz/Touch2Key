@@ -2,11 +2,21 @@ import time
 import threading
 import subprocess
 import re
-from mapper import Mapper
-from bridge import DEF_DPI
 
-class TouchReader:
-    def __init__(self):
+class TouchMapperEvent:
+    def __init__(self, slot, tracking_id, x, y, sx, sy, action, is_mouse, is_wasd):
+        self.slot = slot
+        self.id = tracking_id
+        self.x = x
+        self.y = y
+        self.sx = sx
+        self.sy = sy
+        self.is_mouse = is_mouse
+        self.is_wasd = is_wasd
+        self.action = action # UP, DOWN, PRESSED
+
+class TouchReader(TouchMapperEvent):
+    def __init__(self, config, touch_event_dispatcher):
         self.device = self.get_adb_device()
         self.device_touch_event = self.find_touch_device_event()
         if self.device_touch_event is None:
@@ -17,10 +27,8 @@ class TouchReader:
             raise RuntimeError("Resolution not found")
         self.width, self.height = res
         print(f"[INFO] Using resolution: {self.width}x{self.height}")
-        self.dpi = self.get_dpi()
-        print(f"[INFO] Detected screen DPI: {self.dpi}")
-        self.mapper = Mapper(self.width, self.height, self.dpi)
         
+        self.touch_event_dispatcher = touch_event_dispatcher
         self.slots = {}
         self.start_slots = {}
         self.max_slots = self.get_max_slots()
@@ -103,16 +111,6 @@ class TouchReader:
 
         # None found
         return None
-
-    def get_dpi(self):
-        """Detect screen DPI, fallback to 160."""
-        try:
-            result = subprocess.run(["adb", "-s", self.device, "shell", "getprop", "ro.sf.lcd_density"],
-                                    capture_output=True, text=True, timeout=1)
-            val = result.stdout.strip()
-            return int(val) if val else DEF_DPI
-        except Exception:
-            return DEF_DPI
 
     def parse_hex_signed(self, value_hex: str) -> int:
         """Convert hex string from getevent to signed integer."""
@@ -282,16 +280,18 @@ class TouchReader:
                                     start_info['x'], start_info['y'], self.width, self.height, self.rotation
                                 )
                             
-                            self.mapper.accept_touch_event(
-                                slot,
-                                info['tracking_id'],
-                                rx,
-                                ry,
-                                srx,
-                                sry,
-                                info['state'],
-                                is_mouse = (slot == self.mouse_slot),
-                                is_wasd = (slot == self.wasd_slot)
+                            self.touch_event_dispatcher.dispatch(
+                                TouchMapperEvent(
+                                    slot,
+                                    info['tracking_id'],
+                                    rx,
+                                    ry,
+                                    srx,
+                                    sry,
+                                    info['state'],
+                                    is_mouse = (slot == self.mouse_slot),
+                                    is_wasd = (slot == self.wasd_slot)
+                                )
                             )
                             
                             if info['state'] != 'UP':
