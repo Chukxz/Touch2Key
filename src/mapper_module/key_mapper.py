@@ -1,19 +1,23 @@
 class KeyMapper():
-    def __init__(self, mapper, config, touch_event_dispatcher):
+    def __init__(self, mapper):
         self.mapper = mapper
+        self.config = mapper.config
+        self.mapper_event_dispatcher = self.mapper.mapper_event_dispatcher
+        self.update_config()
         
-        # self.update_config(mapper.config.key)
-        config.register_callback(self.update_config)
-        touch_event_dispatcher.register_callback("ON_TOUCH_DOWN", self.touch_down)  
-        touch_event_dispatcher.register_callback("ON_TOUCH_PRESSED", self.touch_pressed)
-        touch_event_dispatcher.register_callback("ON_TOUCH_UP", self.touch_up)
-    
-    def update_config(self, key_config):
+        self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
+        self.mapper_event_dispatcher.register_callback("ON_TOUCH_DOWN", self.touch_down)  
+        self.mapper_event_dispatcher.register_callback("ON_TOUCH_PRESSED", self.touch_pressed)
+        self.mapper_event_dispatcher.register_callback("ON_TOUCH_UP", self.touch_up)
+
+    def update_config(self):
         """
         Call this whenever F5 is pressed.
         It snapshots the new values so the main loop is fast.
         """
-        print(f"KeyMapper reloading...")
+
+        print(f"KeyMapper reloading...  New MouseWheel Mapping Code: {self.config.config_data['syst']}")
+
     
     def touch_down(self, event):
         pass

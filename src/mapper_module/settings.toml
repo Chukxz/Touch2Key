@@ -1,0 +1,33 @@
+[system]
+# Path to the CSV file defining circular zones
+circ_csv_path = "C:\Users\LENOVO\Documents\Programming\Python_Bluestacks_CODM_mapper_v2\mapper_project\tests\configs\mp_rect.csv"
+# Path to the CSV file defining rectangular zones
+rect_csv_path = "C:\Users\LENOVO\Documents\Programming\Python_Bluestacks_CODM_mapper_v2\mapper_project\tests\configs\mp_circ.csv"
+
+circ_csv_dev_res = (k720, 1612)
+circ_csv_dev_dpi = 320
+circ_csv_dev_name = ""
+
+rect_csv_dev_res = (720, 1612)
+rect_csv_dev_dpi = 320
+rect_csv_dev_name = ""
+
+[key]
+mouse_wheel_mapping_code = "JOY"
+
+[mouse]
+# The "Magic Number" multiplier
+# SENSITIVITY CONSTANT
+# Adjust this multiplier to tune how fast the camera turns
+# roughly: 1.0 means "1 DP unit = 1 Mouse Mickey"
+sensitivity = 15.0
+# Invert Y axis? (True/False)
+invert_y = False
+
+[joystick]
+# Deadzone (0.0 - 1.0)
+deadzone = 0.15
+# Hysteresis Angle (Degrees)
+hysteresis = 5.0
+# Fixed or Dynamic joystick center? (True/False)
+fixed_center = False

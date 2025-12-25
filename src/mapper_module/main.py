@@ -1,45 +1,25 @@
 import threading
-from mapper_project.src.mapper_module.settings_parser import AppConfig
+import keyboard
+from utils import MapperEventDispatcher
+from settings_parser import AppConfig
+from csv_loader import CSV_Loader
 from touch_reader import TouchReader
 from mapper import Mapper
 from mouse_mapper import MouseMapper
 from key_mapper import KeyMapper
 from wasd_mapper import WASDMapper
-        
-class TouchMapperEventDispatcher:
-    def __init__(self):    
-        # The Registry
-        self.callback_registry = {
-            "ON_TOUCH_DOWN": [],
-            "ON_TOUCH_UP": [],
-            "ON_TOUCH_PRESSED": []
-        }
 
-    def register_callback(self, event_type, func):
-        self.callback_registry[event_type].append(func)
-    
-    def unregister_callback(self, event_type, func):
-        self.callback_registry[event_type].remove(func)
-
-    def dispatch(self, event_object):
-        if event_object.action == "DOWN":
-            for func in self.callback_registry["ON_TOUCH_DOWN"]:
-                func(event_object) # Execute the callback
-        elif event_object.action == "UP":
-            for func in self.callback_registry["ON_TOUCH_UP"]:
-                func(event_object) # Execute the callback
-        elif event_object.action == "PRESSED":
-            for func in self.callback_registry["ON_TOUCH_PRESSED"]:
-                func(event_object) # Execute the callback
-
-config = AppConfig('config.ini')
-touch_event_dispatcher = TouchMapperEventDispatcher()
-touch_reader = TouchReader(config, touch_event_dispatcher)
+config = AppConfig('settings.toml')
+mapper_event_dispatcher = MapperEventDispatcher()
+touch_reader = TouchReader(config, mapper_event_dispatcher)
 threading.Thread(target=touch_reader.update_rotation, daemon=True).start()
 
+csv_loader = CSV_Loader(mapper_event_dispatcher, config)
+keyboard.add_hotkey('f5', csv_loader.reload, suppress=True)
 
-mapper = Mapper(touch_reader.width, touch_reader.height, config)
-MouseMapper(mapper, config, touch_event_dispatcher)
-KeyMapper(mapper, config, touch_event_dispatcher)
+mapper = Mapper(csv_loader)
+MouseMapper(mapper)
+KeyMapper(mapper)
 # Register WASD Mapper after registering KeyMapper to ensure we check for WASD blocking by HUD buttons
-WASDMapper(mapper, config, touch_event_dispatcher)
+WASDMapper(mapper)
+

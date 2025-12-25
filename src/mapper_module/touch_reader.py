@@ -2,33 +2,18 @@ import time
 import threading
 import subprocess
 import re
+from utils import TouchMapperEvent, MapperEvent
 
-class TouchMapperEvent:
-    def __init__(self, slot, tracking_id, x, y, sx, sy, action, is_mouse, is_wasd):
-        self.slot = slot
-        self.id = tracking_id
-        self.x = x
-        self.y = y
-        self.sx = sx
-        self.sy = sy
-        self.is_mouse = is_mouse
-        self.is_wasd = is_wasd
-        self.action = action # UP, DOWN, PRESSED
-
-class TouchReader(TouchMapperEvent):
-    def __init__(self, config, touch_event_dispatcher):
+class TouchReader():
+    def __init__(self, config, mapper_event_dispatcher):
         self.device = self.get_adb_device()
         self.device_touch_event = self.find_touch_device_event()
         if self.device_touch_event is None:
             raise RuntimeError("No touchscreen device found via ADB.")
         print(f"[INFO] Using touchscreen device: {self.device_touch_event}")
-        res = self.get_screen_size()
-        if res is None:
-            raise RuntimeError("Resolution not found")
-        self.width, self.height = res
-        print(f"[INFO] Using resolution: {self.width}x{self.height}")
-        
-        self.touch_event_dispatcher = touch_event_dispatcher
+   
+        self.config = config
+        self.mapper_event_dispatcher = mapper_event_dispatcher
         self.slots = {}
         self.start_slots = {}
         self.max_slots = self.get_max_slots()
@@ -117,18 +102,6 @@ class TouchReader(TouchMapperEvent):
         val = int(value_hex, 16)
         return val if val < 0x80000000 else val - 0x100000000
 
-    def get_screen_size(self):
-        """Detect screen resolution (portrait natural)."""
-        result = subprocess.run(
-            ["adb", "-s", self.device, "shell", "wm", "size"], capture_output=True, text=True
-        )
-        output = result.stdout.strip()
-        if "Physical size" in output:
-            w, h = map(int, output.split(":")[-1].strip().split("x"))
-            return w, h
-
-        return None
-
     def rotate_coordinates(self, x, y, width, height, rotation_code):
         """Rotate coordinates based on rotation code (0-3)."""
         if rotation_code == 0:  # Portrait
@@ -139,7 +112,6 @@ class TouchReader(TouchMapperEvent):
             return width - x, height - y
         elif rotation_code == 3:  # Landscape left (screen rotated counter-clockwise)
             return height - y, x
-
         return x, y
 
     def update_rotation(self):
@@ -280,19 +252,23 @@ class TouchReader(TouchMapperEvent):
                                     start_info['x'], start_info['y'], self.width, self.height, self.rotation
                                 )
                             
-                            self.touch_event_dispatcher.dispatch(
-                                TouchMapperEvent(
-                                    slot,
-                                    info['tracking_id'],
-                                    rx,
-                                    ry,
-                                    srx,
-                                    sry,
-                                    info['state'],
-                                    is_mouse = (slot == self.mouse_slot),
-                                    is_wasd = (slot == self.wasd_slot)
-                                )
+                            touch_event = TouchMapperEvent(
+                                slot,
+                                info['tracking_id'],
+                                rx,
+                                ry,
+                                srx,
+                                sry,
+                                is_mouse = (slot == self.mouse_slot),
+                                is_wasd = (slot == self.wasd_slot)
                             )
+                            
+                            mapper_event = MapperEvent(
+                                info['state'],
+                                touch_event
+                            )
+                            
+                            self.mapper_event_dispatcher.dispatch(mapper_event)
                             
                             if info['state'] != 'UP':
                                 self.slots[slot]['state'] = 'PRESSED'

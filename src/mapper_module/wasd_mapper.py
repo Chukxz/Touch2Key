@@ -1,7 +1,7 @@
 import math
 
 class WASDMapper():
-    def __init__(self, mapper, config, touch_event_dispatcher):
+    def __init__(self, mapper):
         self.mapper = mapper        
         # Interception Scan Codes
         self.KEY_W = 0x11
@@ -14,23 +14,32 @@ class WASDMapper():
         self.center_x = 0.0
         self.center_y = 0.0
         self.radius = 0.0
-        self.update_config(mapper.config.joystick)
-        
-        config.register_callback(self.update_config)
-        touch_event_dispatcher.register_callback("ON_TOUCH_DOWN", self.touch_down)  
-        touch_event_dispatcher.register_callback("ON_TOUCH_PRESSED", self.touch_pressed)
-        touch_event_dispatcher.register_callback("ON_TOUCH_UP", self.touch_up)
+        self.csv_loader = mapper.csv_loader
+        self.config = mapper.config
+        self.mapper_event_dispatcher = self.mapper.mapper_event_dispatcher
+        self.update_config()
+        self.updateMouseWheel()
+                
+        self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
+        self.mapper_event_dispatcher.register_callback("ON_CSV_RELOAD", self.updateMouseWheel)
+        self.mapper_event_dispatcher.register_callback("ON_TOUCH_DOWN", self.touch_down)  
+        self.mapper_event_dispatcher.register_callback("ON_TOUCH_PRESSED", self.touch_pressed)
+        self.mapper_event_dispatcher.register_callback("ON_TOUCH_UP", self.touch_up)
 
-    def update_config(self, joystick_config):
+    def update_config(self):
         """
         Call this whenever F5 is pressed.
         It snapshots the new values so the main loop is fast.
         """
-        print(f"JoystickMapper reloading... New Deadzone: {joystick_config.deadzone}, Hysteresis: {joystick_config.hysteresis}, Fixed Center: {joystick_config.fixed_center}")
+        print(f"JoystickMapper reloading... New Deadzone: {self.config.config_data['joystick']['deadzone']}, Hysteresis: {self.config.config_data['joystick']['hysteresis']}, Fixed Center: {self.config.config_data['joystick']['fixed_center']}")
         
-        self.DEADZONE = joystick_config.deadzone
-        self.HYSTERESIS = joystick_config.hysteresis        
-        self.FIXED_CENTER = joystick_config.fixed_center
+        self.DEADZONE = self.config.config_data['joystick']['deadzone']
+        self.HYSTERESIS = self.config.config_data['joystick']['hysteresis']       
+        self.FIXED_CENTER = self.config.config_data['joystick']['fixed_center']
+    
+    def updateMouseWheel(self):
+        mouse_wheel_mapping_code = self.config.config_data['key']['mouse_wheel_mapping_code']
+        self.mouse_wheel = self.csv_loader.csv_data[mouse_wheel_mapping_code]
 
     def set_zone(self, cx, cy, radius):
         """Define the physical location of the joystick on phone."""

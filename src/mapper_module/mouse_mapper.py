@@ -1,25 +1,27 @@
 class MouseMapper():
-    def __init__(self, mapper, config, touch_event_dispatcher):
+    def __init__(self, mapper):
         self.mapper = mapper
         self.prev_x = None
         self.prev_y = None
+        self.config = mapper.config
+        self.mapper_event_dispatcher = self.mapper.mapper_event_dispatcher
+        self.update_config()
+        
+        self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
+        self.mapper_event_dispatcher.register_callback("ON_TOUCH_DOWN", self.touch_down)  
+        self.mapper_event_dispatcher.register_callback("ON_TOUCH_PRESSED", self.touch_pressed)
+        self.mapper_event_dispatcher.register_callback("ON_TOUCH_UP", self.touch_up)
 
-        self.update_config(config.mouse)
-        config.register_callback(self.update_config)
-        touch_event_dispatcher.register_callback("ON_TOUCH_DOWN", self.touch_down)  
-        touch_event_dispatcher.register_callback("ON_TOUCH_PRESSED", self.touch_pressed)
-        touch_event_dispatcher.register_callback("ON_TOUCH_UP", self.touch_up)
-
-    def update_config(self, mouse_config):
+    def update_config(self):
         """
         Call this whenever F5 is pressed.
         It snapshots the new values so the main loop is fast.
         """
-        print(f"MouseMapper reloading... New Sens: {mouse_config.sensitivity}, Invert Y: {mouse_config.invert_y}")
+        print(f"MouseMapper reloading... New Sens: {self.config.config_data['mouse']['sensitivity']}, Invert Y: {self.config.config_data['mouse']['invert_y']}")
         
-        self.AIM_SENSITIVITY = mouse_config.sensitivity       
+        self.AIM_SENSITIVITY = self.config.config_data['mouse']['sensitivity']       
         # Pre-calculate the math so we don't do 'if' checks in the loop
-        self.invert_mult = -1 if mouse_config.invert_y else 1
+        self.invert_mult = -1 if self.config.config_data['mouse']['invert_y'] else 1
     
     def touch_down(self, event):
         # Handle Touch Down (Reset Tracker)

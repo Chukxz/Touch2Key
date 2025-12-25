@@ -1,14 +1,10 @@
 import time
 import ctypes
 from ctypes import wintypes
-import subprocess
-import mouse_mapper
-import wasd_mapper
-import key_mapper
 import threading
 from bridge import InterceptionBridge
+from utils import DEF_DPI
 
-DEF_DPI = 160
 MAX_CLASS_NAME = 256
 
 # EnumWindows callback
@@ -24,31 +20,30 @@ class RECT(ctypes.Structure):
     ]
 
 class Mapper():
-    def __init__(self, width, height, config, window_title="Gameloop(64beta)"):
+    def __init__(self, csv_loader, window_title="Gameloop(64beta)"):
         super().__init__()
         self.game_window_class_name = self.get_game_window_class_name(window_title)
         self.game_window_info = self.get_game_window_info()
         self._last_window_update = 0.0
         self._window_update_interval = 0.016  # seconds
-        self.device_width = width
-        self.device_height = height
-        self.dpi = self.get_dpi()
-        print(f"[INFO] Detected screen DPI: {self.dpi}")
         self.lock = threading.Lock()
-        self.config = config
+        self.csv_loader = csv_loader
+        self.config = self.csv_loader.config
+        self.mapper_event_dispatcher = self.csv_loader.mapper_event_dispatcher
         self.wasd_block = False
         self.interception_bridge = InterceptionBridge(self.dpi)
-
-    def get_dpi(self):
-        """Detect screen DPI, fallback to 160."""
-        try:
-            result = subprocess.run(["adb", "-s", self.device, "shell", "getprop", "ro.sf.lcd_density"],
-                                    capture_output=True, text=True, timeout=1)
-            val = result.stdout.strip()
-            return int(val) if val else DEF_DPI
-        except Exception:
-            return DEF_DPI
+        self.update_config()
         
+        self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
+    
+    def update_config(self):
+        self.device_width = self.csv_loader.width
+        self.device_height = self.csv_loader.height
+        self.dpi = self.csv_loader.dpi
+
+        print(f"[INFO] Using resolution: {self.width}x{self.height}")
+        print(f"[INFO] Using DPI: {self.dpi}")
+              
     # Get the class name of a window
     def get_window_class_name(self, hwnd):
         buffer = ctypes.create_unicode_buffer(MAX_CLASS_NAME)
