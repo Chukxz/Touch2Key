@@ -10,29 +10,20 @@ def create_test_default_toml():
     # --- [system] Section ---
     # Create a table (section)
     sys_table = table()
-    sys_table.comment("Auto generated, edit at your own risk. Both circular and rectangular CSV files devices' resolutions, DPIs and names should match.")
-    sys_table.add("circ_csv_path", "")
-    sys_table["circ_csv_path"].comment("Path to the CSV file defining circular zones.")
-    
-    sys_table.add("rect_csv_path", "")
-    sys_table["rect_csv_path"].comment("Path to the CSV file defining rectangular zones.")
-    
+    sys_table.comment("Auto generated, edit at your own risk.")
+        
     sys_table.add("hud_image_path", "./mp_hud.jpg")
     sys_table["hud_image_path"].comment("Path to the HUD image file.")
     
-    sys_table.add("circ_csv_dev_res", (720, 1612))
-    sys_table["circ_csv_dev_res"].comment("Device resolution for CSV file defining circular zones.")
-    sys_table.add("circ_csv_dev_dpi", 320)
-    sys_table["circ_csv_dev_dpi"].comment("Device DPI for CSV file defining circular zones.")
-    sys_table.add("circ_csv_dev_name", "Chuksxz")
-    sys_table["circ_csv_dev_name"].comment("Device name for CSV file defining circular zones.")
-    
-    sys_table.add("rect_csv_dev_res", (720, 1612))
-    sys_table["rect_csv_dev_res"].comment("Device resolution for CSV file defining rectangular zones.")
-    sys_table.add("rect_csv_dev_dpi", 320)
-    sys_table["rect_csv_dev_dpi"].comment("Device DPI for CSV file defining rectangular zones.")
-    sys_table.add("rect_csv_dev_name", "Chuksxz")
-    sys_table["rect_csv_dev_name"].comment("Device name for CSV file defining rectangular zones.")
+    sys_table.add("csv_path", "")
+    sys_table["csv_path"].comment("Path to the CSV file defining mapping zones.")
+    sys_table.add("csv_dev_res", (720, 1612))
+    sys_table["csv_dev_res"].comment("Device resolution for the CSV file.")
+    sys_table.add("csv_dev_dpi", 320)
+    sys_table["csv_dev_dpi"].comment("Device DPI for the CSV file.")
+    sys_table.add("csv_dev_name", "Chuksxz")
+    sys_table["csv_dev_name"].comment("Device name for the CSV file.")
+
         
     doc.add("system", sys_table)
 
