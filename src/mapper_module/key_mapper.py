@@ -16,7 +16,9 @@ class KeyMapper():
         It snapshots the new values so the main loop is fast.
         """
 
-        print(f"KeyMapper reloading...  New MouseWheel Mapping Code: {self.config.config_data['syst']}")
+        print(f"KeyMapper reloading...  New MouseWheel Mapping Code: {self.config.config_data['key']['mouse_wheel_mapping_code']}")
+        
+        self.MOUSE_WHEEL_CODE = self.config.config_data['key']['mouse_wheel_mapping_code']
 
     
     def touch_down(self, event):

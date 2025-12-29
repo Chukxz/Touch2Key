@@ -4,7 +4,8 @@ import math
 import csv
 import os
 import datetime
-from utils import SCANCODES, CSV_FOLDER_NAME
+from utils import CIRCLE, RECT, SCANCODES, CSV_FOLDER_NAME, select_image_file
+
 
 # --- Constants ---
 IDLE = "IDLE"
@@ -12,15 +13,12 @@ COLLECTING = "COLLECTING"
 WAITING_FOR_KEY = "WAITING_FOR_KEY"
 DELETING = "DELETING"
 CONFIRM_EXIT = "CONFIRM_EXIT"
-NAMING = "NAMING"  # <--- NEW STATE
-
-CIRCLE = "CIRCLE"
-RECT = "RECT"
+NAMING = "NAMING"
 
 SPECIAL_MAP = {
     "escape": "ESC", "enter": "ENTER", "backspace": "BACKSPACE", "tab": "TAB",
-    "f1": "F1", "f2": "F2", "f3": "F3", "f4": "F4", "f5": "F5",
-    "f6": "F6", "f7": "F7", "f8": "F8", "f9": "F9", "f10": "F10",
+    "f1": "F1", "f2": "F2", "f3": "F3", "f4": "F4", "f5": "F5", "f6": "F6", 
+    "f7": "F7", "f8": "F8", "f9": "F9", "f10": "F10", "f11": "F11", "f12": "F12",
     "=": "EQUAL", "-": "MINUS",
     "[": "LEFT_BRACKET", "]": "RIGHT_BRACKET",
     ";": "SEMICOLON", "'": "APOSTROPHE", "`": "GRAVE", "\\": "BACKSLASH",
@@ -33,14 +31,20 @@ SPECIAL_MAP = {
 }
 
 class Plotter:
-    def __init__(self, image_path):
-        # --- 1. Disable Default Matplotlib Shortcuts ---
-        # This prevents 's', 'q', 'f', etc. from triggering internal mpl commands
+    def __init__(self):
+        # Select image file
+        image_path = select_image_file()
+        if image_path:
+            self.image_path = image_path
+        else:
+            print("Exiting: No image selected.")
+            return
+        
+        # Disable Default Matplotlib Shortcuts
         for key in plt.rcParams:
             if key.startswith('keymap.'):
                 plt.rcParams[key] = []
                 
-        self.image_path = image_path
         self.shapes = {}
         self.count = 0
         
@@ -71,7 +75,7 @@ class Plotter:
         self.fig.canvas.mpl_connect("button_press_event", self.on_click)
 
         plt.show()
-
+    
     # --- Visual & State Management ---
 
     def update_title(self, text):
@@ -102,6 +106,23 @@ class Plotter:
     # --- Event Handlers ---
 
     def on_click(self, event):
+        # 1. NEW: Handle Binding via Mouse Click
+        if self.state == WAITING_FOR_KEY:
+            # Matplotlib button codes: 1=Left, 2=Middle, 3=Right
+            mouse_map = {
+                1: "MOUSE_LEFT",
+                2: "MOUSE_MIDDLE",
+                3: "MOUSE_RIGHT"
+            }
+            
+            button_name = mouse_map.get(event.button)
+            
+            if button_name:
+                print(f"[-] Mouse Click Detected: {button_name}")
+                self.finalize_shape(button_name)
+            return
+
+        # 2. Existing: Handle Drawing Points
         if self.state != COLLECTING:
             return
         
@@ -119,28 +140,19 @@ class Plotter:
             self.update_title(f"Mode: {self.mode}. {remaining} points remaining.")
         else:
             self.state = WAITING_FOR_KEY
-            self.update_title(f"Shape Defined! Press KEY to bind (or F8 to Cancel).")
+            self.update_title(f"Shape Defined! Press KEY or CLICK MOUSE to bind (F8 to Cancel).")
 
     def on_key_press(self, event):
-        """
-        Main Input Router. 
-        Strictly segregates actions based on self.state to prevent conflicts.
-        """
-
-        # 1. State: NAMING (Saving)
+        """Main Input Router."""
+        
         if self.state == NAMING:
             self.handle_naming_input(event.key)
             return
         
-        # 2. State: DELETING
-        #    - Only accepts numbers, Enter, or Esc. 
-        #    - F6/F7/Del are ignored.
         if self.state == DELETING:
             self.handle_delete_input(event.key)
             return
 
-        # 3. State: CONFIRM_EXIT
-        #    - Only accepts Enter (quit) or others (cancel).
         if self.state == CONFIRM_EXIT:
             if event.key == 'enter':
                 print("[-] Closing application.")
@@ -149,10 +161,6 @@ class Plotter:
                 self.reset_state()
             return
 
-        # 4. State: DRAWING (COLLECTING or WAITING_FOR_KEY)
-        #    - F8 is the ONLY command allowed (Cancel).
-        #    - WAITING_FOR_KEY also accepts binding keys.
-        #    - F6, F7, Delete, F10 are BLOCKED.
         if self.state in [COLLECTING, WAITING_FOR_KEY]:
             if event.key == 'f8':
                 print("[-] Action Cancelled.")
@@ -160,17 +168,13 @@ class Plotter:
                 return
             
             if self.state == WAITING_FOR_KEY:
-                # If waiting for a bind, try to finalize
                 self.finalize_shape(event.key)
                 return
             
-            # If we reach here, user pressed a blocked key while drawing
             if event.key in ['f6', 'f7', 'delete', 'f10']:
                 print(f"[!] Blocked: Finish or Cancel (F8) current shape first.")
             return
 
-        # 5. State: IDLE
-        #    - Only here can we start new actions.
         if self.state == IDLE:
             if event.key == 'f6':
                 self.start_mode(CIRCLE, 3)
@@ -189,7 +193,6 @@ class Plotter:
     # --- Delete Logic ---
 
     def enter_delete_mode(self):
-        """Switch to DELETING state and clear buffer."""
         if not self.shapes:
             print("[!] No shapes to delete.")
             self.update_title("List empty. Nothing to delete.")
@@ -201,14 +204,9 @@ class Plotter:
         self.update_title("DELETE MODE: Type ID... (Enter to Confirm | Esc to Cancel)")
 
     def handle_delete_input(self, key):
-        """Processes keystrokes while in DELETE mode."""
-        
-        # CANCEL
         if key == 'escape':
             self.reset_state()
             return
-        
-        # CONFIRM
         elif key == 'enter':
             if self.input_buffer:
                 try:
@@ -226,26 +224,19 @@ class Plotter:
                      self.update_title("Error: Invalid Number. Try again or Esc.")
                      self.input_buffer = ""
             return
-
-        # TYPE NUMBER
         elif key.isdigit():
             self.input_buffer += key
             self.update_title(f"DELETE MODE: ID [{self.input_buffer}] (Enter to delete)")
-        
-        # BACKSPACE
         elif key == 'backspace':
             self.input_buffer = self.input_buffer[:-1]
             self.update_title(f"DELETE MODE: ID [{self.input_buffer}] (Enter to delete)")
-        
-        # BLOCK OTHERS
         elif key in ['f6', 'f7', 'delete', 'f10']:
             print("[!] Blocked: Exit Delete Mode (Esc) first.")
 
     # --- Core Logic ---
 
     def finalize_shape(self, key_name):
-        # Prevent F-keys/Special keys from being used as bindings if desirable,
-        # but here we just check mapping existence.
+        # 'key_name' might be a key string ('a', 'f1') OR a mouse string ('MOUSE_LEFT')
         hex_code = self.get_interception_code(key_name)
         
         if hex_code is None:
@@ -267,48 +258,32 @@ class Plotter:
     # --- Naming / Saving Logic ---
 
     def enter_naming_mode(self):
-        """Switch to NAMING state to get filename from user."""
         if not self.shapes:
             self.update_title("Nothing to save!")
             return
 
         self.state = NAMING
-        self.input_buffer = "" # Clear buffer
+        self.input_buffer = ""
         self.update_title("SAVE: Type Name... (Enter for Default | Esc to Cancel)")
 
     def handle_naming_input(self, key):
-        """Captures keystrokes for the filename."""
-        
-        # CANCEL
         if key == 'escape':
             self.reset_state()
             return
-        
-        # CONFIRM SAVE
         elif key == 'enter':
             final_name = self.input_buffer.strip()
-            # If empty, pass None so export_data generates a timestamp
             self.export_data(final_name if final_name else None)
             self.reset_state()
             return
-
-        # EDITING
         elif key == 'backspace':
             self.input_buffer = self.input_buffer[:-1]
-        
-        elif len(key) == 1 and key.isalnum() or key in ['_', '-']:
-            # Allow letters, numbers, underscores, and hyphens
+        elif len(key) == 1 and (key.isalnum() or key in ['_', '-']):
             self.input_buffer += key
         
-        # Update Visuals
         display_name = self.input_buffer if self.input_buffer else "[Default Timestamp]"
         self.update_title(f"SAVE: {display_name} (Enter to Save)")
 
     def export_data(self, user_name=None):
-        """
-        Saves data to CSV.
-        :param user_name: Custom name string. If None, uses timestamp.
-        """
         if not user_name:
             user_name = datetime.datetime.now().strftime("map_%Y%m%d_%H%M%S")
         
@@ -318,17 +293,12 @@ class Plotter:
         combined_rows = []
 
         for _, data in self.shapes.items():
-            # Common: [code, type, cx, cy]
-            common = [data['m_code'], data['type'], data['cx'], data['cy']]
-            
+            common = [data['key_name'], data['m_code'], data['type'], data['cx'], data['cy']]
             row = []
             if data['type'] == RECT:
                 (x_min, y_min), (x_max, y_max) = data['bb']
-                # [cx, cy, x_min, y_min, x_max, y_max]
                 row = common + [x_min, y_min, x_max, y_max]
-                
             elif data['type'] == CIRCLE:
-                # [cx, cy, radius, "", "", ""]
                 row = common + [data['r'], "", "", ""]
             
             combined_rows.append(row)
@@ -338,13 +308,12 @@ class Plotter:
         try:
             with open(file_path, 'w', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(['scancode', 'type', 'cx', 'cy', 'val1', 'val2', 'val3', 'val4'])
+                writer.writerow(['name', 'scancode', 'type', 'cx', 'cy', 'val1', 'val2', 'val3', 'val4'])
                 writer.writerows(combined_rows)
 
             msg = f"Saved: ../resources/{CSV_FOLDER_NAME}/{user_name}.csv"
             print(f"[+] {msg}")
             self.update_title(msg)
-            # We don't reset state here because handle_naming_input calls reset_state right after this
             
         except Exception as e:
             print(f"[!] Export Error: {e}")
@@ -395,4 +364,5 @@ class Plotter:
         ys = [pt[1] for pt in self.points]
         return int(sum(xs)/4), int(sum(ys)/4), None, ((min(xs), min(ys)), (max(xs), max(ys)))
 
-Plotter("../resources/mp_hud.jpg")
+if __name__ == "__main__":
+    Plotter()

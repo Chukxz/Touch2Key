@@ -1,7 +1,7 @@
 import threading
 import keyboard
 from utils import MapperEventDispatcher
-from settings_parser import AppConfig
+from config import AppConfig
 from csv_loader import CSV_Loader
 from touch_reader import TouchReader
 from mapper import Mapper

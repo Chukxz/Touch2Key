@@ -1,7 +1,8 @@
 import csv
 import os
 import time
-from utils import MapperEvent
+from utils import MapperEvent, CIRCLE, RECT
+from default_toml_helper import create_default_toml
 
 RELOAD_DELAY = 0.01
 
@@ -12,38 +13,38 @@ class CSV_Loader():
         self.master_zones = {}
         self.mapper_event_dispatcher = mapper_event_dispatcher
         self.config = config
-        self.last_loaded_circ_path = None
-        self.last_loaded_circ_timestamp = None
-        self.last_loaded_rect_path = None
-        self.last_loaded_rect_timestamp = None
+        self.last_loaded_csv_path = None
+        self.last_loaded_csv_timestamp = None
         self.width = None
         self.height = None
         self.dpi = None
+        self.dev_name = None
         self.csv_data = self.load_csv()
         
     def load_csv(self):
-        self.csv_data = self.process_csv(self.last_loaded_circ_path, self.last_loaded_rect_path)
-        self.last_loaded_circ_path = self.config['system']['circ_csv_path']
-        self.last_loaded_circ_timestamp = os.path.getmtime(self.last_loaded_circ_path)
-        self.last_loaded_rect_path = self.config['system']['rect_csv_path']
-        self.last_loaded_rect_timestamp = os.path.getmtime(self.last_loaded_rect_path)
-
-        circ_res = self.config['system']['circ_csv_dev_res']
-        rect_res = self.config['system']['rect_csv_dev_res']
+        self.csv_data = self.process_csv(self.last_loaded_csv_path)
+        self.last_loaded_csv_path = self.config['system']['csv_path']
+        self.last_loaded_csv_timestamp = os.path.getmtime(self.last_loaded_csv_path)
         
-        if all([circ_res, rect_res]) and circ_res == rect_res:
-            res = circ_res
-        else:
-            raise RuntimeError("Resolution not found or mismatched between circular and rectangular CSV settings.")
-        self.width, self.height = res
+        try:
+            w, h = self.config['system']['csv_dev_res']
+            self.width = int(w)
+            self.height = int(h)     
+        except:
+            create_default_toml()
+            raise RuntimeError("Resolution not found or misconfigured, configuration settings reset to default.")
         
-        circ_dpi = self.config['system']['circ_csv_dev_dpi']
-        rect_dpi = self.config['system']['rect_csv_dev_dpi']
+        try:
+            self.dpi = int(self.config['system']['csv_dev_dpi'])
+        except:
+            create_default_toml()
+            raise RuntimeError("DPI not found or misconfigured in CSV, configuration settings reset to default.")
         
-        if all([circ_dpi, rect_dpi]) and circ_dpi == rect_dpi:
-            self.dpi = circ_dpi
-        else:
-            raise RuntimeError("Mismatch found between circular and rectangular CSV setting")
+        try:
+            self.dev_name = str(self.config['system']['csv_dev_name'])
+        except:
+            create_default_toml()
+            raise RuntimeError("Device name not found or misconfigured, configuration settings reset to default.")
         
     def should_reload(self, old_path, new_path, last_timestamp):
         # ANALYZE: Do we need a HARD RELOAD (CSV)?
@@ -65,13 +66,11 @@ class CSV_Loader():
     def reload(self):
         print("\n[System] Checking for updates...")
         
-        # Check CIRC CSV
-        need_csv_reload_circ = self.should_reload(self.last_loaded_circ_path, self.config['system']['circ_csv_path'], self.last_loaded_circ_timestamp)
-        # Check RECT CSV
-        need_csv_reload_rect = self.should_reload(self.last_loaded_rect_path, self.config['system']['rect_csv_path'], self.last_loaded_rect_timestamp)
+        # Check CSV
+        need_csv_reload = self.should_reload(self.last_loaded_csv_path, self.config['system']['csv_path'], self.last_loaded_csv_timestamp)
                     
         # HARD RELOAD: Only run this block if any CSV actually changed
-        if need_csv_reload_circ or need_csv_reload_rect:
+        if need_csv_reload:
             # Load data into memory FIRST (Don't stop the game yet)
             print("[System] Parsing new CSV...")
             self.load_csv()
@@ -97,9 +96,6 @@ class CSV_Loader():
             file_path (str): Path to the CSV file.
             screen_width (int/float): The resolution width used when creating the CSV.
             screen_height (int/float): The resolution height used when creating the CSV.
-            
-        Returns:
-            dict: { "ZONE_NAME": { "x1": 0.5, "y1": ... } }
         """
         normalized_zones = {}
         
@@ -110,57 +106,55 @@ class CSV_Loader():
         with open(file_path, mode='r', encoding='utf-8-sig') as f:
             # DictReader automatically handles the header row
             reader = csv.DictReader(f)
-            headers = reader.fieldnames
+            # headers = reader.fieldnames
             
-            # Detect CSV Type
-            is_rect = 'x1' in headers and 'y1' in headers
-            is_circ = 'Center X' in headers or 'Radius' in headers
-
             for row in reader:
-                name = row['Name']
+                scancode = row["scancode"]
+                if not scancode:
+                    continue # Skip empty rows or bad data
                 
-                # Skip empty rows or bad data
-                if not name:
-                    continue
-                    
+                name = row["name"]
+
+                # Detect CSV Type
+                is_circ = row['type'] == CIRCLE
+                is_rect = row['type'] == RECT 
+
                 zone_data = {}
                 
                 try:
-                    if is_rect:
-                        # Normalization Formula: Value / Resolution
-                        zone_data['type'] = 'rect'
-                        zone_data['x1'] = float(row['x1']) / screen_width
-                        zone_data['y1'] = float(row['y1']) / screen_height
-                        zone_data['x2'] = float(row['x2']) / screen_width
-                        zone_data['y2'] = float(row['y2']) / screen_height
+                    if is_circ:
+                        zone_data['type'] = CIRCLE
                         
-                    elif is_circ:
-                        zone_data['type'] = 'circ'
                         # Normalize Center
-                        zone_data['cx'] = float(row['Center X']) / screen_width
-                        zone_data['cy'] = float(row['Center Y']) / screen_height
+                        zone_data['cx'] = float(row['cx']) / screen_width
+                        zone_data['cy'] = float(row['cy']) / screen_height
                         
                         # Normalize Radius
                         # NOTE: We normally normalize radius by WIDTH to keep the circle proportional
                         # to the horizontal field of view.
-                        zone_data['r'] = float(row['Radius']) / screen_width
+                        zone_data['r'] = float(row['val1']) / screen_width
 
+                    elif is_rect:
+                        zone_data['type'] = RECT
+                        
+                        # Normalization Formula: Value / Resolution
+                        zone_data['x1'] = float(row['val1']) / screen_width
+                        zone_data['y1'] = float(row['val2']) / screen_height
+                        zone_data['x2'] = float(row['val3']) / screen_width
+                        zone_data['y2'] = float(row['val4']) / screen_height
+                        
                     # Add to master dict
-                    normalized_zones[name] = zone_data
+                    normalized_zones[scancode] = zone_data
                     
                 except ValueError:
-                    print(f"Skipping invalid row for {name}")
+                    print(f"Skipping invalid row for scancode: {scancode} with name: {name}.")
                     continue
 
         return normalized_zones
 
-    def process_csv(self, circ_path, rect_path):
+    def process_csv(self, csv_path):
         # Leave like this for now will still change
         SOURCE_W = 1612
         SOURCE_H = 720
 
-        circ_zones = self.normalize_csv_data(circ_path, SOURCE_W, SOURCE_H)
-        rect_zones = self.normalize_csv_data(rect_path, SOURCE_W, SOURCE_H)
-        master_zones = {**circ_zones , **rect_zones}
-        
-        return master_zones
+        return self.normalize_csv_data(csv_path, SOURCE_W, SOURCE_H)

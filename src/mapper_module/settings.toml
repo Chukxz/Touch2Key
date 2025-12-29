@@ -1,13 +1,9 @@
-[system] # Auto generated, edit at your own risk. Both circular and rectangular CSV files devices' resolutions, DPIs and names should match.
-circ_csv_path = "" # Path to the CSV file defining circular zones.
-rect_csv_path = "" # Path to the CSV file defining rectangular zones.
+[system] # Auto generated, edit at your own risk.
 hud_image_path = "./mp_hud.jpg" # Path to the HUD image file.
-circ_csv_dev_res = [720, 1612] # Device resolution for CSV file defining circular zones.
-circ_csv_dev_dpi = 320 # Device DPI for CSV file defining circular zones.
-circ_csv_dev_name = "Chuksxz" # Device name for CSV file defining circular zones.
-rect_csv_dev_res = [720, 1612] # Device resolution for CSV file defining rectangular zones.
-rect_csv_dev_dpi = 320 # Device DPI for CSV file defining rectangular zones.
-rect_csv_dev_name = "Chuksxz" # Device name for CSV file defining rectangular zones.
+csv_path = "" # Path to the CSV file defining mapping zones.
+csv_dev_res = [720, 1612] # Device resolution for the CSV file.
+csv_dev_dpi = 320 # Device DPI for the CSV file.
+csv_dev_name = "Chuksxz" # Device name for the CSV file.
 
 [key] # Auto generated, edit at your own risk.
 mouse_wheel_mapping_code = "JOY"

@@ -1,5 +1,10 @@
+import tkinter as tk
+from tkinter import filedialog
+
 DEF_DPI = 160
 CSV_FOLDER_NAME = "CSV"
+CIRCLE = "CIRCLE"
+RECT = "RECT"
 
 SCANCODES = {
     "ESC": 0x01,
@@ -117,6 +122,13 @@ SCANCODES = {
     "E0_NUM_ENTER": 0xE01C,
 }
 
+# Note: Non standard, just for internal recognition
+SCANCODES.update({
+    "MOUSE_LEFT":   0x9901, 
+    "MOUSE_RIGHT":  0x9902, 
+    "MOUSE_MIDDLE": 0x9903
+})
+
 class TouchMapperEvent:
     def __init__(self, slot, tracking_id, x, y, sx, sy, is_mouse, is_wasd):
         self.slot = slot
@@ -176,3 +188,23 @@ class MapperEventDispatcher:
                     func()
                 else:
                     func(event_object.touch)
+                    
+
+def select_image_file():
+    # Create a root window and hide it immediately
+    root = tk.Tk()
+    root.withdraw() 
+    
+    # Open the file selector
+    file_path = filedialog.askopenfilename(
+        title="Select an Image",
+        filetypes=[
+            ("Image Files", "*.jpg *.jpeg *.png *.bmp"),
+            # ("All Files", "*.*")
+        ]
+    )
+    
+    # Destroy the hidden root explicitly after selection
+    root.destroy()
+    
+    return file_path
