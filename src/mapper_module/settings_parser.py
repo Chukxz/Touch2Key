@@ -15,20 +15,21 @@ class AppConfig():
         self.filename = filename
         self.mapper_event_dispacher = mapper_event_dispacher
         self.config_lock = threading.Lock()
-        self.config_data = self.load_config(filename)
+        self.config_data = {}
+        self.load_config(filename)
         print("Configuration loaded successfully.")
 
-    def load_config(self, filename):
+    def load_config(self):
         data = {}
         
-        if not os.path.exists(filename):
-            print(f"Config file {filename} not found! Creating default...")
-            data = self.create_default(filename)
+        if not os.path.exists(self.filename):
+            print(f"Config file {self.filename} not found! Creating default...")
+            data = self.create_default(self.filename)
             
-        with open(filename, "rb") as f:
+        with open(self.filename, "rb") as f:
             data = tomllib.load(f)
         
-        return data
+        self.config_data = data
 
     def create_default(self, filename):
         data = {}        
@@ -39,7 +40,7 @@ class AppConfig():
         return data
     
     def reload_config(self):
-        self.load_config(self.filename)
+        self.load_config()
         print("Configuration reloaded successfully.")
         self.mapper_event_dispacher.dispatch(MapperEvent(action="CONFIG"))
         

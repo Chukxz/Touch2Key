@@ -10,7 +10,7 @@ from key_mapper import KeyMapper
 from wasd_mapper import WASDMapper
 
 config = AppConfig('settings.toml')
-mapper_event_dispatcher = MapperEventDispatcher()
+mapper_event_dispatcher = MapperEventDispatcher(config)
 touch_reader = TouchReader(config, mapper_event_dispatcher)
 threading.Thread(target=touch_reader.update_rotation, daemon=True).start()
 

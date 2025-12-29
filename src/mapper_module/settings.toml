@@ -1,33 +1,22 @@
-[system]
-# Path to the CSV file defining circular zones
-circ_csv_path = "C:\Users\LENOVO\Documents\Programming\Python_Bluestacks_CODM_mapper_v2\mapper_project\tests\configs\mp_rect.csv"
-# Path to the CSV file defining rectangular zones
-rect_csv_path = "C:\Users\LENOVO\Documents\Programming\Python_Bluestacks_CODM_mapper_v2\mapper_project\tests\configs\mp_circ.csv"
+[system] # Auto generated, edit at your own risk. Both circular and rectangular CSV files devices' resolutions, DPIs and names should match.
+circ_csv_path = "" # Path to the CSV file defining circular zones.
+rect_csv_path = "" # Path to the CSV file defining rectangular zones.
+hud_image_path = "./mp_hud.jpg" # Path to the HUD image file.
+circ_csv_dev_res = [720, 1612] # Device resolution for CSV file defining circular zones.
+circ_csv_dev_dpi = 320 # Device DPI for CSV file defining circular zones.
+circ_csv_dev_name = "Chuksxz" # Device name for CSV file defining circular zones.
+rect_csv_dev_res = [720, 1612] # Device resolution for CSV file defining rectangular zones.
+rect_csv_dev_dpi = 320 # Device DPI for CSV file defining rectangular zones.
+rect_csv_dev_name = "Chuksxz" # Device name for CSV file defining rectangular zones.
 
-circ_csv_dev_res = (k720, 1612)
-circ_csv_dev_dpi = 320
-circ_csv_dev_name = ""
-
-rect_csv_dev_res = (720, 1612)
-rect_csv_dev_dpi = 320
-rect_csv_dev_name = ""
-
-[key]
+[key] # Auto generated, edit at your own risk.
 mouse_wheel_mapping_code = "JOY"
 
-[mouse]
-# The "Magic Number" multiplier
-# SENSITIVITY CONSTANT
-# Adjust this multiplier to tune how fast the camera turns
-# roughly: 1.0 means "1 DP unit = 1 Mouse Mickey"
-sensitivity = 15.0
-# Invert Y axis? (True/False)
-invert_y = False
+[mouse] # Auto generated, edit at your own risk.
+sensitivity = 15.0 # Adjust this multiplier to tune how fast the camera turns, roughly: 1.0 means "1 DP unit = 1 Mouse Mickey.
+invert_y = false
 
-[joystick]
-# Deadzone (0.0 - 1.0)
-deadzone = 0.15
-# Hysteresis Angle (Degrees)
-hysteresis = 5.0
-# Fixed or Dynamic joystick center? (True/False)
-fixed_center = False
+[joystick] # Auto generated, edit at your own risk.
+deadzone = 0.15 # Deadzone (0.0 - 1.0).
+hysteresis = 5.0 # Hysteresis Angle (Degrees).
+fixed_center = false

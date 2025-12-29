@@ -2,7 +2,7 @@ import time
 import threading
 import subprocess
 import re
-from utils import TouchMapperEvent, MapperEvent
+from utils import TouchMapperEvent, MapperEvent, DEF_DPI
 
 class TouchReader():
     def __init__(self, config, mapper_event_dispatcher):
@@ -16,6 +16,7 @@ class TouchReader():
         self.mapper_event_dispatcher = mapper_event_dispatcher
         self.slots = {}
         self.start_slots = {}
+        self.active_touches = 0
         self.max_slots = self.get_max_slots()
         self.rotation = 0
         self.rotation_poll_interval = 0.1 # seconds
@@ -23,6 +24,28 @@ class TouchReader():
         self.side_limit = self.width // 2
         self.mouse_slot = None
         self.wasd_slot = None
+
+    def get_screen_size(self):
+        """Detect screen resolution (portrait natural)."""
+        result = subprocess.run(
+            ["adb", "-s", self.device, "shell", "wm", "size"], capture_output=True, text=True
+        )
+        output = result.stdout.strip()
+        if "Physical size" in output:
+            w, h = map(int, output.split(":")[-1].strip().split("x"))
+            return w, h
+
+        return None
+    
+    def get_dpi(self):
+        """Detect screen DPI, fallback to 160."""
+        try:
+            result = subprocess.run(["adb", "-s", self.device, "shell", "getprop", "ro.sf.lcd_density"],
+                                    capture_output=True, text=True, timeout=1)
+            val = result.stdout.strip()
+            return int(val) if val else DEF_DPI
+        except Exception:
+            return DEF_DPI
         
     def get_adb_device(self):
         out = subprocess.check_output(["adb", "devices"]).decode().splitlines()
@@ -199,12 +222,17 @@ class TouchReader():
                     self.slots[current_slot]['tracking_id'] = tracking_id
                     self.slots[current_slot]['timestamp'] = time.monotonic_ns()
                     
+                    # Finger Up
                     if tracking_id >= 0 and prev_id == -1:
                         self.slots[current_slot]['state'] = 'DOWN'
                         self.start_slots[current_slot] = self.slots[current_slot]
+                        self.active_touches += 1
+                        self.start_slots[current_slot]['active_touches'] = self.active_touches
                             
+                    # Finger Down
                     elif tracking_id == -1 and prev_id >= 0: 
                         self.slots[current_slot]['state'] = 'UP'
+                        self.active_touches -= 1
                                         
                 # Position X                    
                 elif "ABS_MT_POSITION_X" in line:
