@@ -7,11 +7,11 @@ from default_toml_helper import create_default_toml
 RELOAD_DELAY = 0.01
 
 class CSV_Loader():
-    def __init__(self, mapper_event_dispatcher, config):
+    def __init__(self, config):
         self.last_loaded_path = None
         self.last_loaded_timestamp = 0
         self.master_zones = {}
-        self.mapper_event_dispatcher = mapper_event_dispatcher
+        self.mapper_event_dispatcher = config.mapper_event_dispatcher
         self.config = config
         self.last_loaded_csv_path = None
         self.last_loaded_csv_timestamp = None
@@ -23,11 +23,11 @@ class CSV_Loader():
         
     def load_csv(self):
         self.csv_data = self.process_csv(self.last_loaded_csv_path)
-        self.last_loaded_csv_path = self.config['system']['csv_path']
+        self.last_loaded_csv_path = self.config.config_data['system']['csv_path']
         self.last_loaded_csv_timestamp = os.path.getmtime(self.last_loaded_csv_path)
         
         try:
-            w, h = self.config['system']['csv_dev_res']
+            w, h = self.config.config_data['system']['csv_dev_res']
             self.width = int(w)
             self.height = int(h)     
         except:
@@ -35,13 +35,13 @@ class CSV_Loader():
             raise RuntimeError("Resolution not found or misconfigured, configuration settings reset to default.")
         
         try:
-            self.dpi = int(self.config['system']['csv_dev_dpi'])
+            self.dpi = int(self.config.config_data['system']['csv_dev_dpi'])
         except:
             create_default_toml()
             raise RuntimeError("DPI not found or misconfigured in CSV, configuration settings reset to default.")
         
         try:
-            self.dev_name = str(self.config['system']['csv_dev_name'])
+            self.dev_name = str(self.config.config_data['system']['csv_dev_name'])
         except:
             create_default_toml()
             raise RuntimeError("Device name not found or misconfigured, configuration settings reset to default.")
@@ -67,7 +67,7 @@ class CSV_Loader():
         print("\n[System] Checking for updates...")
         
         # Check CSV
-        need_csv_reload = self.should_reload(self.last_loaded_csv_path, self.config['system']['csv_path'], self.last_loaded_csv_timestamp)
+        need_csv_reload = self.should_reload(self.last_loaded_csv_path, self.config.config_data['system']['csv_path'], self.last_loaded_csv_timestamp)
                     
         # HARD RELOAD: Only run this block if any CSV actually changed
         if need_csv_reload:

@@ -5,7 +5,7 @@ from default_toml_helper import create_default_toml
 from utils import MapperEvent
 
 class AppConfig():
-    def __init__(self, filename, mapper_event_dispacher):
+    def __init__(self, filename, mapper_event_dispatcher):
         super().__init__()
         self.system = None
         # self.device = None
@@ -13,10 +13,10 @@ class AppConfig():
         self.mouse = None
         self.joystick = None
         self.filename = filename
-        self.mapper_event_dispacher = mapper_event_dispacher
+        self.mapper_event_dispatcher = mapper_event_dispatcher
         self.config_lock = threading.Lock()
         self.config_data = {}
-        self.load_config(filename)
+        self.load_config()
         print("Configuration loaded successfully.")
 
     def load_config(self):
@@ -42,5 +42,5 @@ class AppConfig():
     def reload_config(self):
         self.load_config()
         print("Configuration reloaded successfully.")
-        self.mapper_event_dispacher.dispatch(MapperEvent(action="CONFIG"))
+        self.mapper_event_dispatcher.dispatch(MapperEvent(action="CONFIG"))
         

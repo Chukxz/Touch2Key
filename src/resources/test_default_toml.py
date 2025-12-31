@@ -30,7 +30,7 @@ def create_test_default_toml():
     # --- [key] Section ---
     key_table = table()
     key_table.comment("Auto generated, edit at your own risk.")
-    key_table.add("mouse_wheel_mapping_code", "JOY")    
+    key_table.add("mouse_wheel_scancode", "F12")    
     doc.add("key", key_table)
 
     # --- [mouse] Section ---

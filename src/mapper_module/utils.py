@@ -6,6 +6,8 @@ CSV_FOLDER_NAME = "CSV"
 CIRCLE = "CIRCLE"
 RECT = "RECT"
 
+TOML_PATH = "./settings.toml"
+
 SCANCODES = {
     "ESC": 0x01,
     "1": 0x02,

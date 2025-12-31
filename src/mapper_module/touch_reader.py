@@ -4,16 +4,33 @@ import subprocess
 import re
 from utils import TouchMapperEvent, MapperEvent, DEF_DPI
 
+
 class TouchReader():
-    def __init__(self, config, mapper_event_dispatcher):
-        self.device = self.get_adb_device()
-        self.device_touch_event = self.find_touch_device_event()
-        if self.device_touch_event is None:
-            raise RuntimeError("No touchscreen device found via ADB.")
-        print(f"[INFO] Using touchscreen device: {self.device_touch_event}")
-   
+    def __init__(self, config):
+        # self.device = self.get_adb_device()
+        # self.device_touch_event = self.find_touch_device_event()
+        # if self.device_touch_event is None:
+        #     raise RuntimeError("No touchscreen device found via ADB.")
+        # print(f"[INFO] Using touchscreen device: {self.device_touch_event}")
         self.config = config
-        self.mapper_event_dispatcher = mapper_event_dispatcher
+        
+        res = self.get_screen_size() 
+        if res is None:
+            raise RuntimeError("Detected resolution invalid.")
+        else:
+            w, h = res
+            tmp_w = config.config_data['system']['csv_dev_res'][0]
+            tmp_h = config.config_data['system']['csv_dev_res'][1]
+            if w != tmp_w or h != tmp_h:
+                raise RuntimeError("Detected resolution doesn't match CSV resolution.")
+        
+        dpi = config.config_data['system']['csv_dev_dpi']
+        tmp_dpi = self.get_dpi()        
+        if dpi != tmp_dpi:
+            raise RuntimeError("Detected DPI doesn't match CSV DPI.")
+        
+        self.res_dpi = [tmp_w, tmp_h, tmp_dpi]       
+        self.mapper_event_dispatcher = config.mapper_event_dispatcher
         self.slots = {}
         self.start_slots = {}
         self.active_touches = 0

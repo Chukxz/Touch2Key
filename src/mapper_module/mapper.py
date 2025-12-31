@@ -20,7 +20,7 @@ class RECT(ctypes.Structure):
     ]
 
 class Mapper():
-    def __init__(self, csv_loader, window_title="Gameloop(64beta)"):
+    def __init__(self, csv_loader, res_dpi, window_title="Gameloop(64beta)"):
         super().__init__()
         self.game_window_class_name = self.get_game_window_class_name(window_title)
         self.game_window_info = self.get_game_window_info()
@@ -32,6 +32,7 @@ class Mapper():
         self.mapper_event_dispatcher = self.csv_loader.mapper_event_dispatcher
         self.wasd_block = False
         self.interception_bridge = InterceptionBridge(self.dpi)
+        self.res_dpi = res_dpi
         self.update_config()
         
         self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
@@ -40,9 +41,15 @@ class Mapper():
         self.device_width = self.csv_loader.width
         self.device_height = self.csv_loader.height
         self.dpi = self.csv_loader.dpi
+        self.csv_loader_res_dpi = [self.device_width, self.device_height, self.dpi]
+        l = len(self.res_dpi)
+        
+        for i in range(l):
+            if self.res_dpi[i] != self.csv_loader_res_dpi[i]:
+                raise RuntimeError("Detected resolution or DPI doesn't match CSV resolution or DPI.")            
 
         print(f"[INFO] Using resolution: {self.width}x{self.height}")
-        print(f"[INFO] Using DPI: {self.dpi}")
+        print(f"[INFO] Using DPI: {self.dpi}")        
               
     # Get the class name of a window
     def get_window_class_name(self, hwnd):

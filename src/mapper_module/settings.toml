@@ -1,18 +1,18 @@
 [system] # Auto generated, edit at your own risk.
-hud_image_path = "./mp_hud.jpg" # Path to the HUD image file.
-csv_path = "" # Path to the CSV file defining mapping zones.
-csv_dev_res = [720, 1612] # Device resolution for the CSV file.
 csv_dev_dpi = 320 # Device DPI for the CSV file.
 csv_dev_name = "Chuksxz" # Device name for the CSV file.
+csv_dev_res = [720, 1612] # Device resolution for the CSV file. 
+csv_path = "" # Path to the CSV file defining mapping zones.
+hud_image_path = "./mp_hud.jpg" # Path to the HUD image file.
 
 [key] # Auto generated, edit at your own risk.
-mouse_wheel_mapping_code = "JOY"
+mouse_wheel_scancode = ""
 
 [mouse] # Auto generated, edit at your own risk.
+invert_y = false 
 sensitivity = 15.0 # Adjust this multiplier to tune how fast the camera turns, roughly: 1.0 means "1 DP unit = 1 Mouse Mickey.
-invert_y = false
 
 [joystick] # Auto generated, edit at your own risk.
 deadzone = 0.15 # Deadzone (0.0 - 1.0).
+fixed_center = false 
 hysteresis = 5.0 # Hysteresis Angle (Degrees).
-fixed_center = false

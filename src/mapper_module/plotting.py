@@ -1,10 +1,11 @@
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
+import tomlkit
 import math
 import csv
 import os
 import datetime
-from utils import CIRCLE, RECT, SCANCODES, CSV_FOLDER_NAME, select_image_file
+from utils import CIRCLE, RECT, SCANCODES, CSV_FOLDER_NAME, TOML_PATH, select_image_file
 
 
 # --- Constants ---
@@ -57,6 +58,7 @@ class Plotter:
         self.state = IDLE         
         self.target_points = 0
         self.input_buffer = ""
+        self.mouse_wheel_scancode = ""
 
         # GUI Setup
         try:
@@ -68,7 +70,7 @@ class Plotter:
         self.fig, self.ax = plt.subplots()
         self.ax.imshow(img)
         
-        self.update_title("IDLE. F6(Circ) | F7(Rect) | F9(List) | F10(Save) | Del(Remove) | Esc(Exit)")
+        self.update_title("IDLE. F6(Circ) | F7(Rect) | F9(List) | F10(Save) | F12(Mark as mouse wheel) | (Remove) | Esc(Exit)")
 
         # Event Listeners
         self.fig.canvas.mpl_connect("key_press_event", self.on_key_press)
@@ -94,7 +96,7 @@ class Plotter:
         self.mode = None
         self.points = []
         self.input_buffer = ""
-        self.update_title("IDLE. F6(Circ) | F7(Rect) | F9(List) | F10(Save) | Del(Remove) | Esc(Exit)")
+        self.update_title("IDLE. F6(Circ) | F7(Rect) | F9(List) | F10(Save) | F12(Mark as mouse wheel) | (Remove) | Esc(Exit)")
 
     def start_mode(self, mode, num_points):
         self.reset_state() 
@@ -252,6 +254,8 @@ class Plotter:
         if cx is not None:
             self.save_entry(key_name, hex_code, cx, cy, r, bb)
             print(f"[+] Saved ID {self.count-1}: {self.mode} bound to '{key_name}'")
+            if key_name == "f12":
+                self.mouse_wheel_scancode = hex_code
         
         self.reset_state()
 
@@ -313,6 +317,16 @@ class Plotter:
 
             msg = f"Saved: ../resources/{CSV_FOLDER_NAME}/{user_name}.csv"
             print(f"[+] {msg}")
+            
+            with open(TOML_PATH, "r") as f:
+                doc = tomlkit.load(f)
+                try:
+                    doc["system"]["hud_image_path"] = self.image_path
+                    doc["system"]["csv_path"] = file_path
+                    doc["key"]["mouse_wheel_scancode"] = self.mouse_wheel_scancode
+                except:
+                    raise RuntimeError(f"Key error occured when updating {TOML_PATH} file, defaulting to default settings.")
+            
             self.update_title(msg)
             
         except Exception as e:
