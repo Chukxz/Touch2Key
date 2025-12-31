@@ -15,14 +15,14 @@ def create_default_toml():
     sys_table.add("hud_image_path", "")
     sys_table["hud_image_path"].comment("Path to the HUD image file.")
     
-    sys_table.add("csv_path", "")
-    sys_table["csv_path"].comment("Path to the CSV file defining mapping zones.")
-    sys_table.add("csv_dev_res", (0, 0))
-    sys_table["csv_dev_res"].comment("Device resolution for the CSV file.")
-    sys_table.add("csv_dev_dpi", 0)
-    sys_table["csv_dev_dpi"].comment("Device DPI for the CSV file.")
-    sys_table.add("csv_dev_name", "")
-    sys_table["csv_dev_name"].comment("Device name for the CSV file.")
+    sys_table.add("json_path", "")
+    sys_table["json_path"].comment("Path to the JSON file defining mapping zones.")
+    sys_table.add("json_dev_res", [0, 0])
+    sys_table["json_dev_res"].comment("Device resolution for the JSON file.")
+    sys_table.add("json_dev_dpi", 0)
+    sys_table["json_dev_dpi"].comment("Device DPI for the JSON file.")
+    sys_table.add("json_dev_name", "")
+    sys_table["json_dev_name"].comment("Device name for the JSON file.")
 
         
     doc.add("system", sys_table)
@@ -30,7 +30,7 @@ def create_default_toml():
     # --- [key] Section ---
     key_table = table()
     key_table.comment("Auto generated, edit at your own risk.")
-    key_table.add("mouse_wheel_scancode", "")    
+    key_table.add("mouse_wheel_conf", ['', 0.0, 0.0, 0.0]).comment("Mouse Wheel Configuration: [scancode, center_x, center_y, radius].")
     doc.add("key", key_table)
 
     # --- [mouse] Section ---

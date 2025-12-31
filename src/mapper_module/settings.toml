@@ -1,12 +1,12 @@
 [system] # Auto generated, edit at your own risk.
-csv_dev_dpi = 320 # Device DPI for the CSV file.
-csv_dev_name = "Chuksxz" # Device name for the CSV file.
-csv_dev_res = [720, 1612] # Device resolution for the CSV file. 
-csv_path = "" # Path to the CSV file defining mapping zones.
 hud_image_path = "./mp_hud.jpg" # Path to the HUD image file.
+json_dev_dpi = 320 # Device DPI for the JSON file.
+json_dev_name = "Chuksxz" # Device name for the JSON file.
+json_dev_res = [720, 1612] # Device resolution for the JSON file.  
+json_path = "" # Path to the JSON file defining mapping zones.
 
 [key] # Auto generated, edit at your own risk.
-mouse_wheel_scancode = ""
+mouse_wheel_conf = ['', 0.0, 0.0, 0.0] # Mouse Wheel Configuration: [scancode, center_x, center_y, radius].
 
 [mouse] # Auto generated, edit at your own risk.
 invert_y = false 

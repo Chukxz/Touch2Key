@@ -1,12 +1,18 @@
 import tkinter as tk
 from tkinter import filedialog
+import subprocess
 
 DEF_DPI = 160
-CSV_FOLDER_NAME = "CSV"
+IMAGES_FOLDER = "images"
+JSONS_FOLDER = "jsons"
 CIRCLE = "CIRCLE"
 RECT = "RECT"
-
 TOML_PATH = "./settings.toml"
+RELOAD_DELAY = 0.01
+M_LEFT = 0x9901
+M_RIGHT = 0x9902
+M_MIDDLE = 0x9903
+MOUSE_WHEEL_CODE = "F12"
 
 SCANCODES = {
     "ESC": 0x01,
@@ -126,9 +132,9 @@ SCANCODES = {
 
 # Note: Non standard, just for internal recognition
 SCANCODES.update({
-    "MOUSE_LEFT":   0x9901, 
-    "MOUSE_RIGHT":  0x9902, 
-    "MOUSE_MIDDLE": 0x9903
+    "MOUSE_LEFT":   M_LEFT,
+    "MOUSE_RIGHT":  M_RIGHT, 
+    "MOUSE_MIDDLE": M_MIDDLE,
 })
 
 class TouchMapperEvent:
@@ -143,9 +149,10 @@ class TouchMapperEvent:
         self.is_wasd = is_wasd
 
 class MapperEvent:
-    def __init__(self, action, touch: TouchMapperEvent | None = None):
+    def __init__(self, action, touch: TouchMapperEvent | None = None, json_data=None):
         self.touch = touch
-        self.action = action # UP, DOWN, PRESSED, CONFIG, CSV
+        self.json_data = json_data
+        self.action = action # UP, DOWN, PRESSED, CONFIG, JSON
         
 class MapperEventDispatcher:
     def __init__(self):    
@@ -155,7 +162,7 @@ class MapperEventDispatcher:
             "ON_TOUCH_UP": [],
             "ON_TOUCH_PRESSED": [],
             "ON_CONFIG_RELOAD": [],
-            "ON_CSV_RELOAD": []
+            "ON_JSON_RELOAD": []
         }
 
     def register_callback(self, event_type, func):
@@ -178,18 +185,54 @@ class MapperEventDispatcher:
             "UP": "ON_TOUCH_UP",
             "PRESSED": "ON_TOUCH_PRESSED",
             "CONFIG": "ON_CONFIG_RELOAD",
-            "CSV": "ON_CSV_RELOAD"
+            "JSON": "ON_JSON_RELOAD"
         }
         
         registry_key = action_map.get(event_object.action)
         
         if registry_key:
             for func in self.callback_registry[registry_key]:
-                # Input events need the touch object; System events (Config/CSV) do not.
-                if event_object.action in ["CONFIG", "CSV"]:
+                if event_object.action == "CONFIG":
                     func()
+                elif event_object.action == "JSON":
+                    func(event_object.json_data)
                 else:
                     func(event_object.touch)
+
+
+def get_adb_device():
+    out = subprocess.check_output(["adb", "devices"]).decode().splitlines()
+    real = [l.split()[0] for l in out[1:] if "device" in l and not l.startswith("emulator-")]
+
+    if not real:
+        raise RuntimeError("No real device detected")
+    else:
+        return real[0]
+    
+
+def get_screen_size(device):
+    """Detect screen resolution (portrait natural)."""
+    result = subprocess.run(
+        ["adb", "-s", device, "shell", "wm", "size"], capture_output=True, text=True
+    )
+    output = result.stdout.strip()
+    if "Physical size" in output:
+        w, h = map(int, output.split(":")[-1].strip().split("x"))
+        return w, h
+
+    return None
+
+
+def get_dpi(device):
+    """Detect screen DPI, fallback to 160."""
+    try:
+        result = subprocess.run(["adb", "-s", device, "shell", "getprop", "ro.sf.lcd_density"],
+                                capture_output=True, text=True, timeout=1)
+        val = result.stdout.strip()
+        return int(val) if val else DEF_DPI
+    except Exception:
+        return DEF_DPI
+    
                     
 
 def select_image_file():
@@ -210,3 +253,9 @@ def select_image_file():
     root.destroy()
     
     return file_path
+
+def is_in_circle(px, py, cx, cy, r):
+    return (px - cx)**2 + (py - cy)**2 <= r*r
+
+def is_in_rect(px, py, left, right, top, bottom):
+    return (left <= px <= right) and (top <= py <= bottom)

@@ -2,7 +2,6 @@ import time
 import ctypes
 from ctypes import wintypes
 import threading
-from bridge import InterceptionBridge
 from utils import DEF_DPI
 
 MAX_CLASS_NAME = 256
@@ -20,33 +19,33 @@ class RECT(ctypes.Structure):
     ]
 
 class Mapper():
-    def __init__(self, csv_loader, res_dpi, window_title="Gameloop(64beta)"):
+    def __init__(self, json_loader, res_dpi, interception_bridge, window_title="Gameloop(64beta)"):
         super().__init__()
         self.game_window_class_name = self.get_game_window_class_name(window_title)
         self.game_window_info = self.get_game_window_info()
         self._last_window_update = 0.0
         self._window_update_interval = 0.016  # seconds
         self.lock = threading.Lock()
-        self.csv_loader = csv_loader
-        self.config = self.csv_loader.config
-        self.mapper_event_dispatcher = self.csv_loader.mapper_event_dispatcher
+        self.json_loader = json_loader
+        self.config = self.json_loader.config
+        self.mapper_event_dispatcher = self.json_loader.mapper_event_dispatcher
         self.wasd_block = False
-        self.interception_bridge = InterceptionBridge(self.dpi)
+        self.interception_bridge = interception_bridge
         self.res_dpi = res_dpi
         self.update_config()
         
         self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
     
     def update_config(self):
-        self.device_width = self.csv_loader.width
-        self.device_height = self.csv_loader.height
-        self.dpi = self.csv_loader.dpi
-        self.csv_loader_res_dpi = [self.device_width, self.device_height, self.dpi]
+        self.device_width = self.json_loader.width
+        self.device_height = self.json_loader.height
+        self.dpi = self.json_loader.dpi
+        self.json_loader_res_dpi = [self.device_width, self.device_height, self.dpi]
         l = len(self.res_dpi)
         
         for i in range(l):
-            if self.res_dpi[i] != self.csv_loader_res_dpi[i]:
-                raise RuntimeError("Detected resolution or DPI doesn't match CSV resolution or DPI.")            
+            if self.res_dpi[i] != self.json_loader_res_dpi[i]:
+                raise RuntimeError("Detected resolution or DPI doesn't match JSON resolution or DPI.")            
 
         print(f"[INFO] Using resolution: {self.width}x{self.height}")
         print(f"[INFO] Using DPI: {self.dpi}")        
@@ -168,40 +167,33 @@ class Mapper():
         """Convert pixels (px) to dependent pixels (dp)."""
         return px * (DEF_DPI / self.dpi)
 
-    def accept_touch_mouse_event(self, event, button_type="LEFT"):
-        """
-        Handles absolute clicks. 
-        Moves the cursor to the exact mapped coordinates and clicks.
-        """
-        game_x, game_y = self.device_to_game_abs(event.x, event.y)
+    # def accept_touch_mouse_event(self, event, button_type="LEFT"):
+    #     """
+    #     Handles absolute clicks. 
+    #     Moves the cursor to the exact mapped coordinates and clicks.
+    #     """
+    #     game_x, game_y = self.device_to_game_abs(event.x, event.y)
 
-        # State Machine
-        if event.action == "DOWN":
-            # CRITICAL: Move the mouse FIRST, then click.
-            # If you click before moving, you click the wrong spot.
-            self.interception_bridge.mouse_move_abs(game_x, game_y)
-            if button_type == "LEFT":
-                self.interception_bridge.left_click_down()
-            elif button_type == "RIGHT":
-                self.interception_bridge.right_click_down()
+    #     # State Machine
+    #     if event.action == "DOWN":
+    #         # CRITICAL: Move the mouse FIRST, then click.
+    #         # If you click before moving, you click the wrong spot.
+    #         self.interception_bridge.mouse_move_abs(game_x, game_y)
+    #         if button_type == "LEFT":
+    #             self.interception_bridge.left_click_down()
+    #         elif button_type == "RIGHT":
+    #             self.interception_bridge.right_click_down()
 
-        elif event.action == "PRESSED":
-            # If holding and dragging (e.g., dragging an inventory item)
-            # We update position but keep the button held down.
-            self.interception_bridge.mouse_move_abs(game_x, game_y)
+    #     elif event.action == "PRESSED":
+    #         # If holding and dragging (e.g., dragging an inventory item)
+    #         # We update position but keep the button held down.
+    #         self.interception_bridge.mouse_move_abs(game_x, game_y)
 
-        elif event.action == "UP":
-            # Release the button
-            if button_type == "LEFT":
-                self.interception_bridge.left_click_up()
-            elif button_type == "RIGHT":
-                self.interception_bridge.right_click_up()
+    #     elif event.action == "UP":
+    #         # Release the button
+    #         if button_type == "LEFT":
+    #             self.interception_bridge.left_click_up()
+    #         elif button_type == "RIGHT":
+    #             self.interception_bridge.right_click_up()
     
-    def send_mouse_move(self, dx, dy):
-        self.interception_bridge.mouse_move_rel(dx, dy)
     
-    def send_key_down(self, key_code):
-        self.interception_bridge.key_down(key_code)
-    
-    def send_key_up(self, key_code):
-        self.interception_bridge.key_up(key_code)

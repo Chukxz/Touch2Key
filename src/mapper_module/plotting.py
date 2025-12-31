@@ -1,12 +1,13 @@
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
+from PIL import Image
 import tomlkit
 import math
-import csv
+import json
 import os
 import datetime
-from utils import CIRCLE, RECT, SCANCODES, CSV_FOLDER_NAME, TOML_PATH, select_image_file
-
+from utils import CIRCLE, RECT, SCANCODES, JSONS_FOLDER, TOML_PATH, MOUSE_WHEEL_CODE, select_image_file
+from default_toml_helper import create_default_toml
 
 # --- Constants ---
 IDLE = "IDLE"
@@ -32,14 +33,15 @@ SPECIAL_MAP = {
 }
 
 class Plotter:
-    def __init__(self):
+    def __init__(self, image_path=None):
         # Select image file
-        image_path = select_image_file()
-        if image_path:
-            self.image_path = image_path
-        else:
-            print("Exiting: No image selected.")
-            return
+        if image_path is None:
+            image_path = select_image_file()
+            if image_path:
+                self.image_path = image_path
+            else:
+                print("Exiting: No image selected.")
+                return
         
         # Disable Default Matplotlib Shortcuts
         for key in plt.rcParams:
@@ -49,23 +51,22 @@ class Plotter:
         self.shapes = {}
         self.count = 0
         
-        # Data Storage
         self.points = []          
         self.drawn_artists = []   
-        
-        # State Machine
         self.mode = None          
         self.state = IDLE         
         self.target_points = 0
         self.input_buffer = ""
-        self.mouse_wheel_scancode = ""
+        self.saved_mouse_wheel = False
+        self.mouse_wheel_conf = ['', 0.0, 0.0, 0.0]
 
-        # GUI Setup
+        # GUI Setup        
         try:
-            img = mpimg.imread(image_path)
+            img = Image.open(image_path)
         except FileNotFoundError:
-            print(f"[!] Error: Image not found at {image_path}")
-            return
+            raise RuntimeError(f"Image not found at {image_path}")
+        except Exception as e:
+            raise RuntimeError(f"Error loading image: {e}")
 
         self.fig, self.ax = plt.subplots()
         self.ax.imshow(img)
@@ -209,6 +210,7 @@ class Plotter:
         if key == 'escape':
             self.reset_state()
             return
+        
         elif key == 'enter':
             if self.input_buffer:
                 try:
@@ -216,6 +218,8 @@ class Plotter:
                     if uid in self.shapes:
                         del self.shapes[uid]
                         print(f"[+] Deleted ID {uid}")
+                        if self.saved_mouse_wheel and any(v['key_name'] == MOUSE_WHEEL_CODE for v in self.shapes.values()) == False:
+                            self.saved_mouse_wheel = False
                         self.update_title(f"Deleted ID {uid}. Returning to IDLE...")
                         self.reset_state()
                     else:
@@ -226,6 +230,7 @@ class Plotter:
                      self.update_title("Error: Invalid Number. Try again or Esc.")
                      self.input_buffer = ""
             return
+        
         elif key.isdigit():
             self.input_buffer += key
             self.update_title(f"DELETE MODE: ID [{self.input_buffer}] (Enter to delete)")
@@ -239,7 +244,7 @@ class Plotter:
 
     def finalize_shape(self, key_name):
         # 'key_name' might be a key string ('a', 'f1') OR a mouse string ('MOUSE_LEFT')
-        hex_code = self.get_interception_code(key_name)
+        hex_code, interception_key = self.get_interception_code(key_name)
         
         if hex_code is None:
             print(f"[!] Key '{key_name}' not mapped.")
@@ -252,10 +257,8 @@ class Plotter:
             cx, cy, r, bb = self.calculate_rect()
 
         if cx is not None:
-            self.save_entry(key_name, hex_code, cx, cy, r, bb)
-            print(f"[+] Saved ID {self.count-1}: {self.mode} bound to '{key_name}'")
-            if key_name == "f12":
-                self.mouse_wheel_scancode = hex_code
+            self.save_entry(interception_key, hex_code, cx, cy, r, bb)
+            print(f"[+] Saved ID {self.count-1}: {self.mode} bound to key '{key_name}' with interception key: '{interception_key}'")
         
         self.reset_state()
 
@@ -291,61 +294,98 @@ class Plotter:
         if not user_name:
             user_name = datetime.datetime.now().strftime("map_%Y%m%d_%H%M%S")
         
-        base_dir = os.path.join("..", "resources", CSV_FOLDER_NAME)
+        base_dir = os.path.join("..", "resources", JSONS_FOLDER)
         os.makedirs(base_dir, exist_ok=True)
 
-        combined_rows = []
+        json_output = []
 
         for _, data in self.shapes.items():
-            common = [data['key_name'], data['m_code'], data['type'], data['cx'], data['cy']]
-            row = []
+            entry = {
+                "name": data['key_name'],
+                "scancode": data['m_code'], # Saved as hex string "0x..."
+                "type": data['type'],
+                "cx": data['cx'],
+                "cy": data['cy'],
+                # Initialize vals to 0/null
+                "val1": 0, "val2": 0, "val3": 0, "val4": 0
+            }
+            
             if data['type'] == RECT:
                 (x_min, y_min), (x_max, y_max) = data['bb']
-                row = common + [x_min, y_min, x_max, y_max]
+                entry["val1"] = x_min
+                entry["val2"] = y_min
+                entry["val3"] = x_max
+                entry["val4"] = y_max
+                
             elif data['type'] == CIRCLE:
-                row = common + [data['r'], "", "", ""]
+                entry["val1"] = data['r']
+                # val2, 3, 4 remain 0
             
-            combined_rows.append(row)
+            json_output.append(entry)
 
-        file_path = os.path.join(base_dir, f"{user_name}.csv")
+        file_path = os.path.join(base_dir, f"{user_name}.json")
         
         try:
-            with open(file_path, 'w', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(['name', 'scancode', 'type', 'cx', 'cy', 'val1', 'val2', 'val3', 'val4'])
-                writer.writerows(combined_rows)
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(json_output, f, indent=4)
 
-            msg = f"Saved: ../resources/{CSV_FOLDER_NAME}/{user_name}.csv"
+            msg = f"Saved: ../resources/{JSONS_FOLDER}/{user_name}.json"
             print(f"[+] {msg}")
-            
-            with open(TOML_PATH, "r") as f:
-                doc = tomlkit.load(f)
-                try:
-                    doc["system"]["hud_image_path"] = self.image_path
-                    doc["system"]["csv_path"] = file_path
-                    doc["key"]["mouse_wheel_scancode"] = self.mouse_wheel_scancode
-                except:
-                    raise RuntimeError(f"Key error occured when updating {TOML_PATH} file, defaulting to default settings.")
-            
-            self.update_title(msg)
-            
+
         except Exception as e:
             print(f"[!] Export Error: {e}")
             self.update_title(f"Error saving: {e}")
+            return
+            
+        try:
+            # Load
+            with open(TOML_PATH, "r", encoding="utf-8") as f:
+                doc = tomlkit.load(f)
+
+            # Ensure structure exists
+            if "system" not in doc: doc.add("system", tomlkit.table())
+            if "key" not in doc: doc.add("key", tomlkit.table())
+
+            # Update paths
+            doc["system"]["hud_image_path"] = self.image_path
+            doc["system"]["json_path"] = file_path
+            doc['key']['mouse_wheel_conf'] = self.mouse_wheel_conf
+
+            # Save
+            with open(TOML_PATH, "w", encoding="utf-8") as f:
+                tomlkit.dump(doc, f)
+
+        except (KeyError, Exception) as e:
+            create_default_toml()
+            raise RuntimeError(f"Config corrupted. Resetting to defaults. Error: {e}")
+                
+        self.update_title(msg)
             
     # --- Helper Functions ---
 
     def get_interception_code(self, key):
-        val = SCANCODES.get(key)
+        mapped_key = key
+        val = SCANCODES.get(mapped_key)
         if val is None:
             mapped_key = SPECIAL_MAP.get(key)
             if mapped_key:
                 val = SCANCODES.get(mapped_key)
-        return hex(val) if val is not None else None
+        return hex(val) if val is not None else None, mapped_key if val is not None else None
 
-    def save_entry(self, key_name, hex_code, cx, cy, r, bb):
+    def save_entry(self, interception_key, hex_code, cx, cy, r, bb):
+        if interception_key == MOUSE_WHEEL_CODE:
+            if self.mode == CIRCLE:
+                if self.saved_mouse_wheel:
+                    print(f"[!] Mouse Wheel already assigned. Overwriting previous assignment.")
+                    self.shapes = {k: v for k, v in self.shapes.items() if v['key_name'] != MOUSE_WHEEL_CODE}                    
+                self.saved_mouse_wheel = True
+                self.mouse_wheel_conf = [hex_code, cx, cy, r]
+            elif self.mode == RECT:
+                print(f"[!] Error: Mouse Wheel can only be assigned to '{CIRCLE}' not '{RECT} shapes.")
+                return
+        
         entry = {
-            "key_name": key_name,
+            "key_name": interception_key,
             "m_code": hex_code,
             "type": self.mode,
             "cx": cx, "cy": cy, "r": r, "bb": bb

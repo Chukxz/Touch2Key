@@ -5,6 +5,7 @@ class MouseMapper():
         self.prev_y = None
         self.config = mapper.config
         self.mapper_event_dispatcher = self.mapper.mapper_event_dispatcher
+        self.interception_bridge = mapper.interception_bridge
         self.update_config()
         
         self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
@@ -46,7 +47,7 @@ class MouseMapper():
         dpy = self.mapper.px_to_dp(raw_dy)
         
         # C. Apply AIM_SENSITIVITY (Physical Mapping)
-        # We SKIP 'device_to_game_rel' here because we want 
+        # We SKIP 'device_to_game_rel' here because we want
         # 1 physical inch to always equal X degrees of rotation.
         # We don't care how wide the screen is for aiming.
         final_dx = int(dpx * self.AIM_SENSITIVITY)
@@ -54,7 +55,7 @@ class MouseMapper():
         
         # D. Send to Output (Only if there is movement)
         if final_dx != 0 or final_dy != 0:
-            self.mapper.send_mouse_move(final_dx, final_dy)
+            self.interception_bridge.mouse_move_rel(final_dx, final_dy)
             
         # E. Update Previous (Critical for Delta Logic!)
         self.prev_x = event.x

@@ -11,8 +11,8 @@ LEFT_BUTTON_DOWN = 0x0001
 LEFT_BUTTON_UP = 0x0002	
 RIGHT_BUTTON_DOWN = 0x0004	
 RIGHT_BUTTON_UP = 	0x0008	
-MIDDLE_DOWN = 0x0010
-MIDDLE_UP = 0x0020
+MIDDLE_BUTTON_DOWN = 0x0010
+MIDDLE_BUTTON_UP = 0x0020
 X_BUTTON_DOWN =	0x0040
 X_BUTTON_UP = 0x0080
 X_BUTTON_2_DOWN = 0x0100
@@ -22,7 +22,7 @@ MOUSE_HWHEEL = 0x0800
 MOUSE_WHEEL_NEGATIVE = 0x1000
 
 class InterceptionBridge:
-    def __init__(self, dpi):
+    def __init__(self):
         self.ctx = Interception()
         self.mouse = self.ctx.mouse()
         self.keyboard = self.ctx.keyboard()
@@ -72,4 +72,12 @@ class InterceptionBridge:
         
     def right_click_up(self):
         ms_down = MouseStroke(MOUSE_MOVE_RELATIVE, RIGHT_BUTTON_UP, 0, 0, 0)
+        self.ctx.send(self.mouse, ms_down)
+
+    def middle_click_down(self):
+        ms_down = MouseStroke(MOUSE_MOVE_RELATIVE, MIDDLE_BUTTON_DOWN, 0, 0, 0)
+        self.ctx.send(self.mouse, ms_down)
+        
+    def middle_click_up(self):
+        ms_down = MouseStroke(MOUSE_MOVE_RELATIVE, MIDDLE_BUTTON_UP, 0, 0, 0)
         self.ctx.send(self.mouse, ms_down)

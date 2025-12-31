@@ -1,4 +1,5 @@
 import math
+from utils import CIRCLE, is_in_circle
 
 class WASDMapper():
     def __init__(self, mapper):
@@ -14,14 +15,13 @@ class WASDMapper():
         self.center_x = 0.0
         self.center_y = 0.0
         self.radius = 0.0
-        self.csv_loader = mapper.csv_loader
+        self.json_loader = mapper.json_loader
         self.config = mapper.config
         self.mapper_event_dispatcher = self.mapper.mapper_event_dispatcher
         self.update_config()
-        self.updateMouseWheel()
                 
         self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
-        self.mapper_event_dispatcher.register_callback("ON_CSV_RELOAD", self.updateMouseWheel)
+        self.mapper_event_dispatcher.register_callback("ON_JSON_RELOAD", self.updateMouseWheelConfiguration)
         self.mapper_event_dispatcher.register_callback("ON_TOUCH_DOWN", self.touch_down)  
         self.mapper_event_dispatcher.register_callback("ON_TOUCH_PRESSED", self.touch_pressed)
         self.mapper_event_dispatcher.register_callback("ON_TOUCH_UP", self.touch_up)
@@ -31,55 +31,99 @@ class WASDMapper():
         Call this whenever F5 is pressed.
         It snapshots the new values so the main loop is fast.
         """
-        print(f"JoystickMapper reloading... New Deadzone: {self.config.config_data['joystick']['deadzone']}, Hysteresis: {self.config.config_data['joystick']['hysteresis']}, Fixed Center: {self.config.config_data['joystick']['fixed_center']}")
-        
+        print(f"JoystickMapper reloading... New Deadzone: {self.config.config_data['joystick']['deadzone']}, \
+        Hysteresis: {self.config.config_data['joystick']['hysteresis']}, Fixed Center: {self.config.config_data['joystick']['fixed_center']}, \
+        Mouse Wheel Configuration: {self.config.config_data['key']['mouse_wheel_conf']}")
+
         self.DEADZONE = self.config.config_data['joystick']['deadzone']
         self.HYSTERESIS = self.config.config_data['joystick']['hysteresis']       
         self.FIXED_CENTER = self.config.config_data['joystick']['fixed_center']
-    
-    def updateMouseWheel(self):
-        mouse_wheel_mapping_code = self.config.config_data['key']['mouse_wheel_mapping_code']
-        self.mouse_wheel = self.csv_loader.csv_data[mouse_wheel_mapping_code]
+        self.mouse_wheel_conf = self.config.config_data['key']['mouse_wheel_conf']
+        self.set_zone(*self.mouse_wheel_conf)
+        self.fixed_center_block = False
+
+    def updateMouseWheelConfiguration(self):
+        conf = self.json_loader.get_mouse_wheel_configuration()
+        self.set_zone(*conf)
 
     def set_zone(self, cx, cy, radius):
-        """Define the physical location of the joystick on phone."""
+        """Define the physical location of the joystick on the device."""
         self.center_x = cx
         self.center_y = cy
         self.radius = radius
+    
+    def handle_fixed_center(self, event):      
+        if not self.fixed_center_block:
+            json_data = self.mapper.json_loader.json_data
+            mouse_wheel_scancode = self.mouse_wheel_conf[0]                
+            
+            if mouse_wheel_scancode in json_data:
+                wheel_zone = json_data[mouse_wheel_scancode]
+                cx = wheel_zone['cx']
+                cy = wheel_zone['cy']
+                r = wheel_zone['r']
+                if wheel_zone['type'] == CIRCLE and is_in_circle(event.x, event.y, cx, cy, r):
+                    self.center_x = wheel_zone['cx']
+                    self.center_y = wheel_zone['cy']
+                    self.radius = wheel_zone['r']
+                    self.fixed_center_block = True
         
     def touch_down(self, event):
         # On Touch Down, we can optionally recenter the joystick
-        if not self.FIXED_CENTER:
-            self.center_x = event.x
-            self.center_y = event.y
-        self.release_all()
+            if not self.FIXED_CENTER:
+                if event.is_wasd:
+                    self.center_x = event.x
+                    self.center_y = event.y
+                    self.release_all()
+            else:
+                self.handle_fixed_center(event)
+                if self.fixed_center_block:
+                    self.release_all()                
 
     def touch_pressed(self, event):
-        # Normalize Vector (-1.0 to 1.0)
-        # Note: We divide by radius to get 'tilt percentage'
-        dx = (event.x - self.center_x) / self.radius
-        dy = (event.y - self.center_y) / self.radius
+        proceed = False
         
-        # Calculate Magnitude (0.0 to 1.0+)
-        mag = math.sqrt(dx*dx + dy*dy)
+        if not self.FIXED_CENTER:
+            if event.is_wasd:
+                proceed = True
+        else:
+            self.handle_fixed_center(event)
+            if self.fixed_center_block: proceed = True        
         
-        # Deadzone Check
-        if mag < self.DEADZONE:
-            self.release_all()
-            return
+        if proceed:
+            # Normalize Vector (-1.0 to 1.0)
+            # Note: We divide by radius to get 'tilt percentage'
+            dx = (event.x - self.center_x) / self.radius
+            dy = (event.y - self.center_y) / self.radius
+            
+            # Calculate Magnitude (0.0 to 1.0+)
+            mag = math.sqrt(dx*dx + dy*dy)
+            
+            # Deadzone Check
+            if mag < self.DEADZONE:
+                self.release_all()
+                return
 
-        # Calculate Angle (Degrees)
-        # 0 is Right (East), 90 is Down (South), -90 is Up (North)
-        angle = math.degrees(math.atan2(dy, dx))
-        
-        # Determine Target Keys based on Angle
-        target_keys = self.get_keys_from_angle(angle)
-        
-        # Apply Key Changes
-        self.apply_keys(target_keys)
+            # Calculate Angle (Degrees)
+            # 0 is Right (East), 90 is Down (South), -90 is Up (North)
+            angle = math.degrees(math.atan2(dy, dx))
+            
+            # Determine Target Keys based on Angle
+            target_keys = self.get_keys_from_angle(angle)
+            
+            # Apply Key Changes
+            self.apply_keys(target_keys)
     
     def touch_up(self, event):
-        self.release_all()
+        if not self.FIXED_CENTER:
+            if event.is_wasd:
+                self.release_all()
+        else:
+            self.fixed_center_block = False
+            self.handle_fixed_center(event)
+            if self.fixed_center_block:
+                self.release_all()
+                self.fixed_center_block = False
 
     def get_keys_from_angle(self, angle):
         margin = self.HYSTERESIS

@@ -2,32 +2,32 @@ import time
 import threading
 import subprocess
 import re
-from utils import TouchMapperEvent, MapperEvent, DEF_DPI
+from utils import TouchMapperEvent, MapperEvent, get_adb_device, get_screen_size, get_dpi
 
 
 class TouchReader():
     def __init__(self, config):
-        # self.device = self.get_adb_device()
-        # self.device_touch_event = self.find_touch_device_event()
-        # if self.device_touch_event is None:
-        #     raise RuntimeError("No touchscreen device found via ADB.")
-        # print(f"[INFO] Using touchscreen device: {self.device_touch_event}")
+        self.device = get_adb_device()
+        self.device_touch_event = self.find_touch_device_event()
+        if self.device_touch_event is None:
+            raise RuntimeError("No touchscreen device found via ADB.")
+        print(f"[INFO] Using touchscreen device: {self.device_touch_event}")
         self.config = config
         
-        res = self.get_screen_size() 
+        res = get_screen_size(self.device)
         if res is None:
             raise RuntimeError("Detected resolution invalid.")
         else:
             w, h = res
-            tmp_w = config.config_data['system']['csv_dev_res'][0]
-            tmp_h = config.config_data['system']['csv_dev_res'][1]
+            tmp_w = config.config_data['system']['json_dev_res'][0]
+            tmp_h = config.config_data['system']['json_dev_res'][1]
             if w != tmp_w or h != tmp_h:
-                raise RuntimeError("Detected resolution doesn't match CSV resolution.")
+                raise RuntimeError("Detected resolution doesn't match JSON resolution.")
         
-        dpi = config.config_data['system']['csv_dev_dpi']
-        tmp_dpi = self.get_dpi()        
+        dpi = config.config_data['system']['json_dev_dpi']
+        tmp_dpi = get_dpi(self.device)        
         if dpi != tmp_dpi:
-            raise RuntimeError("Detected DPI doesn't match CSV DPI.")
+            raise RuntimeError("Detected DPI doesn't match JSON DPI.")
         
         self.res_dpi = [tmp_w, tmp_h, tmp_dpi]       
         self.mapper_event_dispatcher = config.mapper_event_dispatcher
@@ -40,38 +40,7 @@ class TouchReader():
         self.lock = threading.Lock()
         self.side_limit = self.width // 2
         self.mouse_slot = None
-        self.wasd_slot = None
-
-    def get_screen_size(self):
-        """Detect screen resolution (portrait natural)."""
-        result = subprocess.run(
-            ["adb", "-s", self.device, "shell", "wm", "size"], capture_output=True, text=True
-        )
-        output = result.stdout.strip()
-        if "Physical size" in output:
-            w, h = map(int, output.split(":")[-1].strip().split("x"))
-            return w, h
-
-        return None
-    
-    def get_dpi(self):
-        """Detect screen DPI, fallback to 160."""
-        try:
-            result = subprocess.run(["adb", "-s", self.device, "shell", "getprop", "ro.sf.lcd_density"],
-                                    capture_output=True, text=True, timeout=1)
-            val = result.stdout.strip()
-            return int(val) if val else DEF_DPI
-        except Exception:
-            return DEF_DPI
-        
-    def get_adb_device(self):
-        out = subprocess.check_output(["adb", "devices"]).decode().splitlines()
-        real = [l.split()[0] for l in out[1:] if "device" in l and not l.startswith("emulator-")]
-
-        if not real:
-            raise RuntimeError("No real device detected")
-        else:
-            return real[0]   
+        self.wasd_slot = None  
 
     def get_max_slots(self):
         result = subprocess.run(
