@@ -17,7 +17,8 @@ TOML_PATH = os.path.join(PROJECT_ROOT, "settings.toml")
 IMAGES_FOLDER = os.path.join(SRC_DIR, "resources", "images")
 JSONS_FOLDER = os.path.join(SRC_DIR, "resources", "jsons")
 
-# --- Constants ---
+# --- Constants ---   
+
 DEF_DPI = 160
 CIRCLE = "CIRCLE"
 RECT = "RECT"
@@ -29,6 +30,14 @@ SPRINT_DISTANCE_CODE = "F11"
 MOUSE_WHEEL_CODE = "F12"
 WINDOW_FIND_RETRIES = 100
 WINDOW_FIND_DELAY = 1 # in seconds
+
+# --- Fallback Performance Constants ---
+# Limits PRESSED events to 250 updates per second
+DEFAULT_ADB_RATE_CAP = 250.0  
+
+# Ignores key flickers faster than 10ms
+DEFAULT_KEY_DEBOUNCE = 0.01
+
 
 SCANCODES = {
     "ESC": 0x01,
