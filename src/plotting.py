@@ -1,13 +1,16 @@
 import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
 from PIL import Image
 import tomlkit
 import math
 import json
 import os
 import datetime
-from utils import CIRCLE, RECT, SCANCODES, JSONS_FOLDER, TOML_PATH, MOUSE_WHEEL_CODE, select_image_file
-from default_toml_helper import create_default_toml
+
+from mapper_module.utils import (
+    CIRCLE, RECT, SCANCODES, JSONS_FOLDER, TOML_PATH, 
+    MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, select_image_file
+)
+from mapper_module.default_toml_helper import create_default_toml
 
 # --- Constants ---
 IDLE = "IDLE"
@@ -58,7 +61,10 @@ class Plotter:
         self.target_points = 0
         self.input_buffer = ""
         self.saved_mouse_wheel = False
-        self.mouse_wheel_conf = ['', 0.0, 0.0, 0.0]
+        self.saved_sprint_distance = False
+        self.mouse_wheel_radius = 0.0
+        self.mouse_wheel_cy = 0.0
+        self.sprint_distance = 0.0
 
         # GUI Setup        
         try:
@@ -71,7 +77,7 @@ class Plotter:
         self.fig, self.ax = plt.subplots()
         self.ax.imshow(img)
         
-        self.update_title("IDLE. F6(Circ) | F7(Rect) | F9(List) | F10(Save) | F12(Mark as mouse wheel) | (Remove) | Esc(Exit)")
+        self.update_title("IDLE. F6(Circle) | F7(Rect) | F8(Remove) | F9(List) | F10(Save) | F11(Sprint Threshold) | F12(Mouse Wheel) | Esc(Exit).")
 
         # Event Listeners
         self.fig.canvas.mpl_connect("key_press_event", self.on_key_press)
@@ -97,7 +103,7 @@ class Plotter:
         self.mode = None
         self.points = []
         self.input_buffer = ""
-        self.update_title("IDLE. F6(Circ) | F7(Rect) | F9(List) | F10(Save) | F12(Mark as mouse wheel) | (Remove) | Esc(Exit)")
+        self.update_title("IDLE. F6(Circle) | F7(Rect) | F8(Remove) | F9(List) | F10(Save) | F11(Sprint Threshold) | F12(Mouse Wheel) | Esc(Exit).")
 
     def start_mode(self, mode, num_points):
         self.reset_state() 
@@ -218,17 +224,22 @@ class Plotter:
                     if uid in self.shapes:
                         del self.shapes[uid]
                         print(f"[+] Deleted ID {uid}")
+                        
                         if self.saved_mouse_wheel and any(v['key_name'] == MOUSE_WHEEL_CODE for v in self.shapes.values()) == False:
                             self.saved_mouse_wheel = False
+                        if self.saved_sprint_distance and any(v['key_name'] == SPRINT_DISTANCE_CODE for v in self.shapes.values()) == False:
+                            self.saved_sprint_distance = False
+                            
                         self.update_title(f"Deleted ID {uid}. Returning to IDLE...")
                         self.reset_state()
                     else:
                         print(f"[!] ID {uid} not found.")
                         self.update_title(f"Error: ID {uid} not found. Try again or Esc.")
                         self.input_buffer = ""
+                        
                 except ValueError:
-                     self.update_title("Error: Invalid Number. Try again or Esc.")
-                     self.input_buffer = ""
+                    self.update_title("Error: Invalid Number. Try again or Esc.")
+                    self.input_buffer = ""
             return
         
         elif key.isdigit():
@@ -301,7 +312,7 @@ class Plotter:
 
         for _, data in self.shapes.items():
             entry = {
-                "name": data['key_name'],
+                "name": data['key_name'], # Interception Key Name
                 "scancode": data['m_code'], # Saved as hex string "0x..."
                 "type": data['type'],
                 "cx": data['cx'],
@@ -349,7 +360,8 @@ class Plotter:
             # Update paths
             doc["system"]["hud_image_path"] = self.image_path
             doc["system"]["json_path"] = file_path
-            doc['key']['mouse_wheel_conf'] = self.mouse_wheel_conf
+            doc['joystick']['mouse_wheel_radius'] = self.mouse_wheel_radius
+            doc['joystick']['sprint_distance'] = self.sprint_distance
 
             # Save
             with open(TOML_PATH, "w", encoding="utf-8") as f:
@@ -373,15 +385,46 @@ class Plotter:
         return hex(val) if val is not None else None, mapped_key if val is not None else None
 
     def save_entry(self, interception_key, hex_code, cx, cy, r, bb):
+        id = self.count
+        inc_count = True
+        
         if interception_key == MOUSE_WHEEL_CODE:
             if self.mode == CIRCLE:
                 if self.saved_mouse_wheel:
                     print(f"[!] Mouse Wheel already assigned. Overwriting previous assignment.")
-                    self.shapes = {k: v for k, v in self.shapes.items() if v['key_name'] != MOUSE_WHEEL_CODE}                    
-                self.saved_mouse_wheel = True
-                self.mouse_wheel_conf = [hex_code, cx, cy, r]
+                    for k, v in self.shapes.items():
+                        if v['key_name'] == MOUSE_WHEEL_CODE:
+                            id = k
+                            inc_count = False
+                            self.shapes.pop(k)
+                            break
+                    self.saved_mouse_wheel = True
+                self.mouse_wheel_radius = r
+                self.mouse_wheel_cy = cy
+                
             elif self.mode == RECT:
                 print(f"[!] Error: Mouse Wheel can only be assigned to '{CIRCLE}' not '{RECT} shapes.")
+                return
+        
+        elif interception_key == SPRINT_DISTANCE_CODE:
+            if self.mode == CIRCLE:
+                if self.saved_sprint_distance:
+                    if not self.saved_mouse_wheel:
+                        print(f"[!] Mouse Wheel not assigned yet. Please assign it first.")
+                        return
+                    
+                    print(f"[!] Sprint Threshold already assigned. Overwriting previous assignment.")
+                    for k, v in self.shapes.items():
+                        if v['key_name'] == SPRINT_DISTANCE_CODE:
+                            id = k
+                            inc_count = False
+                            self.shapes.pop(k)
+                            break
+                    self.saved_sprint_distance = True
+                self.sprint_distance = cy - self.mouse_wheel_cy
+                
+            elif self.mode == RECT:
+                print(f"[!] Error: Sprint Button can only be assigned to '{CIRCLE}' not '{RECT} shapes.")
                 return
         
         entry = {
@@ -390,8 +433,9 @@ class Plotter:
             "type": self.mode,
             "cx": cx, "cy": cy, "r": r, "bb": bb
         }
-        self.shapes[self.count] = entry
-        self.count += 1
+        self.shapes[id] = entry
+        if inc_count:
+            self.count += 1
 
     def print_data(self):
         print("\n" + "="*45)

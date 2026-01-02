@@ -1,62 +1,45 @@
 import tomlkit
-from tomlkit import document, table
-from pathlib import Path
+import os
 
+# We need to know where settings.toml lives
+# Assuming this file is in src/mapper_module/
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+SRC_DIR = os.path.dirname(CURRENT_DIR)
+PROJECT_ROOT = os.path.dirname(SRC_DIR)
+TOML_PATH = os.path.join(PROJECT_ROOT, "settings.toml")
 
 def create_default_toml():
-    # Create the main document
-    doc = document()
+    """Creates a fresh settings.toml if one is missing or corrupted."""
+    if os.path.exists(TOML_PATH):
+        return
 
-    # --- [system] Section ---
-    # Create a table (section)
-    sys_table = table()
-    sys_table.comment("Auto generated, edit at your own risk.")
-        
-    sys_table.add("hud_image_path", "")
-    sys_table["hud_image_path"].comment("Path to the HUD image file.")
+    doc = tomlkit.document()
     
-    sys_table.add("json_path", "")
-    sys_table["json_path"].comment("Path to the JSON file defining mapping zones.")
-    sys_table.add("json_dev_res", [0, 0])
-    sys_table["json_dev_res"].comment("Device resolution for the JSON file.")
-    sys_table.add("json_dev_dpi", 0)
-    sys_table["json_dev_dpi"].comment("Device DPI for the JSON file.")
-    sys_table.add("json_dev_name", "")
-    sys_table["json_dev_name"].comment("Device name for the JSON file.")
+    # [system]
+    system = tomlkit.table()
+    system.add("hud_image_path", "resources/images/screenshot.png")
+    system.add("json_path", "resources/jsons/layout.json")
+    system.add("json_dev_res", [2400, 1080]) # Default resolution
+    system.add("json_dev_dpi", 160)
+    doc.add("system", system)
 
-        
-    doc.add("system", sys_table)
+    # [mouse]
+    mouse = tomlkit.table()
+    mouse.add("sensitivity", 1.0)
+    mouse.add("invert_y", False)
+    doc.add("mouse", mouse)
 
-    # --- [key] Section ---
-    key_table = table()
-    key_table.comment("Auto generated, edit at your own risk.")
-    key_table.add("mouse_wheel_conf", ['', 0.0, 0.0, 0.0]).comment("Mouse Wheel Configuration: [scancode, center_x, center_y, radius].")
-    doc.add("key", key_table)
+    # [joystick]
+    joystick = tomlkit.table()
+    joystick.add("deadzone", 0.1)
+    joystick.add("hysteresis", 5.0)
+    joystick.add("mouse_wheel_radius", 0.0) # Will be auto-filled by plotter
+    joystick.add("sprint_distance", 0.0)    # Will be auto-filled by plotter
+    doc.add("joystick", joystick)
 
-    # --- [mouse] Section ---
-    mouse_table = table()
-    mouse_table.comment("Auto generated, edit at your own risk.")
-    mouse_table.add("sensitivity", 1.0)
-    mouse_table["sensitivity"].comment("Adjust this multiplier to tune how fast the camera turns, roughly: 1.0 means \"1 DP unit = 1 Mouse Mickey.")
-    mouse_table.add("invert_y", False)
-    doc.add("mouse", mouse_table)
-
-    # --- [joystick] Section ---
-    joy_table = table()
-    joy_table.comment("Auto generated, edit at your own risk.")
-    joy_table.add("deadzone", 0.1)
-    joy_table["deadzone"].comment("Deadzone (0.0 - 1.0).")
-    joy_table.add("hysteresis", 5.0)
-    joy_table["hysteresis"].comment("Hysteresis Angle (Degrees).")
-    joy_table.add("fixed_center", False)
-    doc.add("joystick", joy_table)
-
-    # Write to file
-    with open(Path("./settings.toml").resolve(), "w") as f:
-        f.write(tomlkit.dumps(doc))
-
-    print("settings.toml created successfully.")
-
-if __name__ == "__main__":
-    create_default_toml()
-    
+    try:
+        with open(TOML_PATH, "w", encoding="utf-8") as f:
+            tomlkit.dump(doc, f)
+        print(f"[System] Created default settings.toml at {TOML_PATH}")
+    except Exception as e:
+        print(f"[Error] Failed to create settings.toml: {e}")

@@ -22,25 +22,16 @@ def create_test_default_toml():
     sys_table.add("json_dev_dpi", 320)
     sys_table["json_dev_dpi"].comment("Device DPI for the JSON file.")
     sys_table.add("json_dev_name", "Chuksxz")
-    sys_table["json_dev_name"].comment("Device name for the JSON file.")
-
-        
+    sys_table["json_dev_name"].comment("Device name for the JSON file.")        
     doc.add("system", sys_table)
-
-    # --- [key] Section ---
-    key_table = table()
-    key_table.comment("Auto generated, edit at your own risk.")
-    key_table.add("mouse_wheel_conf", ['', 0.0, 0.0, 0.0]).comment("Mouse Wheel Configuration: [scancode, center_x, center_y, radius].")
-    doc.add("key", key_table)
 
     # --- [mouse] Section ---
     mouse_table = table()
     mouse_table.comment("Auto generated, edit at your own risk.")
     mouse_table.add("sensitivity", 15.0)
     mouse_table["sensitivity"].comment("Adjust this multiplier to tune how fast the camera turns, roughly: 1.0 means \"1 DP unit = 1 Mouse Mickey.")
-    mouse_table.add("invert_y", False)
     doc.add("mouse", mouse_table)
-
+    
     # --- [joystick] Section ---
     joy_table = table()
     joy_table.comment("Auto generated, edit at your own risk.")
@@ -49,8 +40,10 @@ def create_test_default_toml():
     joy_table.add("hysteresis", 5.0)
     joy_table["hysteresis"].comment("Hysteresis Angle (Degrees).")
     joy_table.add("fixed_center", False)
+    joy_table.add("mouse_wheel_radius", 100).comment("Mouse Wheel radius.")
+    joy_table.add("sprint_distance", 200).comment("Sprint distance.")
     doc.add("joystick", joy_table)
-
+    
     # Write to file
     with open(Path("../mapper_module/settings.toml").resolve(), "w") as f:
         f.write(tomlkit.dumps(doc))

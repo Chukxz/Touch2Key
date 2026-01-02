@@ -1,33 +1,32 @@
-# --- Python Bytecode (Generated automatically, do not upload) ---
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
+# === Project Specifics ===
+# Ignore the screenshots and JSONs
+src/resources/images/*
+src/resources/jsons/*
 
-# --- Virtual Environments ---
-# Ignores standard names for virtual env folders
-.venv/
-venv/
+# Ignore local configuration (since it contains local machine paths)
+settings.toml
+
+# === Python Junk ===
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
 env/
+venv/
 ENV/
 
-# --- Environment Variables & Secrets ---
-# CRITICAL: Never upload API keys or passwords
-.env
-.env.local
-
-# --- Distribution / Build artifacts ---
-# If you package your project later
-build/
+# === Distribution / Build ===
 dist/
+build/
 *.egg-info/
 
-# --- IDE & Editor Settings (Optional but recommended) ---
-# Keeps your personal editor settings out of the shared code
+# === Editor Specifics ===
+# VS Code
 .vscode/
+# PyCharm
 .idea/
-*.swp
 
-# --- OS Generated Files ---
+# === Operating System ===
 .DS_Store
 Thumbs.db

@@ -1,44 +1,83 @@
 import json
 import os
 import time
-from utils import MapperEvent, CIRCLE, RECT, RELOAD_DELAY
-from default_toml_helper import create_default_toml
+import keyboard
+from .utils import MapperEvent, CIRCLE, RECT, RELOAD_DELAY, MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE
+from .default_toml_helper import create_default_toml
 
 class JSON_Loader():
     def __init__(self, config):
-        self.last_loaded_path = None
-        self.last_loaded_timestamp = 0
-        self.master_zones = {}
-        self.mapper_event_dispatcher = config.mapper_event_dispatcher
         self.config = config
+        self.mapper_event_dispatcher = config.mapper_event_dispatcher
+        
+        # State tracking
         self.last_loaded_json_path = None
-        self.last_loaded_json_timestamp = None
+        self.last_loaded_json_timestamp = 0
+        self.json_data = {}
+        
+        # Initialize immediately
         self.load_json()
         
-    def get_mouse_wheel_configuration(self):
-        try:
-            mouse_wheel_conf = self.config.config_data['key']['mouse_wheel_conf']
-            return mouse_wheel_conf
-        except:
-            create_default_toml()
-            raise RuntimeError("Mouse Wheel Configuration not found or misconfigured (mouse_wheel_conf).")
+        # --- SELF REGISTER HOTKEY ---
+        print("[INFO] JSON_Loader registered F5 hotkey.")
+        keyboard.add_hotkey('f5', self.reload, suppress=True)
 
+    def get_mouse_wheel(self):
+        joystick_config = self.config.get('joystick')
+        if not joystick_config:
+            create_default_toml()
+            raise RuntimeError("Joystick section not found in configuration.")
+            
+        if not hasattr(self, 'mouse_wheel'):        
+            for v in self.json_data.values():
+                if v.get('name') == MOUSE_WHEEL_CODE:
+                    self.mouse_wheel = v
+                    return
+            
+            raise RuntimeError(f"Mouse Wheel zone ('{MOUSE_WHEEL_CODE}') not found in JSON layout.")
+        
+    def get_mouse_wheel_radius(self):
+        self.get_mouse_wheel()
+        
+        if not hasattr(self, 'width'):
+             self.process_json(self.last_loaded_json_path)
+
+        mouse_wheel_radius = self.mouse_wheel['r'] * self.width        
+        
+        with self.config.config_lock:
+             if 'joystick' in self.config.config_data:
+                 self.config.config_data['joystick']['mouse_wheel_radius'] = mouse_wheel_radius                
+        
+        return mouse_wheel_radius
+        
+    def get_sprint_distance(self):
+        self.get_mouse_wheel()
+        for v in self.json_data.values():
+            if v.get('name') == SPRINT_DISTANCE_CODE:
+                sprint_distance = (v['cy'] - self.mouse_wheel['cy']) * self.height
+                
+                with self.config.config_lock:
+                    if 'joystick' in self.config.config_data:
+                        self.config.config_data['joystick']['sprint_distance'] = sprint_distance
+                return sprint_distance
+        
+        raise RuntimeError(f"Sprint Distance zone ('{SPRINT_DISTANCE_CODE}') not found in JSON layout.")
+            
     def load_json(self):
-        try:
-            current_path = self.config.config_data['system']['json_path']
-        except:
+        system_config = self.config.get('system')
+        if not system_config or 'json_path' not in system_config:
             create_default_toml()
             raise RuntimeError("JSON path not found or misconfigured (json_path).")
 
+        current_path = system_config['json_path']
+        
         self.json_data = self.process_json(current_path)
         
         self.last_loaded_json_path = current_path
         if os.path.exists(current_path):
             self.last_loaded_json_timestamp = os.path.getmtime(current_path)
 
-        
     def should_reload(self, old_path, new_path, last_timestamp):
-        # ANALYZE: Do we need a HARD RELOAD?
         need_reload = False
         current_file_time = 0
         
@@ -55,11 +94,12 @@ class JSON_Loader():
         return need_reload
 
     def reload(self):
-        # print("\n[System] Checking for updates...")
+        system_config = self.config.get('system')
+        if not system_config:
+            return 
+
+        current_path = system_config.get('json_path')
         
-        current_path = self.config.config_data['system']['json_path']
-        
-        # Check if reload is needed
         need_reload = self.should_reload(
             self.last_loaded_json_path, 
             current_path, 
@@ -68,18 +108,17 @@ class JSON_Loader():
                     
         if need_reload:
             try:
-                # Load data into memory FIRST (Don't stop the game yet)
                 print("[System] Parsing new JSON...")
-                # We call process_json directly here to test the data before applying
                 new_data = self.process_json(current_path)
                 
-                # CRITICAL SECTION (Stop the game briefly)
                 with self.config.config_lock:
                     print("[System] Applying new layout...")
                     self.json_data = new_data
                     self.last_loaded_json_path = current_path
-                    self.last_loaded_json_timestamp = os.path.getmtime(current_path)
-                    self.mapper_event_dispatcher.dispatch(MapperEvent(action="JSON", json_data=new_data))
+                    if os.path.exists(current_path):
+                        self.last_loaded_json_timestamp = os.path.getmtime(current_path)
+                    
+                    self.mapper_event_dispatcher.dispatch(MapperEvent(action="JSON"))
                     
                 print("[System] Layout swapped safely. Game resumed.")
             except Exception as e:
@@ -88,13 +127,9 @@ class JSON_Loader():
         time.sleep(RELOAD_DELAY)
 
     def normalize_json_data(self, file_path, screen_width, screen_height):
-        """ 
-        Reads a JSON file, normalizes all coordinates to 0.0-1.0.
-        """
         normalized_zones = {}
         
         if not os.path.exists(file_path):
-            # Return empty or raise depending on preference. Raising ensures you know it failed.
             raise RuntimeError(f"Error: File {file_path} not found.")
 
         with open(file_path, mode='r', encoding='utf-8') as f:
@@ -109,30 +144,31 @@ class JSON_Loader():
                     continue
                                 
                 zone_type = item.get("type")
-
                 is_circ = zone_type == CIRCLE
                 is_rect = zone_type == RECT 
 
                 zone_data = {}                
-                zone_data['name'] = item['name']
+                zone_data['name'] = item.get('name', '')
+                zone_data['type'] = zone_type
                 
                 try:
                     if is_circ:
-                        zone_data['type'] = CIRCLE
-                        # Normalize Center
                         zone_data['cx'] = float(item['cx']) / screen_width
                         zone_data['cy'] = float(item['cy']) / screen_height
-                        # Normalize Radius (using width for aspect ratio consistency)
                         zone_data['r'] = float(item['val1']) / screen_width
+                        zone_data['val1'] = float(item['val1'])
 
                     elif is_rect:
-                        zone_data['type'] = RECT
                         zone_data['x1'] = float(item['val1']) / screen_width
                         zone_data['y1'] = float(item['val2']) / screen_height
                         zone_data['x2'] = float(item['val3']) / screen_width
                         zone_data['y2'] = float(item['val4']) / screen_height
                         
-                    # Add to master dict
+                        zone_data['val1'] = float(item['val1'])
+                        zone_data['val2'] = float(item['val2'])
+                        zone_data['val3'] = float(item['val3'])
+                        zone_data['val4'] = float(item['val4'])
+                    
                     normalized_zones[scancode] = zone_data
                     
                 except (ValueError, KeyError) as e:
@@ -142,18 +178,17 @@ class JSON_Loader():
         return normalized_zones
 
     def process_json(self, json_path):
-        try:
-            w, h = self.config.config_data['system']['json_dev_res']
-            self.width = int(w)
-            self.height = int(h)     
-        except:
+        system_config = self.config.get('system', {})
+        res = system_config.get('json_dev_res')
+        
+        if not res or len(res) != 2:
             create_default_toml()
             raise RuntimeError("Resolution not found or misconfigured (json_dev_res).")
         
-        try:
-            self.dpi = int(self.config.config_data['system']['json_dev_dpi'])
-        except:
-            create_default_toml()
-            raise RuntimeError("DPI not found or misconfigured (json_dev_dpi).")
+        w, h = res
+        self.width = int(w)
+        self.height = int(h)     
+        
+        self.dpi = int(system_config.get('json_dev_dpi', 160))
         
         return self.normalize_json_data(json_path, w, h)

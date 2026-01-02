@@ -1,18 +1,34 @@
 import tkinter as tk
 from tkinter import filedialog
 import subprocess
+import os
 
+# Get location of this file: .../mapper_project/src/mapper_module
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Go up one level to 'src'
+SRC_DIR = os.path.dirname(CURRENT_DIR)
+
+# Go up another level to 'mapper_project' (Root)
+PROJECT_ROOT = os.path.dirname(SRC_DIR)
+
+# --- Path Assignments ---
+TOML_PATH = os.path.join(PROJECT_ROOT, "settings.toml")
+IMAGES_FOLDER = os.path.join(SRC_DIR, "resources", "images")
+JSONS_FOLDER = os.path.join(SRC_DIR, "resources", "jsons")
+
+# --- Constants ---
 DEF_DPI = 160
-IMAGES_FOLDER = "images"
-JSONS_FOLDER = "jsons"
 CIRCLE = "CIRCLE"
 RECT = "RECT"
-TOML_PATH = "./settings.toml"
 RELOAD_DELAY = 0.01
 M_LEFT = 0x9901
 M_RIGHT = 0x9902
 M_MIDDLE = 0x9903
+SPRINT_DISTANCE_CODE = "F11"
 MOUSE_WHEEL_CODE = "F12"
+WINDOW_FIND_RETRIES = 100
+WINDOW_FIND_DELAY = 1 # in seconds
 
 SCANCODES = {
     "ESC": 0x01,
@@ -149,9 +165,8 @@ class TouchMapperEvent:
         self.is_wasd = is_wasd
 
 class MapperEvent:
-    def __init__(self, action, touch: TouchMapperEvent | None = None, json_data=None):
+    def __init__(self, action, touch: TouchMapperEvent | None = None):
         self.touch = touch
-        self.json_data = json_data
         self.action = action # UP, DOWN, PRESSED, CONFIG, JSON
         
 class MapperEventDispatcher:
@@ -185,17 +200,16 @@ class MapperEventDispatcher:
             "UP": "ON_TOUCH_UP",
             "PRESSED": "ON_TOUCH_PRESSED",
             "CONFIG": "ON_CONFIG_RELOAD",
-            "JSON": "ON_JSON_RELOAD"
+            "JSON": "ON_JSON_RELOAD",
+            "WASD": "ON_WASD_BLOCK",
         }
         
         registry_key = action_map.get(event_object.action)
         
         if registry_key:
             for func in self.callback_registry[registry_key]:
-                if event_object.action == "CONFIG":
+                if event_object.action in ["CONFIG", "WASD", "JSON"]:
                     func()
-                elif event_object.action == "JSON":
-                    func(event_object.json_data)
                 else:
                     func(event_object.touch)
 
