@@ -2,6 +2,7 @@ import time
 import threading
 import subprocess
 import re
+import os
 from .utils import (
     TouchMapperEvent, MapperEvent, get_adb_device, 
     get_screen_size, get_dpi, DEFAULT_ADB_RATE_CAP
@@ -20,50 +21,122 @@ class TouchReader():
         self.mapper_event_dispatcher = dispatcher
 
         # --- PERFORMANCE TUNING ---
-        # Convert Hz to seconds (e.g., 250Hz -> 0.004s)
         self.move_interval = 1.0 / adb_rate_cap if adb_rate_cap > 0 else 0
         self.last_dispatch_time = 0
 
         # 1. Physical Device Specs
         res = get_screen_size(self.device)
-        if res is None: raise RuntimeError("Detected resolution invalid.")
+        if res is None:
+            raise RuntimeError("Detected resolution invalid.")
+
         self.width, self.height = res
         physical_dpi = get_dpi(self.device)
 
-        # 2. Configured Specs
+        # 2. Get Configured Specs
         json_res = config.get('system', {}).get('json_dev_res', [self.width, self.height])
         json_dpi = config.get('system', {}).get('json_dev_dpi', physical_dpi)
 
-        # 3. Validation
+        # 3. Strict Validation
         if self.width != json_res[0] or self.height != json_res[1]:
-            raise RuntimeError(f"Resolution Mismatch! Physical: {self.width}x{self.height}")
-        
+            raise RuntimeError(f"Resolution Mismatch! Physical: {self.width}x{self.height} vs Config: {json_res[0]}x{json_res[1]}")
+
         self.res_dpi = [json_res[0], json_res[1], json_dpi]       
         self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
 
         # State Tracking
         self.slots = {}
-        self.start_slots = {}
         self.active_touches = 0
         self.max_slots = self.get_max_slots()
         self.rotation = 0
         self.rotation_poll_interval = 0.5 
         self.lock = threading.Lock()
         self.side_limit = self.width // 2
-        self.mouse_slot = None
-        self.wasd_slot = None  
+        self.running = True
 
         # --- SELF STARTING THREADS ---
-        print(f"[INFO] TouchReader starting @ {adb_rate_cap}Hz Cap...")
+        print(f"[INFO] TouchReader running at {adb_rate_cap}Hz Cap. Side Limit: {self.side_limit}px")
         self.process = None
         threading.Thread(target=self.update_rotation, daemon=True).start()
         threading.Thread(target=self.get_touches, daemon=True).start()
 
-    # (Methods: find_touch_device_event, get_max_slots, parse_hex_signed, rotate_coordinates remain same)
+    def find_touch_device_event(self):
+        """Finds the correct /dev/input/event node for the touchscreen."""
+        try:
+            result = subprocess.run(
+                ["adb", "-s", self.device, "shell", "getevent", "-lp"],
+                capture_output=True, text=True, timeout=2
+            )
+            lines = result.stdout.splitlines()
+            current_device, block, devices = None, [], {}
+            for line in lines:
+                if line.startswith("add device"):
+                    if current_device: devices[current_device] = "\n".join(block)
+                    block = []
+                    current_device = line.split(":")[1].strip()
+                else: block.append(line)
+            if current_device: devices[current_device] = "\n".join(block)
+
+            for dev, txt in devices.items():
+                if "ABS_MT_POSITION_X" in txt and "INPUT_PROP_DIRECT" in txt: return dev
+            for dev, txt in devices.items():
+                if "ABS_MT_POSITION_X" in txt: return dev
+        except: pass
+        return None
+
+    def get_max_slots(self):
+        """Detects the maximum number of multi-touch fingers supported."""
+        try:
+            result = subprocess.run(["adb", "-s", self.device, "shell", "getevent", "-p", self.device_touch_event], capture_output=True, text=True)
+            for line in result.stdout.splitlines():
+                if "ABS_MT_SLOT" in line and "max" in line:
+                    return int(line.split("max")[1].strip().split(',')[0]) + 1
+        except: pass
+        return 10 
+
+    def update_config(self, *args):
+        """Hot-reloads settings from TOML."""
+        try:
+            json_res = self.config.get('system', {}).get('json_dev_res', [self.width, self.height])
+            json_dpi = self.config.get('system', {}).get('json_dev_dpi', 160)
+            self.side_limit = json_res[0] // 2
+            self.res_dpi[:] = [json_res[0], json_res[1], json_dpi]
+        except Exception as e:
+            print(f"[ERROR] Config update failed: {e}")
+
+    def update_rotation(self):
+        """Monitors Android orientation changes."""
+        patterns = [r"mCurrentRotation=(\d+)", r"rotation=(\d+)", r"mCurrentOrientation=(\d+)"]
+        while self.running:
+            try:
+                result = subprocess.run(["adb", "-s", self.device, "shell", "dumpsys", "display"], capture_output=True, text=True, timeout=1)
+                for pat in patterns:
+                    m = re.search(pat, result.stdout)
+                    if m:
+                        with self.lock: self.rotation = int(m.group(1)) % 4
+                        break
+            except: pass
+            time.sleep(self.rotation_poll_interval)
+
+    def rotate_coordinates(self, x, y):
+        """Adjusts raw coordinates based on device rotation."""
+        if self.rotation == 1: return y, self.width - x
+        elif self.rotation == 2: return self.width - x, self.height - y
+        elif self.rotation == 3: return self.height - y, x
+        return x, y
+
+    def _ensure_slot(self, slot):
+        if slot not in self.slots:
+            self.slots[slot] = {'x': 0, 'y': 0, 'start_x': None, 'start_y': None, 
+                                'tid': -1, 'state': 'IDLE', 'is_mouse': False, 'is_wasd': False}
+
+    def parse_hex_signed(self, value_hex):
+        val = int(value_hex, 16)
+        return val if val < 0x80000000 else val - 0x100000000
 
     def get_touches(self):
+        """The main ADB event streaming loop."""
         current_slot = 0
-        while True:
+        while self.running:
             self.process = subprocess.Popen(
                 ["adb", "-s", self.device, "shell", "getevent", "-l", self.device_touch_event],
                 stdout=subprocess.PIPE, text=True, bufsize=0 
@@ -71,90 +144,85 @@ class TouchReader():
 
             try:
                 for line in self.process.stdout:
-                    line = line.strip()
-                    if not line: continue
+                    if not self.running: break
+                    parts = line.strip().split()
+                    if len(parts) < 3: continue
 
-                    if "ABS_MT_SLOT" in line:
-                        current_slot = int(line.split()[-1], 16)
-                        self.ensure_slot(current_slot)
+                    code, val_str = parts[1], parts[2]
 
-                    elif "ABS_MT_TRACKING_ID" in line:
-                        tracking_id = self.parse_hex_signed(line.split()[-1])
-                        self.ensure_slot(current_slot)
-                        prev_id = self.slots[current_slot]['tracking_id']
-                        self.slots[current_slot]['tracking_id'] = tracking_id
-                        
-                        if tracking_id >= 0 and prev_id == -1:
-                            self.slots[current_slot]['state'] = 'DOWN'
-                            # We reset the start_info to ensure fresh coordinates for is_mouse check
-                            self.start_slots[current_slot] = {'x': None, 'y': None, 'timestamp': time.monotonic_ns()}
-                            self.active_touches += 1
-                        elif tracking_id == -1 and prev_id >= 0: 
+                    if "ABS_MT_SLOT" == code:
+                        current_slot = int(val_str, 16)
+                        self._ensure_slot(current_slot)
+                    elif "ABS_MT_TRACKING_ID" == code:
+                        tid = self.parse_hex_signed(val_str)
+                        self._ensure_slot(current_slot)
+                        prev_id = self.slots[current_slot]['tid']
+                        self.slots[current_slot]['tid'] = tid
+                        if tid >= 0 and prev_id == -1:
+                            self.slots[current_slot].update({'state': 'DOWN', 'start_x': None})
+                        elif tid == -1:
                             self.slots[current_slot]['state'] = 'UP'
-                            self.active_touches -= 1
+                    elif "ABS_MT_POSITION_X" == code:
+                        self.slots[current_slot]['x'] = int(val_str, 16)
+                    elif "ABS_MT_POSITION_Y" == code:
+                        self.slots[current_slot]['y'] = int(val_str, 16)
+                    elif "SYN_REPORT" == code:
+                        self.handle_sync()
+            except Exception: pass
+            if self.running:
+                self.stop_process()
+                time.sleep(1.0)
 
-                    elif "ABS_MT_POSITION_X" in line:
-                        val = int(line.split()[-1], 16)
-                        self.ensure_slot(current_slot)
-                        self.slots[current_slot]['x'] = val
-                        if current_slot in self.start_slots and self.start_slots[current_slot]['x'] is None:
-                             self.start_slots[current_slot]['x'] = val
-
-                    elif "ABS_MT_POSITION_Y" in line:
-                        val = int(line.split()[-1], 16)
-                        self.ensure_slot(current_slot)
-                        self.slots[current_slot]['y'] = val
-                        if current_slot in self.start_slots and self.start_slots[current_slot]['y'] is None:
-                             self.start_slots[current_slot]['y'] = val
-
-                    elif "SYN_REPORT" in line:
-                        self.handle_sync(current_slot)
-
-            except Exception as e:
-                print(f"[ERROR] ADB Stream Error: {e}")
-            
-            time.sleep(1.0)
-
-    def handle_sync(self, current_slot):
-        """Processes the synchronized touch data with rate limiting."""
+    def handle_sync(self):
+        """Processes and dispatches synchronized events with the rate cap."""
         now = time.perf_counter()
         
-        # Identify mouse/wasd fingers based on where they first touched
-        self.update_mouse_finger()
-        self.update_wasd_finger()
+        for slot, data in list(self.slots.items()):
+            if data['state'] == 'IDLE': continue
 
-        for slot, info in self.slots.items():
-            start_info = self.start_slots.get(slot)
-            if info['tracking_id'] < 0 or info['x'] is None or info['y'] is None or not start_info:
-                continue
+            # Initial Identification
+            if data['state'] == 'DOWN':
+                if data['x'] is None or data['y'] is None: continue
+                data['start_x'], data['start_y'] = data['x'], data['y']
+                data['is_mouse'] = (data['x'] >= self.side_limit)
+                data['is_wasd'] = not data['is_mouse']
 
-            state = info['state']
-            
-            # --- RATE LIMITING ---
-            # We ALWAYS allow DOWN and UP. We cap PRESSED (movement).
-            if state == 'PRESSED':
+            # Rate Limit for movement
+            if data['state'] == 'PRESSED':
                 if (now - self.last_dispatch_time) < self.move_interval:
                     continue
                 self.last_dispatch_time = now
 
             with self.lock:
-                rx, ry = self.rotate_coordinates(info['x'], info['y'], self.width, self.height, self.rotation)
-                srx, sry = self.rotate_coordinates(start_info['x'], start_info['y'], self.width, self.height, self.rotation)
+                rx, ry = self.rotate_coordinates(data['x'], data['y'])
+                sx, sy = self.rotate_coordinates(data['start_x'], data['start_y'])
 
-            touch_event = TouchMapperEvent(
-                slot=slot, tracking_id=info['tracking_id'],
-                x=rx, y=ry, sx=srx, sy=sry,
-                is_mouse=(slot == self.mouse_slot),
-                is_wasd=(slot == self.wasd_slot)
+            event = MapperEvent(
+                action=data['state'],
+                touch=TouchMapperEvent(
+                    slot=slot, tracking_id=data['tid'], x=rx, y=ry, sx=sx, sy=sy,
+                    is_mouse=data['is_mouse'], is_wasd=data['is_wasd']
+                )
             )
+            self.mapper_event_dispatcher.dispatch(event)
 
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action=state, touch=touch_event))
+            if data['state'] == 'DOWN': data['state'] = 'PRESSED'
+            elif data['state'] == 'UP': self.reset_slot(slot)
 
-            # State Transition
-            if state == 'DOWN':
-                self.slots[slot]['state'] = 'PRESSED'
-            elif state == 'UP':
-                self.slots[slot] = {'timestamp': None, 'x': None, 'y': None, 'tracking_id': -1, 'state': 'IDLE'}
-                self.start_slots.pop(slot, None)
+    def reset_slot(self, slot):
+        self.slots[slot] = {'x': 0, 'y': 0, 'start_x': None, 'start_y': None, 
+                            'tid': -1, 'state': 'IDLE', 'is_mouse': False, 'is_wasd': False}
 
-    # (Remaining helper methods: update_mouse_finger, update_wasd_finger, stop, etc.)
+    def stop_process(self):
+        """Kills the active ADB subprocess."""
+        if self.process:
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=2)
+            except:
+                self.process.kill()
+
+    def stop(self):
+        """Stops all threads and cleanup."""
+        self.running = False
+        self.stop_process()
