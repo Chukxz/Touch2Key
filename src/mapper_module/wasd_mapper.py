@@ -45,7 +45,7 @@ class WASDMapper():
                 self.DEADZONE = conf.get('deadzone', 0.1)
                 self.HYSTERESIS = conf.get('hysteresis', 5.0)       
         except Exception as e:
-           print(f"[Error] loading joystick config: {e}")
+           raise RuntimeError(f"Error loading joystick config: {e}")
 
     def updateMouseWheel(self):
         # Refreshes geometry from the JSON loader

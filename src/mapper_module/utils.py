@@ -256,19 +256,20 @@ def get_dpi(device):
     except Exception:
         return DEF_DPI
     
-                    
 
-def select_image_file():
+def select_image_file(base_dir = None):
     # Create a root window and hide it immediately
     root = tk.Tk()
     root.withdraw() 
-    
+    root.attributes('-topmost', True) # Bring to front
+
     # Open the file selector
     file_path = filedialog.askopenfilename(
+        initialdir=base_dir,
         title="Select an Image",
         filetypes=[
             ("Image Files", "*.jpg *.jpeg *.png *.bmp"),
-            # ("All Files", "*.*")
+            ("All Files", "*.*")
         ]
     )
     

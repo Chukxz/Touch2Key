@@ -1,7 +1,6 @@
 import keyboard
 import os
 import sys
-import threading
 from mapper_module.utils import DEFAULT_ADB_RATE_CAP, DEFAULT_KEY_DEBOUNCE
 from mapper_module import (
     MapperEventDispatcher, 
@@ -34,7 +33,7 @@ def main():
 
     # 1. Initialize Core Systems
     mapper_event_dispatcher = MapperEventDispatcher()
-    config = AppConfig(TOML_PATH, mapper_event_dispatcher)
+    config = AppConfig(mapper_event_dispatcher)
 
     # 2. Initialize Bridge & Loader
     interception_bridge = InterceptionBridge()

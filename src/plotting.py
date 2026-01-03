@@ -7,7 +7,7 @@ import os
 import datetime
 
 from mapper_module.utils import (
-    CIRCLE, RECT, SCANCODES, JSONS_FOLDER, TOML_PATH, 
+    CIRCLE, RECT, SCANCODES, IMAGES_FOLDER, JSONS_FOLDER, TOML_PATH, 
     MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, select_image_file
 )
 from mapper_module.default_toml_helper import create_default_toml
@@ -39,7 +39,10 @@ class Plotter:
     def __init__(self, image_path=None):
         # Select image file
         if image_path is None:
-            image_path = select_image_file()
+            os.makedirs(IMAGES_FOLDER, exist_ok=True)
+            print(f"[System] Looking for profiles in: {IMAGES_FOLDER}")
+
+            image_path = select_image_file(IMAGES_FOLDER)
             if image_path:
                 self.image_path = image_path
             else:
@@ -305,9 +308,7 @@ class Plotter:
         if not user_name:
             user_name = datetime.datetime.now().strftime("map_%Y%m%d_%H%M%S")
         
-        base_dir = os.path.join("..", "resources", JSONS_FOLDER)
-        os.makedirs(base_dir, exist_ok=True)
-
+        os.makedirs(JSONS_FOLDER, exist_ok=True)
         json_output = []
 
         for _, data in self.shapes.items():
@@ -334,13 +335,13 @@ class Plotter:
             
             json_output.append(entry)
 
-        file_path = os.path.join(base_dir, f"{user_name}.json")
+        file_path = os.path.join(JSONS_FOLDER, f"{user_name}.json")
         
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(json_output, f, indent=4)
 
-            msg = f"Saved: ../resources/{JSONS_FOLDER}/{user_name}.json"
+            msg = f"{JSONS_FOLDER}/{user_name}.json"
             print(f"[+] {msg}")
 
         except Exception as e:
@@ -349,6 +350,9 @@ class Plotter:
             return
             
         try:
+            if not os.path.exists(TOML_PATH):
+                create_default_toml()
+                
             # Load
             with open(TOML_PATH, "r", encoding="utf-8") as f:
                 doc = tomlkit.load(f)
@@ -358,8 +362,8 @@ class Plotter:
             if "key" not in doc: doc.add("key", tomlkit.table())
 
             # Update paths
-            doc["system"]["hud_image_path"] = self.image_path
-            doc["system"]["json_path"] = file_path
+            doc["system"]["hud_image_path"] = os.path.normpath(self.image_path)
+            doc["system"]["json_path"] = os.path.normpath(file_path)
             doc['joystick']['mouse_wheel_radius'] = self.mouse_wheel_radius
             doc['joystick']['sprint_distance'] = self.sprint_distance
 

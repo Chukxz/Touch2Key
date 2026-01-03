@@ -2,7 +2,11 @@ import json
 import os
 import time
 import keyboard
-from .utils import MapperEvent, CIRCLE, RECT, RELOAD_DELAY, MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE
+from .utils import (
+    MapperEvent, CIRCLE, RECT, RELOAD_DELAY,
+    MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE
+    )
+
 from .default_toml_helper import create_default_toml
 
 class JSON_Loader():
@@ -22,13 +26,13 @@ class JSON_Loader():
         print("[INFO] JSON_Loader registered F5 hotkey.")
         keyboard.add_hotkey('f5', self.reload, suppress=True)
 
-    def get_mouse_wheel(self):
+    def get_mouse_wheel(self, force=False):
         joystick_config = self.config.get('joystick')
         if not joystick_config:
             create_default_toml()
             raise RuntimeError("Joystick section not found in configuration.")
             
-        if not hasattr(self, 'mouse_wheel'):        
+        if not hasattr(self, 'mouse_wheel') or force:        
             for v in self.json_data.values():
                 if v.get('name') == MOUSE_WHEEL_CODE:
                     self.mouse_wheel = v
@@ -40,18 +44,19 @@ class JSON_Loader():
         self.get_mouse_wheel()
         
         if not hasattr(self, 'width'):
-             self.process_json(self.last_loaded_json_path)
+            self.process_json(self.last_loaded_json_path)
 
         mouse_wheel_radius = self.mouse_wheel['r'] * self.width        
         
         with self.config.config_lock:
-             if 'joystick' in self.config.config_data:
-                 self.config.config_data['joystick']['mouse_wheel_radius'] = mouse_wheel_radius                
+            if 'joystick' in self.config.config_data:
+                self.config.config_data['joystick']['mouse_wheel_radius'] = mouse_wheel_radius                
         
         return mouse_wheel_radius
         
     def get_sprint_distance(self):
         self.get_mouse_wheel()
+        
         for v in self.json_data.values():
             if v.get('name') == SPRINT_DISTANCE_CODE:
                 sprint_distance = (v['cy'] - self.mouse_wheel['cy']) * self.height
@@ -83,24 +88,24 @@ class JSON_Loader():
         
         if os.path.exists(new_path):
             current_file_time = os.path.getmtime(new_path)
-            
-        if new_path != old_path:
-            print(f"[Update] Layout path changed: '{old_path}' -> '{new_path}'")
-            need_reload = True
-        elif current_file_time != last_timestamp:
-            print(f"[Update] JSON file modification detected: '{new_path}'")
-            need_reload = True
+                
+            if new_path != old_path:
+                print(f"[Update] Layout path changed: '{old_path}' -> '{new_path}'")
+                need_reload = True
+            elif current_file_time != last_timestamp:
+                print(f"[Update] JSON file modification detected: '{new_path}'")
+                need_reload = True
         
-        return need_reload
+        return need_reload, current_file_time
 
     def reload(self):
         system_config = self.config.get('system')
         if not system_config:
-            return 
+            return
 
         current_path = system_config.get('json_path')
         
-        need_reload = self.should_reload(
+        need_reload, current_file_time = self.should_reload(
             self.last_loaded_json_path, 
             current_path, 
             self.last_loaded_json_timestamp
@@ -115,9 +120,8 @@ class JSON_Loader():
                     print("[System] Applying new layout...")
                     self.json_data = new_data
                     self.last_loaded_json_path = current_path
-                    if os.path.exists(current_path):
-                        self.last_loaded_json_timestamp = os.path.getmtime(current_path)
-                    
+                    self.last_loaded_json_timestamp = current_file_time
+                    self.get_mouse_wheel(force=True)                    
                     self.mapper_event_dispatcher.dispatch(MapperEvent(action="JSON"))
                     
                 print("[System] Layout swapped safely. Game resumed.")

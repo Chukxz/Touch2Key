@@ -1,5 +1,3 @@
-# src/mapper_module/__init__.py
-
 # Utilities & Config
 from .utils import MapperEventDispatcher, TOML_PATH
 from .config import AppConfig

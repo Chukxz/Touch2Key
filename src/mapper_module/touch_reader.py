@@ -2,11 +2,10 @@ import time
 import threading
 import subprocess
 import re
-import os
 from .utils import (
     TouchMapperEvent, MapperEvent, get_adb_device, 
     get_screen_size, get_dpi, DEFAULT_ADB_RATE_CAP
-)
+    )
 
 class TouchReader():
     def __init__(self, config, dispatcher, adb_rate_cap=DEFAULT_ADB_RATE_CAP):

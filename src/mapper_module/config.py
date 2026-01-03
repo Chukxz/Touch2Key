@@ -1,14 +1,11 @@
 import tomllib
 import threading
 import os
-# Use relative imports since this is inside the mapper_module package
 from .default_toml_helper import create_default_toml
-from .utils import MapperEvent
+from .utils import MapperEvent, TOML_PATH
 
 class AppConfig:
-    def __init__(self, filename, mapper_event_dispatcher):
-        # super().__init__() is not needed for a base class
-        self.filename = filename
+    def __init__(self, mapper_event_dispatcher):
         self.mapper_event_dispatcher = mapper_event_dispatcher
         
         # 1. Initialize the lock to protect config_data
@@ -18,18 +15,18 @@ class AppConfig:
         
         # 2. Load immediately
         self.load_config()
-        print(f"Configuration loaded from {self.filename}")
+        print(f"Configuration loaded from {TOML_PATH}")
 
     def load_config(self):
         """Loads TOML data safely. Creates default if missing."""
         try:
             # Check if file exists; if not, create it using your helper
-            if not os.path.exists(self.filename):
-                print(f"Config file {self.filename} not found! Creating default...")
+            if not os.path.exists(TOML_PATH):
+                print(f"Config file {TOML_PATH} not found! Creating default...")
                 create_default_toml()
 
             # Read the file from disk
-            with open(self.filename, "rb") as f:
+            with open(TOML_PATH, "rb") as f:
                 new_data = tomllib.load(f)
 
             # 3. CRITICAL: Use the lock when updating self.config_data

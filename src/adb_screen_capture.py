@@ -12,7 +12,7 @@ from mapper_module.utils import (
 )
 from mapper_module.default_toml_helper import create_default_toml
 
-def capture_android_screen(nickname: str, custom_img_name: str) -> None:
+def capture_android_screen():
     """
     Captures screen and saves as: {nickname}_{custom_img_name}_{timestamp}.png
     Handles 4 scenarios: 
@@ -30,6 +30,10 @@ def capture_android_screen(nickname: str, custom_img_name: str) -> None:
 
     # --- ROBUST NAMING LOGIC ---
     timestamp = int(time.time())
+
+    # Get inputs from user
+    nickname = input("Enter device nickname (optional, default 'Device'): ").strip()
+    custom_img_name = input("Enter optional image name (e.g. cod_low): ").strip()
     
     # Clean and fallback for nickname
     nick_clean = nickname.strip().replace(" ", "_") if nickname.strip() else "Device"
@@ -42,10 +46,8 @@ def capture_android_screen(nickname: str, custom_img_name: str) -> None:
     else:
         filename = f"{nick_clean}_{timestamp}.png"
 
-    # Setup Paths (Ensures cross-platform compatibility)
-    base_dir = os.path.normpath(os.path.join("..", "resources", IMAGES_FOLDER))
-    os.makedirs(base_dir, exist_ok=True)
-    full_save_path = os.path.join(base_dir, filename)
+    os.makedirs(IMAGES_FOLDER, exist_ok=True)
+    full_save_path = os.path.join(IMAGES_FOLDER, filename)
 
     try:
         print(f"[PROCESS] Capturing {res[0]}x{res[1]} screen from {device_id}...")
@@ -73,7 +75,7 @@ def capture_android_screen(nickname: str, custom_img_name: str) -> None:
         # Update TOML settings
         doc["system"]["json_dev_res"] = [res[0], res[1]]
         doc["system"]["json_dev_dpi"] = dpi
-        doc["system"]["hud_image_path"] = full_save_path
+        doc["system"]["hud_image_path"] = os.path.normpath(full_save_path)
         doc["system"]["json_dev_name"] = nick_clean  # Uses the cleaned nickname
 
         with open(TOML_PATH, "w", encoding="utf-8") as f:
@@ -88,9 +90,4 @@ def capture_android_screen(nickname: str, custom_img_name: str) -> None:
         print(f"[ERROR] Config update failed: {e}")
 
 if __name__ == "__main__":
-    # Get inputs from user
-    nick_in = input("Enter device nickname (optional, default 'Device'): ").strip()
-    img_in = input("Enter optional image name (e.g. cod_low): ").strip()
-
-    # The function now handles the empty/whitespace logic internally
-    capture_android_screen(nick_in, img_in)
+    capture_android_screen()

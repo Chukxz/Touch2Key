@@ -1,5 +1,9 @@
 import time
-from .utils import RECT, CIRCLE, M_LEFT, M_RIGHT, M_MIDDLE, SCANCODES, MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, is_in_circle, is_in_rect, MapperEvent
+from .utils import (
+    RECT, CIRCLE, M_LEFT, M_RIGHT, M_MIDDLE, 
+    SCANCODES, MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, 
+    is_in_circle, is_in_rect, MapperEvent
+    )
 
 class KeyMapper():
     def __init__(self, mapper, debounce_time=0.01):
@@ -89,7 +93,7 @@ class KeyMapper():
                     hit = True
 
             if hit:
-                # Attempt to press the key (subject to debounce)
+                # Attempt to press (subject to debounce)
                 if self._send_key_event(scancode, down=True):
                     self.events_dict[event.slot] = [scancode, value, event.is_wasd]
                     if event.is_wasd:
@@ -126,8 +130,10 @@ class KeyMapper():
         if event.slot in self.events_dict:
             scancode, _, is_wasd = self.events_dict[event.slot]
 
+            # Attempt to release (subject to debounce)
             if self._send_key_event(scancode, down=False):
                 self.events_dict.pop(event.slot, None)
                 if is_wasd:
                     self.mapper.wasd_block = max(0, self.mapper.wasd_block - 1)
                     self.mapper_event_dispatcher.dispatch(MapperEvent(action="WASD"))
+

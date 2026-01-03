@@ -20,11 +20,14 @@ class MouseMapper():
         self.mapper_event_dispatcher.register_callback("ON_TOUCH_UP", self.touch_up)
 
     def update_config(self):
-        with self.config.config_lock:
-            mouse_cfg = self.config.config_data.get('mouse', {})
-            base_sens = mouse_cfg.get('sensitivity', 1.0)
-            dpi_scale = DEF_DPI / self.mapper.dpi if self.mapper.dpi > 0 else 1.0
-            self.TOTAL_MULT = base_sens * dpi_scale
+        try:
+            with self.config.config_lock:
+                mouse_cfg = self.config.config_data.get('mouse', {})
+                base_sens = mouse_cfg.get('sensitivity', 1.0)
+                dpi_scale = DEF_DPI / self.mapper.dpi if self.mapper.dpi > 0 else 1.0
+                self.TOTAL_MULT = base_sens * dpi_scale
+        except Exception as e:
+            raise RuntimeError(f"Error loading mouse config: {e}")
 
     def touch_down(self, event):
         if not event.is_mouse:
