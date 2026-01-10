@@ -77,7 +77,7 @@ class Mapper():
     def get_game_window_class_name(self, window_title, retries=WINDOW_FIND_RETRIES, delay=WINDOW_FIND_DELAY):
         """Waits for the game window to appear on startup."""
         if window_title is None:
-            raise RuntimeError("window_title must be provided")
+            raise RuntimeError("Window_title must be provided")
             
         print(f"[INFO] Waiting for window: '{window_title}'...")
         for i in range(retries):
@@ -87,9 +87,10 @@ class Mapper():
                 print(f"[INFO] Found window '{window_title}' (Class: {class_name})")
                 return class_name
             time.sleep(delay)
-            
-        raise RuntimeError(f"Window '{window_title}' not found after {retries} retries, lasting for {retries * delay} seconds.")
         
+        _str = f"Window '{window_title}' not found after {retries} retries, lasting for {retries * delay} seconds."
+        raise RuntimeError(_str)
+
     def enum_windows_callback(self, hwnd, lParam):
         target_class = ctypes.cast(lParam, ctypes.POINTER(ctypes.py_object)).contents.value['class_name']
         results = ctypes.cast(lParam, ctypes.POINTER(ctypes.py_object)).contents.value['results']
@@ -182,7 +183,8 @@ class Mapper():
                 target_info = info
         
         if target_info is None:
-            raise RuntimeError(f"No visible window found for class '{self.game_window_class_name}'")    
+            _str = f"No visible window found for class '{self.game_window_class_name}'."
+            raise RuntimeError(_str)
         return target_info
 
     # --- Coordinate Mapping ---
@@ -204,11 +206,11 @@ class Mapper():
         converted_x, converted_y = self.device_to_game_rel(x, y)
         
         with self.lock:
-             if self.window_lost:
+            if self.window_lost:
                 return 0, 0
                 
-             game_left = self.game_window_info['left']
-             game_top = self.game_window_info['top']
+            game_left = self.game_window_info['left']
+            game_top = self.game_window_info['top']
             
         final_x = game_left + converted_x
         final_y = game_top  + converted_y

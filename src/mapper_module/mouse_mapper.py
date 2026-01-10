@@ -27,7 +27,8 @@ class MouseMapper():
                 dpi_scale = DEF_DPI / self.mapper.dpi if self.mapper.dpi > 0 else 1.0
                 self.TOTAL_MULT = base_sens * dpi_scale
         except Exception as e:
-            raise RuntimeError(f"Error loading mouse config: {e}")
+            _str = f"Error loading mouse config: {e}"
+            raise RuntimeError(_str)
 
     def touch_down(self, event):
         if not event.is_mouse:
@@ -42,7 +43,6 @@ class MouseMapper():
         if not event.is_mouse:
             return
 
-        # Ensures no 'jumping' if a new finger takes over
         if self.prev_x is None:
             self.prev_x = event.x
             self.prev_y = event.y
@@ -51,23 +51,31 @@ class MouseMapper():
         raw_dx = event.x - self.prev_x
         raw_dy = event.y - self.prev_y
 
-        # Sub-pixel precision (passes all tremors)
+        # Update tracking immediately to prevent delta growth
+        self.prev_x = event.x
+        self.prev_y = event.y
+
+        # Sub-pixel precision math
         calc_dx = (raw_dx * self.TOTAL_MULT) + self.acc_x
         calc_dy = (raw_dy * self.TOTAL_MULT) + self.acc_y
 
         final_dx = int(calc_dx)
         final_dy = int(calc_dy)
 
-        # Store remainders
+        # IMPORTANT: Only send if the movement is at least 1 pixel
+        # This filters out "digitizer noise" that clogs the bridge
+        if final_dx == 0 and final_dy == 0:
+            self.acc_x = calc_dx
+            self.acc_y = calc_dy
+            return
+
+        # Store remainders for the next movement
         self.acc_x = calc_dx - final_dx
         self.acc_y = calc_dy - final_dy
 
-        if final_dx != 0 or final_dy != 0:
-            self.interception_bridge.mouse_move_rel(final_dx, final_dy)
-
-        self.prev_x = event.x
-        self.prev_y = event.y
-
+        # Send to bridge
+        self.interception_bridge.mouse_move_rel(final_dx, final_dy)
+        
     def touch_up(self, event):
         # When any mouse finger is lifted, clear the state
         if event.is_mouse:

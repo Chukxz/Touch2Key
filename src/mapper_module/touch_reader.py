@@ -37,7 +37,8 @@ class TouchReader():
 
         # 3. Strict Validation
         if self.width != json_res[0] or self.height != json_res[1]:
-            raise RuntimeError(f"Resolution Mismatch! Physical: {self.width}x{self.height} vs Config: {json_res[0]}x{json_res[1]}")
+            _str = f"Resolution Mismatch! Physical: {self.width}x{self.height} vs Config: {json_res[0]}x{json_res[1]}"
+            raise RuntimeError(_str)
 
         self.res_dpi = [json_res[0], json_res[1], json_dpi]       
         self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
@@ -49,15 +50,15 @@ class TouchReader():
         self.rotation = 0
         self.rotation_poll_interval = 0.5 
         self.lock = threading.Lock()
-        self.side_limit = self.width // 2
         self.running = True
 
         # Identity tracking
+        self.side_limit = self.width // 2
         self.mouse_slot = None
         self.wasd_slot = None
 
         # --- SELF STARTING THREADS ---
-        print(f"[INFO] TouchReader running at {adb_rate_cap}Hz Cap. Side Limit: {self.side_limit}px")
+        print(f"[INFO] TouchReader running at {adb_rate_cap}Hz Cap.")
         self.process = None
         threading.Thread(target=self.update_rotation, daemon=True).start()
         threading.Thread(target=self.get_touches, daemon=True).start()
@@ -72,13 +73,14 @@ class TouchReader():
         eligible_mouse = []
         eligible_wasd = []
 
-        for slot, data in self.slots.items():
+        for slot, data in list(self.slots.items()):
             if data['tid'] != -1 and data['start_x'] is not None:
                 # Check which side the finger started on
                 if data['start_x'] >= self.side_limit:
                     eligible_mouse.append((slot, data['timestamp']))
                 else:
                     eligible_wasd.append((slot, data['timestamp']))
+        
 
         # Use the finger with the earliest timestamp (oldest) for each role
         self.mouse_slot = min(eligible_mouse, key=lambda x: x[1])[0] if eligible_mouse else None
@@ -116,19 +118,18 @@ class TouchReader():
                 if "ABS_MT_SLOT" in line and "max" in line:
                     return int(line.split("max")[1].strip().split(',')[0]) + 1
         except: pass
-        return 10 
+        return 10
 
-    def update_config(self, *args):
+    def update_config(self):
         try:
             json_res = self.config.get('system', {}).get('json_dev_res', [self.width, self.height])
             json_dpi = self.config.get('system', {}).get('json_dev_dpi', 160)
-            self.side_limit = json_res[0] // 2
             self.res_dpi[:] = [json_res[0], json_res[1], json_dpi]
         except Exception as e:
-            print(f"[ERROR] Config update failed: {e}")
+            print(f"[ERROR] Config update failed: {e}")            
 
     def update_rotation(self):
-        patterns = [r"mCurrentRotation=(\d+)", r"rotation=(\d+)", r"mCurrentOrientation=(\d+)"]
+        patterns = [r"mCurrentRotation=(\d+)", r"rotation=(\d+)", r"mCurrentOrientation=(\d+)", r"mUserRotation=(\d+)"]
         while self.running:
             try:
                 result = subprocess.run(["adb", "-s", self.device, "shell", "dumpsys", "display"], capture_output=True, text=True, timeout=1)
@@ -141,17 +142,35 @@ class TouchReader():
             time.sleep(self.rotation_poll_interval)
 
     def rotate_coordinates(self, x, y):
-        if self.rotation == 1: return y, self.width - x
-        elif self.rotation == 2: return self.width - x, self.height - y
-        elif self.rotation == 3: return self.height - y, x
-        return x, y
+        if x is None or y is None:
+            return x, y
+        
+        with self.lock:
+            if self.rotation == 1:
+                self.side_limit = self.height // 2
+                return y, self.width - x
+            
+            elif self.rotation == 2:
+                self.side_limit = self.width // 2
+                return self.width - x, self.height - y
+            
+            elif self.rotation == 3:
+                self.side_limit = self.height // 2
+                return self.height - y, x
+            
+            else:
+                self.side_limit = self.width // 2            
+                return x, y 
 
     def _ensure_slot(self, slot):
         if slot not in self.slots:
-            self.slots[slot] = {
-                'x': 0, 'y': 0, 'start_x': None, 'start_y': None, 
-                'tid': -1, 'state': 'IDLE', 'timestamp': 0
-            }
+            self.reset_slot(slot)
+            
+    def reset_slot(self, slot):
+        self.slots[slot] = {
+            'x': None, 'y': None, 'start_x': None, 'start_y': None, 
+            'tid': -1, 'state': 'IDLE', 'timestamp': 0
+        }
 
     def parse_hex_signed(self, value_hex):
         val = int(value_hex, 16)
@@ -176,6 +195,7 @@ class TouchReader():
                     if "ABS_MT_SLOT" == code:
                         current_slot = int(val_str, 16)
                         self._ensure_slot(current_slot)
+                        
                     elif "ABS_MT_TRACKING_ID" == code:
                         tid = self.parse_hex_signed(val_str)
                         self._ensure_slot(current_slot)
@@ -185,7 +205,7 @@ class TouchReader():
                         if tid >= 0 and prev_id == -1:
                             self.slots[current_slot].update({
                                 'state': 'DOWN', 
-                                'start_x': None,
+                                'start_x': None, 'start_y': None,
                                 'timestamp': time.monotonic_ns()
                             })
                         elif tid == -1:
@@ -193,14 +213,23 @@ class TouchReader():
                             
                     elif "ABS_MT_POSITION_X" == code:
                         val = int(val_str, 16)
-                        self.slots[current_slot]['x'] = val
+                        self.slots[current_slot]['x'] = val                        
                         if self.slots[current_slot]['start_x'] is None:
-                            self.slots[current_slot]['start_x'] = val
+                            tmp = self.rotate_coordinates(val, self.slots[current_slot]['start_y'])
+                            self.slots[current_slot]['start_x'], self.slots[current_slot]['start_y'] = tmp
+                            
                     elif "ABS_MT_POSITION_Y" == code:
-                        self.slots[current_slot]['y'] = int(val_str, 16)
+                        val = int(val_str, 16)
+                        self.slots[current_slot]['y'] = val                        
+                        if self.slots[current_slot]['start_y'] is None:
+                            tmp = self.rotate_coordinates(self.slots[current_slot]['start_x'], val)
+                            self.slots[current_slot]['start_x'], self.slots[current_slot]['start_y'] = tmp
+
                     elif "SYN_REPORT" == code:
                         self.handle_sync()
+                        
             except Exception: pass
+            
             if self.running:
                 self.stop_process()
                 time.sleep(1.0)
@@ -219,35 +248,27 @@ class TouchReader():
                 if (now - self.last_dispatch_time) < self.move_interval:
                     continue
                 self.last_dispatch_time = now
-
-            with self.lock:
-                rx, ry = self.rotate_coordinates(data['x'], data['y'])
-                # Reference start position for swipes if needed
-                sx, sy = self.rotate_coordinates(data['start_x'] or data['x'], 0)
+            
+            rx, ry = self.rotate_coordinates(data['x'], data['y'])
 
             event = MapperEvent(
                 action=data['state'],
                 touch=TouchMapperEvent(
                     slot=slot, 
-                    tracking_id=data['tid'], 
-                    x=rx, y=ry, 
-                    sx=rx, sy=ry, # Standardizing start coords for now
+                    id=data['tid'], 
+                    x=rx, y = ry,
+                    sx=data['start_x'], sy=data['start_y'],
                     is_mouse=(slot == self.mouse_slot), 
                     is_wasd=(slot == self.wasd_slot)
                 )
-            )
+            )                                   
+            
             self.mapper_event_dispatcher.dispatch(event)
 
             if data['state'] == 'DOWN': 
                 data['state'] = 'PRESSED'
             elif data['state'] == 'UP': 
                 self.reset_slot(slot)
-
-    def reset_slot(self, slot):
-        self.slots[slot] = {
-            'x': 0, 'y': 0, 'start_x': None, 'start_y': None, 
-            'tid': -1, 'state': 'IDLE', 'timestamp': 0
-        }
 
     def stop_process(self):
         if self.process:

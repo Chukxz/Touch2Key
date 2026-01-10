@@ -38,8 +38,9 @@ class JSON_Loader():
                     self.mouse_wheel = v
                     return
             
-            raise RuntimeError(f"Mouse Wheel zone ('{MOUSE_WHEEL_CODE}') not found in JSON layout.")
-        
+            _str = f"Mouse Wheel zone ('{MOUSE_WHEEL_CODE}') not found in JSON layout."
+            raise RuntimeError(_str)
+
     def get_mouse_wheel_radius(self):
         self.get_mouse_wheel()
         
@@ -66,8 +67,9 @@ class JSON_Loader():
                         self.config.config_data['joystick']['sprint_distance'] = sprint_distance
                 return sprint_distance
         
-        raise RuntimeError(f"Sprint Distance zone ('{SPRINT_DISTANCE_CODE}') not found in JSON layout.")
-            
+        _str = f"Sprint Distance zone ('{SPRINT_DISTANCE_CODE}') not found in JSON layout."
+        raise RuntimeError(_str)
+
     def load_json(self):
         system_config = self.config.get('system')
         if not system_config or 'json_path' not in system_config:
@@ -134,14 +136,16 @@ class JSON_Loader():
         normalized_zones = {}
         
         if not os.path.exists(file_path):
-            raise RuntimeError(f"Error: File {file_path} not found.")
+            _str = f"Error: File '{file_path}' not found."
+            raise RuntimeError(_str)
 
         with open(file_path, mode='r', encoding='utf-8') as f:
             try:
                 data = json.load(f)
             except json.JSONDecodeError as e:
-                raise RuntimeError(f"Invalid JSON syntax in {file_path}: {e}")
-            
+                _str = f"Invalid JSON syntax in '{file_path}': {e}"
+                raise RuntimeError(_str)
+
             for item in data:
                 scancode = item.get("scancode")
                 if scancode is None: 

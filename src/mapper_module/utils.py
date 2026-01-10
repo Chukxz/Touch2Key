@@ -163,20 +163,27 @@ SCANCODES.update({
 })
 
 class TouchMapperEvent:
-    def __init__(self, slot, tracking_id, x, y, sx, sy, is_mouse, is_wasd):
+    def __init__(self, slot, id, x, y, sx, sy, is_mouse, is_wasd):
         self.slot = slot
-        self.id = tracking_id
+        self.id = id
         self.x = x
         self.y = y
         self.sx = sx
         self.sy = sy
         self.is_mouse = is_mouse
         self.is_wasd = is_wasd
+        
+    def log(self):
+        return f"Slot: {self.slot}, ID: {self.id}, X: {self.x}, Y: {self.y}, SX: {self.sx}, SY: {self.sy}, isMouse: {self.is_mouse}, isWASD: {self.is_wasd}"
 
 class MapperEvent:
     def __init__(self, action, touch: TouchMapperEvent | None = None):
         self.touch = touch
-        self.action = action # UP, DOWN, PRESSED, CONFIG, JSON
+        self.action = action # UP, DOWN, PRESSED, CONFIG, JSON        
+    
+    def log(self):
+        _ = self.touch.log() if self.touch is not None else ""
+        return f"Action: {self.action}\n Touch: {_}"
         
 class MapperEventDispatcher:
     def __init__(self):    
@@ -186,7 +193,8 @@ class MapperEventDispatcher:
             "ON_TOUCH_UP": [],
             "ON_TOUCH_PRESSED": [],
             "ON_CONFIG_RELOAD": [],
-            "ON_JSON_RELOAD": []
+            "ON_JSON_RELOAD": [],
+            "ON_WASD_BLOCK": [],
         }
 
     def register_callback(self, event_type, func):

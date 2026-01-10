@@ -45,7 +45,8 @@ class WASDMapper():
                 self.DEADZONE = conf.get('deadzone', 0.1)
                 self.HYSTERESIS = conf.get('hysteresis', 5.0)       
         except Exception as e:
-           raise RuntimeError(f"Error loading joystick config: {e}")
+            _str = f"Error loading joystick config: {e}"
+            raise RuntimeError(_str)
 
     def updateMouseWheel(self):
         # Refreshes geometry from the JSON loader
@@ -108,8 +109,10 @@ class WASDMapper():
             self.apply_keys(target_keys)
     
     def touch_up(self, event):
-        if event.is_wasd:
-            self.release_all()
+            # Check if the slot that just went UP was the one we were tracking
+            # or if we simply have keys down and no more WASD finger exists.
+            if event.is_wasd or self.current_keys:
+                self.release_all()
 
     def get_keys_from_angle(self, angle):
         margin = self.HYSTERESIS
@@ -170,14 +173,18 @@ class WASDMapper():
         else: return {self.KEY_A}
 
     def apply_keys(self, target_keys):
-        # Efficiently press/release only changed keys
+        # Add a safety check: if WASD is blocked mid-movement, kill keys
+        if self.mapper.wasd_block > 0:
+            self.release_all()
+            return
+
         keys_to_press = target_keys - self.current_keys
         keys_to_release = self.current_keys - target_keys
         
         for k in keys_to_release:
-            self.mapper.interception_bridge.key_up(k)
+            self.interception_bridge.key_up(k)
         for k in keys_to_press:
-            self.mapper.interception_bridge.key_down(k)
+            self.interception_bridge.key_down(k)
             
         self.current_keys = target_keys
 

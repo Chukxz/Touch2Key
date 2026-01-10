@@ -73,14 +73,16 @@ class Plotter:
         try:
             img = Image.open(image_path)
         except FileNotFoundError:
-            raise RuntimeError(f"Image not found at {image_path}")
+            _str = f"Image not found at {image_path}"
+            raise RuntimeError(_str)
         except Exception as e:
-            raise RuntimeError(f"Error loading image: {e}")
+            _str = f"Error loading image: {e}"
+            raise RuntimeError(_str)
 
         self.fig, self.ax = plt.subplots()
         self.ax.imshow(img)
         
-        self.update_title("IDLE. F6(Circle) | F7(Rect) | F8(Remove) | F9(List) | F10(Save) | F11(Sprint Threshold) | F12(Mouse Wheel) | Esc(Exit).")
+        self.update_title("IDLE. F6(Circle) | F7(Rect) | F8(Remove) | F9(List) | F10(Save) | F11(Sprint Threshold) | F12(Mouse Wheel) | Delete(Delete) | Esc(Exit).")
 
         # Event Listeners
         self.fig.canvas.mpl_connect("key_press_event", self.on_key_press)
@@ -106,7 +108,7 @@ class Plotter:
         self.mode = None
         self.points = []
         self.input_buffer = ""
-        self.update_title("IDLE. F6(Circle) | F7(Rect) | F8(Remove) | F9(List) | F10(Save) | F11(Sprint Threshold) | F12(Mouse Wheel) | Esc(Exit).")
+        self.update_title("IDLE. F6(Circle) | F7(Rect) | F8(Remove) | F9(List) | F10(Save) | F11(Sprint Threshold) | F12(Mouse Wheel) | Delete(Delete) | Esc(Exit).")
 
     def start_mode(self, mode, num_points):
         self.reset_state() 
@@ -271,8 +273,9 @@ class Plotter:
             cx, cy, r, bb = self.calculate_rect()
 
         if cx is not None:
-            self.save_entry(interception_key, hex_code, cx, cy, r, bb)
-            print(f"[+] Saved ID {self.count-1}: {self.mode} bound to key '{key_name}' with interception key: '{interception_key}'")
+            saved = self.save_entry(interception_key, hex_code, cx, cy, r, bb)
+            if saved:
+                print(f"[+] Saved ID {self.count-1}: {self.mode} bound to key '{key_name}' with interception key: '{interception_key}'")
         
         self.reset_state()
 
@@ -373,7 +376,8 @@ class Plotter:
 
         except (KeyError, Exception) as e:
             create_default_toml()
-            raise RuntimeError(f"Config corrupted. Resetting to defaults. Error: {e}")
+            _str = f"Config corrupted. Resetting to defaults. Error: {e}"
+            raise RuntimeError(_str)
                 
         self.update_title(msg)
             
@@ -391,6 +395,7 @@ class Plotter:
     def save_entry(self, interception_key, hex_code, cx, cy, r, bb):
         id = self.count
         inc_count = True
+        saved = False
         
         if interception_key == MOUSE_WHEEL_CODE:
             if self.mode == CIRCLE:
@@ -408,14 +413,14 @@ class Plotter:
                 
             elif self.mode == RECT:
                 print(f"[!] Error: Mouse Wheel can only be assigned to '{CIRCLE}' not '{RECT} shapes.")
-                return
+                return saved
         
         elif interception_key == SPRINT_DISTANCE_CODE:
             if self.mode == CIRCLE:
                 if self.saved_sprint_distance:
                     if not self.saved_mouse_wheel:
                         print(f"[!] Mouse Wheel not assigned yet. Please assign it first.")
-                        return
+                        return saved
                     
                     print(f"[!] Sprint Threshold already assigned. Overwriting previous assignment.")
                     for k, v in self.shapes.items():
@@ -429,7 +434,7 @@ class Plotter:
                 
             elif self.mode == RECT:
                 print(f"[!] Error: Sprint Button can only be assigned to '{CIRCLE}' not '{RECT} shapes.")
-                return
+                return saved
         
         entry = {
             "key_name": interception_key,
@@ -440,6 +445,9 @@ class Plotter:
         self.shapes[id] = entry
         if inc_count:
             self.count += 1
+        
+        saved = True
+        return saved
 
     def print_data(self):
         print("\n" + "="*45)

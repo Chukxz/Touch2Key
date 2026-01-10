@@ -1,10 +1,10 @@
 import keyboard
 import os
 import sys
+import psutil  # Required for priority
 from mapper_module.utils import DEFAULT_ADB_RATE_CAP, DEFAULT_KEY_DEBOUNCE
 from mapper_module import (
     MapperEventDispatcher, 
-    TOML_PATH, 
     AppConfig, 
     JSON_Loader, 
     TouchReader, 
@@ -15,67 +15,80 @@ from mapper_module import (
     WASDMapper
 )
 
+def set_high_priority(pid=None):
+    """Sets a process to High Priority and pins it to specific CPU cores."""
+    try:
+        p = psutil.Process(pid or os.getpid())
+        
+        # 1. Set Windows Process Priority to HIGH
+        p.nice(psutil.HIGH_PRIORITY_CLASS)
+        
+        # 2. CPU Affinity (Optional but recommended)
+        # Pinning the Bridge to the last core and the Main loop to others 
+        # prevents 'Context Switching' lag.
+        cores = list(range(psutil.cpu_count()))
+        if len(cores) > 1:
+            if pid: # If this is the Bridge Process
+                p.cpu_affinity([cores[-1]]) # Use last core
+            else: # If this is the Main Process
+                p.cpu_affinity(cores[:-1]) # Use all cores except the last
+                
+        state = "Main" if pid is None else "Bridge"
+        print(f"[Priority] {state} Process (PID: {p.pid}) set to HIGH.")
+    except Exception as e:
+        print(f"[Priority] Warning: Could not set priority for {pid or 'Main'}: {e}")
+
 def main():
+    # --- 1. Elevate Main Process ---
+    set_high_priority()
+
     print("[System] Initializing Mapper... Press 'ESC' at any time to Stop.")
 
-    # --- Argument Parsing ---
-    # Usage: python main.py [rate_cap] [debounce_time]
-    # Example: python main.py 500 0.005
     try:
-        # Default to utils.py values if args are missing
         rate_cap = float(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_ADB_RATE_CAP
         debounce = float(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_KEY_DEBOUNCE
     except ValueError:
-        print("[!] Invalid command line arguments. Falling back to defaults.")
         rate_cap, debounce = DEFAULT_ADB_RATE_CAP, DEFAULT_KEY_DEBOUNCE
 
-    print(f"[Config] ADB Rate Cap: {rate_cap}Hz | Key Debounce: {debounce*1000}ms")
-
-    # 1. Initialize Core Systems
+    # 2. Initialize Core Systems
     mapper_event_dispatcher = MapperEventDispatcher()
     config = AppConfig(mapper_event_dispatcher)
 
-    # 2. Initialize Bridge & Loader
+    # 3. Initialize Bridge (This spawns the worker process)
     interception_bridge = InterceptionBridge()
-    json_loader = JSON_Loader(config)
+    
+    # --- 4. Elevate Bridge Process ---
+    # We target the .process.pid we created inside InterceptionBridge
+    if hasattr(interception_bridge, 'process'):
+        set_high_priority(interception_bridge.process.pid)
 
-    # 3. Initialize Touch Reader
-    # Passing the custom rate_cap from sys.argv
+    json_loader = JSON_Loader(config)
     touch_reader = TouchReader(config, mapper_event_dispatcher, adb_rate_cap=rate_cap)
 
-    # 4. Initialize Mappers
-    # The 'mapper' object tracks the game window
     mapper_logic = Mapper(json_loader, touch_reader.res_dpi, interception_bridge)
 
-    # Initialize sub-mappers
     MouseMapper(mapper_logic)
-    # Passing the custom debounce from sys.argv
     KeyMapper(mapper_logic, debounce_time=debounce)
     WASDMapper(mapper_logic)
 
-    # 5. Shutdown Logic
     def shutdown():
         print("\n[System] ESC detected. Cleaning up...")
-
-        # Stop the window tracking thread in Mapper
         mapper_logic.running = False
-
-        # Stop the ADB stream in TouchReader
         touch_reader.stop()
-
-        # Release all currently held keys to prevent "sticky keys" on exit
-        interception_bridge.release_all()
+        
+        # Important: Release keys before the bridge process is killed
+        try:
+            interception_bridge.release_all()
+        except: pass
 
         print("[System] Shutdown complete. Goodbye.")
-        os._exit(0) # Force exit all threads
+        os._exit(0)
 
-    # Register the escape key
     keyboard.add_hotkey('esc', shutdown)
-
-    # 6. Keep Main Thread Alive
     keyboard.wait('esc')
 
 if __name__ == "__main__":
+    # Multiprocessing on Windows requires this check to avoid spawn loops
     try:
         main()
     except KeyboardInterrupt:
