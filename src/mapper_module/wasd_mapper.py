@@ -1,6 +1,7 @@
 import math
+import threading
 from .utils import (
-    SCANCODES, DOWN, UP, PRESSED
+    SCANCODES, DOWN, PRESSED
 )
 
 class WASDMapper():
@@ -52,7 +53,7 @@ class WASDMapper():
             with self.config.config_lock:
                 conf = self.config.config_data.get('joystick', {})
                 self.DEADZONE = conf.get('deadzone', 0.1)
-                self.HYSTERESIS = conf.get('hysteresis', 5.0)       
+                self.HYSTERESIS = conf.get('hysteresis', 5.0)
         except Exception as e:
             _str = f"Error loading joystick config: {e}"
             raise RuntimeError(_str)
@@ -67,13 +68,13 @@ class WASDMapper():
             self.release_all()
         
     def touch_down(self, touch_event):
-        if touch_event.is_wasd and self.mapper.wasd_block == 0:
+        if self.mapper.wasd_block == 0:
             self.center_x = touch_event.x
             self.center_y = touch_event.y
             self.release_all()
 
     def touch_pressed(self, touch_event):
-        if not touch_event.is_wasd or self.mapper.wasd_block > 0:
+        if self.mapper.wasd_block > 0:
             self.release_all()
             return
 
@@ -107,10 +108,10 @@ class WASDMapper():
         sector = int((angle_rad + (math.pi / 8)) / (math.pi / 4)) % 8
         self.apply_keys(self.DIRECTION_LOOKUP[sector])
 
-    def touch_up(self, event):
-        # Only release if the finger that lifted is the designated WASD finger
+    def touch_up(self):
+        # Only release if the finger that lifted is the designated WASD finger (handled in main.py)
         # OR if we have keys down and want to be safe (Emergency release)
-        if event.is_wasd or self.current_keys:
+        if self.current_keys:
             self.release_all()
 
     def apply_keys(self, target_keys):
@@ -132,9 +133,6 @@ class WASDMapper():
             
         elif action == DOWN:
             self.touch_down(touch_event)
-        
-        elif action == UP:
-            self.touch_up(touch_event) 
 
     def release_all(self):
         if not self.current_keys: return

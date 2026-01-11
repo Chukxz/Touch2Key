@@ -49,9 +49,12 @@ class MouseMapper():
         The 'Hot Path'. This code runs hundreds of times per second.
         Optimized to minimize branching and float operations.
         """
-        if self.prev_x is None:
+        if self.prev_x is None or self.prev_y is None:
             self.prev_x = touch_event.x
             self.prev_y = touch_event.y
+            self.acc_x = 0.0
+            self.acc_y = 0.0
+            return
 
         # 1. Calculate Raw Delta
         raw_dx = touch_event.x - self.prev_x

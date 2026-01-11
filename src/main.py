@@ -2,7 +2,7 @@ import keyboard
 import os
 import sys
 import psutil
-from mapper_module.utils import DEFAULT_ADB_RATE_CAP, DEFAULT_KEY_DEBOUNCE, DEFAULT_LATENCY_THRESHOLD
+from mapper_module.utils import DEFAULT_ADB_RATE_CAP, DEFAULT_KEY_DEBOUNCE, DEFAULT_LATENCY_THRESHOLD, UP
 from mapper_module import (
     MapperEventDispatcher, 
     AppConfig, 
@@ -39,8 +39,12 @@ def process_touch_event(action, event):
     if event.is_key and key_mapper is not None:
         key_mapper.process_touch(action, event)
 
-    if event.is_wasd and wasd_mapper is not None:
-        wasd_mapper.process_touch(action, event)
+    if wasd_mapper is not None:
+        if action == UP:
+            wasd_mapper.touch_up()
+                   
+        if event.is_wasd:
+            wasd_mapper.process_touch(action, event) 
         
             
 def main():
@@ -77,7 +81,7 @@ def main():
     mapper_logic = Mapper(json_loader, touch_reader.res_dpi, interception_bridge)
 
     mouse_mapper = MouseMapper(mapper_logic)
-    key_mapper = KeyMapper(mapper_logic, debounce_time=debounce)
+    key_mapper = KeyMapper(mapper_logic, debounce)
     wasd_mapper = WASDMapper(mapper_logic)
     
     touch_reader.bind_touch_event(process_touch_event)
