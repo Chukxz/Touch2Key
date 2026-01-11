@@ -2,6 +2,7 @@ import keyboard
 import os
 import sys
 import psutil
+import win32gui
 from mapper_module.utils import DEFAULT_ADB_RATE_CAP, DEFAULT_KEY_DEBOUNCE, DEFAULT_LATENCY_THRESHOLD, UP
 from mapper_module import (
     MapperEventDispatcher, 
@@ -15,9 +16,12 @@ from mapper_module import (
     WASDMapper
 )
 
+FOREGROUND_WINDOW = win32gui.GetForegroundWindow()
+
 mouse_mapper = None
 key_mapper = None
 wasd_mapper = None
+is_visible = True
 
 def set_high_priority(pid, label, priority_level=psutil.HIGH_PRIORITY_CLASS):
     try:
@@ -31,7 +35,7 @@ def set_high_priority(pid, label, priority_level=psutil.HIGH_PRIORITY_CLASS):
 
 
 def process_touch_event(action, event):
-    global mouse_mapper, key_mapper, wasd_mapper
+    global mouse_mapper, key_mapper, wasd_mapper, is_visible
     
     if event.is_mouse and mouse_mapper is not None:
         mouse_mapper.process_touch(action, event)
@@ -75,7 +79,7 @@ def main():
     if hasattr(interception_bridge, 'k_proc'):
         set_high_priority(interception_bridge.k_proc.pid, "Keyboard")
 
-    json_loader = JSON_Loader(config)
+    json_loader = JSON_Loader(config, FOREGROUND_WINDOW)
     touch_reader = TouchReader(config, mapper_event_dispatcher, rate_cap, latency)
 
     mapper_logic = Mapper(json_loader, touch_reader.res_dpi, interception_bridge)
@@ -84,9 +88,14 @@ def main():
     key_mapper = KeyMapper(mapper_logic, debounce)
     wasd_mapper = WASDMapper(mapper_logic)
     
+    mapper_event_dispatcher.register_callback("ON_MENU_MODE_TOGGLE", ...)
+    
     touch_reader.bind_touch_event(process_touch_event)
 
     def shutdown():
+        if not win32gui.GetForegroundWindow() == FOREGROUND_WINDOW:
+            return
+                
         print("\n[System] 'ESC' detected. Cleaning up...")
         mapper_logic.running = False
         touch_reader.stop()
@@ -100,7 +109,7 @@ def main():
         os._exit(0)
 
     keyboard.add_hotkey('esc', shutdown)
-    keyboard.wait('esc')
+    keyboard.wait()
 
 if __name__ == "__main__":
     try:
