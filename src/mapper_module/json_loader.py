@@ -2,6 +2,7 @@ import json
 import os
 import time
 import keyboard
+import win32gui
 from .utils import (
     MapperEvent, CIRCLE, RECT, RELOAD_DELAY,
     MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE
@@ -10,9 +11,10 @@ from .utils import (
 from .default_toml_helper import create_default_toml
 
 class JSON_Loader():
-    def __init__(self, config):
+    def __init__(self, config, foreground_window):
         self.config = config
         self.mapper_event_dispatcher = config.mapper_event_dispatcher
+        self.foreground_window = foreground_window
         
         # State tracking
         self.last_loaded_json_path = None
@@ -24,7 +26,7 @@ class JSON_Loader():
         
         # --- SELF REGISTER HOTKEY ---
         print("[INFO] Press F5 to hot reload json data.")
-        keyboard.add_hotkey('f5', self.reload, suppress=True)
+        keyboard.add_hotkey('f5', self.reload)
 
     def get_mouse_wheel(self, force=False):
         joystick_config = self.config.get('joystick')
@@ -101,6 +103,9 @@ class JSON_Loader():
         return need_reload, current_file_time
 
     def reload(self):
+        if not win32gui.GetForegroundWindow() == self.foreground_window:
+            return
+        
         system_config = self.config.get('system')
         if not system_config:
             create_default_toml()

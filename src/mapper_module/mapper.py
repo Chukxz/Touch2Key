@@ -2,7 +2,11 @@ import time
 import ctypes
 from ctypes import wintypes
 import threading
-from .utils import DEF_DPI, WINDOW_FIND_RETRIES, WINDOW_FIND_DELAY
+import win32gui
+from .utils import (
+    DEF_DPI, WINDOW_FIND_RETRIES, WINDOW_FIND_DELAY,
+    MapperEvent
+    )
 
 MAX_CLASS_NAME = 256
 
@@ -39,7 +43,8 @@ class Mapper():
         # We create a local 'cache' of window info to avoid locking during math
         self.cached_window_info = {'left': 0, 'top': 0, 'width': 1, 'height': 1}
         self.window_lost = False        
-        self.window_title_target = window_title 
+        self.window_title_target = window_title
+        self.last_cursor_state = True # Cursor showing (Default)
         
         # Constants applied implicitly via default arguments here
         self.game_window_class_name = self.get_game_window_class_name(window_title)
@@ -123,6 +128,20 @@ class Mapper():
         pt.x = 0
         pt.y = 0
         ctypes.windll.user32.ClientToScreen(hwnd, ctypes.byref(pt))
+        
+
+        # Check Cursor Visibility
+        try:
+            flags, hcursor, pos = win32gui.GetCursorInfo()
+            # 0x00000001 is CURSOR_SHOWING
+            is_visible = (flags & 1) 
+            
+            if is_visible != self.last_cursor_state:
+                self.last_cursor_state = is_visible
+                # Signal the rest of the app to switch modes
+                self.mapper_event_dispatcher.dispatch(MapperEvent(action="MENU_MODE_TOGGLE", is_visible=is_visible))
+        except Exception as e:
+            raise RuntimeError(f"Could not check cursor visibility: {e}")
                 
         return {
             'hwnd': hwnd,

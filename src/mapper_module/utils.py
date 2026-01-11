@@ -188,11 +188,11 @@ class TouchEvent:
         return f"Slot: {self.slot}, ID: {self.id}, X: {self.x}, Y: {self.y}, SX: {self.sx}, SY: {self.sy}, isMouse: {self.is_mouse}, isWASD: {self.is_wasd}"
 
 class MapperEvent:
-    def __init__(self, action, pac_t = None, pac_n = None):
+    def __init__(self, action, pac_t = None, pac_n = None, is_visible=True):
         self.action = action # UP, DOWN, PRESSED, CONFIG, JSON, NETWORK
         self.pac_t = pac_t
         self.pac_n = pac_n
-        
+        self.is_visible = is_visible        
     
     def show(self):
         _ = self.touch.log() if self.touch is not None else ""
@@ -202,10 +202,11 @@ class MapperEventDispatcher:
     def __init__(self):    
         # The Registry
         self.callback_registry = {
-            "ON_CONFIG_RELOAD": [],
-            "ON_JSON_RELOAD":   [],
-            "ON_WASD_BLOCK":    [],
-            "ON_NETWORK_LAG":   [],
+            "ON_CONFIG_RELOAD":     [],
+            "ON_JSON_RELOAD":       [],
+            "ON_WASD_BLOCK":        [],
+            "ON_NETWORK_LAG":       [],
+            "ON_MENU_MODE_TOGGLE":  [],
         }
 
     def register_callback(self, event_type, func):
@@ -224,10 +225,11 @@ class MapperEventDispatcher:
     def dispatch(self, event_object: MapperEvent):
         # Map simple action names to full registry keys
         action_map = {
-            "CONFIG":   "ON_CONFIG_RELOAD",
-            "JSON":     "ON_JSON_RELOAD",
-            "WASD":     "ON_WASD_BLOCK",
-            "NETWORK":  "ON_NETWORK_LAG",
+            "CONFIG":           "ON_CONFIG_RELOAD",
+            "JSON":             "ON_JSON_RELOAD",
+            "WASD":             "ON_WASD_BLOCK",
+            "NETWORK":          "ON_NETWORK_LAG",
+            "MENU_MODE_TOGGLE": "ON_MENU_MODE_TOGGLE",
         }
         
         registry_key = action_map.get(event_object.action)
@@ -238,6 +240,8 @@ class MapperEventDispatcher:
                     func()
                 elif event_object.action in ["NETWORK"]:
                     func(event_object.pac_n, event_object.pac_t)
+                elif event_object.action in ["MENU_MODE_TOGGLE"]:
+                    func(event_object.is_visible)
 
 
 def get_adb_device():
