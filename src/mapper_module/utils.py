@@ -20,6 +20,12 @@ JSONS_FOLDER = os.path.join(SRC_DIR, "resources", "jsons")
 # --- Constants ---   
 
 DEF_DPI = 160
+
+DOWN = "DOWN"
+UP = "UP"
+PRESSED = "PRESSED"
+IDLE = "IDLE"
+
 CIRCLE = "CIRCLE"
 RECT = "RECT"
 RELOAD_DELAY = 0.01
@@ -37,6 +43,9 @@ DEFAULT_ADB_RATE_CAP = 250.0
 
 # Ignores key flickers faster than 10ms
 DEFAULT_KEY_DEBOUNCE = 0.01
+
+# Default ADB latency threshold
+DEFAULT_LATENCY_THRESHOLD = 0.05
 
 
 SCANCODES = {
@@ -162,7 +171,8 @@ SCANCODES.update({
     "MOUSE_MIDDLE": M_MIDDLE,
 })
 
-class TouchMapperEvent:
+
+class TouchEvent:
     def __init__(self, slot, id, x, y, sx, sy, is_mouse, is_wasd):
         self.slot = slot
         self.id = id
@@ -172,29 +182,30 @@ class TouchMapperEvent:
         self.sy = sy
         self.is_mouse = is_mouse
         self.is_wasd = is_wasd
+        self.is_key = not self.is_mouse
         
-    def log(self):
+    def show(self):
         return f"Slot: {self.slot}, ID: {self.id}, X: {self.x}, Y: {self.y}, SX: {self.sx}, SY: {self.sy}, isMouse: {self.is_mouse}, isWASD: {self.is_wasd}"
 
 class MapperEvent:
-    def __init__(self, action, touch: TouchMapperEvent | None = None):
-        self.touch = touch
-        self.action = action # UP, DOWN, PRESSED, CONFIG, JSON        
+    def __init__(self, action, pac_t = None, pac_n = None):
+        self.action = action # UP, DOWN, PRESSED, CONFIG, JSON, NETWORK
+        self.pac_t = pac_t
+        self.pac_n = pac_n
+        
     
-    def log(self):
+    def show(self):
         _ = self.touch.log() if self.touch is not None else ""
-        return f"Action: {self.action}\n Touch: {_}"
+        return f"Action: {self.action}\n Touch: {_}\n Packets (N: {self.pac_n}, Avg Time(1s dur): {self.pac_t})"
         
 class MapperEventDispatcher:
     def __init__(self):    
         # The Registry
         self.callback_registry = {
-            "ON_TOUCH_DOWN": [],
-            "ON_TOUCH_UP": [],
-            "ON_TOUCH_PRESSED": [],
             "ON_CONFIG_RELOAD": [],
-            "ON_JSON_RELOAD": [],
-            "ON_WASD_BLOCK": [],
+            "ON_JSON_RELOAD":   [],
+            "ON_WASD_BLOCK":    [],
+            "ON_NETWORK_LAG":   [],
         }
 
     def register_callback(self, event_type, func):
@@ -213,22 +224,20 @@ class MapperEventDispatcher:
     def dispatch(self, event_object: MapperEvent):
         # Map simple action names to full registry keys
         action_map = {
-            "DOWN": "ON_TOUCH_DOWN",
-            "UP": "ON_TOUCH_UP",
-            "PRESSED": "ON_TOUCH_PRESSED",
-            "CONFIG": "ON_CONFIG_RELOAD",
-            "JSON": "ON_JSON_RELOAD",
-            "WASD": "ON_WASD_BLOCK",
+            "CONFIG":   "ON_CONFIG_RELOAD",
+            "JSON":     "ON_JSON_RELOAD",
+            "WASD":     "ON_WASD_BLOCK",
+            "NETWORK":  "ON_NETWORK_LAG",
         }
         
         registry_key = action_map.get(event_object.action)
         
         if registry_key:
             for func in self.callback_registry[registry_key]:
-                if event_object.action in ["CONFIG", "WASD", "JSON"]:
+                if event_object.action in ["CONFIG", "JSON", "WASD"]:
                     func()
-                else:
-                    func(event_object.touch)
+                elif event_object.action in ["NETWORK"]:
+                    func(event_object.pac_n, event_object.pac_t)
 
 
 def get_adb_device():

@@ -3,12 +3,12 @@ import threading
 import subprocess
 import re
 from .utils import (
-    TouchMapperEvent, MapperEvent, get_adb_device, 
-    get_screen_size, get_dpi, DEFAULT_ADB_RATE_CAP
+    TouchEvent, MapperEvent, get_adb_device, 
+    get_screen_size, get_dpi, DOWN, UP, PRESSED
     )
 
 class TouchReader():
-    def __init__(self, config, dispatcher, adb_rate_cap=DEFAULT_ADB_RATE_CAP):
+    def __init__(self, config, dispatcher, rate_cap, latency):
         self.device = get_adb_device()
         self.device_touch_event = self.find_touch_device_event()
 
@@ -18,10 +18,6 @@ class TouchReader():
         print(f"[INFO] Using touchscreen device: {self.device_touch_event}")
         self.config = config
         self.mapper_event_dispatcher = dispatcher
-
-        # --- PERFORMANCE TUNING ---
-        self.move_interval = 1.0 / adb_rate_cap if adb_rate_cap > 0 else 0
-        self.last_dispatch_time = 0
 
         # 1. Physical Device Specs
         res = get_screen_size(self.device)
@@ -42,6 +38,7 @@ class TouchReader():
 
         self.res_dpi = [json_res[0], json_res[1], json_dpi]       
         self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
+        # self.mapper_event_dispatcher.register_callback("ON_NETWORK_LAG", self.log_lag)
 
         # State Tracking
         self.slots = {}
@@ -56,16 +53,33 @@ class TouchReader():
         self.side_limit = self.width // 2
         self.mouse_slot = None
         self.wasd_slot = None
+        
+        _init_time = time.perf_counter()
+
+        # --- PERFORMANCE TUNING ---
+        self.adb_rate_cap = rate_cap
+        self.move_interval = 1.0 / self.adb_rate_cap if self.adb_rate_cap > 0 else 0
+        self.last_dispatch_times = []
+        for _ in range(self.max_slots):
+            self.last_dispatch_times.append(_init_time)
+        
+        # --- LATENCY MONITORING ---
+        self.packet_time_acc = 0.0
+        self.packet_time_n = 0
+        self.last_packet_time = _init_time
+        self.latency_threshold = latency
+        
+        self.touch_event_processor = None
 
         # --- SELF STARTING THREADS ---
-        print(f"[INFO] TouchReader running at {adb_rate_cap}Hz Cap.")
+        print(f"[INFO] Reading pressed touches at {self.adb_rate_cap}Hz Cap.")
         self.process = None
         threading.Thread(target=self.update_rotation, daemon=True).start()
         threading.Thread(target=self.get_touches, daemon=True).start()
 
     # --- FINGER IDENTITY LOGIC ---
 
-    def _update_finger_identities(self):
+    def update_finger_identities(self):
         """
         Implements 'Upside' logic: Identify the oldest finger on each side
         to assign as the dedicated Mouse or WASD finger.
@@ -178,6 +192,7 @@ class TouchReader():
 
     def get_touches(self):
         current_slot = 0
+        
         while self.running:
             self.process = subprocess.Popen(
                 ["adb", "-s", self.device, "shell", "getevent", "-l", self.device_touch_event],
@@ -185,13 +200,16 @@ class TouchReader():
             )
 
             try:
-                for line in self.process.stdout:
+                for line in self.process.stdout:                    
                     if not self.running: break
+                    
+                    # self.get_latency()
+                    
                     parts = line.strip().split()
                     if len(parts) < 3: continue
 
                     code, val_str = parts[1], parts[2]
-
+                    
                     if "ABS_MT_SLOT" == code:
                         current_slot = int(val_str, 16)
                         self._ensure_slot(current_slot)
@@ -204,12 +222,12 @@ class TouchReader():
                         
                         if tid >= 0 and prev_id == -1:
                             self.slots[current_slot].update({
-                                'state': 'DOWN', 
+                                'state': DOWN, 
                                 'start_x': None, 'start_y': None,
                                 'timestamp': time.monotonic_ns()
                             })
                         elif tid == -1:
-                            self.slots[current_slot]['state'] = 'UP'
+                            self.slots[current_slot]['state'] = UP
                             
                     elif "ABS_MT_POSITION_X" == code:
                         val = int(val_str, 16)
@@ -237,37 +255,42 @@ class TouchReader():
     def handle_sync(self):
         now = time.perf_counter()
         
-        # Determine who is the Mouse and who is the WASD before dispatching
-        self._update_finger_identities()
-        
+        # --- OPTIMIZATION: Only update identities if a slot state changed from DOWN or UP
+        needs_identity_update = any(s['state'] in [DOWN, UP] for s in self.slots.values())
+        if needs_identity_update:
+            self.update_finger_identities()
+                
         for slot, data in list(self.slots.items()):
             if data['state'] == 'IDLE': continue
 
             # Rate Limit for movement (PRESSED state) only
-            if data['state'] == 'PRESSED':
-                if (now - self.last_dispatch_time) < self.move_interval:
+            if data['state'] == PRESSED:
+                if (now - self.last_dispatch_times[slot]) < self.move_interval:
                     continue
-                self.last_dispatch_time = now
+                self.last_dispatch_times[slot] = now
             
             rx, ry = self.rotate_coordinates(data['x'], data['y'])
 
-            event = MapperEvent(
-                action=data['state'],
-                touch=TouchMapperEvent(
-                    slot=slot, 
-                    id=data['tid'], 
-                    x=rx, y = ry,
-                    sx=data['start_x'], sy=data['start_y'],
-                    is_mouse=(slot == self.mouse_slot), 
-                    is_wasd=(slot == self.wasd_slot)
-                )
-            )                                   
-            
-            self.mapper_event_dispatcher.dispatch(event)
+            if self.touch_event_processor:
+                try:
+                    action = data['state']
+                    
+                    touch_event = TouchEvent(
+                        slot=slot, 
+                        id=data['tid'], 
+                        x=rx, y=ry,
+                        sx=data['start_x'], sy=data['start_y'],
+                        is_mouse=(slot == self.mouse_slot), 
+                        is_wasd=(slot == self.wasd_slot),
+                    )
+                    
+                    self.touch_event_processor(action, touch_event)
+                except:
+                    print(f"[INFO] Event with action: {action} could not be processed")
 
-            if data['state'] == 'DOWN': 
-                data['state'] = 'PRESSED'
-            elif data['state'] == 'UP': 
+            if data['state'] == DOWN: 
+                data['state'] = PRESSED
+            elif data['state'] == UP: 
                 self.reset_slot(slot)
 
     def stop_process(self):
@@ -284,3 +307,26 @@ class TouchReader():
     def stop(self):
         self.running = False
         self.stop_process()
+
+
+    def get_latency(self):
+        current_time = time.perf_counter()
+        time_since_last = current_time - self.last_packet_time                                                            
+        self.packet_time_n += 1
+        self.packet_time_acc += time_since_last
+        self.last_packet_time = current_time
+        
+        if self.packet_time_acc >= 1.0:
+            avg_t = self.packet_time_acc / self.packet_time_n
+            if avg_t > self.latency_threshold:
+                self.mapper_event_dispatcher.dispatch(MapperEvent(action="NETWORK", pac_n=self.packet_time_n, pac_t=avg_t))
+                
+            self.packet_time_acc = 0.0
+            self.packet_time_n = 0
+
+    def log_lag(self, pac_n, pac_t):
+        print(f"[Network] Jitter detected, {pac_n} packets captured in approx. 1s with an average latency of {pac_t * 1000:.2f}ms")
+    
+    
+    def bind_touch_event(self, touch_event_processor):
+        self.touch_event_processor = touch_event_processor

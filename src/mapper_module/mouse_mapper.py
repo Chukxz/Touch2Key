@@ -1,4 +1,6 @@
-from .utils import DEF_DPI 
+from .utils import (
+    DEF_DPI, DOWN, UP, PRESSED
+)
 
 class MouseMapper():
     def __init__(self, mapper):
@@ -12,74 +14,90 @@ class MouseMapper():
         self.mapper_event_dispatcher = self.mapper.mapper_event_dispatcher
         self.interception_bridge = mapper.interception_bridge
 
+        self.TOTAL_MULT = 1.0
         self.update_config()
 
+        # Register Callbacks
         self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
-        self.mapper_event_dispatcher.register_callback("ON_TOUCH_DOWN", self.touch_down)  
-        self.mapper_event_dispatcher.register_callback("ON_TOUCH_PRESSED", self.touch_pressed)
-        self.mapper_event_dispatcher.register_callback("ON_TOUCH_UP", self.touch_up)
+
 
     def update_config(self):
+        """Pre-calculates sensitivity to keep the touch_pressed loop lean."""
+        print(f"[Info] MouseMapper syncing sensitivity...")
         try:
             with self.config.config_lock:
                 mouse_cfg = self.config.config_data.get('mouse', {})
                 base_sens = mouse_cfg.get('sensitivity', 1.0)
-                dpi_scale = DEF_DPI / self.mapper.dpi if self.mapper.dpi > 0 else 1.0
+                # Ensure we don't divide by zero
+                device_dpi = self.mapper.dpi if self.mapper.dpi > 0 else DEF_DPI
+                dpi_scale = DEF_DPI / device_dpi
                 self.TOTAL_MULT = base_sens * dpi_scale
         except Exception as e:
-            _str = f"Error loading mouse config: {e}"
-            raise RuntimeError(_str)
+            print(f"[Error] Mouse config update failed: {e}")
 
-    def touch_down(self, event):
-        if not event.is_mouse:
-            return
-        # Anchor new finger and clear math remainders
-        self.prev_x = event.x
-        self.prev_y = event.y
+    def touch_down(self, touch_event):
+        """
+        Anchor the start position and reset precision accumulators
+        """
+        self.prev_x = touch_event.x
+        self.prev_y = touch_event.y
         self.acc_x = 0.0
         self.acc_y = 0.0
 
-    def touch_pressed(self, event):
-        if not event.is_mouse:
-            return
-
+    def touch_pressed(self, touch_event):
+        """
+        The 'Hot Path'. This code runs hundreds of times per second.
+        Optimized to minimize branching and float operations.
+        """
         if self.prev_x is None:
-            self.prev_x = event.x
-            self.prev_y = event.y
-            return
+            self.prev_x = touch_event.x
+            self.prev_y = touch_event.y
 
-        raw_dx = event.x - self.prev_x
-        raw_dy = event.y - self.prev_y
+        # 1. Calculate Raw Delta
+        raw_dx = touch_event.x - self.prev_x
+        raw_dy = touch_event.y - self.prev_y
 
-        # Update tracking immediately to prevent delta growth
-        self.prev_x = event.x
-        self.prev_y = event.y
+        # 2. Update anchors immediately
+        self.prev_x = touch_event.x
+        self.prev_y = touch_event.y
 
-        # Sub-pixel precision math
+        # 3. Apply Multiplier and add previous remainders (Sub-pixel precision)
+        # Using float math here is necessary for 1:1 feel
         calc_dx = (raw_dx * self.TOTAL_MULT) + self.acc_x
         calc_dy = (raw_dy * self.TOTAL_MULT) + self.acc_y
 
+        # 4. Truncate to Integer (Actual pixels to move)
         final_dx = int(calc_dx)
         final_dy = int(calc_dy)
 
-        # IMPORTANT: Only send if the movement is at least 1 pixel
-        # This filters out "digitizer noise" that clogs the bridge
+        # 5. Fast-Exit for Noise
+        # If the delta is less than 1 physical pixel, just keep the remainder and exit.
+        # This prtouch_events the Interception Bridge from being flooded with 0-pixel movements.
         if final_dx == 0 and final_dy == 0:
             self.acc_x = calc_dx
             self.acc_y = calc_dy
             return
 
-        # Store remainders for the next movement
+        # 6. Save remainders for next packet
         self.acc_x = calc_dx - final_dx
         self.acc_y = calc_dy - final_dy
 
-        # Send to bridge
+        # 7. Physical movement execution
         self.interception_bridge.mouse_move_rel(final_dx, final_dy)
         
-    def touch_up(self, event):
-        # When any mouse finger is lifted, clear the state
-        if event.is_mouse:
-            self.prev_x = None
-            self.prev_y = None
-            self.acc_x = 0.0
-            self.acc_y = 0.0
+    def touch_up(self):
+        """Clears state when the aiming finger lifts."""
+        self.prev_x = None
+        self.prev_y = None
+        self.acc_x = 0.0
+        self.acc_y = 0.0
+
+    def process_touch(self, action, touch_event):
+        if action == PRESSED:
+            self.touch_pressed(touch_event)
+            
+        elif action == DOWN:
+            self.touch_down(touch_event)
+        
+        elif action == UP:
+            self.touch_up() 

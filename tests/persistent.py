@@ -1,7 +1,6 @@
 import tkinter as tk
 from pynput import mouse, keyboard
 import pandas as pd
-import sns
 import seaborn as sns
 import matplotlib.pyplot as plt
 import time

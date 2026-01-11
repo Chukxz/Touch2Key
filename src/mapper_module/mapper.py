@@ -35,6 +35,10 @@ class Mapper():
         
         # 2. Window Tracking Setup
         self.lock = threading.Lock()
+        
+        # We create a local 'cache' of window info to avoid locking during math
+        self.cached_window_info = {'left': 0, 'top': 0, 'width': 1, 'height': 1}
+        self.window_lost = False        
         self.window_title_target = window_title 
         
         # Constants applied implicitly via default arguments here
@@ -65,7 +69,7 @@ class Mapper():
             self.device_width = self.json_loader.width
             self.device_height = self.json_loader.height
             self.dpi = self.json_loader.dpi
-            print(f"[INFO] Mapper synced to Resolution: {self.device_width}x{self.device_height}, DPI: {self.dpi}")
+            print(f"[INFO] Mapping from Device synced to Resolution: {self.device_width}x{self.device_height}, DPI: {self.dpi}")
             
     # --- Window Management ---
     
@@ -119,7 +123,7 @@ class Mapper():
         pt.x = 0
         pt.y = 0
         ctypes.windll.user32.ClientToScreen(hwnd, ctypes.byref(pt))
-        
+                
         return {
             'hwnd': hwnd,
             'left': pt.x,    
@@ -127,44 +131,59 @@ class Mapper():
             'width': width,  
             'height': height 
         }
-        
+
     def update_game_window_info(self):
-        """Background thread to track window movement and handle restarts."""
+        """Background thread - optimized to minimize lock hold time."""
         while self.running:
             try:
-                # 1. Check if current handle is still valid
-                if self.game_window_info and ctypes.windll.user32.IsWindow(self.game_window_info['hwnd']):
-                    # Window exists, update its position
-                    info = self.get_window_info(self.game_window_info['hwnd'])
-                    with self.lock:
-                        self.game_window_info = info
+                # Check if current handle is still valid
+                current_hwnd = None
+                with self.lock:
+                    if self.game_window_info:
+                        current_hwnd = self.game_window_info.get('hwnd')
+
+                if current_hwnd and ctypes.windll.user32.IsWindow(current_hwnd):
+                    # 1. WINDOW IS ACTIVE: Get fresh coordinates
+                    new_info = self.get_window_info(current_hwnd)
                     
                     if self.window_lost:
                         print(f"[INFO] Re-acquired game window!")
+                                            
+                    # 2. ATOMIC SWAP: Only hold lock to update the dict reference
+                    with self.lock:
+                        self.game_window_info = new_info
+                        self.cached_window_info = new_info 
                         self.window_lost = False
-
+                        
                 else:
-                    # 2. Window Handle Invalid (Closed/Crashed)
+                    # 3. WINDOW IS LOST: Handle scanning
                     if not self.window_lost:
-                        print("[WARNING] Game window handle lost! Scanning for new window...")
-                        self.window_lost = True
+                        print("[WARNING] Game window lost! Scanning for new window...")
+                        with self.lock:
+                            self.window_lost = True
                     
                     try:
-                        # Attempt to find a new window
-                        new_info = self.get_game_window_info()
+                        # Scan for the window (CPU intensive, done outside lock)
+                        discovered_info = self.get_game_window_info()
+                        
+                        # If we found it, swap it in
                         with self.lock:
-                            self.game_window_info = new_info
+                            self.game_window_info = discovered_info
+                            self.cached_window_info = discovered_info # FIX: Use discovered_info, not 'info'
+                            self.window_lost = False
+                            print("[INFO] New window handle bound.")
+                            
                     except RuntimeError:
-                        # Still not found, keep looping
+                        # Game isn't open yet, just keep waiting
                         pass
-
+                    
             except Exception as e:
                 print(f"[ERROR] Window tracking error: {e}")
             
-            # 3. Dynamic Sleep: Fast if found, Slow if lost (using Constant)
+            # Dynamic Sleep: Constant from utils
             sleep_time = WINDOW_FIND_DELAY if self.window_lost else self._window_update_interval
-            time.sleep(sleep_time) 
-       
+            time.sleep(sleep_time)
+
     def get_game_window_info(self):
         hwnds = self.find_hwnds_by_class(self.game_window_class_name)
         target_info = None
@@ -187,35 +206,29 @@ class Mapper():
             raise RuntimeError(_str)
         return target_info
 
-    # --- Coordinate Mapping ---
-
     def device_to_game_rel(self, dx, dy):
+        """Math is now outside the lock."""
+        # Check window_lost once without a full block if possible, 
+        # but for safety, we grab the current dimensions quickly.
         with self.lock:
-            if self.window_lost:
-                return 0, 0
-                
-            game_w = self.game_window_info['width']
-            game_h = self.game_window_info['height']
-                        
-        converted_x = (dx / self.device_width) * game_w
-        converted_y = (dy / self.device_height) * game_h
+            if self.window_lost: return 0, 0
+            w = self.cached_window_info['width']
+            h = self.cached_window_info['height']
 
-        return converted_x, converted_y
+        # Math happens here - NO LOCK HELD
+        # This allows other threads (Keyboard) to get the lock immediately
+        return (dx / self.device_width) * w, (dy / self.device_height) * h
     
     def device_to_game_abs(self, x, y):
-        converted_x, converted_y = self.device_to_game_rel(x, y)
-        
+        """Thread-safe absolute mapping."""
         with self.lock:
-            if self.window_lost:
-                return 0, 0
-                
-            game_left = self.game_window_info['left']
-            game_top = self.game_window_info['top']
+            if self.window_lost: return 0, 0
+            w = self.cached_window_info['width']
+            h = self.cached_window_info['height']
+            l = self.cached_window_info['left']
+            t = self.cached_window_info['top']
             
-        final_x = game_left + converted_x
-        final_y = game_top  + converted_y
-
-        return final_x, final_y
+        return l + (x / self.device_width) * w, t + (y / self.device_height) * h
     
     def dp_to_px(self, dp):
         return dp * (self.dpi / DEF_DPI)

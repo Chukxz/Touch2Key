@@ -3,6 +3,7 @@ from .utils import TOML_PATH
 
 def create_default_toml():
     """Wipes the existing settings.toml and creates a fresh default configuration."""
+    print(f"Resetting '{TOML_PATH}' to default (Minimally Viable Version).")
     
     # Create the TOML structure in memory
     doc = tomlkit.document()
@@ -35,6 +36,6 @@ def create_default_toml():
         # Opening with "w" automatically clears (truncates) the file before writing
         with open(TOML_PATH, "w", encoding="utf-8") as f:
             tomlkit.dump(doc, f)
-        print(f"[System] Successfully reset and created settings.toml at {TOML_PATH}")
+        print(f"[System] Successfully reset and created settings.toml at '{TOML_PATH}'")
     except Exception as e:
         print(f"[Error] Failed to create settings.toml: {e}")

@@ -23,14 +23,14 @@ class JSON_Loader():
         self.load_json()
         
         # --- SELF REGISTER HOTKEY ---
-        print("[INFO] JSON_Loader registered F5 hotkey.")
+        print("[INFO] Press F5 to hot reload json data.")
         keyboard.add_hotkey('f5', self.reload, suppress=True)
 
     def get_mouse_wheel(self, force=False):
         joystick_config = self.config.get('joystick')
         if not joystick_config:
             create_default_toml()
-            raise RuntimeError("Joystick section not found in configuration.")
+            raise RuntimeError("'joystick' section not found in configuration.")
             
         if not hasattr(self, 'mouse_wheel') or force:        
             for v in self.json_data.values():
@@ -103,7 +103,8 @@ class JSON_Loader():
     def reload(self):
         system_config = self.config.get('system')
         if not system_config:
-            return
+            create_default_toml()
+            raise RuntimeError("'system' section not found in configuration")
 
         current_path = system_config.get('json_path')
         
@@ -129,6 +130,9 @@ class JSON_Loader():
                 print("[System] Layout swapped safely. Game resumed.")
             except Exception as e:
                 print(f"[Error] Failed to reload JSON layout: {e}")
+        
+        else:
+            print("Hot reloading skipped as no file or file path changes were detected.")
         
         time.sleep(RELOAD_DELAY)
 
