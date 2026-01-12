@@ -37,7 +37,6 @@ SPECIAL_MAP = {
 
 class Plotter:
     def __init__(self, image_path=None):
-
         import ctypes
         ctypes.windll.shcore.SetProcessDpiAwareness(1) # Ensures 1:1 pixel mapping
 
