@@ -192,7 +192,7 @@ class MapperEvent:
         self.action = action # UP, DOWN, PRESSED, CONFIG, JSON, NETWORK
         self.pac_t = pac_t
         self.pac_n = pac_n
-        self.is_visible = is_visible        
+        self.is_visible = is_visible
     
     def show(self):
         _ = self.touch.log() if self.touch is not None else ""

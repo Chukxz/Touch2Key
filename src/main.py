@@ -3,6 +3,7 @@ import os
 import sys
 import psutil
 import win32gui
+import threading
 from mapper_module.utils import DEFAULT_ADB_RATE_CAP, DEFAULT_KEY_DEBOUNCE, DEFAULT_LATENCY_THRESHOLD, UP
 from mapper_module import (
     MapperEventDispatcher, 
@@ -18,10 +19,12 @@ from mapper_module import (
 
 FOREGROUND_WINDOW = win32gui.GetForegroundWindow()
 
+interception_bridge = None
 mouse_mapper = None
 key_mapper = None
 wasd_mapper = None
 is_visible = True
+lock = threading.Lock()
 
 def set_high_priority(pid, label, priority_level=psutil.HIGH_PRIORITY_CLASS):
     try:
@@ -32,6 +35,17 @@ def set_high_priority(pid, label, priority_level=psutil.HIGH_PRIORITY_CLASS):
         print(f"[Priority] {label} set to HIGH (Floating Affinity)")
     except Exception as e:
         print(f"[Priority] Warning: {e}")
+
+
+def set_is_visible(_is_visible):
+    global is_visible, lock, interception_bridge
+    with lock:
+        is_visible = _is_visible
+        # Clean up keys on both processes through the bridge
+        if interception_bridge:
+            try:
+                interception_bridge.release_all()
+            except: pass
 
 
 def process_touch_event(action, event):
@@ -52,7 +66,7 @@ def process_touch_event(action, event):
         
             
 def main():
-    global mouse_mapper, key_mapper, wasd_mapper    
+    global mouse_mapper, key_mapper, wasd_mapper, interception_bridge    
 
     # --- Elevate Main Process (ADB Parsing & Logic) ---
     # We leave this on default cores (usually all but the last)
@@ -87,10 +101,10 @@ def main():
     mouse_mapper = MouseMapper(mapper_logic)
     key_mapper = KeyMapper(mapper_logic, debounce)
     wasd_mapper = WASDMapper(mapper_logic)
-    
-    mapper_event_dispatcher.register_callback("ON_MENU_MODE_TOGGLE", ...)
-    
+        
     touch_reader.bind_touch_event(process_touch_event)
+    mapper_event_dispatcher.register_callback("ON_MENU_MODE_TOGGLE", set_is_visible)
+    
 
     def shutdown():
         if not win32gui.GetForegroundWindow() == FOREGROUND_WINDOW:
