@@ -15,13 +15,8 @@ MIDDLE_BUTTON_DOWN, MIDDLE_BUTTON_UP = 0x0010, 0x0020
 # --- Worker: Keyboard (Isolated) ---
 def keyboard_worker(k_queue):
     """ Dedicated process for Keyboard events only. """
-    import time
-    import random
-
     k_ctx = Interception()
     k_handle = k_ctx.keyboard
-    _sleep = time.sleep
-    _random = random.random
     
     while True:
         code, state = k_queue.get() # Blocks until key event
@@ -30,6 +25,12 @@ def keyboard_worker(k_queue):
 # --- Worker: Mouse (Isolated with Coalescing) ---
 def mouse_worker(m_queue):
     """ Dedicated process for Mouse events with movement coalescing. """
+    import time
+    import random
+
+    _sleep = time.sleep
+    _random = random.random
+
     m_ctx = Interception()
     m_handle = m_ctx.mouse
     
