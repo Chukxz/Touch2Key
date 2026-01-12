@@ -37,12 +37,16 @@ SPECIAL_MAP = {
 
 class Plotter:
     def __init__(self, image_path=None):
+        # 1. DPI Awareness MUST be first to ensure coordinates match the screen
         import ctypes
-        ctypes.windll.shcore.SetProcessDpiAwareness(1) # Ensures 1:1 pixel mapping
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1) 
+        except Exception:
+            try: ctypes.windll.user32.SetProcessDPIAware()
+            except: pass
 
-       # 1. SMART PATH DETECTION
+        # 2. SMART PATH DETECTION
         if image_path is None:
-            # First, check if there's a valid path in the TOML
             if os.path.exists(TOML_PATH):
                 try:
                     with open(TOML_PATH, "r", encoding="utf-8") as f:
@@ -50,12 +54,12 @@ class Plotter:
                         toml_img = doc.get("system", {}).get("hud_image_path", "")
                         if toml_img and os.path.exists(toml_img):
                             image_path = toml_img
+                            print(f"[System] Auto-loading last HUD: {os.path.basename(image_path)}")
                 except: pass
 
-            # Second, if TOML fails, fall back to the selection utility
             if image_path is None:
                 os.makedirs(IMAGES_FOLDER, exist_ok=True)
-                print(f"[System] No active HUD found. Please select one.")
+                print(f"[System] No active HUD found in config. Opening selector...")
                 image_path = select_image_file(IMAGES_FOLDER)
 
         if not image_path:
@@ -64,18 +68,13 @@ class Plotter:
 
         self.image_path = image_path
 
-            else:
-                print("Exiting: No image selected.")
-                return
-        
-        # Disable Default Matplotlib Shortcuts
+        # 3. GUI Configuration
         for key in plt.rcParams:
             if key.startswith('keymap.'):
                 plt.rcParams[key] = []
-                
+
         self.shapes = {}
         self.count = 0
-        
         self.points = []          
         self.drawn_artists = []   
         self.mode = None          
@@ -88,26 +87,20 @@ class Plotter:
         self.mouse_wheel_cy = 0.0
         self.sprint_distance = 0.0
 
-        # GUI Setup        
         try:
             img = Image.open(image_path)
-        except FileNotFoundError:
-            _str = f"Image not found at {image_path}"
-            raise RuntimeError(_str)
         except Exception as e:
-            _str = f"Error loading image: {e}"
-            raise RuntimeError(_str)
+            raise RuntimeError(f"Error loading image: {e}")
 
         self.fig, self.ax = plt.subplots()
         self.ax.imshow(img)
-        
-        self.update_title("IDLE. F6(Circle) | F7(Rect) | F8(Remove) | F9(List) | F10(Save) | F11(Sprint Threshold) | F12(Mouse Wheel) | Delete(Delete) | Esc(Exit).")
+        self.update_title("IDLE. F6(Circle) | F7(Rect) | F8(Remove) | F9(List) | F10(Save) | Esc(Exit).")
 
-        # Event Listeners
         self.fig.canvas.mpl_connect("key_press_event", self.on_key_press)
         self.fig.canvas.mpl_connect("button_press_event", self.on_click)
 
         plt.show()
+
     
     # --- Visual & State Management ---
 
