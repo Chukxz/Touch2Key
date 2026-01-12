@@ -1,6 +1,7 @@
 import ctypes
 import multiprocessing
 import time
+import random
 from interception import Interception, KeyStroke, MouseStroke
 from .utils import SCANCODES, M_LEFT, M_RIGHT, M_MIDDLE
 
@@ -54,7 +55,7 @@ def mouse_worker(m_queue):
                 m_ctx.send(m_handle, MouseStroke(0, MOUSE_MOVE_RELATIVE, 0, int(acc_dx), int(acc_dy)))
                 acc_dx, acc_dy = 0, 0
             
-            time.sleep(0.001) # Pacing
+            time.sleep(0.0008 + random.random() * 0.0004) # Fast Randomized Pacing (approx. 1000Hz)
 
         elif task == "move_abs":
             x, y, flags = data
@@ -69,6 +70,9 @@ class InterceptionBridge:
         import ctypes
         # Set timer resolution to 1ms (10,000 units of 100ns)
         ctypes.windll.ntdll.NtSetTimerResolution(10000, 1, ctypes.byref(ctypes.c_ulong()))
+
+self.screen_w = ctypes.windll.user32.GetSystemMetrics(0)
+self.screen_h = ctypes.windll.user32.GetSystemMetrics(1)
 
         # 1. Setup Keyboard Channel (Infinite queue - never drop keys)
         self.k_queue = multiprocessing.Queue()
@@ -99,10 +103,8 @@ class InterceptionBridge:
         except: pass # Drop move if flooded
 
     def mouse_move_abs(self, x, y):
-        screen_w = ctypes.windll.user32.GetSystemMetrics(0)
-        screen_h = ctypes.windll.user32.GetSystemMetrics(1)
-        abs_x = int((x * 65535) / screen_w)
-        abs_y = int((y * 65535) / screen_h)
+        abs_x = int((x * 65535) / self.screen_w)
+        abs_y = int((y * 65535) / self.screen_h)
         flags = MOUSE_MOVE_ABSOLUTE | MOUSE_VIRTUAL_DESKTOP
         self.m_queue.put(("move_abs", (abs_x, abs_y, flags)))
 
