@@ -75,8 +75,8 @@ class InterceptionBridge:
         # Set timer resolution to 1ms (10,000 units of 100ns)
         ctypes.windll.ntdll.NtSetTimerResolution(10000, 1, ctypes.byref(ctypes.c_ulong()))
 
-self.screen_w = ctypes.windll.user32.GetSystemMetrics(0)
-self.screen_h = ctypes.windll.user32.GetSystemMetrics(1)
+        self.screen_w = ctypes.windll.user32.GetSystemMetrics(0)
+        self.screen_h = ctypes.windll.user32.GetSystemMetrics(1)
 
         # 1. Setup Keyboard Channel (Infinite queue - never drop keys)
         self.k_queue = multiprocessing.Queue()
