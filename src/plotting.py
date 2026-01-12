@@ -39,7 +39,7 @@ class Plotter:
     def __init__(self, image_path=None):
 
         import ctypes
-       ctypes.windll.shcore.SetProcessDpiAwareness(1) # Ensures 1:1 pixel mapping
+        ctypes.windll.shcore.SetProcessDpiAwareness(1) # Ensures 1:1 pixel mapping
 
        # 1. SMART PATH DETECTION
         if image_path is None:
