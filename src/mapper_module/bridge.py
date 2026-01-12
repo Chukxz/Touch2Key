@@ -14,14 +14,13 @@ LEFT_BUTTON_DOWN, LEFT_BUTTON_UP = 0x0001, 0x0002
 RIGHT_BUTTON_DOWN, RIGHT_BUTTON_UP = 0x0004, 0x0008
 MIDDLE_BUTTON_DOWN, MIDDLE_BUTTON_UP = 0x0010, 0x0020
 
-_sleep = time.sleep
-_random = random.random
-
 # --- Worker: Keyboard (Isolated) ---
 def keyboard_worker(k_queue):
     """ Dedicated process for Keyboard events only. """
     k_ctx = Interception()
     k_handle = k_ctx.keyboard
+    _sleep = time.sleep
+    _random = random.random
     
     while True:
         code, state = k_queue.get() # Blocks until key event
