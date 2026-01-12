@@ -140,8 +140,8 @@ class Mapper():
                 self.last_cursor_state = is_visible
                 # Signal the rest of the app to switch modes
                 self.mapper_event_dispatcher.dispatch(MapperEvent(action="MENU_MODE_TOGGLE", is_visible=is_visible))
-        except Exception as e:
-            raise RuntimeError(f"Could not check cursor visibility: {e}")
+        except Exception:
+            print("Could not check cursor visibility.")
                 
         return {
             'hwnd': hwnd,
