@@ -1,7 +1,5 @@
 import ctypes
 import multiprocessing
-import time
-import random
 from interception import Interception, KeyStroke, MouseStroke
 from .utils import SCANCODES, M_LEFT, M_RIGHT, M_MIDDLE
 
@@ -17,6 +15,9 @@ MIDDLE_BUTTON_DOWN, MIDDLE_BUTTON_UP = 0x0010, 0x0020
 # --- Worker: Keyboard (Isolated) ---
 def keyboard_worker(k_queue):
     """ Dedicated process for Keyboard events only. """
+    import time
+    import random
+
     k_ctx = Interception()
     k_handle = k_ctx.keyboard
     _sleep = time.sleep
