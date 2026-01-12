@@ -37,14 +37,34 @@ SPECIAL_MAP = {
 
 class Plotter:
     def __init__(self, image_path=None):
-        # Select image file
-        if image_path is None:
-            os.makedirs(IMAGES_FOLDER, exist_ok=True)
-            print(f"[System] Looking for profiles in: {IMAGES_FOLDER}")
 
-            image_path = select_image_file(IMAGES_FOLDER)
-            if image_path:
-                self.image_path = image_path
+        import ctypes
+       ctypes.windll.shcore.SetProcessDpiAwareness(1) # Ensures 1:1 pixel mapping
+
+       # 1. SMART PATH DETECTION
+        if image_path is None:
+            # First, check if there's a valid path in the TOML
+            if os.path.exists(TOML_PATH):
+                try:
+                    with open(TOML_PATH, "r", encoding="utf-8") as f:
+                        doc = tomlkit.load(f)
+                        toml_img = doc.get("system", {}).get("hud_image_path", "")
+                        if toml_img and os.path.exists(toml_img):
+                            image_path = toml_img
+                except: pass
+
+            # Second, if TOML fails, fall back to the selection utility
+            if image_path is None:
+                os.makedirs(IMAGES_FOLDER, exist_ok=True)
+                print(f"[System] No active HUD found. Please select one.")
+                image_path = select_image_file(IMAGES_FOLDER)
+
+        if not image_path:
+            print("Exiting: No image selected.")
+            return
+
+        self.image_path = image_path
+
             else:
                 print("Exiting: No image selected.")
                 return
