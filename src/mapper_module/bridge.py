@@ -14,6 +14,9 @@ LEFT_BUTTON_DOWN, LEFT_BUTTON_UP = 0x0001, 0x0002
 RIGHT_BUTTON_DOWN, RIGHT_BUTTON_UP = 0x0004, 0x0008
 MIDDLE_BUTTON_DOWN, MIDDLE_BUTTON_UP = 0x0010, 0x0020
 
+_sleep = time.sleep
+_random = random.random
+
 # --- Worker: Keyboard (Isolated) ---
 def keyboard_worker(k_queue):
     """ Dedicated process for Keyboard events only. """
@@ -55,7 +58,7 @@ def mouse_worker(m_queue):
                 m_ctx.send(m_handle, MouseStroke(0, MOUSE_MOVE_RELATIVE, 0, int(acc_dx), int(acc_dy)))
                 acc_dx, acc_dy = 0, 0
             
-            time.sleep(0.0008 + random.random() * 0.0004) # Fast Randomized Pacing (approx. 1000Hz)
+            _sleep(0.0008 + _random() * 0.0004) # Fast Randomized Pacing (approx. 1000Hz)
 
         elif task == "move_abs":
             x, y, flags = data
