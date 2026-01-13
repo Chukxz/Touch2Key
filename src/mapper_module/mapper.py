@@ -47,9 +47,9 @@ class Mapper():
         self.last_cursor_state = True # Cursor showing (Default)
         
         # Constants applied implicitly via default arguments here
-        self.game_window_class_name = self.get_game_window_class_name(window_title)
-        
-        self.game_window_info = self.get_game_window_info()
+        self.game_window_class_name = None
+        self.game_window_info = None
+        self.window_lost = True
         self._window_update_interval = 0.05 
         
         # 3. Initialize Resolution & DPI
@@ -83,22 +83,21 @@ class Mapper():
         ctypes.windll.user32.GetClassNameW(hwnd, buffer, MAX_CLASS_NAME)
         return buffer.value
 
-    def get_game_window_class_name(self, window_title, retries=WINDOW_FIND_RETRIES, delay=WINDOW_FIND_DELAY):
-        """Waits for the game window to appear on startup."""
+    def get_game_window_class_name(self, window_title):
+        """Gets the game window classname."""
         if window_title is None:
             raise RuntimeError("Window_title must be provided")
-            
+
+        class_name = None            
         print(f"[INFO] Waiting for window: '{window_title}'...")
-        for i in range(retries):
-            hwnd = ctypes.windll.user32.FindWindowW(None, window_title)
-            if hwnd != 0:
-                class_name = self.get_window_class_name(hwnd)
-                print(f"[INFO] Found window '{window_title}' (Class: {class_name})")
-                return class_name
-            time.sleep(delay)
-        
-        _str = f"Window '{window_title}' not found after {retries} retries, lasting for {retries * delay} seconds."
-        raise RuntimeError(_str)
+        hwnd = ctypes.windll.user32.FindWindowW(None, window_title)
+        if hwnd != 0:
+            class_name = self.get_window_class_name(hwnd)
+            print(f"[INFO] Found window '{window_title}' (Class: {class_name}).")
+        else:
+            _str = f"[INFO] Window class name could not be gotten for window: '{window_title}'."
+            raise RuntimeError(_str)            
+        return class_name
 
     def enum_windows_callback(self, hwnd, lParam):
         target_class = ctypes.cast(lParam, ctypes.POINTER(ctypes.py_object)).contents.value['class_name']
@@ -154,7 +153,7 @@ class Mapper():
     def update_game_window_info(self):
         """Background thread - optimized to minimize lock hold time."""
         while self.running:
-            try:
+            try:                
                 # Check if current handle is still valid
                 current_hwnd = None
                 with self.lock:
@@ -166,7 +165,7 @@ class Mapper():
                     new_info = self.get_window_info(current_hwnd)
                     
                     if self.window_lost:
-                        print(f"[INFO] Re-acquired game window!")
+                        print(f"[INFO] Acquired game window!")
                                             
                     # 2. ATOMIC SWAP: Only hold lock to update the dict reference
                     with self.lock:
@@ -182,13 +181,17 @@ class Mapper():
                             self.window_lost = True
                     
                     try:
+                        # Get window title class name if it doesn't exist (CPU intensive, done outside lock)
+                        if not self.game_window_class_name:
+                            self.game_window_class_name = self.get_game_window_class_name(self.window_title_target)
+
                         # Scan for the window (CPU intensive, done outside lock)
                         discovered_info = self.get_game_window_info()
                         
                         # If we found it, swap it in
                         with self.lock:
                             self.game_window_info = discovered_info
-                            self.cached_window_info = discovered_info # FIX: Use discovered_info, not 'info'
+                            self.cached_window_info = discovered_info
                             self.window_lost = False
                             print("[INFO] New window handle bound.")
                             
@@ -221,8 +224,9 @@ class Mapper():
                 target_info = info
         
         if target_info is None:
-            _str = f"No visible window found for class '{self.game_window_class_name}'."
+            _str = f"No visible window found for class: '{self.game_window_class_name}'."
             raise RuntimeError(_str)
+        
         return target_info
 
     def device_to_game_rel(self, dx, dy):
