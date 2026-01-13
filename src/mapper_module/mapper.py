@@ -39,14 +39,9 @@ class Mapper():
         
         # 2. Window Tracking Setup
         self.lock = threading.Lock()
-        
-        # We create a local 'cache' of window info to avoid locking during math
-        self.cached_window_info = {'left': 0, 'top': 0, 'width': 1, 'height': 1}
         self.window_lost = False        
         self.window_title_target = window_title
         self.last_cursor_state = True # Cursor showing (Default)
-        
-        # Constants applied implicitly via default arguments here
         self.game_window_class_name = None
         self.game_window_info = None
         self.window_lost = True
@@ -170,7 +165,6 @@ class Mapper():
                     # 2. ATOMIC SWAP: Only hold lock to update the dict reference
                     with self.lock:
                         self.game_window_info = new_info
-                        self.cached_window_info = new_info 
                         self.window_lost = False
                         
                 else:
@@ -191,7 +185,6 @@ class Mapper():
                         # If we found it, swap it in
                         with self.lock:
                             self.game_window_info = discovered_info
-                            self.cached_window_info = discovered_info
                             self.window_lost = False
                             print("[INFO] New window handle bound.")
                             
