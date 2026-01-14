@@ -100,6 +100,7 @@ def main():
         
     if hasattr(interception_bridge, 'k_proc'):
         set_high_priority(interception_bridge.k_proc.pid, "Keyboard")
+    time.sleep(1)
 
     touch_reader = TouchReader(config, mapper_event_dispatcher, rate_cap, latency)
     json_loader = JSON_Loader(config, FOREGROUND_WINDOW)
