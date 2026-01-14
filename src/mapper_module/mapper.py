@@ -5,7 +5,7 @@ import threading
 import win32gui
 from .utils import (
     DEF_DPI, WINDOW_FIND_DELAY,
-    MapperEvent
+    MapperEvent, set_dpi_awareness
     )
 
 MAX_CLASS_NAME = 256
@@ -31,13 +31,7 @@ class Mapper():
     EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 
     def __init__(self, json_loader, res_dpi, interception_bridge, window_title="Gameloop(64beta)"):
-        try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(1) 
-        except Exception:
-            try: 
-                ctypes.windll.user32.SetProcessDPIAware()
-            except: pass
-
+        set_dpi_awareness()
         self.enumWindowsProc = EnumWindowsProc
 
         # Setup Dependencies
