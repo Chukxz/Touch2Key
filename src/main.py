@@ -39,21 +39,24 @@ def set_high_priority(pid, label, priority_level=psutil.HIGH_PRIORITY_CLASS):
 
 
 def set_is_visible(_is_visible):
-    global is_visible, lock, interception_bridge
+    global is_visible, lock, interception_bridge, mouse_mapper, key_mapper, wasd_mapper
+
     with lock:
         is_visible = _is_visible
-        # Clean up keys on both processes through the bridge
-        if interception_bridge:
-            try:
-                interception_bridge.release_all()
-            except: pass
+        # Clean up keys and state
+        try:
+            interception_bridge.release_all()
+            mouse_mapper.touch_up()
+            key_mapper.release_all()
+            wasd_mapper.release_all()
+        except: pass
 
 
 def process_touch_event(action, event):
     global mouse_mapper, key_mapper, wasd_mapper, is_visible
     
     if event.is_mouse and mouse_mapper is not None:
-        mouse_mapper.process_touch(action, event)
+        mouse_mapper.process_touch(action, event, is_visible)
            
     if event.is_key and key_mapper is not None:
         key_mapper.process_touch(action, event)
