@@ -1,5 +1,7 @@
+import time
 from .utils import (
-    DEF_DPI, DOWN, UP, PRESSED
+    DEF_DPI, DOWN, UP, PRESSED,
+    DOUBLE_TAP_DELAY
 )
 
 class MouseMapper():
@@ -9,7 +11,9 @@ class MouseMapper():
         self.prev_y = None
         self.acc_x = 0.0
         self.acc_y = 0.0
-        
+        self.last_touch = 0
+        self.double_tap = False
+
         self.config = mapper.config
         self.mapper_event_dispatcher = self.mapper.mapper_event_dispatcher
         self.interception_bridge = mapper.interception_bridge
@@ -35,26 +39,47 @@ class MouseMapper():
         except Exception as e:
             print(f"[Error] Mouse config update failed: {e}")
 
-    def touch_down(self, touch_event):
+    def touch_down(self, touch_event, is_visible):
         """
         Anchor the start position and reset precision accumulators
         """
+        self.double_tap = False
         self.prev_x = touch_event.x
         self.prev_y = touch_event.y
         self.acc_x = 0.0
         self.acc_y = 0.0
 
-    def touch_pressed(self, touch_event):
+        now = time.monotonic()
+        if not self.double_tap:
+            if now - self.last_touch < DOUBLE_TAP_DELAY:
+                self.double_tap = True
+        if is_visible:
+            self.last_touch = now
+        
+
+    def touch_pressed(self, touch_event, is_visible):
         """
         The 'Hot Path'. This code runs hundreds of times per second.
         Optimized to minimize branching and float operations.
         """
         if self.prev_x is None or self.prev_y is None:
+            self.double_tap = False
             self.prev_x = touch_event.x
             self.prev_y = touch_event.y
             self.acc_x = 0.0
             self.acc_y = 0.0
+
+            now = time.monotonic()
+            if not self.double_tap:
+                if now - self.last_touch < DOUBLE_TAP_DELAY:
+                    self.double_tap = True
+            if is_visible:
+                self.last_touch = now
+
             return
+        
+        if is_visible:
+            
 
         # 1. Calculate Raw Delta
         raw_dx = touch_event.x - self.prev_x
@@ -75,7 +100,7 @@ class MouseMapper():
 
         # 5. Fast-Exit for Noise
         # If the delta is less than 1 physical pixel, just keep the remainder and exit.
-        # This prtouch_events the Interception Bridge from being flooded with 0-pixel movements.
+        # This prevents the Interception Bridge from being flooded with 0-pixel movements.
         if final_dx == 0 and final_dy == 0:
             self.acc_x = calc_dx
             self.acc_y = calc_dy
@@ -95,12 +120,12 @@ class MouseMapper():
         self.acc_x = 0.0
         self.acc_y = 0.0
 
-    def process_touch(self, action, touch_event):
+    def process_touch(self, action, touch_event, is_visible):
         if action == PRESSED:
-            self.touch_pressed(touch_event)
+            self.touch_pressed(touch_event, is_visible)
             
         elif action == DOWN:
-            self.touch_down(touch_event)
+            self.touch_down(touch_event, is_visible)
         
         elif action == UP:
             self.touch_up() 
