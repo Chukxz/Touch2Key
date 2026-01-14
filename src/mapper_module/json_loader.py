@@ -27,8 +27,7 @@ class JSON_Loader():
         self.load_json()
         
         # --- REGISTER HOTKEY ---
-        print("[INFO] Press F5 to hot reload json data.")
-        keyboard.add_hotkey('f5', self.reload)
+        print("[INFO] Press F5 to hot reload json data.")      
 
 
     def get_mouse_wheel(self, force=False):
