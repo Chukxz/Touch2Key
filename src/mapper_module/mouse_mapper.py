@@ -43,18 +43,28 @@ class MouseMapper():
         """
         Anchor the start position and reset precision accumulators
         """
-        self.double_tap = False
         self.prev_x = touch_event.x
         self.prev_y = touch_event.y
         self.acc_x = 0.0
         self.acc_y = 0.0
 
-        now = time.monotonic()
-        if not self.double_tap:
-            if now - self.last_touch < DOUBLE_TAP_DELAY:
-                self.double_tap = True
         if is_visible:
+            self.interception_bridge.left_click_up()
+            self.interception_bridge.right_click_up()
+            self.double_tap = False
+            now = time.monotonic()
+            if not self.double_tap:
+                if now - self.last_touch < DOUBLE_TAP_DELAY:
+                    self.double_tap = True
+            
+            _x, _y = self.mapper.device_to_game_abs(self.prev_x, self.prev_y)
+            self.interception_bridge.mouse_move_abs(_x, _y)
+            
             self.last_touch = now
+            if self.double_tap:
+                self.interception_bridge.right_click_down()
+            else:
+                self.interception_bridge.left_click_down()
         
 
     def touch_pressed(self, touch_event, is_visible):
@@ -63,24 +73,9 @@ class MouseMapper():
         Optimized to minimize branching and float operations.
         """
         if self.prev_x is None or self.prev_y is None:
-            self.double_tap = False
-            self.prev_x = touch_event.x
-            self.prev_y = touch_event.y
-            self.acc_x = 0.0
-            self.acc_y = 0.0
-
-            now = time.monotonic()
-            if not self.double_tap:
-                if now - self.last_touch < DOUBLE_TAP_DELAY:
-                    self.double_tap = True
-            if is_visible:
-                self.last_touch = now
-
-            return
-        
-        if is_visible:
+            self.touch_down(touch_event, is_visible)
+            return      
             
-
         # 1. Calculate Raw Delta
         raw_dx = touch_event.x - self.prev_x
         raw_dy = touch_event.y - self.prev_y
