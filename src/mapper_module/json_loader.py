@@ -49,7 +49,7 @@ class JSON_Loader():
     def get_mouse_wheel_radius(self):
         self.get_mouse_wheel()
         if not hasattr(self, 'width'):
-    self.process_json(self.last_loaded_json_path)
+            self.process_json(self.last_loaded_json_path)
 
         mouse_wheel_radius = self.mouse_wheel['r'] * self.width   
         
@@ -62,7 +62,7 @@ class JSON_Loader():
     def get_sprint_distance(self):
         self.get_mouse_wheel()
         if not hasattr(self, 'height'):
-    self.process_json(self.last_loaded_json_path)
+            self.process_json(self.last_loaded_json_path)
         
         for v in self.json_data.values():
             if v.get('name') == SPRINT_DISTANCE_CODE:
