@@ -31,6 +31,11 @@ class Mapper():
     EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 
     def __init__(self, json_loader, res_dpi, interception_bridge, window_title="Gameloop(64beta)"):
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1) # For Windows 8.1/10
+        except Exception:
+            ctypes.windll.user32.SetProcessDPIAware() # Fallback for older Windows
+
         self.enumWindowsProc = EnumWindowsProc
 
         # Setup Dependencies
