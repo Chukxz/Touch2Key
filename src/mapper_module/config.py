@@ -49,9 +49,4 @@ class AppConfig:
         self.mapper_event_dispatcher.dispatch(MapperEvent(action="CONFIG"))
 
     def get(self, key, default=None):
-        """
-        Thread-safe helper to get values. 
-        Use this in your Mappers: config.get("sensitivity")
-        """
-        with self.config_lock:
-            return self.config_data.get(key, default)
+        return self.config_data.get(key, default)
