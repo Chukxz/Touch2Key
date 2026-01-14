@@ -56,7 +56,7 @@ def set_is_visible(_is_visible):
 def process_touch_event(action, event):
     global mouse_mapper, key_mapper, wasd_mapper, is_visible
     
-    if lock.acquire(blocking=False):
+    with lock:
         try: 
             if event.is_mouse:
                 mouse_mapper.process_touch(action, event, is_visible)
@@ -68,14 +68,9 @@ def process_touch_event(action, event):
                     wasd_mapper.touch_up()
                    
                 if event.is_wasd:
-                    wasd_mapper.process_touch(action, event)
-
-        except:
-            pass
-        finally:
-            lock.release()
+                    wasd_mapper.process_touch(action, event) 
         
-            
+    
 def main():
     global mouse_mapper, key_mapper, wasd_mapper, interception_bridge    
 
