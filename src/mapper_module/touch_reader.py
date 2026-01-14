@@ -307,22 +307,21 @@ class TouchReader():
             if self.touch_event_processor:
                    if self.config.config_lock.acquire(blocking=False):
                        try:
-                           action = data['state']
-                    
+                           action = data['state']                   
                            touch_event = TouchEvent(
-                        slot=slot, 
-                        id=data['tid'], 
-                        x=rx, y=ry,
-                        sx=data['start_x'], sy=data['start_y'],
-                        is_mouse=(slot == self.mouse_slot), 
-                        is_wasd=(slot == self.wasd_slot),
-                    )
+                                slot=slot, 
+                                id=data['tid'], 
+                                x=rx, y=ry,
+                                sx=data['start_x'], sy=data['start_y'],
+                                is_mouse=(slot == self.mouse_slot), 
+                                is_wasd=(slot == self.wasd_slot),
+                            )
                            self.touch_event_processor(action, touch_event)
+ 
+                       except:
+                           pass
                        finally:
                            self.config.config_lock.release()
- 
-               except:
-                   print(f"[INFO] Event with action: {action} could not be processed")
 
             if data['state'] == DOWN: 
                 data['state'] = PRESSED
