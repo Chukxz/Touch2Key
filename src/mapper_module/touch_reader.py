@@ -116,12 +116,18 @@ class TouchReader():
         return 10
 
     def update_config(self):
-        try:
-            json_res = self.config.get('system', {}).get('json_dev_res', [self.width, self.height])
-            json_dpi = self.config.get('system', {}).get('json_dev_dpi', DEF_DPI)
+        with self.config.config_lock():
+            try:
+                json_res = self.config.get('system', {}).get('json_dev_res', [self.width, self.height])
 
-        except Exception as e:
-            print(f"[ERROR] Config update failed: {e}")            
+                self.json_width, self.json_height = json_res
+                self.scale_x = self.width / self.json_width
+                self.scale_y = self.height / self.json_height
+        
+                print(f"[INFO] Auto-Scaling Active: X={self.scale_x:.2f}, Y={self.scale_y:.2f}")
+
+            except Exception as e:
+                print(f"[ERROR] Config update failed: {e}")            
 
     def update_rotation(self):
         patterns = [r"mCurrentRotation=(\d+)", r"rotation=(\d+)", r"mCurrentOrientation=(\d+)", r"mUserRotation=(\d+)"]
@@ -205,8 +211,7 @@ class TouchReader():
         self.json_width, self.json_height = json_res
         self.scale_x = self.width / self.json_width
         self.scale_y = self.height / self.json_height
-        json_dpi = self.config.get('system', {}).get('json_dev_dpi', dpi)
-            
+        
         print(f"[INFO] Auto-Scaling Active: X={self.scale_x:.2f}, Y={self.scale_y:.2f}")
 
             
@@ -216,7 +221,8 @@ class TouchReader():
 
         while self.running:
             try:
-                self.configure_device()
+                with self.config.config_lock():
+                    self.configure_device()
             except RuntimeError as e:
                 print(f"Error: {e}. ADB Device disconnected. Retrying in 2s...")
                 time.sleep(2.0)
