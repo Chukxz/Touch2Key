@@ -14,7 +14,7 @@ def select_json_profile():
 
     os.makedirs(JSONS_FOLDER, exist_ok=True)
     
-    # 1. Open File Dialog
+    # Open File Dialog
     file_path = filedialog.askopenfilename(
         initialdir=JSONS_FOLDER,
         title="Select JSON Mapping Profile",
@@ -26,7 +26,27 @@ def select_json_profile():
         root.destroy()
         return
 
-    # Update settings.toml
+    root.destroy()
+        
+    if not os.path.exists(file_path):
+            _str = f"Error: File '{file_path}' not found."
+            raise RuntimeError(_str)
+
+    with open(file_path, mode='r', encoding='utf-8') as f:
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError as e:
+            _str = f"Invalid JSON syntax in '{file_path}': {e}"
+                raise RuntimeError(_str)
+
+        try:
+            metadata = data["metadata"]
+            w = metadata["width"]
+            h = metadata["height"]
+            dpi = metadata["dpi"]
+        except:
+                raise RuntimeError(f"Error loading json file")
+
     try:
         if not os.path.exists(TOML_PATH):
             create_default_toml()
@@ -37,18 +57,13 @@ def select_json_profile():
         if "system" not in doc: doc.add("system", tomlkit.table())
         if "joystick" not in doc: doc.add("joystick", tomlkit.table())
 
-        # Apply new path and clear HUD image
         doc["system"]["json_path"] = os.path.normpath(file_path)
         
         # Reset dynamic joystick values
         doc["joystick"]["mouse_wheel_radius"] = 0.0
         doc["joystick"]["sprint_distance"] = 0.0
-        
-        metadata      
-        
-        configure_config(w, h, dpi, "")
 
-    root.destroy()
+    configure_config(w, h, dpi, "")
 
 if __name__ == "__main__":
     select_json_profile()
