@@ -89,7 +89,7 @@ class MouseMapper():
         self.interception_bridge.mouse_move_rel(final_dx, final_dy)
         
     def touch_up(self):
-        """Clears state when the aiming finger lifts."""
+        """Clears state."""
         self.prev_x = None
         self.prev_y = None
         self.acc_x = 0.0
