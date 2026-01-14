@@ -91,7 +91,7 @@ def capture_android_screen():
         with Image.open(full_save_path) as img:
         # PNG stores DPI as a tuple (horizontal, vertical)
         # We re-save the image with the 'dpi' parameter
-        img.save(full_save_path, dpi=(dpi, dpi))
+            img.save(full_save_path, dpi=(dpi, dpi))
         print(f"[INFO] DPI ({dpi}) embedded into PNG metadata.")
 
     except Exception as e:
