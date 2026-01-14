@@ -71,8 +71,9 @@ def process_touch_event(action, event):
                     wasd_mapper.process_touch(action, event)
 
         except:
+            pass
+        finally:
             lock.release()
-            pass 
         
             
 def main():
