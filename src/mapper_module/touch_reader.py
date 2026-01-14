@@ -313,7 +313,7 @@ class TouchReader():
                            self.touch_event_processor(action, touch_event)
                        finally:
                            self.config.config_lock.release()
-                       else:
+                   else:
                            # lock was already acquired → skip
                            pass 
                except:
