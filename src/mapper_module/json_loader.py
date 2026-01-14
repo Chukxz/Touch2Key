@@ -140,7 +140,7 @@ class JSON_Loader():
                     self.last_loaded_json_path = current_path
                     self.last_loaded_json_timestamp = current_file_time
                     self.get_mouse_wheel(force=True)                    
-                    self.mapper_event_dispatcher.dispatch(MapperEvent(action="JSON"))
+                self.mapper_event_dispatcher.dispatch(MapperEvent(action="JSON"))
                     
                 print("[System] Layout swapped safely. Game resumed.")
             except Exception as e:
