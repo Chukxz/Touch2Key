@@ -339,5 +339,5 @@ def configure_config(w, h, dpi, image_path):
 
         with open(TOML_PATH, "w", encoding="utf-8") as f:
             tomlkit.dump(doc, f)
-    except Exception as e:
-        raise RuntimeError(e)
+    except Exception:
+        raise RuntimeError()
