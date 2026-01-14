@@ -292,7 +292,7 @@ def set_dpi_awareness():
     except Exception:
         try:
             ctypes.windll.user32.SetProcessDPIAware()
-            except: pass
+        except: pass
 
 def select_image_file(base_dir = None):
     # Create a root window and hide it immediately
