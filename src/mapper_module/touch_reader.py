@@ -3,7 +3,7 @@ import threading
 import subprocess
 import re
 from .utils import (
-    TouchEvent, MapperEvent, get_adb_device, is_device_online, DEF_DPI
+    TouchEvent, MapperEvent, get_adb_device, is_device_online, DEF_DPI,
     get_screen_size, get_dpi, DOWN, UP, PRESSED
     )
 
@@ -186,7 +186,7 @@ class TouchReader():
 
     def configure_device(self):
         self.device = get_adb_device() # Raises runtime error is no eligible adb device is found
-        if not is_device_online(self device):
+        if not is_device_online(self.device):
             raise RuntimeError(f"{self.device} is not online.")
         self.device_touch_event = self.find_touch_device_event()
         if self.device_touch_event is None:
@@ -197,7 +197,7 @@ class TouchReader():
         res = get_screen_size(self.device)
         if res is None:
             raise RuntimeError("Detected resolution invalid.")
-        dpi = self.get_dpi(self.device)    
+        dpi = get_dpi(self.device)    
         self.width, self.height = res
             
         # Get Configured Specs
@@ -218,7 +218,7 @@ class TouchReader():
             try:
                 self.configure_device()
             except RuntimeError as e:
-                print("Error: {e}. ADB Device disconnected. Retrying in 2s...")
+                print(f"Error: {e}. ADB Device disconnected. Retrying in 2s...")
                 time.sleep(2.0)
                 continue            
 
