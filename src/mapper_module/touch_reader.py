@@ -30,8 +30,9 @@ class TouchReader():
         self.wasd_slot = None
         self.width = 1080
         self.height = 1920
-        self.json_width = 1080
-        self.json_height = 1920
+        self.json_width = self.width
+        self.json_height = self.height
+        self.res_dpi = [self.width, self.height, DEF_DPI]
         self.scale_x = 1
         self.scale_y = 1
         
