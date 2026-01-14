@@ -35,9 +35,13 @@ def mouse_worker(m_queue):
     m_handle = m_ctx.mouse
     
     acc_dx, acc_dy = 0, 0
+    pending_task = None
 
     while True:
-        task, data = m_queue.get()
+        if pending_task:
+            task, data = pending_task
+        else:
+            task, data = m_queue.get()
 
         if task == "move_rel":
             acc_dx += data[0]
@@ -52,8 +56,10 @@ def mouse_worker(m_queue):
                         acc_dy += next_data[1]
                     else:
                         # If a button/absolute move is next, break to process it
+                        pending_task = (next_task, next_data) # Save for next loop
                         break 
-                except: break
+                except: 
+                    break
 
             if acc_dx != 0 or acc_dy != 0:
                 m_ctx.send(m_handle, MouseStroke(0, MOUSE_MOVE_RELATIVE, 0, int(acc_dx), int(acc_dy)))
