@@ -6,7 +6,7 @@ import json
 import os
 import datetime
 from mapper_module.utils import (
-    CIRCLE, RECT, SCANCODES, IMAGES_FOLDER, JSONS_FOLDER, TOML_PATH, 
+    CIRCLE, RECT, SCANCODES, DEF_DPI IMAGES_FOLDER, JSONS_FOLDER, TOML_PATH, 
     MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, select_image_file, set_dpi_awareness, configure_json
 )
 from mapper_module.default_toml_helper import create_default_toml
@@ -84,7 +84,9 @@ class Plotter:
         try:
             img = Image.open(image_path)
         except Exception as e:
-            raise RuntimeError(f"Error loading image: {e}")
+            raise RuntimeError(f"Error loading image: {e}")    
+        self.width, self.height = img.size
+        self.dpi = img.info.get("dpi", DEF_DPI)
 
         self.fig, self.ax = plt.subplots()
         self.ax.imshow(img)
@@ -129,10 +131,11 @@ class Plotter:
             self.image_path = new_path
         # Reload the image and refresh the plot
         img = Image.open(new_path)
+        self.width, self.height = img.size
+        self.dpi = img.info.get("dpi", DEF_DPI)
         self.ax.clear()
         self.ax.imshow(img)
         self.reset_state()
-        print(f"[System] Swapped HUD to: {os.path.basename(new_path)}")
 
         # Update settings.toml
         try:
@@ -145,9 +148,6 @@ class Plotter:
             if "system" not in doc: doc.add("system", tomlkit.table())
             if "joystick" not in doc: doc.add("joystick", tomlkit.table())
 
-            # Apply new HUD image to Toml file
-            doc["system"]["hud_image_path"] = os.normpath(new_path) 
-
             # Reset dynamic joystick values
             doc["joystick"]["mouse_wheel_radius"] = 0.0
             doc["joystick"]["sprint_distance"] = 0.0
@@ -155,27 +155,14 @@ class Plotter:
             self.saved_mouse_wheel = False
             self.saved_sprint_distance = False
 
-            # Apply new Resolution/DPI if provided
-            if res_raw:
-                try:
-                    w, h = map(int, res_raw.replace(" ", "").split(","))
-                    doc["system"]["json_dev_res"] = [w, h]
-                except ValueError:
-                    print("[!] Invalid resolution format. Skipping update for resolution.")
-
-            if dpi_raw:
-                doc["system"]["json_dev_dpi"] = dpi_raw
-
             with open(TOML_PATH, "w", encoding="utf-8") as f:
                 tomlkit.dump(doc, f)
 
-            print(f"\n[SUCCESS] Profile changed!")
-            print(f"New JSON: {os.path.basename(file_path)}")
-            if res_raw: print(f"Native Res: {w}x{h}")
-            if dpi_raw: print(f"Native DPI: {dpi_raw}")
-
         except Exception as e:
             print(f"[ERROR] Failed to update config: {e}")
+
+    configure_config(self.width, self.height, self.dpi, new_path)
+    print(f"[System] Swapped HUD to: {os.path.basename(new_path)}")
 
 
     # --- Event Handlers ---
