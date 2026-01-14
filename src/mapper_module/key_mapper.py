@@ -135,4 +135,4 @@ class KeyMapper():
             self._send_key_event(scancode, down=False, force=True)
         self.last_action_times.clear()
         self.mapper.wasd_block = 0
-        self.mapper_event_dispatcher.dispatch(MapperEvent(action="WASD"))
+        
