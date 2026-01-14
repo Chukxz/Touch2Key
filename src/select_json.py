@@ -1,8 +1,9 @@
 import os
 import tkinter as tk
-from tkinter import filedialog, simpledialog
+from tkinter import filedialog
+import json
 import tomlkit
-from mapper_module.utils import JSONS_FOLDER, TOML_PATH
+from mapper_module.utils import JSONS_FOLDER, TOML_PATH, configure_config
 from mapper_module.default_toml_helper import create_default_toml
 
 def select_json_profile():
@@ -25,12 +26,7 @@ def select_json_profile():
         root.destroy()
         return
 
-    # 2. Ask for Resolution and DPI (Optional but recommended)
-    # These values must match the device that CREATED the JSON
-    res_raw = simpledialog.askstring("Input", "Enter JSON native resolution (Width, Height):", initialvalue=None)
-    dpi_raw = simpledialog.askinteger("Input", "Enter JSON native DPI:", initialvalue=None)
-
-    # 3. Update settings.toml
+    # Update settings.toml
     try:
         if not os.path.exists(TOML_PATH):
             create_default_toml()
@@ -43,33 +39,14 @@ def select_json_profile():
 
         # Apply new path and clear HUD image
         doc["system"]["json_path"] = os.path.normpath(file_path)
-        doc["system"]["hud_image_path"] = "" 
         
         # Reset dynamic joystick values
         doc["joystick"]["mouse_wheel_radius"] = 0.0
-        doc["joystick"]["sprint_distance"] = 0.0        
+        doc["joystick"]["sprint_distance"] = 0.0
         
-        # Apply new Resolution/DPI if provided
-        if res_raw:
-            try:
-                w, h = map(int, res_raw.replace(" ", "").split(","))
-                doc["system"]["json_dev_res"] = [w, h]
-            except ValueError:
-                print("[!] Invalid resolution format. Skipping update for resolution.")
+        metadata      
         
-        if dpi_raw:
-            doc["system"]["json_dev_dpi"] = dpi_raw
-
-        with open(TOML_PATH, "w", encoding="utf-8") as f:
-            tomlkit.dump(doc, f)
-
-        print(f"\n[SUCCESS] Profile changed!")
-        print(f"New JSON: {os.path.basename(file_path)}")
-        if res_raw: print(f"Native Res: {w}x{h}")
-        if dpi_raw: print(f"Native DPI: {dpi_raw}")
-        
-    except Exception as e:
-        print(f"[ERROR] Failed to update config: {e}")
+        configure_config(w, h, dpi, "")
 
     root.destroy()
 
