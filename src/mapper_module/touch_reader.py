@@ -309,13 +309,13 @@ class TouchReader():
                     )
                     
                    if self.config.config_lock.acquire(blocking=False):
-    try:
-        self.touch_event_processor(action, touch_event)
-    finally:
-        self.config.config_lock.release()
-else:
-    # lock was already acquired → skip
-    pass 
+                       try:
+                           self. touch_event_processor(action, touch_event)
+                       finally:
+                           self.config.config_lock.release()
+                       else:
+                           # lock was already acquired → skip
+                           pass 
                 except:
                     print(f"[INFO] Event with action: {action} could not be processed")
 
