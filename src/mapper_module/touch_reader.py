@@ -217,8 +217,8 @@ class TouchReader():
         while self.running:
             try:
                 self.configure_device()
-            except:
-                print("[Warning] ADB Device disconnected. Retrying in 2s...")
+            except RuntimeError as e:
+                print("Error: {e}. ADB Device disconnected. Retrying in 2s...")
                 time.sleep(2.0)
                 continue            
 
