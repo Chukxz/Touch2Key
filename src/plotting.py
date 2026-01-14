@@ -5,7 +5,7 @@ import math
 import json
 import os
 import datetime
-
+import ctypes
 from mapper_module.utils import (
     CIRCLE, RECT, SCANCODES, IMAGES_FOLDER, JSONS_FOLDER, TOML_PATH, 
     MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, select_image_file
@@ -37,8 +37,7 @@ SPECIAL_MAP = {
 
 class Plotter:
     def __init__(self, image_path=None):
-        # 1. DPI Awareness MUST be first to ensure coordinates match the screen
-        import ctypes
+        # 1. DPI Awareness MUST be first to ensure coordinates match the screen      
         try:
             ctypes.windll.shcore.SetProcessDpiAwareness(1) 
         except Exception:
