@@ -310,7 +310,7 @@ class TouchReader():
             rx, ry = self.rotate_norm_coordinates(data['x'], data['y'])
 
             if self.touch_event_processor:
-                if self.config.config_lock.acquire(blocking=False):
+                with self.config.config_lock:
                     try:
                         action = data['state']                   
                         touch_event = TouchEvent(
@@ -322,10 +322,7 @@ class TouchReader():
                              is_wasd=(slot == self.wasd_slot),
                              )
                         self.touch_event_processor(action, touch_event)
-                    except:
-                        pass
-                    finally:
-                        self.config.config_lock.release()
+                     
 
             if data['state'] == DOWN: 
                 data['state'] = PRESSED
