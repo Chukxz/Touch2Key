@@ -3,7 +3,7 @@ import threading
 import subprocess
 import re
 from .utils import (
-    TouchEvent, MapperEvent, get_adb_device, is_device_online,
+    TouchEvent, MapperEvent, get_adb_device,
     get_screen_size, get_dpi, DOWN, UP, PRESSED
     )
 
@@ -25,9 +25,11 @@ class TouchReader():
         self.running = True
 
         # Identity tracking
-        self.side_limit = self.width // 2
+        self.side_limit = 0
         self.mouse_slot = None
         self.wasd_slot = None
+        self.scale_x = 1
+        self.scale_y = 1
         
         init_time = 0
 
@@ -130,11 +132,11 @@ class TouchReader():
             except: pass
             time.sleep(self.rotation_poll_interval)
 
-    def rotate_coordinates(self, x, y):
+    def rotate_norm_coordinates(self, x, y):
         if x is None or y is None:
             return x, y
         
-        # NEW: Normalize physical pixels back to "JSON Space"
+        # Normalize physical pixels back to "JSON Space"
         # If phone is 2000px and JSON was 1000px, we divide by 2.
         logic_x = x / self.scale_x
         logic_y = y / self.scale_y
@@ -210,7 +212,7 @@ class TouchReader():
                 time.sleep(2.0)
                 continue            
 
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="LOAD_JSON", res_dpi=configure_device))
+            self.mapper_event_dispatcher.dispatch(MapperEvent(action="CONFIGURE_DEVICE", res_dpi=configure_device))
 
             self.process = subprocess.Popen(
                 ["adb", "-s", self.device, "shell", "getevent", "-l", self.device_touch_event],
@@ -251,14 +253,14 @@ class TouchReader():
                         val = int(val_str, 16)
                         self.slots[current_slot]['x'] = val                        
                         if self.slots[current_slot]['start_x'] is None:
-                            tmp = self.rotate_coordinates(val, self.slots[current_slot]['start_y'])
+                            tmp = self.rotate_norm_coordinates(val, self.slots[current_slot]['start_y'])
                             self.slots[current_slot]['start_x'], self.slots[current_slot]['start_y'] = tmp
                             
                     elif "ABS_MT_POSITION_Y" == code:
                         val = int(val_str, 16)
                         self.slots[current_slot]['y'] = val                        
                         if self.slots[current_slot]['start_y'] is None:
-                            tmp = self.rotate_coordinates(self.slots[current_slot]['start_x'], val)
+                            tmp = self.rotate_norm_coordinates(self.slots[current_slot]['start_x'], val)
                             self.slots[current_slot]['start_x'], self.slots[current_slot]['start_y'] = tmp
 
                     elif "SYN_REPORT" == code:
@@ -277,7 +279,7 @@ class TouchReader():
     def handle_sync(self):
         now = time.perf_counter()
         
-        # --- OPTIMIZATION: Only update identities if a slot state changed from DOWN or UP
+        # Only update identities if a slot state changed from DOWN or UP
         needs_identity_update = any(s['state'] in [DOWN, UP] for s in self.slots.values())
         if needs_identity_update:
             self.update_finger_identities()
