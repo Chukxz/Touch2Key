@@ -310,12 +310,12 @@ class TouchReader():
                         action = data['state']                   
                         touch_event = TouchEvent(
                              slot=slot, 
-                            id=data['tid'], 
+                             id=data['tid'], 
                              x=rx, y=ry,
                              sx=data['start_x'], sy=data['start_y'],
                              is_mouse=(slot == self.mouse_slot), 
                              is_wasd=(slot == self.wasd_slot),
-                         )
+                             )
                         self.touch_event_processor(action, touch_event)
                     except:
                         pass
