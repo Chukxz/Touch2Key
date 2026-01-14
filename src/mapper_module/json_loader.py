@@ -25,15 +25,11 @@ class JSON_Loader():
         
         # Load immediately
         self.load_json()
-        self.physical_dev_params = self.width, self.height, self.dpi
-        self.mapper_event_dispatcher.register_callback("ON_CONFIGURE_DEVICE", self.set_physical_dev_params)
         
-        # --- SELF REGISTER HOTKEY ---
+        # --- REGISTER HOTKEY ---
         print("[INFO] Press F5 to hot reload json data.")
         keyboard.add_hotkey('f5', self.reload)
-    
-    def set_physical_dev_params(self, _physical_dev_params):
-        self.physical_dev_params = _physical_dev_params
+
 
     def get_mouse_wheel(self, force=False):
         joystick_config = self.config.get('joystick')
@@ -52,8 +48,10 @@ class JSON_Loader():
 
     def get_mouse_wheel_radius(self):
         self.get_mouse_wheel()
-        w, _, _ = self.physical_dev_params
-        mouse_wheel_radius = self.mouse_wheel['r'] * w     
+        if not hasattr(self, 'width'):
+    self.process_json(self.last_loaded_json_path)
+
+        mouse_wheel_radius = self.mouse_wheel['r'] * self.width   
         
         with self.config.config_lock:
             if 'joystick' in self.config.config_data:
@@ -63,11 +61,12 @@ class JSON_Loader():
         
     def get_sprint_distance(self):
         self.get_mouse_wheel()
-        _, h, _ = self.physical_dev_params
+        if not hasattr(self, 'height'):
+    self.process_json(self.last_loaded_json_path)
         
         for v in self.json_data.values():
             if v.get('name') == SPRINT_DISTANCE_CODE:
-                sprint_distance = (v['cy'] - self.mouse_wheel['cy']) * h
+                sprint_distance = (v['cy'] - self.mouse_wheel['cy']) * self.height
                 
                 with self.config.config_lock:
                     if 'joystick' in self.config.config_data:
