@@ -5,54 +5,10 @@ import time
 from PIL import Image
 
 from mapper_module.utils import (
-    IMAGES_FOLDER,
-    get_adb_device, 
-    get_screen_size, 
-    get_dpi, 
-    TOML_PATH
+    IMAGES_FOLDER, TOML_PATH, get_adb_device,
+    get_screen_size, get_dpi, get_rotation
 )
-from mapper_module.default_toml_helper import create_default_toml
-
-    def get_rotation(device):
-        rotation = 0
-        patterns = [r"mCurrentRotation=(\d+)", r"rotation=(\d+)", r"mCurrentOrientation=(\d+)", r"mUserRotation=(\d+)"]
-        while self.running:
-            try:
-                result = subprocess.run(["adb", "-s", device, "shell", "dumpsys", "display"], capture_output=True, text=True, timeout=1)
-                for pat in patterns:
-                    m = re.search(pat, result.stdout)
-                    if m:
-                        rotation = int(m.group(1)) % 4
-                        break
-            except: pass
-
-        return rotation
-    
-
-    def rotate_coordinates(self, device, x, y):
-        if x is None or y is None:
-            return x, y
-
-        # Initialize result with current values as a fallback
-        res_x, res_y = x, y 
-
-        rotation = get_rotation(device)
-        if rotation == 1:
-            res_x, res_y = logic_y, self.json_width - logic_x
-                    elif self.rotation == 2:
-                        self.side_limit = self.json_width // 2
-                        res_x, res_y = self.json_width - logic_x, self.json_height - logic_y
-                    elif self.rotation == 3:
-                        self.side_limit = self.json_height // 2
-                        res_x, res_y = self.json_height - logic_y, logic_x
-                    else:
-                        self.side_limit = self.json_width // 2
-                        res_x, res_y = logic_x, logic_y
-            finally:
-                self.config.config_lock.release()
-
-        # Always returns a tuple, even if the lock was busy
-        return res_x, res_y 
+from mapper_module.default_toml_helper import create_default_toml 
 
 def capture_android_screen():
     """
@@ -81,12 +37,14 @@ def capture_android_screen():
     nick_clean = nickname.strip().replace(" ", "_") if nickname.strip() else "Device"
     # Clean image name
     img_clean = custom_img_name.strip().replace(" ", "_")
+    
+    img_rotation = get_rotation(device_id)
 
     # Construct filename based on presence of custom image name
     if img_clean:
-        filename = f"{nick_clean}_{img_clean}_{timestamp}.png"
+        filename = f"{nick_clean}_{img_clean}_{timestamp}_r{img_rotation}.png"
     else:
-        filename = f"{nick_clean}_{timestamp}.png"
+        filename = f"{nick_clean}_{timestamp}_r{img_rotation}.png"
 
     os.makedirs(IMAGES_FOLDER, exist_ok=True)
     full_save_path = os.path.join(IMAGES_FOLDER, filename)

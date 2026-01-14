@@ -3,6 +3,9 @@ from tkinter import filedialog
 import subprocess
 import os
 import ctypes
+import tomlkit
+import re
+from .default_toml_helper import create_default_toml
 
 # Get location of this file: .../mapper_project/src/mapper_module
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -341,3 +344,31 @@ def configure_config(w, h, dpi, image_path):
             tomlkit.dump(doc, f)
     except Exception:
         raise RuntimeError()
+
+def get_rotation(device):
+    rotation = 0
+    patterns = [r"mCurrentRotation=(\d+)", r"rotation=(\d+)", r"mCurrentOrientation=(\d+)", r"mUserRotation=(\d+)"]
+    try:
+        result = subprocess.run(["adb", "-s", device, "shell", "dumpsys", "display"], capture_output=True, text=True, timeout=1)
+        for pat in patterns:
+            m = re.search(pat, result.stdout)
+            if m:
+                rotation = int(m.group(1)) % 4
+                break
+    except: pass
+
+    return rotation
+
+
+def rotate_resolution(x, y, rotation):
+    if x is None or y is None:
+        return x, y
+
+    # Initialize result with current values as a fallback
+    res_x, res_y = x, y 
+
+    # Device in landscape, rotate back to potrait.
+    if rotation == 1 or rotation == 3:
+        return res_y, res_x
+
+    return res_x, res_y

@@ -6,8 +6,9 @@ import json
 import os
 import datetime
 from mapper_module.utils import (
-    CIRCLE, RECT, SCANCODES, DEF_DPI IMAGES_FOLDER, JSONS_FOLDER, TOML_PATH, 
-    MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, select_image_file, set_dpi_awareness, configure_json
+    CIRCLE, RECT, SCANCODES, DEF_DPI, IMAGES_FOLDER,
+    JSONS_FOLDER, TOML_PATH, MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE,
+    select_image_file, set_dpi_awareness, rotate_resolution
 )
 from mapper_module.default_toml_helper import create_default_toml
 
@@ -86,6 +87,13 @@ class Plotter:
         except Exception as e:
             raise RuntimeError(f"Error loading image: {e}")    
         self.width, self.height = img.size
+        
+        image_name = os.path.basename(image_path)
+        _str = image_name.split(".")[0].split("_")[-1]
+        if _str.startswith("r"):
+            rot = int(_str[1:])
+            self.width, self.height = rotate_resolution(self.width, self.height, rot)
+            
         self.dpi = img.info.get("dpi", DEF_DPI)
 
         self.fig, self.ax = plt.subplots()
@@ -125,13 +133,20 @@ class Plotter:
         self.state = COLLECTING
         self.update_title(f"Mode: {mode}. Click {num_points} points on the image (F8 to Cancel).")
 
-    def change_image():
+    def change_image(self):
         new_path = select_image_file(IMAGES_FOLDER)
         if new_path:
             self.image_path = new_path
         # Reload the image and refresh the plot
         img = Image.open(new_path)
         self.width, self.height = img.size
+
+        image_name = os.path.basename(self.image_path)
+        _str = image_name.split(".")[0].split("_")[-1]
+        if _str.startswith("r"):
+            rot = int(_str[1:])
+            self.width, self.height = rotate_resolution(self.width, self.height, rot)
+            
         self.dpi = img.info.get("dpi", DEF_DPI)
         self.ax.clear()
         self.ax.imshow(img)
@@ -390,8 +405,8 @@ class Plotter:
             output.append(entry)
 
         json_output = {
-            metadata: {width: self.width, height: self.height, dpi: self.dpi}
-            content: output
+            "metadata": {"width": self.width, "height": self.height, "dpi": self.dpi},
+            "content": output
         }
 
         file_path = os.path.join(JSONS_FOLDER, f"{user_name}.json")
