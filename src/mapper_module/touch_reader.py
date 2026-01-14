@@ -135,29 +135,35 @@ class TouchReader():
     def rotate_norm_coordinates(self, x, y):
         if x is None or y is None:
             return x, y
-        
-        # Normalize physical pixels back to "JSON Space"
-        # If phone is 2000px and JSON was 1000px, we divide by 2.
+
         logic_x = x / self.scale_x
         logic_y = y / self.scale_y
+    
+        # Initialize result with current values as a fallback
+        res_x, res_y = logic_x, logic_y 
 
+        # Attempt to acquire the config lock
         if self.config.config_lock.acquire(blocking=False):
             try:
                 with self.lock:
-                    if self.rotation == 1: # 90 deg
+                    if self.rotation == 1:
                         self.side_limit = self.json_height // 2
-                        return logic_y, self.json_width - logic_x
-                    elif self.rotation == 2: # 180 deg
+                        res_x, res_y = logic_y, self.json_width - logic_x
+                    elif self.rotation == 2:
                         self.side_limit = self.json_width // 2
-                        return self.json_width - logic_x, self.json_height - logic_y
-                    elif self.rotation == 3: # 270 deg
+                        res_x, res_y = self.json_width - logic_x, self.json_height - logic_y
+                    elif self.rotation == 3:
                         self.side_limit = self.json_height // 2
-                        return self.json_height - logic_y, logic_x
-                    else: # 0 deg
+                        res_x, res_y = self.json_height - logic_y, logic_x
+                    else:
                         self.side_limit = self.json_width // 2
-                        return logic_x, logic_y
+                        res_x, res_y = logic_x, logic_y
             finally:
                 self.config.config_lock.release()
+    
+        # Always returns a tuple, even if the lock was busy
+        return res_x, res_y 
+
 
     def ensure_slot(self, slot):
         if slot not in self.slots:
