@@ -49,8 +49,6 @@ class MouseMapper():
         self.acc_y = 0.0
 
         if is_visible:
-            self.interception_bridge.left_click_up()
-            self.interception_bridge.right_click_up()
             self.double_tap = False
             now = time.monotonic()
             if not self.double_tap:
@@ -114,6 +112,8 @@ class MouseMapper():
         self.prev_y = None
         self.acc_x = 0.0
         self.acc_y = 0.0
+        self.interception_bridge.left_click_up()
+        self.interception_bridge.right_click_up()
 
     def process_touch(self, action, touch_event, is_visible):
         if action == PRESSED:
