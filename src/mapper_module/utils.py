@@ -187,12 +187,11 @@ class TouchEvent:
         return f"Slot: {self.slot}, ID: {self.id}, X: {self.x}, Y: {self.y}, SX: {self.sx}, SY: {self.sy}, isMouse: {self.is_mouse}, isWASD: {self.is_wasd}"
 
 class MapperEvent:
-    def __init__(self, action, pac_t = None, pac_n = None, is_visible=True, res_dpi=None):
+    def __init__(self, action, pac_t = None, pac_n = None, is_visible=True):
         self.action = action # UP, DOWN, PRESSED, CONFIG, JSON, NETWORK
         self.pac_t = pac_t
         self.pac_n = pac_n
         self.is_visible = is_visible
-        self.res_dpi = res_dpi
     
     def show(self):
         _ = self.touch.log() if self.touch is not None else ""
@@ -202,7 +201,6 @@ class MapperEventDispatcher:
     def __init__(self):    
         # The Registry
         self.callback_registry = {
-            "CONFIGURE_DEVICE":     [],
             "ON_CONFIG_RELOAD":     [],
             "ON_JSON_RELOAD":       [],
             "ON_WASD_BLOCK":        [],
@@ -212,7 +210,6 @@ class MapperEventDispatcher:
         
         # Map simple action names to full registry keys
         self.action_map = {
-            "CONFIGURE_DEVICE": "ON_CONFIGURE_DEVICE",
             "CONFIG":           "ON_CONFIG_RELOAD",
             "JSON":             "ON_JSON_RELOAD",
             "WASD":             "ON_WASD_BLOCK",
@@ -242,8 +239,6 @@ class MapperEventDispatcher:
                     func()
                 elif event_object.action in ["NETWORK"]:
                     func(event_object.pac_n, event_object.pac_t)
-                elif event_object.action in ["CONFIGURE_DEVICE"]:
-                    func(event_object.res_dpi)
                 elif event_object.action in ["MENU_MODE_TOGGLE"]:
                     func(event_object.is_visible)
 
