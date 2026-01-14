@@ -28,13 +28,12 @@ IDLE = "IDLE"
 
 CIRCLE = "CIRCLE"
 RECT = "RECT"
-RELOAD_DELAY = 0.01
+RELOAD_DELAY = 0.5
 M_LEFT = 0x9901
 M_RIGHT = 0x9902
 M_MIDDLE = 0x9903
 SPRINT_DISTANCE_CODE = "F11"
 MOUSE_WHEEL_CODE = "F12"
-WINDOW_FIND_RETRIES = 100
 WINDOW_FIND_DELAY = 1 # in seconds
 
 # --- Fallback Performance Constants ---
@@ -42,7 +41,7 @@ WINDOW_FIND_DELAY = 1 # in seconds
 DEFAULT_ADB_RATE_CAP = 250.0  
 
 # Ignores key flickers faster than 10ms
-DEFAULT_KEY_DEBOUNCE = 0.01
+KEY_DEBOUNCE = 0.01
 
 # Default ADB latency threshold
 DEFAULT_LATENCY_THRESHOLD = 0.05
@@ -188,11 +187,12 @@ class TouchEvent:
         return f"Slot: {self.slot}, ID: {self.id}, X: {self.x}, Y: {self.y}, SX: {self.sx}, SY: {self.sy}, isMouse: {self.is_mouse}, isWASD: {self.is_wasd}"
 
 class MapperEvent:
-    def __init__(self, action, pac_t = None, pac_n = None, is_visible=True):
+    def __init__(self, action, pac_t = None, pac_n = None, is_visible=True, res_dpi=None):
         self.action = action # UP, DOWN, PRESSED, CONFIG, JSON, NETWORK
         self.pac_t = pac_t
         self.pac_n = pac_n
         self.is_visible = is_visible
+        self.res_dpi = res_dpi
     
     def show(self):
         _ = self.touch.log() if self.touch is not None else ""
@@ -202,11 +202,22 @@ class MapperEventDispatcher:
     def __init__(self):    
         # The Registry
         self.callback_registry = {
+            "ON_LOAD_JSON":         [],
             "ON_CONFIG_RELOAD":     [],
             "ON_JSON_RELOAD":       [],
             "ON_WASD_BLOCK":        [],
             "ON_NETWORK_LAG":       [],
             "ON_MENU_MODE_TOGGLE":  [],
+        }
+        
+        # Map simple action names to full registry keys
+        self.action_map = {
+            "LOAD_JSON":        "ON_LOAD_JSON",
+            "CONFIG":           "ON_CONFIG_RELOAD",
+            "JSON":             "ON_JSON_RELOAD",
+            "WASD":             "ON_WASD_BLOCK",
+            "NETWORK":          "ON_NETWORK_LAG",
+            "MENU_MODE_TOGGLE": "ON_MENU_MODE_TOGGLE",
         }
 
     def register_callback(self, event_type, func):
@@ -222,17 +233,8 @@ class MapperEventDispatcher:
             else:
                 print(f"[Warning] Function {func.__name__} was not registered for {event_type}")
 
-    def dispatch(self, event_object: MapperEvent):
-        # Map simple action names to full registry keys
-        action_map = {
-            "CONFIG":           "ON_CONFIG_RELOAD",
-            "JSON":             "ON_JSON_RELOAD",
-            "WASD":             "ON_WASD_BLOCK",
-            "NETWORK":          "ON_NETWORK_LAG",
-            "MENU_MODE_TOGGLE": "ON_MENU_MODE_TOGGLE",
-        }
-        
-        registry_key = action_map.get(event_object.action)
+    def dispatch(self, event_object: MapperEvent):       
+        registry_key = self.action_map.get(event_object.action)
         
         if registry_key:
             for func in self.callback_registry[registry_key]:
@@ -240,6 +242,8 @@ class MapperEventDispatcher:
                     func()
                 elif event_object.action in ["NETWORK"]:
                     func(event_object.pac_n, event_object.pac_t)
+                elif event_object.action in ["LOAD_JSON"]:
+                    func(event_object.res_dpi)
                 elif event_object.action in ["MENU_MODE_TOGGLE"]:
                     func(event_object.is_visible)
 
@@ -276,7 +280,14 @@ def get_dpi(device):
         return int(val) if val else DEF_DPI
     except Exception:
         return DEF_DPI
-    
+
+def is_device_online(device):
+    try:
+        res = subprocess.run(["adb", "-s", device, "get-state"], 
+                            capture_output=True, text=True, timeout=1)
+        return "device" in res.stdout
+    except:
+        return False
 
 def select_image_file(base_dir = None):
     # Create a root window and hide it immediately
@@ -289,7 +300,7 @@ def select_image_file(base_dir = None):
         initialdir=base_dir,
         title="Select an Image",
         filetypes=[
-            ("Image Files", "*.jpg *.jpeg *.png *.bmp"),
+            ("Image Files", "*.jpg *.jpeg *.png *.bmp *.webp"),
             ("All Files", "*.*")
         ]
     )

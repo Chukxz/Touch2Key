@@ -71,7 +71,6 @@ def mouse_worker(m_queue):
 
 class InterceptionBridge:
     def __init__(self):
-        import ctypes
         # Set timer resolution to 1ms (10,000 units of 100ns)
         ctypes.windll.ntdll.NtSetTimerResolution(10000, 1, ctypes.byref(ctypes.c_ulong()))
 

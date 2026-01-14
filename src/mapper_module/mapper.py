@@ -4,7 +4,7 @@ from ctypes import wintypes
 import threading
 import win32gui
 from .utils import (
-    DEF_DPI, WINDOW_FIND_RETRIES, WINDOW_FIND_DELAY,
+    DEF_DPI, WINDOW_FIND_DELAY,
     MapperEvent
     )
 
@@ -31,13 +31,15 @@ class POINT(ctypes.Structure):
 
 class Mapper():
     def __init__(self, json_loader, res_dpi, interception_bridge, window_title="Gameloop(64beta)"):
-        # 1. Setup Dependencies
+        # Setup Dependencies
         self.json_loader = json_loader
         self.config = self.json_loader.config
         self.mapper_event_dispatcher = self.json_loader.mapper_event_dispatcher
         self.interception_bridge = interception_bridge
         
-        # 2. Window Tracking Setup
+        # Window Tracking Setup
+        self.screen_w = ctypes.windll.user32.GetSystemMetrics(0)
+        self.screen_h = ctypes.windll.user32.GetSystemMetrics(1)
         self.lock = threading.Lock()
         self.window_lost = False        
         self.window_title_target = window_title
@@ -45,20 +47,15 @@ class Mapper():
         self.game_window_class_name = None
         self.game_window_info = None
         self.window_lost = True
-        self._window_update_interval = 0.05 
+        self.window_update_interval = 0.05 
         
-        # 3. Initialize Resolution & DPI
-        self.device_width = res_dpi[0]
-        self.device_height = res_dpi[1]
-        self.device_dpi = res_dpi[2]
-        
-        # 4. Config & State
+        # Config & State
         self.wasd_block = 0
         self.update_config() 
         
         self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
         
-        # 5. Start the window tracking thread
+        # Start the window tracking thread
         self.running = True
         self.window_lost = False
         self.window_thread = threading.Thread(target=self.update_game_window_info, daemon=True)
@@ -81,7 +78,7 @@ class Mapper():
     def get_game_window_class_name(self, window_title):
         """Gets the game window classname."""
         if window_title is None:
-            raise RuntimeError("Window_title must be provided")
+            raise ValueError("Window_title must be provided.")
 
         class_name = None            
         print(f"[INFO] Waiting for window: '{window_title}'...")
@@ -130,10 +127,11 @@ class Mapper():
             # 0x00000001 is CURSOR_SHOWING
             is_visible = (flags & 1) 
             
-            if is_visible != self.last_cursor_state:
+            if not is_visible == self.last_cursor_state:
                 self.last_cursor_state = is_visible
                 # Signal the rest of the app to switch modes
                 self.mapper_event_dispatcher.dispatch(MapperEvent(action="MENU_MODE_TOGGLE", is_visible=is_visible))
+                
         except Exception:
             print("Could not check cursor visibility.")
                 
@@ -175,18 +173,18 @@ class Mapper():
                             self.window_lost = True
                     
                     try:
-                        # Get window title class name if it doesn't exist (CPU intensive, done outside lock)
+                        # Get window title class name if it doesn't exist
                         if not self.game_window_class_name:
                             self.game_window_class_name = self.get_game_window_class_name(self.window_title_target)
 
-                        # Scan for the window (CPU intensive, done outside lock)
+                        # Scan for the window
                         discovered_info = self.get_game_window_info()
                         
                         # If we found it, swap it in
                         with self.lock:
                             self.game_window_info = discovered_info
                             self.window_lost = False
-                            print("[INFO] New window handle bound.")
+                        print("[INFO] New window handle bound.")
                             
                     except RuntimeError:
                         # Game isn't open yet, just keep waiting
@@ -196,7 +194,7 @@ class Mapper():
                 print(f"[ERROR] Window tracking error: {e}")
             
             # Dynamic Sleep: Constant from utils
-            sleep_time = WINDOW_FIND_DELAY if self.window_lost else self._window_update_interval
+            sleep_time = WINDOW_FIND_DELAY if self.window_lost else self.window_update_interval
             time.sleep(sleep_time)
 
     def get_game_window_info(self):
@@ -223,26 +221,30 @@ class Mapper():
         return target_info
 
     def device_to_game_rel(self, dx, dy):
-        """Math is now outside the lock."""
-        # Check window_lost once without a full block if possible, 
-        # but for safety, we grab the current dimensions quickly.
+        """Thread-safe relative mapping."""
         with self.lock:
-            if self.window_lost: return 0, 0
-            w = self.cached_window_info['width']
-            h = self.cached_window_info['height']
+            if self.window_lost: 
+                w = self.screen_w
+                h = self.screen_h
+            else:
+                w = self.game_window_info['width']
+                h = self.game_window_info['height']
 
-        # Math happens here - NO LOCK HELD
-        # This allows other threads (Keyboard) to get the lock immediately
         return (dx / self.device_width) * w, (dy / self.device_height) * h
     
     def device_to_game_abs(self, x, y):
         """Thread-safe absolute mapping."""
         with self.lock:
-            if self.window_lost: return 0, 0
-            w = self.cached_window_info['width']
-            h = self.cached_window_info['height']
-            l = self.cached_window_info['left']
-            t = self.cached_window_info['top']
+            if self.window_lost:
+                w = self.screen_w
+                h = self.screen_h
+                l = 0
+                t = 0
+            else:
+                w = self.game_window_info['width']
+                h = self.game_window_info['height']
+                l = self.game_window_info['left']
+                t = self.game_window_info['top']
             
         return l + (x / self.device_width) * w, t + (y / self.device_height) * h
     

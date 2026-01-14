@@ -4,7 +4,7 @@ import sys
 import psutil
 import win32gui
 import threading
-from mapper_module.utils import DEFAULT_ADB_RATE_CAP, DEFAULT_KEY_DEBOUNCE, DEFAULT_LATENCY_THRESHOLD, UP
+from mapper_module.utils import DEFAULT_ADB_RATE_CAP, KEY_DEBOUNCE, DEFAULT_LATENCY_THRESHOLD, UP
 from mapper_module import (
     MapperEventDispatcher, 
     AppConfig, 
@@ -25,6 +25,7 @@ key_mapper = None
 wasd_mapper = None
 is_visible = True
 lock = threading.Lock()
+is_shutting_down = False
 
 def set_high_priority(pid, label, priority_level=psutil.HIGH_PRIORITY_CLASS):
     try:
@@ -76,10 +77,9 @@ def main():
 
     try:
         rate_cap = float(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_ADB_RATE_CAP
-        debounce = float(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_KEY_DEBOUNCE
-        latency  = float(sys.argv[3]) if len(sys.argv) > 3 else DEFAULT_LATENCY_THRESHOLD
+        latency  = float(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_LATENCY_THRESHOLD
     except ValueError:
-        rate_cap, debounce, latency = DEFAULT_ADB_RATE_CAP, DEFAULT_KEY_DEBOUNCE, DEFAULT_LATENCY_THRESHOLD
+        rate_cap, latency = DEFAULT_ADB_RATE_CAP, DEFAULT_LATENCY_THRESHOLD
 
     mapper_event_dispatcher = MapperEventDispatcher()
     config = AppConfig(mapper_event_dispatcher)
@@ -93,13 +93,13 @@ def main():
     if hasattr(interception_bridge, 'k_proc'):
         set_high_priority(interception_bridge.k_proc.pid, "Keyboard")
 
-    json_loader = JSON_Loader(config, FOREGROUND_WINDOW)
     touch_reader = TouchReader(config, mapper_event_dispatcher, rate_cap, latency)
+    json_loader = JSON_Loader(config, FOREGROUND_WINDOW)
 
     mapper_logic = Mapper(json_loader, touch_reader.res_dpi, interception_bridge)
 
     mouse_mapper = MouseMapper(mapper_logic)
-    key_mapper = KeyMapper(mapper_logic, debounce)
+    key_mapper = KeyMapper(mapper_logic, KEY_DEBOUNCE)
     wasd_mapper = WASDMapper(mapper_logic)
         
     touch_reader.bind_touch_event(process_touch_event)
@@ -107,8 +107,13 @@ def main():
     
 
     def shutdown():
+        global is_shutting_down
         if not win32gui.GetForegroundWindow() == FOREGROUND_WINDOW:
             return
+        
+        if is_shutting_down:
+            return
+        is_shutting_down = True        
                 
         print("\n[System] 'ESC' detected. Cleaning up...")
         mapper_logic.running = False
@@ -122,7 +127,7 @@ def main():
         print("[System] Shutdown complete. Goodbye.")
         os._exit(0)
 
-    keyboard.add_hotkey('esc', shutdown)
+    keyboard.add_hotkey('esc', shutdown, trigger_on_release=True)
     keyboard.wait()
 
 if __name__ == "__main__":

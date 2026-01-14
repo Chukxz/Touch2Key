@@ -20,13 +20,20 @@ class JSON_Loader():
         self.last_loaded_json_path = None
         self.last_loaded_json_timestamp = 0
         self.json_data = {}
+        self.last_reload_time = 0
+        self.physical_dev_params = None
         
-        # Initialize immediately
+        # Load immediately
         self.load_json()
+        self.physical_dev_params = self.width, self.height, self.dpi
+        self.mapper_event_dispatcher.register_callback("ON_LOAD_JSON", self.set_physical_dev_params)
         
         # --- SELF REGISTER HOTKEY ---
         print("[INFO] Press F5 to hot reload json data.")
         keyboard.add_hotkey('f5', self.reload)
+    
+    def set_physical_dev_params(self, _physical_dev_params):
+        self.physical_dev_params = _physical_dev_params
 
     def get_mouse_wheel(self, force=False):
         joystick_config = self.config.get('joystick')
@@ -45,24 +52,22 @@ class JSON_Loader():
 
     def get_mouse_wheel_radius(self):
         self.get_mouse_wheel()
-        
-        if not hasattr(self, 'width'):
-            self.process_json(self.last_loaded_json_path)
-
-        mouse_wheel_radius = self.mouse_wheel['r'] * self.width        
+        w, _, _ = self.physical_dev_params
+        mouse_wheel_radius = self.mouse_wheel['r'] * w     
         
         with self.config.config_lock:
             if 'joystick' in self.config.config_data:
                 self.config.config_data['joystick']['mouse_wheel_radius'] = mouse_wheel_radius                
         
-        return mouse_wheel_radius
+        return mouse_wheel_radius   
         
     def get_sprint_distance(self):
         self.get_mouse_wheel()
+        _, h, _ = self.physical_dev_params
         
         for v in self.json_data.values():
             if v.get('name') == SPRINT_DISTANCE_CODE:
-                sprint_distance = (v['cy'] - self.mouse_wheel['cy']) * self.height
+                sprint_distance = (v['cy'] - self.mouse_wheel['cy']) * h
                 
                 with self.config.config_lock:
                     if 'joystick' in self.config.config_data:
@@ -103,8 +108,14 @@ class JSON_Loader():
         return need_reload, current_file_time
 
     def reload(self):
+        current_time = time.time()
+        if current_time - self.last_reload_time < RELOAD_DELAY:
+            return
+        
         if not win32gui.GetForegroundWindow() == self.foreground_window:
             return
+        
+        self.last_reload_time = current_time
         
         system_config = self.config.get('system')
         if not system_config:
@@ -139,8 +150,6 @@ class JSON_Loader():
         else:
             print("Hot reloading skipped as no file or file path changes were detected.")
         
-        time.sleep(RELOAD_DELAY)
-
     def normalize_json_data(self, file_path, screen_width, screen_height):
         normalized_zones = {}
         
@@ -204,7 +213,7 @@ class JSON_Loader():
         
         w, h = res
         self.width = int(w)
-        self.height = int(h)     
+        self.height = int(h)   
         
         self.dpi = int(system_config.get('json_dev_dpi', 160))
         

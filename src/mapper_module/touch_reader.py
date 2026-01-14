@@ -3,40 +3,15 @@ import threading
 import subprocess
 import re
 from .utils import (
-    TouchEvent, MapperEvent, get_adb_device, 
+    TouchEvent, MapperEvent, get_adb_device, is_device_online,
     get_screen_size, get_dpi, DOWN, UP, PRESSED
     )
 
 class TouchReader():
     def __init__(self, config, dispatcher, rate_cap, latency):
-        self.device = get_adb_device()
-        self.device_touch_event = self.find_touch_device_event()
-
-        if self.device_touch_event is None:
-            raise RuntimeError("No touchscreen device found via ADB.")
-
-        print(f"[INFO] Using touchscreen device: {self.device_touch_event}")
         self.config = config
         self.mapper_event_dispatcher = dispatcher
-
-        # 1. Physical Device Specs
-        res = get_screen_size(self.device)
-        if res is None:
-            raise RuntimeError("Detected resolution invalid.")
-
-        self.width, self.height = res
-        physical_dpi = get_dpi(self.device)
-
-        # 2. Get Configured Specs
-        json_res = config.get('system', {}).get('json_dev_res', [self.width, self.height])
-        json_dpi = config.get('system', {}).get('json_dev_dpi', physical_dpi)
-
-        # 3. Strict Validation
-        if self.width != json_res[0] or self.height != json_res[1]:
-            _str = f"Resolution Mismatch! Physical: {self.width}x{self.height} vs Config: {json_res[0]}x{json_res[1]}"
-            raise RuntimeError(_str)
-
-        self.res_dpi = [json_res[0], json_res[1], json_dpi]       
+           
         self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
         # self.mapper_event_dispatcher.register_callback("ON_NETWORK_LAG", self.log_lag)
 
@@ -54,19 +29,19 @@ class TouchReader():
         self.mouse_slot = None
         self.wasd_slot = None
         
-        _init_time = time.perf_counter()
+        init_time = 0
 
         # --- PERFORMANCE TUNING ---
         self.adb_rate_cap = rate_cap
         self.move_interval = 1.0 / self.adb_rate_cap if self.adb_rate_cap > 0 else 0
         self.last_dispatch_times = []
         for _ in range(self.max_slots):
-            self.last_dispatch_times.append(_init_time)
+            self.last_dispatch_times.append(init_time)
         
         # --- LATENCY MONITORING ---
         self.packet_time_acc = 0.0
         self.packet_time_n = 0
-        self.last_packet_time = _init_time
+        self.last_packet_time = init_time
         self.latency_threshold = latency
         
         self.touch_event_processor = None
@@ -159,24 +134,26 @@ class TouchReader():
         if x is None or y is None:
             return x, y
         
-        with self.lock:
-            if self.rotation == 1:
-                self.side_limit = self.height // 2
-                return y, self.width - x
-            
-            elif self.rotation == 2:
-                self.side_limit = self.width // 2
-                return self.width - x, self.height - y
-            
-            elif self.rotation == 3:
-                self.side_limit = self.height // 2
-                return self.height - y, x
-            
-            else:
-                self.side_limit = self.width // 2            
-                return x, y 
+        # NEW: Normalize physical pixels back to "JSON Space"
+        # If phone is 2000px and JSON was 1000px, we divide by 2.
+        logic_x = x / self.scale_x
+        logic_y = y / self.scale_y
 
-    def _ensure_slot(self, slot):
+        with self.lock:
+            if self.rotation == 1: # 90 deg
+                self.side_limit = self.json_height // 2
+                return logic_y, self.json_width - logic_x
+            elif self.rotation == 2: # 180 deg
+                self.side_limit = self.json_width // 2
+                return self.json_width - logic_x, self.json_height - logic_y
+            elif self.rotation == 3: # 270 deg
+                self.side_limit = self.json_height // 2
+                return self.json_height - logic_y, logic_x
+            else: # 0 deg
+                self.side_limit = self.json_width // 2
+                return logic_x, logic_y
+
+    def ensure_slot(self, slot):
         if slot not in self.slots:
             self.reset_slot(slot)
             
@@ -190,10 +167,51 @@ class TouchReader():
         val = int(value_hex, 16)
         return val if val < 0x80000000 else val - 0x100000000
 
+
+    def configure_device(self):
+        try:
+            self.device = get_adb_device() # Raises runtime error is no eligible adb device is found
+            self.device_touch_event = self.find_touch_device_event()
+            if self.device_touch_event is None:
+                raise RuntimeError("No touchscreen device found via ADB.")
+            print(f"[INFO] Using touchscreen device: {self.device_touch_event}")
+            
+            # 1. Physical Device Specs
+            res = get_screen_size(self.device)
+            if res is None:
+                raise RuntimeError("Detected resolution invalid.")
+            
+            self.width, self.height = res
+            physical_dpi = get_dpi(self.device)
+            
+            # 2. Get Configured Specs
+            json_res = self.config.get('system', {}).get('json_dev_res', [self.width, self.height])
+            json_dpi = self.config.get('system', {}).get('json_dev_dpi', physical_dpi)
+            
+            self.json_width, self.json_height = json_res
+            self.scale_x = self.width / self.json_width
+            self.scale_y = self.height / self.json_height
+            
+            print(f"[INFO] Auto-Scaling Active: X={self.scale_x:.2f}, Y={self.scale_y:.2f}")
+            self.res_dpi = [json_res[0], json_res[1], json_dpi]
+            
+            return self.width, self.height, physical_dpi
+            
+        except RuntimeError:
+            return None
+
     def get_touches(self):
         current_slot = 0
-        
+
         while self.running:
+            configure_device = self.configure_device()
+            if not configure_device:
+                print("[Warning] ADB Device disconnected. Retrying in 2s...")
+                time.sleep(2.0)
+                continue            
+
+            self.mapper_event_dispatcher.dispatch(MapperEvent(action="LOAD_JSON", res_dpi=configure_device))
+
             self.process = subprocess.Popen(
                 ["adb", "-s", self.device, "shell", "getevent", "-l", self.device_touch_event],
                 stdout=subprocess.PIPE, text=True, bufsize=0 
@@ -212,11 +230,11 @@ class TouchReader():
                     
                     if "ABS_MT_SLOT" == code:
                         current_slot = int(val_str, 16)
-                        self._ensure_slot(current_slot)
+                        self.ensure_slot(current_slot)
                         
                     elif "ABS_MT_TRACKING_ID" == code:
                         tid = self.parse_hex_signed(val_str)
-                        self._ensure_slot(current_slot)
+                        self.ensure_slot(current_slot)
                         prev_id = self.slots[current_slot]['tid']
                         self.slots[current_slot]['tid'] = tid
                         
@@ -246,8 +264,12 @@ class TouchReader():
                     elif "SYN_REPORT" == code:
                         self.handle_sync()
                         
-            except Exception: pass
-            
+            except Exception as e:
+                print(f"[Error] ADB Stream interrupted: {e}")
+                with self.lock:
+                    for slot in self.slots:
+                        self.reset_slot(slot) # Clear all touches on disconnect
+                        
             if self.running:
                 self.stop_process()
                 time.sleep(1.0)
@@ -307,7 +329,6 @@ class TouchReader():
     def stop(self):
         self.running = False
         self.stop_process()
-
 
     def get_latency(self):
         current_time = time.perf_counter()
