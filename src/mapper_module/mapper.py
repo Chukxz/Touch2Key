@@ -10,9 +10,6 @@ from .utils import (
 
 MAX_CLASS_NAME = 256
 
-# EnumWindows callback type definition
-EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
-
 # RECT structure for Windows API
 class RECT(ctypes.Structure):
     _fields_ = [
@@ -30,7 +27,12 @@ class POINT(ctypes.Structure):
     ]
 
 class Mapper():
+    # EnumWindows callback type definition
+    EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+
     def __init__(self, json_loader, res_dpi, interception_bridge, window_title="Gameloop(64beta)"):
+        self.enumWindowsProc = EnumWindowsProc
+
         # Setup Dependencies
         self.json_loader = json_loader
         self.config = self.json_loader.config
@@ -104,7 +106,7 @@ class Mapper():
     def find_hwnds_by_class(self, class_name):
         results = []
         data = ctypes.py_object({'class_name': class_name, 'results': results})
-        ctypes.windll.user32.EnumWindows(EnumWindowsProc(self.enum_windows_callback), ctypes.byref(data))
+        ctypes.windll.user32.EnumWindows(self.enumWindowsProc(self.enum_windows_callback), ctypes.byref(data))
         return results
 
     def get_window_info(self, hwnd):
