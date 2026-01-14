@@ -32,9 +32,11 @@ class Mapper():
 
     def __init__(self, json_loader, res_dpi, interception_bridge, window_title="Gameloop(64beta)"):
         try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(1) # For Windows 8.1/10
+            ctypes.windll.shcore.SetProcessDpiAwareness(1) 
         except Exception:
-            ctypes.windll.user32.SetProcessDPIAware() # Fallback for older Windows
+            try: 
+                ctypes.windll.user32.SetProcessDPIAware()
+            except: pass
 
         self.enumWindowsProc = EnumWindowsProc
 
