@@ -3,7 +3,7 @@ import threading
 import subprocess
 import re
 from .utils import (
-    TouchEvent, MapperEvent, get_adb_device,
+    TouchEvent, MapperEvent, get_adb_device, is_device_online, DEF_DPI
     get_screen_size, get_dpi, DOWN, UP, PRESSED
     )
 
@@ -28,6 +28,10 @@ class TouchReader():
         self.side_limit = 0
         self.mouse_slot = None
         self.wasd_slot = None
+        self.width = 1080
+        self.height = 1920
+        self.json_width = 1080
+        self.json_height = 1920
         self.scale_x = 1
         self.scale_y = 1
         
@@ -114,7 +118,7 @@ class TouchReader():
     def update_config(self):
         try:
             json_res = self.config.get('system', {}).get('json_dev_res', [self.width, self.height])
-            json_dpi = self.config.get('system', {}).get('json_dev_dpi', 160)
+            json_dpi = self.config.get('system', {}).get('json_dev_dpi', DEF_DPI)
             self.res_dpi[:] = [json_res[0], json_res[1], json_dpi]
         except Exception as e:
             print(f"[ERROR] Config update failed: {e}")            
@@ -181,36 +185,31 @@ class TouchReader():
 
 
     def configure_device(self):
-        try:
-            self.device = get_adb_device() # Raises runtime error is no eligible adb device is found
-            self.device_touch_event = self.find_touch_device_event()
-            if self.device_touch_event is None:
-                raise RuntimeError("No touchscreen device found via ADB.")
-            print(f"[INFO] Using touchscreen device: {self.device_touch_event}")
+        self.device = get_adb_device() # Raises runtime error is no eligible adb device is found
+        if not is_device_online(self device):
+            raise RuntimeError(f"{self.device} is not online.")
+        self.device_touch_event = self.find_touch_device_event()
+        if self.device_touch_event is None:
+            raise RuntimeError("No touchscreen device found via ADB.")
+        print(f"[INFO] Using touchscreen device: {self.device_touch_event}")
             
-            # 1. Physical Device Specs
-            res = get_screen_size(self.device)
-            if res is None:
-                raise RuntimeError("Detected resolution invalid.")
+        # Physical Device Specs
+        res = get_screen_size(self.device)
+        if res is None:
+            raise RuntimeError("Detected resolution invalid.")
+        dpi = self.get_dpi(self.device)    
+        self.width, self.height = res
             
-            self.width, self.height = res
-            physical_dpi = get_dpi(self.device)
+        # Get Configured Specs
+        json_res = self.config.get('system', {}).get('json_dev_res', [self.width, self.height])      
+        self.json_width, self.json_height = json_res
+        self.scale_x = self.width / self.json_width
+        self.scale_y = self.height / self.json_height
+        json_dpi = self.config.get('system', {}).get('json_dev_dpi', dpi)
             
-            # 2. Get Configured Specs
-            json_res = self.config.get('system', {}).get('json_dev_res', [self.width, self.height])
-            json_dpi = self.config.get('system', {}).get('json_dev_dpi', physical_dpi)
+        print(f"[INFO] Auto-Scaling Active: X={self.scale_x:.2f}, Y={self.scale_y:.2f}")
+        self.res_dpi = [json_res[0], json_res[1], json_dpi]
             
-            self.json_width, self.json_height = json_res
-            self.scale_x = self.width / self.json_width
-            self.scale_y = self.height / self.json_height
-            
-            print(f"[INFO] Auto-Scaling Active: X={self.scale_x:.2f}, Y={self.scale_y:.2f}")
-            self.res_dpi = [json_res[0], json_res[1], json_dpi]
-            
-            return self.width, self.height, physical_dpi
-            
-        except RuntimeError:
-            return None
 
     def get_touches(self):
         current_slot = 0
@@ -220,9 +219,7 @@ class TouchReader():
             if not configure_device:
                 print("[Warning] ADB Device disconnected. Retrying in 2s...")
                 time.sleep(2.0)
-                continue            
-
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="CONFIGURE_DEVICE", res_dpi=configure_device))
+                continue             
 
             self.process = subprocess.Popen(
                 ["adb", "-s", self.device, "shell", "getevent", "-l", self.device_touch_event],
