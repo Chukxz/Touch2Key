@@ -320,3 +320,24 @@ def is_in_circle(px, py, cx, cy, r):
 
 def is_in_rect(px, py, left, right, top, bottom):
     return (left <= px <= right) and (top <= py <= bottom)
+
+def configure_config(w, h, dpi, image_path):
+    try:
+        if not os.path.exists(TOML_PATH):
+            create_default_toml()
+
+        with open(TOML_PATH, "r", encoding="utf-8") as f:
+            doc = tomlkit.load(f)
+
+        if "system" not in doc: 
+            doc.add("system", tomlkit.table())
+
+        # Update TOML settings
+        doc["system"]["json_dev_res"] = [w, h]
+        doc["system"]["json_dev_dpi"] = dpi
+        doc["system"]["hud_image_path"] = os.path.normpath(image_path)
+
+        with open(TOML_PATH, "w", encoding="utf-8") as f:
+            tomlkit.dump(doc, f)
+    except Exception as e:
+        raise RuntimeError(e)
