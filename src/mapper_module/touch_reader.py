@@ -305,10 +305,11 @@ class TouchReader():
             rx, ry = self.rotate_norm_coordinates(data['x'], data['y'])
 
             if self.touch_event_processor:
-                try:
-                    action = data['state']
+                   if self.config.config_lock.acquire(blocking=False):
+                       try:
+                           action = data['state']
                     
-                    touch_event = TouchEvent(
+                           touch_event = TouchEvent(
                         slot=slot, 
                         id=data['tid'], 
                         x=rx, y=ry,
@@ -316,9 +317,6 @@ class TouchReader():
                         is_mouse=(slot == self.mouse_slot), 
                         is_wasd=(slot == self.wasd_slot),
                     )
-                    
-                   if self.config.config_lock.acquire(blocking=False):
-                       try:
                            self.touch_event_processor(action, touch_event)
                        finally:
                            self.config.config_lock.release()
