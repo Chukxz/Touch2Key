@@ -202,7 +202,7 @@ class MapperEventDispatcher:
     def __init__(self):    
         # The Registry
         self.callback_registry = {
-            "ON_LOAD_JSON":         [],
+            "CONFIGURE_DEVICE":     [],
             "ON_CONFIG_RELOAD":     [],
             "ON_JSON_RELOAD":       [],
             "ON_WASD_BLOCK":        [],
@@ -212,7 +212,7 @@ class MapperEventDispatcher:
         
         # Map simple action names to full registry keys
         self.action_map = {
-            "LOAD_JSON":        "ON_LOAD_JSON",
+            "CONFIGURE_DEVICE": "ON_CONFIGURE_DEVICE",
             "CONFIG":           "ON_CONFIG_RELOAD",
             "JSON":             "ON_JSON_RELOAD",
             "WASD":             "ON_WASD_BLOCK",
@@ -242,7 +242,7 @@ class MapperEventDispatcher:
                     func()
                 elif event_object.action in ["NETWORK"]:
                     func(event_object.pac_n, event_object.pac_t)
-                elif event_object.action in ["LOAD_JSON"]:
+                elif event_object.action in ["CONFIGURE_DEVICE"]:
                     func(event_object.res_dpi)
                 elif event_object.action in ["MENU_MODE_TOGGLE"]:
                     func(event_object.is_visible)
