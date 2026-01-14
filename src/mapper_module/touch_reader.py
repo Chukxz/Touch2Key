@@ -32,7 +32,6 @@ class TouchReader():
         self.height = 1920
         self.json_width = self.width
         self.json_height = self.height
-        self.res_dpi = [self.width, self.height, DEF_DPI]
         self.scale_x = 1
         self.scale_y = 1
         
@@ -120,7 +119,7 @@ class TouchReader():
         try:
             json_res = self.config.get('system', {}).get('json_dev_res', [self.width, self.height])
             json_dpi = self.config.get('system', {}).get('json_dev_dpi', DEF_DPI)
-            self.res_dpi[:] = [json_res[0], json_res[1], json_dpi]
+
         except Exception as e:
             print(f"[ERROR] Config update failed: {e}")            
 
@@ -209,7 +208,7 @@ class TouchReader():
         json_dpi = self.config.get('system', {}).get('json_dev_dpi', dpi)
             
         print(f"[INFO] Auto-Scaling Active: X={self.scale_x:.2f}, Y={self.scale_y:.2f}")
-        self.res_dpi = [json_res[0], json_res[1], json_dpi]
+
             
 
     def get_touches(self):
