@@ -5,10 +5,9 @@ import math
 import json
 import os
 import datetime
-import ctypes
 from mapper_module.utils import (
     CIRCLE, RECT, SCANCODES, IMAGES_FOLDER, JSONS_FOLDER, TOML_PATH, 
-    MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, select_image_file
+    MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, select_image_file, set_dpi_awareness
 )
 from mapper_module.default_toml_helper import create_default_toml
 
@@ -37,12 +36,8 @@ SPECIAL_MAP = {
 
 class Plotter:
     def __init__(self, image_path=None):
-        # 1. DPI Awareness MUST be first to ensure coordinates match the screen      
-        try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(1) 
-        except Exception:
-            try: ctypes.windll.user32.SetProcessDPIAware()
-            except: pass
+        # 1. DPI Awareness MUST be first to ensure coordinates match the screen
+        set_dpi_awareness()
 
         # 2. SMART PATH DETECTION
         if image_path is None:
@@ -128,7 +123,7 @@ class Plotter:
         self.state = COLLECTING
         self.update_title(f"Mode: {mode}. Click {num_points} points on the image (F8 to Cancel).")
 
-    def refresh_image():
+    def change_image():
         new_path = select_image_file(IMAGES_FOLDER)
         if new_path:
             self.image_path = new_path
@@ -138,6 +133,49 @@ class Plotter:
         self.ax.imshow(img)
         self.reset_state()
         print(f"[System] Swapped HUD to: {os.path.basename(new_path)}")
+
+        # Update settings.toml
+        try:
+            if not os.path.exists(TOML_PATH):
+                create_default_toml()
+
+            with open(TOML_PATH, "r", encoding="utf-8") as f:
+                doc = tomlkit.load(f)
+
+            if "system" not in doc: doc.add("system", tomlkit.table())
+            if "joystick" not in doc: doc.add("joystick", tomlkit.table())
+
+            # Apply new HUD image to Toml file
+            doc["system"]["hud_image_path"] = os.normpath(new_path) 
+
+            # Reset dynamic joystick values
+            doc["joystick"]["mouse_wheel_radius"] = 0.0
+            doc["joystick"]["sprint_distance"] = 0.0
+
+            self.saved_mouse_wheel = False
+            self.saved_sprint_distance = False
+
+            # Apply new Resolution/DPI if provided
+            if res_raw:
+                try:
+                    w, h = map(int, res_raw.replace(" ", "").split(","))
+                    doc["system"]["json_dev_res"] = [w, h]
+                except ValueError:
+                    print("[!] Invalid resolution format. Skipping update for resolution.")
+
+            if dpi_raw:
+                doc["system"]["json_dev_dpi"] = dpi_raw
+
+            with open(TOML_PATH, "w", encoding="utf-8") as f:
+                tomlkit.dump(doc, f)
+
+            print(f"\n[SUCCESS] Profile changed!")
+            print(f"New JSON: {os.path.basename(file_path)}")
+            if res_raw: print(f"Native Res: {w}x{h}")
+            if dpi_raw: print(f"Native DPI: {dpi_raw}")
+
+        except Exception as e:
+            print(f"[ERROR] Failed to update config: {e}")
 
 
     # --- Event Handlers ---
@@ -214,7 +252,7 @@ class Plotter:
 
         if self.state == IDLE:
             if event.key == 'f5':
-                self.refresh_image()
+                self.change_image()
             if event.key == 'f6':
                 self.start_mode(CIRCLE, 3)
             elif event.key == 'f7':
