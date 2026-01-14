@@ -7,7 +7,7 @@ import os
 import datetime
 from mapper_module.utils import (
     CIRCLE, RECT, SCANCODES, IMAGES_FOLDER, JSONS_FOLDER, TOML_PATH, 
-    MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, select_image_file, set_dpi_awareness
+    MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, select_image_file, set_dpi_awareness, configure_json
 )
 from mapper_module.default_toml_helper import create_default_toml
 
@@ -375,7 +375,8 @@ class Plotter:
             user_name = datetime.datetime.now().strftime("map_%Y%m%d_%H%M%S")
         
         os.makedirs(JSONS_FOLDER, exist_ok=True)
-        json_output = []
+
+        output = []
 
         for _, data in self.shapes.items():
             entry = {
@@ -399,7 +400,12 @@ class Plotter:
                 entry["val1"] = data['r']
                 # val2, 3, 4 remain 0
             
-            json_output.append(entry)
+            output.append(entry)
+
+        json_output = {
+            metadata: {width: self.width, height: self.height, dpi: self.dpi}
+            content: output
+        }
 
         file_path = os.path.join(JSONS_FOLDER, f"{user_name}.json")
         
