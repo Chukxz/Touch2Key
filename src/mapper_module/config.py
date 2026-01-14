@@ -46,8 +46,7 @@ class AppConfig:
         
         # Dispatch event so other modules know config changed
         # Uses action="CONFIG" to match the dispatcher in utils.py
-        if self.mapper_event_dispatcher:
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="CONFIG"))
+        self.mapper_event_dispatcher.dispatch(MapperEvent(action="CONFIG"))
 
     def get(self, key, default=None):
         """
