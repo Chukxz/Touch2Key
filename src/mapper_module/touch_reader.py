@@ -215,11 +215,12 @@ class TouchReader():
         current_slot = 0
 
         while self.running:
-            configure_device = self.configure_device()
-            if not configure_device:
+            try:
+                self.configure_device()
+            except:
                 print("[Warning] ADB Device disconnected. Retrying in 2s...")
                 time.sleep(2.0)
-                continue             
+                continue            
 
             self.process = subprocess.Popen(
                 ["adb", "-s", self.device, "shell", "getevent", "-l", self.device_touch_event],
