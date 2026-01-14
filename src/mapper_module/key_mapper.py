@@ -27,9 +27,10 @@ class KeyMapper():
         self.active_zones = []
         
         # Initialize data structures
-        self.update_json_data()
+        self.process_json_data()
+        self.mapper_event_dispatcher.register_callback("ON_JSON_RELOAD", self.process_json_data)
 
-    def update_json_data(self):
+    def process_json_data(self):
         """Pre-processes JSON into a high-speed iteration list."""
         self.release_all()
         self.events_dict.clear()
