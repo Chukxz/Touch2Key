@@ -40,6 +40,7 @@ def mouse_worker(m_queue):
     while True:
         if pending_task:
             task, data = pending_task
+            pending_task = None
         else:
             task, data = m_queue.get()
 
