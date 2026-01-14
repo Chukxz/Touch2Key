@@ -150,7 +150,7 @@ class JSON_Loader():
         else:
             print("Hot reloading skipped as no file or file path changes were detected.")
         
-    def normalize_json_data(self, file_path, screen_width, screen_height):
+    def process_json(self, json_path):
         normalized_zones = {}
         
         if not os.path.exists(file_path):
@@ -164,7 +164,19 @@ class JSON_Loader():
                 _str = f"Invalid JSON syntax in '{file_path}': {e}"
                 raise RuntimeError(_str)
 
-            for item in data:
+            try:
+                metadata = data["metadata"]
+                content = data["content"]
+                screen_width = metadata["width"]
+                screen_height = metadata["height"]
+                self.dpi = metadata["dpi"]
+            except:
+                raise RuntimeError(f"Error loading json file")
+
+            self.width = screen_width
+            self.height = screen_height
+
+            for item in content:
                 scancode = item.get("scancode")
                 if scancode is None: 
                     continue
@@ -202,19 +214,3 @@ class JSON_Loader():
                     continue
 
         return normalized_zones
-
-    def process_json(self, json_path):
-        system_config = self.config.get('system', {})
-        res = system_config.get('json_dev_res')
-        
-        if not res or len(res) != 2:
-            create_default_toml()
-            raise RuntimeError("Resolution not found or misconfigured (json_dev_res).")
-        
-        w, h = res
-        self.width = int(w)
-        self.height = int(h)   
-        
-        self.dpi = int(system_config.get('json_dev_dpi', 160))
-        
-        return self.normalize_json_data(json_path, w, h)
