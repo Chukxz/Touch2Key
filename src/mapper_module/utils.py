@@ -46,6 +46,7 @@ KEY_DEBOUNCE = 0.01
 # Default ADB latency threshold
 DEFAULT_LATENCY_THRESHOLD = 0.05
 
+DOUBLE_TAP_DELAY = 0.25
 
 SCANCODES = {
     "ESC": 0x01,
