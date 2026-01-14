@@ -141,8 +141,7 @@ class TouchReader():
         logic_x = x / self.scale_x
         logic_y = y / self.scale_y
 
-        if 
-            self.config.config_lock.acquire(blocking=False):
+        if self.config.config_lock.acquire(blocking=False):
             try:
                 with self.lock:
                     if self.rotation == 1: # 90 deg
