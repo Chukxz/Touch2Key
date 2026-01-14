@@ -4,6 +4,7 @@ import sys
 import psutil
 import win32gui
 import threading
+import time
 from mapper_module.utils import DEFAULT_ADB_RATE_CAP, KEY_DEBOUNCE, DEFAULT_LATENCY_THRESHOLD, UP
 from mapper_module import (
     MapperEventDispatcher, 
