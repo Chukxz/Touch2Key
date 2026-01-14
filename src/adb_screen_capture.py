@@ -2,6 +2,7 @@ import subprocess
 import os
 import tomlkit
 import time
+from PIL import Image
 
 from mapper_module.utils import (
     IMAGES_FOLDER,
@@ -73,10 +74,7 @@ def capture_android_screen():
             doc.add("system", tomlkit.table())
 
         # Update TOML settings
-        doc["system"]["json_dev_res"] = [res[0], res[1]]
-        doc["system"]["json_dev_dpi"] = dpi
         doc["system"]["hud_image_path"] = os.path.normpath(full_save_path)
-        doc["system"]["json_dev_name"] = nick_clean  # Uses the cleaned nickname
 
         with open(TOML_PATH, "w", encoding="utf-8") as f:
             tomlkit.dump(doc, f)
@@ -88,6 +86,16 @@ def capture_android_screen():
 
     except Exception as e:
         print(f"[ERROR] Config update failed: {e}")
+
+    try:
+        with Image.open(full_save_path) as img:
+        # PNG stores DPI as a tuple (horizontal, vertical)
+        # We re-save the image with the 'dpi' parameter
+        img.save(full_save_path, dpi=(dpi, dpi))
+        print(f"[INFO] DPI ({dpi}) embedded into PNG metadata.")
+
+    except Exception as e:
+        print(f"[WARNING] Could not embed DPI into image: {e}")
 
 if __name__ == "__main__":
     capture_android_screen()
