@@ -55,18 +55,23 @@ def set_is_visible(_is_visible):
 def process_touch_event(action, event):
     global mouse_mapper, key_mapper, wasd_mapper, is_visible
     
-    if event.is_mouse and mouse_mapper is not None:
-        mouse_mapper.process_touch(action, event, is_visible)
+    if lock.acquire(blocking=False):
+        try: 
+            if event.is_mouse:
+                mouse_mapper.process_touch(action, event, is_visible)
            
-    if event.is_key and key_mapper is not None:
-        key_mapper.process_touch(action, event)
-
-    if wasd_mapper is not None:
-        if action == UP:
-            wasd_mapper.touch_up()
+            if event.is_key:
+                key_mapper.process_touch(action, event)
+            
+                if action == UP:
+                    wasd_mapper.touch_up()
                    
-        if event.is_wasd:
-            wasd_mapper.process_touch(action, event) 
+                if event.is_wasd:
+                    wasd_mapper.process_touch(action, event)
+
+        except:
+            lock.release()
+            pass 
         
             
 def main():
