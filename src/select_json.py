@@ -45,7 +45,7 @@ def select_json_profile():
             h = metadata["height"]
             dpi = metadata["dpi"]
         except:
-                raise RuntimeError(f"Error loading json file")
+                raise RuntimeError("Error loading json file")
 
     try:
         if not os.path.exists(TOML_PATH):
@@ -62,6 +62,8 @@ def select_json_profile():
         # Reset dynamic joystick values
         doc["joystick"]["mouse_wheel_radius"] = 0.0
         doc["joystick"]["sprint_distance"] = 0.0
+    except:
+        raise RuntimeError("Error updating config")
 
     configure_config(w, h, dpi, "")
 
