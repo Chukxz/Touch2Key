@@ -93,7 +93,7 @@ class Plotter:
 
         self.fig, self.ax = plt.subplots()
         self.ax.imshow(img)
-        self.update_title("IDLE. F6(Circle) | F7(Rect) | F8(Remove) | F9(List) | F10(Save) | Esc(Exit).")
+        self.update_title("IDLE. F5 (Change Image) | F6(Circle) | F7(Rect) | F8(Remove) | F9(List) | F10(Save) | Esc(Exit).")
 
         self.fig.canvas.mpl_connect("key_press_event", self.on_key_press)
         self.fig.canvas.mpl_connect("button_press_event", self.on_click)
@@ -119,7 +119,7 @@ class Plotter:
         self.mode = None
         self.points = []
         self.input_buffer = ""
-        self.update_title("IDLE. F6(Circle) | F7(Rect) | F8(Remove) | F9(List) | F10(Save) | F11(Sprint Threshold) | F12(Mouse Wheel) | Delete(Delete) | Esc(Exit).")
+        self.update_title("IDLE. F5 (Change Image) | F6(Circle) | F7(Rect) | F8(Remove) | F9(List) | F10(Save) | F11(Sprint Threshold) | F12(Mouse Wheel) | Delete(Delete) | Esc(Exit).")
 
     def start_mode(self, mode, num_points):
         self.reset_state() 
@@ -127,6 +127,18 @@ class Plotter:
         self.target_points = num_points
         self.state = COLLECTING
         self.update_title(f"Mode: {mode}. Click {num_points} points on the image (F8 to Cancel).")
+
+    def refresh_image():
+        new_path = select_image_file(IMAGES_FOLDER)
+        if new_path:
+            self.image_path = new_path
+        # Reload the image and refresh the plot
+        img = Image.open(new_path)
+        self.ax.clear()
+        self.ax.imshow(img)
+        self.reset_state()
+        print(f"[System] Swapped HUD to: {os.path.basename(new_path)}")
+
 
     # --- Event Handlers ---
 
@@ -201,6 +213,8 @@ class Plotter:
             return
 
         if self.state == IDLE:
+            if event.key == 'f5':
+                self.refresh_image()
             if event.key == 'f6':
                 self.start_mode(CIRCLE, 3)
             elif event.key == 'f7':
