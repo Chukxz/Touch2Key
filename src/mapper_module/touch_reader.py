@@ -159,7 +159,6 @@ class TouchReader():
             finally:
                 self.config.config_lock.release()
 
-
     def ensure_slot(self, slot):
         if slot not in self.slots:
             self.reset_slot(slot)
