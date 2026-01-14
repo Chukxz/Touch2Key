@@ -13,6 +13,47 @@ from mapper_module.utils import (
 )
 from mapper_module.default_toml_helper import create_default_toml
 
+    def get_rotation(device):
+        rotation = 0
+        patterns = [r"mCurrentRotation=(\d+)", r"rotation=(\d+)", r"mCurrentOrientation=(\d+)", r"mUserRotation=(\d+)"]
+        while self.running:
+            try:
+                result = subprocess.run(["adb", "-s", device, "shell", "dumpsys", "display"], capture_output=True, text=True, timeout=1)
+                for pat in patterns:
+                    m = re.search(pat, result.stdout)
+                    if m:
+                        rotation = int(m.group(1)) % 4
+                        break
+            except: pass
+
+        return rotation
+    
+
+    def rotate_coordinates(self, device, x, y):
+        if x is None or y is None:
+            return x, y
+
+        # Initialize result with current values as a fallback
+        res_x, res_y = x, y 
+
+        rotation = get_rotation(device)
+        if rotation == 1:
+            res_x, res_y = logic_y, self.json_width - logic_x
+                    elif self.rotation == 2:
+                        self.side_limit = self.json_width // 2
+                        res_x, res_y = self.json_width - logic_x, self.json_height - logic_y
+                    elif self.rotation == 3:
+                        self.side_limit = self.json_height // 2
+                        res_x, res_y = self.json_height - logic_y, logic_x
+                    else:
+                        self.side_limit = self.json_width // 2
+                        res_x, res_y = logic_x, logic_y
+            finally:
+                self.config.config_lock.release()
+
+        # Always returns a tuple, even if the lock was busy
+        return res_x, res_y 
+
 def capture_android_screen():
     """
     Captures screen and saves as: {nickname}_{custom_img_name}_{timestamp}.png
