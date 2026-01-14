@@ -26,7 +26,7 @@ class JSON_Loader():
         # Load immediately
         self.load_json()
         self.physical_dev_params = self.width, self.height, self.dpi
-        self.mapper_event_dispatcher.register_callback("ON_LOAD_JSON", self.set_physical_dev_params)
+        self.mapper_event_dispatcher.register_callback("ON_CONFIGURE_DEVICE", self.set_physical_dev_params)
         
         # --- SELF REGISTER HOTKEY ---
         print("[INFO] Press F5 to hot reload json data.")
