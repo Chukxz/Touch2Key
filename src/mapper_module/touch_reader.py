@@ -141,19 +141,25 @@ class TouchReader():
         logic_x = x / self.scale_x
         logic_y = y / self.scale_y
 
-        with self.lock:
-            if self.rotation == 1: # 90 deg
-                self.side_limit = self.json_height // 2
-                return logic_y, self.json_width - logic_x
-            elif self.rotation == 2: # 180 deg
-                self.side_limit = self.json_width // 2
-                return self.json_width - logic_x, self.json_height - logic_y
-            elif self.rotation == 3: # 270 deg
-                self.side_limit = self.json_height // 2
-                return self.json_height - logic_y, logic_x
-            else: # 0 deg
-                self.side_limit = self.json_width // 2
-                return logic_x, logic_y
+        if 
+            self.config.config_lock.acquire(blocking=False):
+            try:
+                with self.lock:
+                    if self.rotation == 1: # 90 deg
+                        self.side_limit = self.json_height // 2
+                        return logic_y, self.json_width - logic_x
+                    elif self.rotation == 2: # 180 deg
+                        self.side_limit = self.json_width // 2
+                        return self.json_width - logic_x, self.json_height - logic_y
+                    elif self.rotation == 3: # 270 deg
+                        self.side_limit = self.json_height // 2
+                        return self.json_height - logic_y, logic_x
+                    else: # 0 deg
+                        self.side_limit = self.json_width // 2
+                        return logic_x, logic_y
+            finally:
+                self.config.config_lock.release()
+
 
     def ensure_slot(self, slot):
         if slot not in self.slots:
@@ -293,7 +299,7 @@ class TouchReader():
                     continue
                 self.last_dispatch_times[slot] = now
             
-            rx, ry = self.rotate_coordinates(data['x'], data['y'])
+            rx, ry = self.rotate_norm_coordinates(data['x'], data['y'])
 
             if self.touch_event_processor:
                 try:
@@ -313,9 +319,7 @@ class TouchReader():
                            self.touch_event_processor(action, touch_event)
                        finally:
                            self.config.config_lock.release()
-                   else:
-                       # lock was already acquired → skip
-                       pass 
+ 
                except:
                    print(f"[INFO] Event with action: {action} could not be processed")
 
