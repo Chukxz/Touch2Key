@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import filedialog
 import subprocess
 import os
+import ctypes
 
 # Get location of this file: .../mapper_project/src/mapper_module
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -284,6 +285,14 @@ def is_device_online(device):
         return "device" in res.stdout
     except:
         return False
+
+def set_dpi_awareness():
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1) 
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+            except: pass
 
 def select_image_file(base_dir = None):
     # Create a root window and hide it immediately
