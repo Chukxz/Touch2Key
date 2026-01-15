@@ -132,12 +132,14 @@ class TouchReader():
                 self.json_width, self.json_height = json_res
                 self.scale_x = self.width / self.json_width
                 self.scale_y = self.height / self.json_height
-                self.update_matrix()
         
                 print(f"[INFO] Auto-Scaling Active: X={self.scale_x:.2f}, Y={self.scale_y:.2f}")
 
             except Exception as e:
-                print(f"[ERROR] Config update failed: {e}")            
+                print(f"[ERROR] Config update failed: {e}")
+                return
+
+            self.update_matrix()         
 
     def update_rotation(self):
         patterns = [r"mCurrentRotation=(\d+)", r"rotation=(\d+)", r"mCurrentOrientation=(\d+)", r"mUserRotation=(\d+)"]
