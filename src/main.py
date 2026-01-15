@@ -1,5 +1,4 @@
 import keyboard
-import os
 import sys
 import psutil
 import win32gui
@@ -15,7 +14,8 @@ from mapper_module import (
     Mapper, 
     MouseMapper, 
     KeyMapper, 
-    WASDMapper
+    WASDMapper,
+    set_high_priority
 )
 
 FOREGROUND_WINDOW = win32gui.GetForegroundWindow()
@@ -27,16 +27,6 @@ wasd_mapper = None
 is_visible = True
 lock = threading.Lock()
 is_shutting_down = False
-
-def set_high_priority(pid, label, priority_level=psutil.HIGH_PRIORITY_CLASS):
-    try:
-        p = psutil.Process(pid)
-        p.nice(priority_level)
-        p.cpu_affinity(list(range(psutil.cpu_count())))
-        
-        print(f"[Priority] {label} set to HIGH (Floating Affinity)")
-    except Exception as e:
-        print(f"[Priority] Warning: {e}")
 
 
 def set_is_visible(_is_visible):
