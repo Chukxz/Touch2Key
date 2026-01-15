@@ -5,6 +5,7 @@ import os
 import ctypes
 import tomlkit
 import re
+import psutil
 
 # Get location of this file: .../mapper_project/src/mapper_module
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -389,3 +390,13 @@ def rotate_resolution(x, y, rotation):
         return res_y, res_x
 
     return res_x, res_y
+
+def set_high_priority(pid, label, priority_level=psutil.HIGH_PRIORITY_CLASS):
+    try:
+        p = psutil.Process(pid)
+        p.nice(priority_level)
+        p.cpu_affinity(list(range(psutil.cpu_count())))
+        
+        print(f"[Priority] {label} set to HIGH (Floating Affinity)")
+    except Exception as e:
+        print(f"[Priority] Warning: {e}")
