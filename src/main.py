@@ -47,7 +47,9 @@ def process_touch_event(action, event):
     global mouse_mapper, key_mapper, wasd_mapper, is_visible
     
     with lock:
-        try: 
+        mapper_logic.event_count += 1 # Tick the counter
+
+        try:
             if event.is_mouse:
                 mouse_mapper.process_touch(action, event, is_visible)
            
