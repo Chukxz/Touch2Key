@@ -125,8 +125,8 @@ class JSON_Loader():
                 screen_width = metadata["width"]
                 screen_height = metadata["height"]
                 self.dpi = metadata["dpi"]
-                self.mouse_wheel_radius = ["mouse_wheel_radius"]
-                self.sprint_distance = ["sprint_distance"]
+                self.mouse_wheel_radius = metadata["mouse_wheel_radius"]
+                self.sprint_distance = metadata["sprint_distance"]
             except:
                 raise RuntimeError(f"Error loading json file")
 
