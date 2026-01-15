@@ -36,6 +36,7 @@ class TouchReader():
         self.json_height = self.height
         self.scale_x = 1
         self.scale_y = 1
+        self.matrix = (0, 0, 0, 0, 0, 0)
         
         init_time = 0
 
@@ -145,39 +146,36 @@ class TouchReader():
                     m = re.search(pat, result.stdout)
                     if m:
                         with self.lock: self.rotation = int(m.group(1)) % 4
+                        self.update_matrix()
                         break
             except: pass
             time.sleep(self.rotation_poll_interval)
+    
+    def update_matrix(self):
+        with self.lock:
+            # Base scaling
+            sx, sy = 1/self.scale_x, 1/self.scale_y
+            w, h = self.json_width, self.json_height
+            
+            if self.rotation == 0: # 0°
+                self.matrix = (sx, 0, 0, 0, sy, 0)
+            elif self.rotation == 1: # 90° CW
+                self.matrix = (0, sy, 0, -sx, 0, w)
+            elif self.rotation == 2: # 180°
+                self.matrix = (-sx, 0, w, 0, -sy, h)
+            elif self.rotation == 3: # 270° CW
+                self.matrix = (0, -sy, h, sx, 0, 0)            
 
     def rotate_norm_coordinates(self, x, y):
         if x is None or y is None:
             return x, y
-
-        logic_x = x / self.scale_x
-        logic_y = y / self.scale_y
-    
-        # Initialize result with current values as a fallback
-        res_x, res_y = logic_x, logic_y 
-
-        with self.config.config_lock:
-            w = self.json_width
-            h = self.json_height
-
-        with self.lock:
-            if self.rotation == 1:
-                self.side_limit = h // 2
-                res_x, res_y = logic_y, w - logic_x
-            elif self.rotation == 2:
-                self.side_limit = w // 2
-                res_x, res_y = w - logic_x, h - logic_y
-            elif self.rotation == 3:
-                self.side_limit = h // 2
-                res_x, res_y = h - logic_y, logic_x
-            else:
-                self.side_limit = w // 2
-                res_x, res_y = logic_x, logic_y           
-    
-        return res_x, res_y 
+            
+        a, b, c, d, e, f = self.matrix
+        # Standard affine transformation formula
+        res_x = a * x + b * y + c
+        res_y = d * x + e * y + f
+        
+        return res_x, res_y
 
 
     def ensure_slot(self, slot):
@@ -242,12 +240,11 @@ class TouchReader():
                 for line in self.process.stdout:                    
                     if not self.running: break
                     
-                    # self.get_latency()
+                    if "ABS_MT" not in line and "SYN_REPORT" not in line:
+                        continue
                     
-                    parts = line.strip().split()
-                    if len(parts) < 3: continue
-
-                    code, val_str = parts[1], parts[2]
+                    parts = line.split()
+                    code, val_str = parts[2], parts[3]
                     
                     if "ABS_MT_SLOT" == code:
                         current_slot = int(val_str, 16)
