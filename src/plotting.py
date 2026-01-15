@@ -478,6 +478,11 @@ class Plotter:
         file_path = os.path.join(JSONS_FOLDER, f"{user_name}.json")
         
         try:
+            if (not self.saved_mouse_wheel) and (not self.saved_sprint_distance):
+                print("Error: mouse wheel and sprint distance not configured.")
+                self.update_title(f"Error saving: {e}")
+                return
+
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(json_output, f, indent=4)
 
@@ -542,7 +547,7 @@ class Plotter:
                             self.shapes.pop(k)
                             break
                     self.saved_sprint_distance = True
-                self.sprint_distance = cy - self.mouse_wheel_cy
+                self.sprint_distance = min(0.0, cy - self.mouse_wheel_cy)
                 
             elif self.mode == RECT:
                 print(f"[!] Error: Sprint Button can only be assigned to '{CIRCLE}' not '{RECT} shapes.")
