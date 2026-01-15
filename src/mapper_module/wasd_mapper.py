@@ -19,8 +19,8 @@ class WASDMapper():
         self.current_keys = set() 
         self.center_x = 0.0
         self.center_y = 0.0
-        self.innerradius = 0.0
-        self.outerradius = 0.0
+        self.inner_radius = 0.0
+        self.outer_radius = 0.0
         
         # O(1) Lookup Table: Maps sector index (0-7) to physical key sets
         self.DIRECTION_LOOKUP = [
