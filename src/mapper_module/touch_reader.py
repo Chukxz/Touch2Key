@@ -154,11 +154,12 @@ class TouchReader():
             time.sleep(self.rotation_poll_interval)
     
     def update_matrix(self):
-        with self.lock:
+        with self.config.config_lock:
             # Base scaling
             sx, sy = 1/self.scale_x, 1/self.scale_y
             w, h = self.json_width, self.json_height
-            
+        
+         with self.lock:
             if self.rotation == 0: # 0°
                 self.matrix = (sx, 0, 0, 0, sy, 0)
             elif self.rotation == 1: # 90° CW
@@ -171,11 +172,12 @@ class TouchReader():
     def rotate_norm_coordinates(self, x, y):
         if x is None or y is None:
             return x, y
-            
-        a, b, c, d, e, f = self.matrix
-        # Standard affine transformation formula
-        res_x = a * x + b * y + c
-        res_y = d * x + e * y + f
+
+        with self.lock:
+            a, b, c, d, e, f = self.matrix
+            # Standard affine transformation formula
+            res_x = a * x + b * y + c
+            res_y = d * x + e * y + f
         
         return res_x, res_y
 
@@ -349,7 +351,7 @@ class TouchReader():
     def set_is_visible(self, _is_visible):
         with self.config.config_lock:
             self.is_visible = _is_visible
-            self.update_finger_identities()
+        self.update_finger_identities()
 
     def stop(self):
         self.running = False
