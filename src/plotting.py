@@ -557,8 +557,8 @@ class Plotter:
                         print(f"[!] ERROR: Sprint point must be OUTSIDE the joystick radius!")
                     return False, id
 
-                        self.sprint_distance = dy
-                        self.saved_sprint_distance = True
+                    self.sprint_distance = dy
+                    self.saved_sprint_distance = True
                 
             elif self.mode == RECT:
                 print(f"[!] Error: Sprint Button can only be assigned to '{CIRCLE}' not '{RECT} shapes.")
