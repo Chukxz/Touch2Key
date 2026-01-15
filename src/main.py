@@ -132,4 +132,5 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
+        interception_bridge.release_all()
         os._exit(0)
