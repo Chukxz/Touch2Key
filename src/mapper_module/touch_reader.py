@@ -139,7 +139,7 @@ class TouchReader():
                 print(f"[ERROR] Config update failed: {e}")
                 return
 
-            self.update_matrix()         
+        self.update_matrix()         
 
     def update_rotation(self):
         patterns = [r"mCurrentRotation=(\d+)", r"rotation=(\d+)", r"mCurrentOrientation=(\d+)", r"mUserRotation=(\d+)"]
