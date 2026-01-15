@@ -69,6 +69,8 @@ def process_touch_event(action, event):
                    
                 if event.is_wasd:
                     wasd_mapper.process_touch(action, event) 
+        except:
+            pass
         
     
 def main():
@@ -102,7 +104,7 @@ def main():
     touch_reader = TouchReader(config, mapper_event_dispatcher, rate_cap, latency)
     json_loader = JSON_Loader(config, FOREGROUND_WINDOW)
 
-    mapper_logic = Mapper(json_loader, touch_reader.res_dpi, interception_bridge)
+    mapper_logic = Mapper(json_loader, interception_bridge)
 
     mouse_mapper = MouseMapper(mapper_logic)
     key_mapper = KeyMapper(mapper_logic, KEY_DEBOUNCE)

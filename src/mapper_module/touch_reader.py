@@ -221,7 +221,7 @@ class TouchReader():
 
         while self.running:
             try:
-                with self.config.config_lock():
+                with self.config.config_lock:
                     self.configure_device()
             except RuntimeError as e:
                 print(f"Error: {e}. ADB Device disconnected. Retrying in 2s...")
@@ -322,6 +322,8 @@ class TouchReader():
                              is_wasd=(slot == self.wasd_slot),
                              )
                         self.touch_event_processor(action, touch_event)
+                    except:
+                        pass
                      
 
             if data['state'] == DOWN: 

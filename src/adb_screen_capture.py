@@ -6,9 +6,8 @@ from PIL import Image
 
 from mapper_module.utils import (
     IMAGES_FOLDER, TOML_PATH, get_adb_device,
-    get_screen_size, get_dpi, get_rotation
+    get_screen_size, get_dpi, get_rotation, update_toml
 )
-from mapper_module.default_toml_helper import create_default_toml 
 
 def capture_android_screen():
     """
@@ -61,22 +60,19 @@ def capture_android_screen():
     except subprocess.CalledProcessError as e:
         print(f"[ERROR] ADB failure: {e}")
         return
+    
+    try:
+        with Image.open(full_save_path) as img:
+        # PNG stores DPI as a tuple (horizontal, vertical)
+        # We re-save the image with the 'dpi' parameter
+            img.save(full_save_path, dpi=(dpi, dpi))
+            print(f"[INFO] DPI ({dpi}) embedded into PNG metadata.")
+
+    except Exception as e:
+        print(f"[WARNING] Could not embed DPI into image: {e}")
 
     try:
-        if not os.path.exists(TOML_PATH):
-            create_default_toml()
-
-        with open(TOML_PATH, "r", encoding="utf-8") as f:
-            doc = tomlkit.load(f)
-
-        if "system" not in doc: 
-            doc.add("system", tomlkit.table())
-
-        # Update TOML settings
-        doc["system"]["hud_image_path"] = os.path.normpath(full_save_path)
-
-        with open(TOML_PATH, "w", encoding="utf-8") as f:
-            tomlkit.dump(doc, f)
+        update_toml(image_path=full_save_path, strict=True)
 
         print(f"\n[SUCCESS]")
         print(f"File:   {filename}")
@@ -84,17 +80,7 @@ def capture_android_screen():
         print(f"Config: {TOML_PATH} updated.")
 
     except Exception as e:
-        print(f"[ERROR] Config update failed: {e}")
-
-    try:
-        with Image.open(full_save_path) as img:
-        # PNG stores DPI as a tuple (horizontal, vertical)
-        # We re-save the image with the 'dpi' parameter
-            img.save(full_save_path, dpi=(dpi, dpi))
-        print(f"[INFO] DPI ({dpi}) embedded into PNG metadata.")
-
-    except Exception as e:
-        print(f"[WARNING] Could not embed DPI into image: {e}")
+        print(f"[ERROR] Toml update failed: {e}")
 
 if __name__ == "__main__":
     capture_android_screen()

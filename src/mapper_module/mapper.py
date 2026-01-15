@@ -30,9 +30,9 @@ class Mapper():
     # EnumWindows callback type definition
     EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 
-    def __init__(self, json_loader, res_dpi, interception_bridge, window_title="Gameloop(64beta)"):
+    def __init__(self, json_loader, interception_bridge, window_title="Gameloop(64beta)"):
         set_dpi_awareness()
-        self.enumWindowsProc = EnumWindowsProc
+        self.enumWindowsProc = Mapper.EnumWindowsProc
 
         # Setup Dependencies
         self.json_loader = json_loader

@@ -37,7 +37,7 @@ class KeyMapper():
         
         temp_zones = []
         # Get raw data from the loader
-        raw_data = self.mapper.json_loader.json_data 
+        raw_data = self.mapper.json_loader.json_data
         
         for scancode, value in raw_data.items():
             # Filter out ignored functional codes

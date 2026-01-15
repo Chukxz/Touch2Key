@@ -6,11 +6,10 @@ import json
 import os
 import datetime
 from mapper_module.utils import (
-    CIRCLE, RECT, SCANCODES, DEF_DPI, IMAGES_FOLDER,
-    JSONS_FOLDER, TOML_PATH, MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE,
-    select_image_file, set_dpi_awareness, rotate_resolution
+    CIRCLE, RECT, SCANCODES, DEF_DPI, IMAGES_FOLDER, JSONS_FOLDER,
+    TOML_PATH, MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, select_image_file,
+    set_dpi_awareness, rotate_resolution, update_toml
 )
-from mapper_module.default_toml_helper import create_default_toml
 
 # --- Constants ---
 IDLE = "IDLE"
@@ -19,6 +18,7 @@ WAITING_FOR_KEY = "WAITING_FOR_KEY"
 DELETING = "DELETING"
 CONFIRM_EXIT = "CONFIRM_EXIT"
 NAMING = "NAMING"
+DEF_STR = "MODE: IDLE\nF4(Toggle Shapes Visibility) | F5(Change Image)\nF6(Circle) | F7(Rect) | F8(Cancel) | F9(List) | F10(Save)\nF11(Sprint Threshold) | F12(Mouse Wheel) | Delete(Delete) | Esc(Exit)"
 
 SPECIAL_MAP = {
     "escape": "ESC", "enter": "ENTER", "backspace": "BACKSPACE", "tab": "TAB",
@@ -37,10 +37,10 @@ SPECIAL_MAP = {
 
 class Plotter:
     def __init__(self, image_path=None):
-        # 1. DPI Awareness MUST be first to ensure coordinates match the screen
+        # DPI Awareness MUST be first to ensure coordinates match the screen
         set_dpi_awareness()
 
-        # 2. SMART PATH DETECTION
+        # SMART PATH DETECTION
         if image_path is None:
             if os.path.exists(TOML_PATH):
                 try:
@@ -63,43 +63,50 @@ class Plotter:
 
         self.image_path = image_path
 
-        # 3. GUI Configuration
+        #  GUI Configuration
         for key in plt.rcParams:
             if key.startswith('keymap.'):
                 plt.rcParams[key] = []
-
-        self.shapes = {}
-        self.count = 0
+        
+        # Initiate Parameters
         self.points = []          
-        self.drawn_artists = []   
+        self.drawn_artists = []
         self.mode = None          
         self.state = IDLE         
-        self.target_points = 0
         self.input_buffer = ""
-        self.saved_mouse_wheel = False
-        self.saved_sprint_distance = False
-        self.mouse_wheel_radius = 0.0
-        self.mouse_wheel_cy = 0.0
-        self.sprint_distance = 0.0
+        self.shapes_artists = {}
+        self.init_params_helper()
 
         try:
             img = Image.open(image_path)
         except Exception as e:
-            raise RuntimeError(f"Error loading image: {e}")    
-        self.width, self.height = img.size
+            raise RuntimeError(f"Error loading image: {e}")
         
-        image_name = os.path.basename(image_path)
-        _str = image_name.split(".")[0].split("_")[-1]
-        if _str.startswith("r"):
-            rot = int(_str[1:])
-            self.width, self.height = rotate_resolution(self.width, self.height, rot)
-            
-        self.dpi = img.info.get("dpi", DEF_DPI)
+        self.width, self.height = img.size        
+        image_name = os.path.basename(self.image_path)
+        try:
+            _str = image_name.split(".")[0].split("_")[-1]
+            if _str.startswith("r"):
+                rot = int(_str[1:])
+                self.width, self.height = rotate_resolution(self.width, self.height, rot)
+        except:
+            pass
+        self.dpi = int(round(img.info.get("dpi", DEF_DPI)[0]))
 
         self.fig, self.ax = plt.subplots()
         self.ax.imshow(img)
-        self.update_title("IDLE. F5 (Change Image) | F6(Circle) | F7(Rect) | F8(Remove) | F9(List) | F10(Save) | Esc(Exit).")
+        self.update_title(DEF_STR)
 
+        # Create the "Shadow" (Black, thicker)
+        self.cursor_h_bg = self.ax.axhline(0, color='black', linewidth=1.5, alpha=0.8, visible=False, zorder=10, animated=True)
+        self.cursor_v_bg = self.ax.axvline(0, color='black', linewidth=1.5, alpha=0.8, visible=False, zorder=10, animated=True)
+
+        # Create the "Core" (White, thinner)
+        self.cursor_h_fg = self.ax.axhline(0, color='white', linewidth=0.6, alpha=1.0, visible=False, zorder=11, animated=True)
+        self.cursor_v_fg = self.ax.axvline(0, color='white', linewidth=0.6, alpha=1.0, visible=False, zorder=11, animated=True)
+        self.bg_cache = None
+        
+        self.fig.canvas.mpl_connect("motion_notify_event", self.on_mouse_move)
         self.fig.canvas.mpl_connect("key_press_event", self.on_key_press)
         self.fig.canvas.mpl_connect("button_press_event", self.on_click)
 
@@ -108,6 +115,20 @@ class Plotter:
     
     # --- Visual & State Management ---
 
+    def init_params_helper(self):
+        self.shapes = {}
+        self.count = 0
+        self.target_points = 0
+        self.saved_mouse_wheel = False
+        self.saved_sprint_distance = False
+        self.mouse_wheel_radius = 0.0
+        self.mouse_wheel_cy = 0.0
+        self.sprint_distance = 0.0
+        self.show_overlays = True
+        for uid in self.shapes_artists:
+            self.shapes_artists[uid].remove()
+        self.shapes_artists = {}
+        
     def update_title(self, text):
         self.ax.set_title(text)
         self.fig.canvas.draw()
@@ -124,7 +145,7 @@ class Plotter:
         self.mode = None
         self.points = []
         self.input_buffer = ""
-        self.update_title("IDLE. F5 (Change Image) | F6(Circle) | F7(Rect) | F8(Remove) | F9(List) | F10(Save) | F11(Sprint Threshold) | F12(Mouse Wheel) | Delete(Delete) | Esc(Exit).")
+        self.update_title(DEF_STR)
 
     def start_mode(self, mode, num_points):
         self.reset_state() 
@@ -135,52 +156,75 @@ class Plotter:
 
     def change_image(self):
         new_path = select_image_file(IMAGES_FOLDER)
-        if new_path:
-            self.image_path = new_path
-        # Reload the image and refresh the plot
-        img = Image.open(new_path)
-        self.width, self.height = img.size
-
-        image_name = os.path.basename(self.image_path)
-        _str = image_name.split(".")[0].split("_")[-1]
-        if _str.startswith("r"):
-            rot = int(_str[1:])
-            self.width, self.height = rotate_resolution(self.width, self.height, rot)
+        if new_path:            
+            # Reload the image and refresh the plot
+            img = Image.open(new_path)
+            self.width, self.height = img.size        
+            image_name = os.path.basename(self.image_path)
+            try:
+                _str = image_name.split(".")[0].split("_")[-1]
+                if _str.startswith("r"):
+                    rot = int(_str[1:])
+                    self.width, self.height = rotate_resolution(self.width, self.height, rot)
+            except:
+                pass
+            self.dpi = int(round(img.info.get("dpi", DEF_DPI)[0]))
             
-        self.dpi = img.info.get("dpi", DEF_DPI)
-        self.ax.clear()
-        self.ax.imshow(img)
-        self.reset_state()
+            self.ax.clear()
+            self.ax.imshow(img)
+            self.reset_state()
+            self.image_path = new_path
+            self.init_params_helper()
+            print(f"Swapped HUD to: {os.path.basename(self.image_path)}")
 
-        # Update settings.toml
-        try:
-            if not os.path.exists(TOML_PATH):
-                create_default_toml()
-
-            with open(TOML_PATH, "r", encoding="utf-8") as f:
-                doc = tomlkit.load(f)
-
-            if "system" not in doc: doc.add("system", tomlkit.table())
-            if "joystick" not in doc: doc.add("joystick", tomlkit.table())
-
-            # Reset dynamic joystick values
-            doc["joystick"]["mouse_wheel_radius"] = 0.0
-            doc["joystick"]["sprint_distance"] = 0.0
-
-            self.saved_mouse_wheel = False
-            self.saved_sprint_distance = False
-
-            with open(TOML_PATH, "w", encoding="utf-8") as f:
-                tomlkit.dump(doc, f)
-
-        except Exception as e:
-            print(f"[ERROR] Failed to update config: {e}")
-
-    configure_config(self.width, self.height, self.dpi, new_path)
-    print(f"[System] Swapped HUD to: {os.path.basename(new_path)}")
+    def toggle_visibility(self):
+        self.show_overlays = not self.show_overlays
+        state_str = "VISIBLE" if self.show_overlays else "HIDDEN"
+        print(f"[*] Overlays are now {state_str}")
+        
+        for artist in self.shapes_artists.values():
+            artist.set_visible(self.show_overlays)
+        
+        self.fig.canvas.draw()
+        self.update_title(f"Overlays {state_str}. Press F4 to Toggle.")
 
 
     # --- Event Handlers ---
+
+    def on_mouse_move(self, event):
+        if self.state == COLLECTING and event.inaxes == self.ax:
+            # Round to integer for the "Snap to Pixel" feel
+            x, y = int(round(event.xdata)), int(round(event.ydata))
+
+            # Capture background if we don't have it yet
+            # Note: We do this only when the mouse is actually inside to save memory
+            if self.bg_cache is None:
+                self.bg_cache = self.fig.canvas.copy_from_bbox(self.ax.bbox)
+
+            # Restore the clean background (removes the crosshair from the previous frame)
+            self.fig.canvas.restore_region(self.bg_cache)
+
+            # Update and draw Horizontal lines (BG then FG for proper z-order layering)
+            for line in [self.cursor_h_bg, self.cursor_h_fg]:
+                line.set_visible(True)
+                line.set_ydata([y, y])
+                self.ax.draw_artist(line)
+            
+            # Update and draw Vertical lines (BG then FG for proper z-order layering)
+            for line in [self.cursor_v_bg, self.cursor_v_fg]:
+                line.set_visible(True)
+                line.set_xdata([x, x])
+                self.ax.draw_artist(line)
+
+            # Push these updates specifically to the axes area
+            self.fig.canvas.blit(self.ax.bbox)
+            
+        else:
+            # If mouse leaves the area or we stop collecting, hide lines and redraw once
+            if self.cursor_h_bg.get_visible():
+                for line in [self.cursor_h_bg, self.cursor_h_fg, self.cursor_v_bg, self.cursor_v_fg]:
+                    line.set_visible(False)
+                self.fig.canvas.draw_idle()
 
     def on_click(self, event):
         # 1. NEW: Handle Binding via Mouse Click
@@ -211,6 +255,7 @@ class Plotter:
         dot, = self.ax.plot(event.xdata, event.ydata, 'ro')
         self.drawn_artists.append(dot)
         self.fig.canvas.draw()
+        self.bg_cache = None
 
         remaining = self.target_points - len(self.points)
         if remaining > 0:
@@ -253,6 +298,8 @@ class Plotter:
             return
 
         if self.state == IDLE:
+            if event.key == 'f4':
+                self.toggle_visibility()
             if event.key == 'f5':
                 self.change_image()
             if event.key == 'f6':
@@ -293,6 +340,8 @@ class Plotter:
                     uid = int(self.input_buffer)
                     if uid in self.shapes:
                         del self.shapes[uid]
+                        if uid in self.shapes_artists:
+                            self.shapes_artists[uid].remove()
                         print(f"[+] Deleted ID {uid}")
                         
                         if self.saved_mouse_wheel and any(v['key_name'] == MOUSE_WHEEL_CODE for v in self.shapes.values()) == False:
@@ -338,10 +387,19 @@ class Plotter:
             cx, cy, r, bb = self.calculate_rect()
 
         if cx is not None:
-            saved = self.save_entry(interception_key, hex_code, cx, cy, r, bb)
+            saved, entry_id = self.save_entry(interception_key, hex_code, cx, cy, r, bb)
             if saved:
                 print(f"[+] Saved ID {self.count-1}: {self.mode} bound to key '{key_name}' with interception key: '{interception_key}'")
-        
+                if self.mode == CIRCLE and cx and cy and r:
+                    artist = plt.Circle((cx, cy), r, color='green', fill=False)
+                    self.ax.add_patch(artist)
+                    self.shapes_artists[entry_id] = artist
+                elif self.mode == RECT and bb:
+                    (x1, y1), (x2, y2) = bb
+                    artist = plt.Rectangle((x1, y1), x2-x1, y2-y1, color='green', fill=False, lw=2)
+                    self.ax.add_patch(artist)
+                    self.shapes_artists[entry_id] = artist
+                    
         self.reset_state()
 
     # --- Naming / Saving Logic ---
@@ -375,6 +433,8 @@ class Plotter:
     def export_data(self, user_name=None):
         if not user_name:
             user_name = datetime.datetime.now().strftime("map_%Y%m%d_%H%M%S")
+        else:
+            user_name += datetime.datetime.now().strftime("map_%Y%m%d_%H%M%S")
         
         os.makedirs(JSONS_FOLDER, exist_ok=True)
 
@@ -405,7 +465,13 @@ class Plotter:
             output.append(entry)
 
         json_output = {
-            "metadata": {"width": self.width, "height": self.height, "dpi": self.dpi},
+            "metadata": {
+                "width": self.width,
+                "height": self.height,
+                "dpi": self.dpi,
+                "mouse_wheel_radius": self.mouse_wheel_radius,
+                "sprint_distance:": self.sprint_distance
+                },
             "content": output
         }
 
@@ -418,38 +484,13 @@ class Plotter:
             msg = f"{JSONS_FOLDER}/{user_name}.json"
             print(f"[+] {msg}")
 
+            update_toml(self.width, self.height, self.dpi, self.image_path, file_path, self.mouse_wheel_radius, self.sprint_distance, True)
+
         except Exception as e:
             print(f"[!] Export Error: {e}")
             self.update_title(f"Error saving: {e}")
             return
             
-        try:
-            if not os.path.exists(TOML_PATH):
-                create_default_toml()
-                
-            # Load
-            with open(TOML_PATH, "r", encoding="utf-8") as f:
-                doc = tomlkit.load(f)
-
-            # Ensure structure exists
-            if "system" not in doc: doc.add("system", tomlkit.table())
-            if "key" not in doc: doc.add("key", tomlkit.table())
-
-            # Update paths
-            doc["system"]["hud_image_path"] = os.path.normpath(self.image_path)
-            doc["system"]["json_path"] = os.path.normpath(file_path)
-            doc['joystick']['mouse_wheel_radius'] = self.mouse_wheel_radius
-            doc['joystick']['sprint_distance'] = self.sprint_distance
-
-            # Save
-            with open(TOML_PATH, "w", encoding="utf-8") as f:
-                tomlkit.dump(doc, f)
-
-        except (KeyError, Exception) as e:
-            create_default_toml()
-            _str = f"Config corrupted. Resetting to defaults. Error: {e}"
-            raise RuntimeError(_str)
-                
         self.update_title(msg)
             
     # --- Helper Functions ---
@@ -484,14 +525,14 @@ class Plotter:
                 
             elif self.mode == RECT:
                 print(f"[!] Error: Mouse Wheel can only be assigned to '{CIRCLE}' not '{RECT} shapes.")
-                return saved
+                return saved, id
         
         elif interception_key == SPRINT_DISTANCE_CODE:
             if self.mode == CIRCLE:
                 if self.saved_sprint_distance:
                     if not self.saved_mouse_wheel:
                         print(f"[!] Mouse Wheel not assigned yet. Please assign it first.")
-                        return saved
+                        return saved, id
                     
                     print(f"[!] Sprint Threshold already assigned. Overwriting previous assignment.")
                     for k, v in self.shapes.items():
@@ -505,7 +546,7 @@ class Plotter:
                 
             elif self.mode == RECT:
                 print(f"[!] Error: Sprint Button can only be assigned to '{CIRCLE}' not '{RECT} shapes.")
-                return saved
+                return saved, id
         
         entry = {
             "key_name": interception_key,
@@ -513,12 +554,13 @@ class Plotter:
             "type": self.mode,
             "cx": cx, "cy": cy, "r": r, "bb": bb
         }
+        
         self.shapes[id] = entry
         if inc_count:
             self.count += 1
         
         saved = True
-        return saved
+        return saved, id
 
     def print_data(self):
         print("\n" + "="*45)
@@ -534,7 +576,9 @@ class Plotter:
         x2, y2 = self.points[1]
         x3, y3 = self.points[2]
         D = 2 * (x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2))
-        if D == 0: return None, None, None, None
+        if D == 0:
+            self.update_title("Error: Points are collinear. Try again.")
+            return None, None, None, None
         h = ((x1**2 + y1**2) * (y2 - y3) + (x2**2 + y2**2) * (y3 - y1) + (x3**2 + y3**2) * (y1 - y2)) / D
         k = ((x1**2 + y1**2) * (x3 - x2) + (x2**2 + y2**2) * (x1 - x3) + (x3**2 + y3**2) * (x2 - x1)) / D
         r = math.sqrt((x1 - h)**2 + (y1 - k)**2)

@@ -4,8 +4,8 @@ import time
 import keyboard
 import win32gui
 from .utils import (
-    MapperEvent, CIRCLE, RECT, RELOAD_DELAY,
-    MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE
+    MapperEvent, CIRCLE, RECT, 
+    RELOAD_DELAY, update_toml
     )
 
 from .default_toml_helper import create_default_toml
@@ -21,7 +21,6 @@ class JSON_Loader():
         self.last_loaded_json_timestamp = 0
         self.json_data = {}
         self.last_reload_time = 0
-        self.physical_dev_params = None
         
         # Load immediately
         self.load_json()
@@ -30,51 +29,8 @@ class JSON_Loader():
         print("[INFO] Press F5 to hot reload json data.")
         keyboard.add_hotkey('f5', self.reload)
 
-
-    def get_mouse_wheel(self, force=False):
-        joystick_config = self.config.get('joystick')
-        if not joystick_config:
-            create_default_toml()
-            raise RuntimeError("'joystick' section not found in configuration.")
-            
-        if not hasattr(self, 'mouse_wheel') or force:        
-            for v in self.json_data.values():
-                if v.get('name') == MOUSE_WHEEL_CODE:
-                    self.mouse_wheel = v
-                    return
-            
-            _str = f"Mouse Wheel zone ('{MOUSE_WHEEL_CODE}') not found in JSON layout."
-            raise RuntimeError(_str)
-
-    def get_mouse_wheel_radius(self):
-        self.get_mouse_wheel()
-        if not hasattr(self, 'width'):
-            self.process_json(self.last_loaded_json_path)
-
-        mouse_wheel_radius = self.mouse_wheel['r'] * self.width   
-        
-        with self.config.config_lock:
-            if 'joystick' in self.config.config_data:
-                self.config.config_data['joystick']['mouse_wheel_radius'] = mouse_wheel_radius                
-        
-        return mouse_wheel_radius   
-        
-    def get_sprint_distance(self):
-        self.get_mouse_wheel()
-        if not hasattr(self, 'height'):
-            self.process_json(self.last_loaded_json_path)
-        
-        for v in self.json_data.values():
-            if v.get('name') == SPRINT_DISTANCE_CODE:
-                sprint_distance = (v['cy'] - self.mouse_wheel['cy']) * self.height
-                
-                with self.config.config_lock:
-                    if 'joystick' in self.config.config_data:
-                        self.config.config_data['joystick']['sprint_distance'] = sprint_distance
-                return sprint_distance
-        
-        _str = f"Sprint Distance zone ('{SPRINT_DISTANCE_CODE}') not found in JSON layout."
-        raise RuntimeError(_str)
+    def get_mouse_wheel_info(self):
+        return self.mouse_wheel_radius, self.sprint_distance
 
     def load_json(self):
         system_config = self.config.get('system')
@@ -82,13 +38,13 @@ class JSON_Loader():
             create_default_toml()
             raise RuntimeError("JSON path not found or misconfigured (json_path).")
 
-        current_path = system_config['json_path']
+        self.current_path = system_config['json_path']
         
-        self.json_data = self.process_json(current_path)
+        self.json_data = self.process_json(self.current_path)
         
-        self.last_loaded_json_path = current_path
-        if os.path.exists(current_path):
-            self.last_loaded_json_timestamp = os.path.getmtime(current_path)
+        self.last_loaded_json_path = self.current_path
+        if os.path.exists(self.current_path):
+            self.last_loaded_json_timestamp = os.path.getmtime(self.current_path)
 
     def should_reload(self, old_path, new_path, last_timestamp):
         need_reload = False
@@ -132,14 +88,13 @@ class JSON_Loader():
         if need_reload:
             try:
                 print("[System] Parsing new JSON...")
-                new_data = self.process_json(current_path)
+                new_data = self.process_json(self.current_path)
                 
                 with self.config.config_lock:
                     print("[System] Applying new layout...")
                     self.json_data = new_data
-                    self.last_loaded_json_path = current_path
+                    self.last_loaded_json_path = self.current_path
                     self.last_loaded_json_timestamp = current_file_time
-                    self.get_mouse_wheel(force=True)                    
                 self.mapper_event_dispatcher.dispatch(MapperEvent(action="JSON"))
                 self.mapper_event_dispatcher.dispatch(MapperEvent(action="CONFIG"))
                     
@@ -150,18 +105,18 @@ class JSON_Loader():
         else:
             print("Hot reloading skipped as no file or file path changes were detected.")
         
-    def process_json(self, json_path):
+    def process_json(self, json_file_path):
         normalized_zones = {}
         
-        if not os.path.exists(file_path):
-            _str = f"Error: File '{file_path}' not found."
+        if not os.path.exists(json_file_path):
+            _str = f"Error: File '{json_file_path}' not found."
             raise RuntimeError(_str)
 
-        with open(file_path, mode='r', encoding='utf-8') as f:
+        with open(json_file_path, mode='r', encoding='utf-8') as f:
             try:
                 data = json.load(f)
             except json.JSONDecodeError as e:
-                _str = f"Invalid JSON syntax in '{file_path}': {e}"
+                _str = f"Invalid JSON syntax in '{json_file_path}': {e}"
                 raise RuntimeError(_str)
 
             try:
@@ -170,6 +125,8 @@ class JSON_Loader():
                 screen_width = metadata["width"]
                 screen_height = metadata["height"]
                 self.dpi = metadata["dpi"]
+                self.mouse_wheel_radius = ["mouse_wheel_radius"]
+                self.sprint_distance = ["sprint_distance"]
             except:
                 raise RuntimeError(f"Error loading json file")
 
@@ -212,5 +169,6 @@ class JSON_Loader():
                 except (ValueError, KeyError) as e:
                     print(f"Skipping invalid item: {scancode}. Error: {e}")
                     continue
-
+        
+        update_toml(w=self.width, h=self.height, dpi=self.dpi, mouse_wheel_radius=self.mouse_wheel_radius, sprint_distance=self.sprint_distance, strict=True)
         return normalized_zones

@@ -5,7 +5,6 @@ import os
 import ctypes
 import tomlkit
 import re
-from .default_toml_helper import create_default_toml
 
 # Get location of this file: .../mapper_project/src/mapper_module
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -20,6 +19,8 @@ PROJECT_ROOT = os.path.dirname(SRC_DIR)
 TOML_PATH = os.path.join(PROJECT_ROOT, "settings.toml")
 IMAGES_FOLDER = os.path.join(SRC_DIR, "resources", "images")
 JSONS_FOLDER = os.path.join(SRC_DIR, "resources", "jsons")
+
+from .default_toml_helper import create_default_toml
 
 # --- Constants ---   
 
@@ -51,6 +52,7 @@ KEY_DEBOUNCE = 0.01
 DEFAULT_LATENCY_THRESHOLD = 0.05
 
 DOUBLE_TAP_DELAY = 0.25
+
 
 SCANCODES = {
     "ESC": 0x01,
@@ -324,7 +326,7 @@ def is_in_circle(px, py, cx, cy, r):
 def is_in_rect(px, py, left, right, top, bottom):
     return (left <= px <= right) and (top <= py <= bottom)
 
-def configure_config(w, h, dpi, image_path):
+def update_toml(w=None, h=None, dpi=None, image_path=None, json_path=None, mouse_wheel_radius=None, sprint_distance=None, strict=False):
     try:
         if not os.path.exists(TOML_PATH):
             create_default_toml()
@@ -332,18 +334,33 @@ def configure_config(w, h, dpi, image_path):
         with open(TOML_PATH, "r", encoding="utf-8") as f:
             doc = tomlkit.load(f)
 
-        if "system" not in doc: 
-            doc.add("system", tomlkit.table())
-
-        # Update TOML settings
-        doc["system"]["json_dev_res"] = [w, h]
-        doc["system"]["json_dev_dpi"] = dpi
-        doc["system"]["hud_image_path"] = os.path.normpath(image_path)
+        if "system" not in doc: doc.add("system", tomlkit.table())
+        if "joystick" not in doc: doc.add("joystick", tomlkit.table())
+        
+        if mouse_wheel_radius:
+            doc["joystick"]["mouse_wheel_radius"] = mouse_wheel_radius
+        if sprint_distance:
+            doc["joystick"]["sprint_distance"] = sprint_distance 
+                       
+        if w and h:
+            doc["system"]["json_dev_res"] = [w, h]            
+        if dpi:
+            doc["system"]["json_dev_dpi"] = dpi        
+        if image_path is not None:
+            doc["system"]["hud_image_path"] = os.path.normpath(image_path)            
+        if json_path is not None:
+            doc["system"]["json_path"] = os.path.normpath(json_path)
 
         with open(TOML_PATH, "w", encoding="utf-8") as f:
             tomlkit.dump(doc, f)
-    except Exception:
-        raise RuntimeError()
+            
+    except Exception as e:
+        create_default_toml()
+        print("Resetting to defaults...")
+        if strict:
+            raise e
+        else:
+            print(f"[ERROR] Could not update Toml: {e}")
 
 def get_rotation(device):
     rotation = 0

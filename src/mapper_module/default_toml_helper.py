@@ -10,12 +10,10 @@ def create_default_toml():
     
     # [system] - Core paths and hardware baseline
     system = tomlkit.table()
-    system.add("device_nickname", "Default_Device")
     system.add("hud_image_path", "")
     system.add("json_path", "")
     system.add("json_dev_res", [2400, 1080]) # Default fallback resolution
     system.add("json_dev_dpi", 160)
-    system.add("json_dev_name", "Device")
     doc.add("system", system)
 
     # [mouse] - Sensitivity settings
