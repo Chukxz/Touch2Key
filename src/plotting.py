@@ -546,8 +546,19 @@ class Plotter:
                             inc_count = False
                             self.shapes.pop(k)
                             break
-                    self.saved_sprint_distance = True
-                self.sprint_distance = min(0.0, cy - self.mouse_wheel_cy)
+                            
+                        # Use Pythagorean theorem for the true radius/distance
+                        dx = cx - self.mouse_wheel_cx
+                        dy = cy - self.mouse_wheel_cy
+                        actual_dist = (dx**2 + dy**2)**0.5
+
+                        # STRICT CHECK: Ensure Sprint is actually outside the Joystick
+                        if actual_dist <= self.mouse_wheel_radius:
+                        print(f"[!] ERROR: Sprint point must be OUTSIDE the joystick radius!")
+                        return False, id
+
+                        self.sprint_distance = dy
+                        self.saved_sprint_distance = True
                 
             elif self.mode == RECT:
                 print(f"[!] Error: Sprint Button can only be assigned to '{CIRCLE}' not '{RECT} shapes.")
