@@ -31,7 +31,7 @@ class Mapper():
     # EnumWindows callback type definition
     EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 
-    def __init__(self, json_loader, interception_bridge, window_title="Gameloop(64beta)"):
+    def __init__(self, json_loader, interception_bridge, pps, window_title="Gameloop(64beta)"):
         set_dpi_awareness()
         self.enumWindowsProc = Mapper.EnumWindowsProc
 
@@ -40,6 +40,10 @@ class Mapper():
         self.config = self.json_loader.config
         self.mapper_event_dispatcher = self.json_loader.mapper_event_dispatcher
         self.interception_bridge = interception_bridge
+
+        self.pps = pps
+        self.event_count = 0
+        self.last_pulse_time = time.perf_counter()
         
         # Window Tracking Setup
         self.screen_w = ctypes.windll.user32.GetSystemMetrics(0)
@@ -123,6 +127,8 @@ class Mapper():
         pt.x = 0
         pt.y = 0
         ctypes.windll.user32.ClientToScreen(hwnd, ctypes.byref(pt))
+
+        self.pulse_status()
         
         # Restart failed child processes
         self.maintain_bridge_health()
@@ -292,4 +298,22 @@ class Mapper():
                     bridge.m_queue.get_nowait()
                 except: 
                     break
+
+    def pulse_status(self):
+        now = time.perf_counter()
+        elapsed = now - self.last_pulse_time
+    
+        if elapsed >= 5.0: # Every 5 seconds
+            pps = self.event_count / elapsed # Packets Per Second
+        
+            # Check if we are lagging
+        status = "HEALTHY" if pps > 60 else "LOW RATE"
+            if pps == 0: status = "IDLE/DISCONNECTED"
+
+            print(f"[Monitor] Rate: {pps:.1f} Hz | Status: {status} | WASD Block: {self.wasd_block}")
+        
+            # Reset
+            self.event_count = 0
+            self.last_pulse_time = now
+
 
