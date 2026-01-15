@@ -244,7 +244,7 @@ class TouchReader():
                         continue
                     
                     parts = line.split()
-                    code, val_str = parts[2], parts[3]
+                    code, val_str = parts[-2], parts[-1]
                     
                     if "ABS_MT_SLOT" == code:
                         current_slot = int(val_str, 16)
