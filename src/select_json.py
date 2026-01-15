@@ -39,7 +39,7 @@ def select_json_profile():
             print(f"Invalid JSON syntax in '{file_path}': {e}")
             return
 
-    update_toml(image_path="", json_path=file_path)
+    update_toml(image_path="", json_path=file_path, strict=True)
 
 if __name__ == "__main__":
     select_json_profile()
