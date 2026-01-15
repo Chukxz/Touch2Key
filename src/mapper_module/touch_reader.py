@@ -219,8 +219,7 @@ class TouchReader():
         self.update_matrix() # Initialize matrix with starting specs
         
         print(f"[INFO] Auto-Scaling Active: X={self.scale_x:.2f}, Y={self.scale_y:.2f}")
-
-            
+          
 
     def get_touches(self):
         current_slot = 0
