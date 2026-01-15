@@ -13,6 +13,7 @@ class TouchReader():
         self.mapper_event_dispatcher = dispatcher
            
         self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
+        self.mapper_event_dispatcher.register_callback("ON_MENU_MODE_TOGGLE", set_is_visible)
         # self.mapper_event_dispatcher.register_callback("ON_NETWORK_LAG", self.log_lag)
 
         # State Tracking
@@ -23,6 +24,7 @@ class TouchReader():
         self.rotation_poll_interval = 0.5 
         self.lock = threading.Lock()
         self.running = True
+        self.is_visible = True
 
         # Identity tracking
         self.side_limit = 0
@@ -62,9 +64,14 @@ class TouchReader():
 
     def update_finger_identities(self):
         """
-        Implements 'Upside' logic: Identify the oldest finger on each side
-        to assign as the dedicated Mouse or WASD finger.
+        If the cursor is visible use slot 0 as the Mouse finger and clear the WASD finger else identify the oldest finger on each side to assign as the dedicated Mouse or WASD finger.
         """
+        with self.config.config_lock:
+            if self.is_visible:
+                self.mouse_slot = 0
+                self.wasd_slot = None
+                return
+
         eligible_mouse = []
         eligible_wasd = []
 
@@ -153,7 +160,7 @@ class TouchReader():
         res_x, res_y = logic_x, logic_y 
 
         # Attempt to acquire the config lock
-        if self.config.config_lock.acquire(blocking=False):
+        with self.config.config_lock:
             try:
                 with self.lock:
                     if self.rotation == 1:
@@ -168,10 +175,8 @@ class TouchReader():
                     else:
                         self.side_limit = self.json_width // 2
                         res_x, res_y = logic_x, logic_y
-            finally:
-                self.config.config_lock.release()
+                
     
-        # Always returns a tuple, even if the lock was busy
         return res_x, res_y 
 
 
@@ -341,6 +346,10 @@ class TouchReader():
                 # Force kill if it hangs
                 if self.process:
                     self.process.kill()
+
+    def set_is_visible(self, _is_visible):
+        with self.config.config_lock:
+            self.is_visible = _is_visible
 
     def stop(self):
         self.running = False
