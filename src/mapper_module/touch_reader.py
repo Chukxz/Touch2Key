@@ -293,15 +293,15 @@ class TouchReader():
                         
             except Exception as e:
                 print(f"[Error] ADB Stream interrupted: {e}")
-                with self.lock:
-                    for slot in self.slots:
-                        self.reset_slot(slot) # Clear all touches on disconnect
+                self.handle_sync(True)
+                self.mouse_slot = None
+                self.wasd_slot = None
                         
             if self.running:
                 self.stop_process()
                 time.sleep(1.0)
 
-    def handle_sync(self):
+    def handle_sync(self, lift_up=False):
         now = time.perf_counter()
         # Grab a local snapshot of the matrix once per sync
         with self.lock:
@@ -313,6 +313,7 @@ class TouchReader():
             self.update_finger_identities()
                 
         for slot, data in list(self.slots.items()):
+            if lift_up: data['state'] = 'UP'
             if data['state'] == 'IDLE': continue
 
             # Rate Limit for movement (PRESSED state) only
