@@ -61,8 +61,8 @@ class WASDMapper():
     def updateMouseWheel(self):
         with self.config.config_lock:
             print(f"[Info] WASDMapper updating mousewheel...")
-            self.innerradius, d_radius = self.json_loader.get_mouse_wheel_info()
-            self.outer_radius = self.innerradius + d_radius
+            self.innerradius, dradius = self.json_loader.get_mouse_wheel_info()
+            self.outerradius = self.innerradius + dradius
     
     def on_wasd_block(self):
         if self.mapper.wasd_block > 0:
