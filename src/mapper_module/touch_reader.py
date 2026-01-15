@@ -4,7 +4,7 @@ import subprocess
 import re
 from .utils import (
     TouchEvent, MapperEvent, get_adb_device, is_device_online, DEF_DPI,
-    get_screen_size, get_dpi, DOWN, UP, PRESSED
+    get_screen_size, get_dpi, DOWN, UP, PRESSED, IDLE
     )
 
 class TouchReader():
@@ -187,7 +187,7 @@ class TouchReader():
     def reset_slot(self, slot):
         self.slots[slot] = {
             'x': None, 'y': None, 'start_x': None, 'start_y': None, 
-            'tid': -1, 'state': 'IDLE', 'timestamp': 0
+            'tid': -1, 'state': IDLE, 'timestamp': 0
         }
 
     def parse_hex_signed(self, value_hex):
@@ -306,8 +306,8 @@ class TouchReader():
             self.update_finger_identities()
                 
         for slot, data in list(self.slots.items()):
-            if lift_up: data['state'] = 'UP'
-            if data['state'] == 'IDLE': continue
+            if lift_up: data['state'] = UP
+            if data['state'] == IDLE: continue
 
             # Rate Limit for movement (PRESSED state) only
             if data['state'] == PRESSED:
