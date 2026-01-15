@@ -349,6 +349,7 @@ class TouchReader():
     def set_is_visible(self, _is_visible):
         with self.config.config_lock:
             self.is_visible = _is_visible
+            self.update_finger_identities()
 
     def stop(self):
         self.running = False
