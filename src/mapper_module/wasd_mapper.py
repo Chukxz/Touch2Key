@@ -61,8 +61,8 @@ class WASDMapper():
     def updateMouseWheel(self):
         with self.config.config_lock:
             print(f"[Info] WASDMapper updating mousewheel...")
-            self.innerradius, dradius = self.json_loader.get_mouse_wheel_info()
-            self.outerradius = self.innerradius + dradius
+            self.inner_radius, d_radius = self.json_loader.get_mouse_wheel_info()
+            self.outer_radius = self.inner_radius + d_radius
     
     def on_wasd_block(self):
         if self.mapper.wasd_block > 0:
@@ -84,21 +84,22 @@ class WASDMapper():
         dist_sq = vx*vx + vy*vy
         
         # Optimization: Deadzone check using squared distance avoids math.sqrt()
-        dz_px = self.innerradius * self.DEADZONE
+        dz_px = self.inner_radius * self.DEADZONE
         if dist_sq < (dz_px * dz_px):
             self.release_all()
             return
-
-        dist = dist_sq**0.5
-
+        
         # Leash Logic (Floating Joystick center follow)
-        if dist > self.outerradius and self.outerradius > 0:
-            scale = self.outerradius / dist
+        outer_sq = self.outer_radius * self.outer_radius
+      
+        if dist_sq > outer_sq and outer_sq > 0:
+           dist = dist_sq**0.5 # Only calculate sqrt if we are actually leashing
+            scale = self.outer_radius / dist
             self.center_x = touch_event.x - (vx * scale)
             self.center_y = touch_event.y - (vy * scale)
             vx = touch_event.x - self.center_x
             vy = touch_event.y - self.center_y
-            # dist is now effectively self.outerradius
+            # dist is now effectively self.outer_radius
 
         # FAST ANGLE TO SECTOR INDEX
         # atan2 gives -pi to pi; we shift to 0 to 2pi and offset by pi/8 (22.5°)
