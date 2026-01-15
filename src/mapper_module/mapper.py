@@ -5,7 +5,8 @@ import threading
 import win32gui
 from .utils import (
     DEF_DPI, WINDOW_FIND_DELAY,
-    MapperEvent, set_dpi_awareness
+    MapperEvent, set_dpi_awareness,
+    set_high_priority
     )
 
 MAX_CLASS_NAME = 256
@@ -256,3 +257,33 @@ class Mapper():
 
     def px_to_dp(self, px):
         return px * (DEF_DPI / self.dpi)
+
+    def maintain_bridge_health(self):
+        """
+        Checks if workers are alive; restarts and re-prioritizes if dead.
+        """
+        bridge = self.interception_bridge
+    
+        # 1. Check Keyboard Worker
+        if not bridge.k_proc.is_alive():
+            print(f"\n[CRITICAL] {datetime.now().strftime('%H:%M:%S')} - Keyboard Worker Died!")
+            bridge.k_proc = multiprocessing.Process(
+target=keyboard_worker, args=(bridge.k_queue,), daemon=True
+)
+            bridge.k_proc.start()
+            # Re-apply High Priority to the new PID
+            set_high_priority(bridge.k_proc.pid, "RE-REVived Keyboard")
+            # Safety: Clear the queue to prevent a backlog of old 'stuck' keys firing at once
+            while not bridge.k_queue.empty():
+                try: bridge.k_queue.get_nowait()
+                except: break
+
+        # 2. Check Mouse Worker
+        if not bridge.m_proc.is_alive():
+            print(f"\n[CRITICAL] {datetime.now().strftime('%H:%M:%S')} - Mouse Worker Died!")
+            bridge.m_proc = multiprocessing.Process(
+target=mouse_worker, args=(bridge.m_queue,), daemon=True
+)
+            bridge.m_proc.start()
+            set_high_priority(bridge.m_proc.pid, "RE-REVived Mouse")
+
