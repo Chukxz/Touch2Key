@@ -4,7 +4,8 @@ import psutil
 import win32gui
 import threading
 import time
-from mapper_module.utils import DEFAULT_ADB_RATE_CAP, KEY_DEBOUNCE, DEFAULT_LATENCY_THRESHOLD, UP
+from mapper_module.utils import DEFAULT_ADB_RATE_CAP, KEY_DEBOUNCE, DEFAULT_LATENCY_THRESHOLD, UP, set_high_priority
+
 from mapper_module import (
     MapperEventDispatcher, 
     AppConfig, 
@@ -15,7 +16,6 @@ from mapper_module import (
     MouseMapper, 
     KeyMapper, 
     WASDMapper,
-    set_high_priority
 )
 
 FOREGROUND_WINDOW = win32gui.GetForegroundWindow()
