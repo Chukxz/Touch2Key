@@ -8,7 +8,7 @@ from .utils import (
     )
 
 class TouchReader():
-    def __init__(self, config, dispatcher, rate_cap, latency):
+    def __init__(self, config, dispatcher, rate_cap):
         self.config = config
         self.mapper_event_dispatcher = dispatcher
            
@@ -44,17 +44,10 @@ class TouchReader():
         for _ in range(self.max_slots):
             self.last_dispatch_times.append(init_time)
         
-        # --- LATENCY MONITORING ---
-        self.packet_time_acc = 0.0
-        self.packet_time_n = 0
-        self.last_packet_time = init_time
-        self.latency_threshold = latency
-        
         self.touch_event_processor = None
         
         self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
         self.mapper_event_dispatcher.register_callback("ON_MENU_MODE_TOGGLE", self.set_is_visible)
-        # self.mapper_event_dispatcher.register_callback("ON_NETWORK_LAG", self.log_lag)
 
         # --- SELF STARTING THREADS ---
         print(f"[INFO] Reading pressed touches at {self.adb_rate_cap}Hz Cap.")
@@ -366,24 +359,6 @@ class TouchReader():
         self.running = False
         self.stop_process()
 
-    def get_latency(self):
-        current_time = time.perf_counter()
-        time_since_last = current_time - self.last_packet_time                                                            
-        self.packet_time_n += 1
-        self.packet_time_acc += time_since_last
-        self.last_packet_time = current_time
-        
-        if self.packet_time_acc >= 1.0:
-            avg_t = self.packet_time_acc / self.packet_time_n
-            if avg_t > self.latency_threshold:
-                self.mapper_event_dispatcher.dispatch(MapperEvent(action="NETWORK", pac_n=self.packet_time_n, pac_t=avg_t))
-                
-            self.packet_time_acc = 0.0
-            self.packet_time_n = 0
-
-    def log_lag(self, pac_n, pac_t):
-        print(f"[Network] Jitter detected, {pac_n} packets captured in approx. 1s with an average latency of {pac_t * 1000:.2f}ms")
-    
     
     def bind_touch_event(self, touch_event_processor):
         self.touch_event_processor = touch_event_processor
