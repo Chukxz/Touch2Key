@@ -112,6 +112,7 @@ class MouseMapper():
         self.prev_y = None
         self.acc_x = 0.0
         self.acc_y = 0.0
+        self.double_tap = False
         self.interception_bridge.left_click_up()
         self.interception_bridge.right_click_up()
 
