@@ -29,7 +29,7 @@ def select_json_profile():
     root.destroy()
         
     if not os.path.exists(file_path):
-        print(_str = f"Error: File '{file_path}' not found.")
+        print(f"Error: File '{file_path}' not found.")
         return
 
     with open(file_path, mode='r', encoding='utf-8') as f:
