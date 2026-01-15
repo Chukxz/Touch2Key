@@ -167,17 +167,20 @@ class TouchReader():
             elif self.rotation == 2: # 180°
                 self.matrix = (-sx, 0, w, 0, -sy, h)
             elif self.rotation == 3: # 270° CW
-                self.matrix = (0, -sy, h, sx, 0, 0)            
+                self.matrix = (0, -sy, h, sx, 0, 0)
 
     def rotate_norm_coordinates(self, x, y):
+        with self.lock:
+            return self.rotate_norm_coordinates_local(x, y, self.matrix)    
+
+    def rotate_norm_coordinates_local(self, x, y, matrix):
         if x is None or y is None:
             return x, y
-
-        with self.lock:
-            a, b, c, d, e, f = self.matrix
-            # Standard affine transformation formula
-            res_x = a * x + b * y + c
-            res_y = d * x + e * y + f
+        
+        a, b, c, d, e, f = matrix
+        # Standard affine transformation formula
+        res_x = a * x + b * y + c
+        res_y = d * x + e * y + f
         
         return res_x, res_y
 
@@ -298,7 +301,10 @@ class TouchReader():
 
     def handle_sync(self):
         now = time.perf_counter()
-        
+        # Grab a local snapshot of the matrix once per sync
+        with self.lock:
+            matrix_snapshot = self.matrix
+
         # Only update identities if a slot state changed from DOWN or UP
         needs_identity_update = any(s['state'] in [DOWN, UP] for s in self.slots.values())
         if needs_identity_update:
@@ -313,7 +319,7 @@ class TouchReader():
                     continue
                 self.last_dispatch_times[slot] = now
             
-            rx, ry = self.rotate_norm_coordinates(data['x'], data['y'])
+            rx, ry = self.rotate_norm_coordinates_local(data['x'], data['y'], matrix_snapshot)
 
             if self.touch_event_processor:
                 with self.config.config_lock:
