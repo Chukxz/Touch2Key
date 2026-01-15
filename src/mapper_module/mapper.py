@@ -286,6 +286,7 @@ class Mapper():
             bridge.m_proc = multiprocessing.Process(target=mouse_worker, args=(bridge.m_queue,), daemon=True)
             bridge.m_proc.start()
             set_high_priority(bridge.m_proc.pid, "RE-REVived Mouse")
+            # Safety: Clear the queue to prevent a backlog of old 'stuck' mouse movements firing at once
             while not bridge.m_queue.empty():
                 try: 
                     bridge.m_queue.get_nowait()
