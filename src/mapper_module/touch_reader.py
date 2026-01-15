@@ -12,9 +12,6 @@ class TouchReader():
         self.config = config
         self.mapper_event_dispatcher = dispatcher
            
-        self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
-        self.mapper_event_dispatcher.register_callback("ON_MENU_MODE_TOGGLE", self.set_is_visible)
-        # self.mapper_event_dispatcher.register_callback("ON_NETWORK_LAG", self.log_lag)
 
         # State Tracking
         self.slots = {}
@@ -54,6 +51,10 @@ class TouchReader():
         self.latency_threshold = latency
         
         self.touch_event_processor = None
+        
+        self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
+        self.mapper_event_dispatcher.register_callback("ON_MENU_MODE_TOGGLE", self.set_is_visible)
+        # self.mapper_event_dispatcher.register_callback("ON_NETWORK_LAG", self.log_lag)
 
         # --- SELF STARTING THREADS ---
         print(f"[INFO] Reading pressed touches at {self.adb_rate_cap}Hz Cap.")
@@ -131,6 +132,7 @@ class TouchReader():
                 self.json_width, self.json_height = json_res
                 self.scale_x = self.width / self.json_width
                 self.scale_y = self.height / self.json_height
+                self.update_matrix()
         
                 print(f"[INFO] Auto-Scaling Active: X={self.scale_x:.2f}, Y={self.scale_y:.2f}")
 
