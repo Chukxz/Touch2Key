@@ -51,9 +51,8 @@ class MouseMapper():
         if is_visible:
             self.double_tap = False
             now = time.monotonic()
-            if not self.double_tap:
-                if now - self.last_touch < DOUBLE_TAP_DELAY:
-                    self.double_tap = True
+            if now - self.last_touch < DOUBLE_TAP_DELAY:
+            self.double_tap = True
             
             _x, _y = self.mapper.device_to_game_abs(self.prev_x, self.prev_y)
             self.interception_bridge.mouse_move_abs(_x, _y)
