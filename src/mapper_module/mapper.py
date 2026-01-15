@@ -124,7 +124,9 @@ class Mapper():
         pt.y = 0
         ctypes.windll.user32.ClientToScreen(hwnd, ctypes.byref(pt))
         
-
+        # Restart failed child processes
+        self.maintain_bridge_health()
+        
         # Check Cursor Visibility
         try:
             flags, hcursor, pos = win32gui.GetCursorInfo()
@@ -267,9 +269,7 @@ class Mapper():
         # 1. Check Keyboard Worker
         if not bridge.k_proc.is_alive():
             print(f"\n[CRITICAL] {datetime.now().strftime('%H:%M:%S')} - Keyboard Worker Died!")
-            bridge.k_proc = multiprocessing.Process(
-target=keyboard_worker, args=(bridge.k_queue,), daemon=True
-)
+            bridge.k_proc = multiprocessing.Process(target=keyboard_worker, args=(bridge.k_queue,), daemon=True)
             bridge.k_proc.start()
             # Re-apply High Priority to the new PID
             set_high_priority(bridge.k_proc.pid, "RE-REVived Keyboard")
@@ -281,9 +281,7 @@ target=keyboard_worker, args=(bridge.k_queue,), daemon=True
         # 2. Check Mouse Worker
         if not bridge.m_proc.is_alive():
             print(f"\n[CRITICAL] {datetime.now().strftime('%H:%M:%S')} - Mouse Worker Died!")
-            bridge.m_proc = multiprocessing.Process(
-target=mouse_worker, args=(bridge.m_queue,), daemon=True
-)
+            bridge.m_proc = multiprocessing.Process(target=mouse_worker, args=(bridge.m_queue,), daemon=True)
             bridge.m_proc.start()
             set_high_priority(bridge.m_proc.pid, "RE-REVived Mouse")
 
