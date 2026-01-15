@@ -13,7 +13,7 @@ class TouchReader():
         self.mapper_event_dispatcher = dispatcher
            
         self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
-        self.mapper_event_dispatcher.register_callback("ON_MENU_MODE_TOGGLE", set_is_visible)
+        self.mapper_event_dispatcher.register_callback("ON_MENU_MODE_TOGGLE", self.set_is_visible)
         # self.mapper_event_dispatcher.register_callback("ON_NETWORK_LAG", self.log_lag)
 
         # State Tracking
