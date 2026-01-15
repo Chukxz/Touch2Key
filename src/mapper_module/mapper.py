@@ -275,8 +275,10 @@ class Mapper():
             set_high_priority(bridge.k_proc.pid, "RE-REVived Keyboard")
             # Safety: Clear the queue to prevent a backlog of old 'stuck' keys firing at once
             while not bridge.k_queue.empty():
-                try: bridge.k_queue.get_nowait()
-                except: break
+                try: 
+                    bridge.k_queue.get_nowait()
+                except: 
+                    break
 
         # 2. Check Mouse Worker
         if not bridge.m_proc.is_alive():
@@ -284,4 +286,9 @@ class Mapper():
             bridge.m_proc = multiprocessing.Process(target=mouse_worker, args=(bridge.m_queue,), daemon=True)
             bridge.m_proc.start()
             set_high_priority(bridge.m_proc.pid, "RE-REVived Mouse")
+            while not bridge.m_queue.empty():
+                try: 
+                    bridge.m_queue.get_nowait()
+                except: 
+                    break
 
