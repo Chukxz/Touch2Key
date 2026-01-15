@@ -123,7 +123,7 @@ class TouchReader():
         return 10
 
     def update_config(self):
-        with self.config.config_lock():
+        with self.config.config_lock:
             try:
                 json_res = self.config.get('system', {}).get('json_dev_res', [self.width, self.height])
 
