@@ -49,9 +49,7 @@ DEFAULT_ADB_RATE_CAP = 250.0
 # Ignores key flickers faster than 10ms
 KEY_DEBOUNCE = 0.01
 
-# Default ADB latency threshold
-DEFAULT_LATENCY_THRESHOLD = 0.05
-
+PPS = 60
 DOUBLE_TAP_DELAY = 0.25
 
 
@@ -195,15 +193,12 @@ class TouchEvent:
         return f"Slot: {self.slot}, ID: {self.id}, X: {self.x}, Y: {self.y}, SX: {self.sx}, SY: {self.sy}, isMouse: {self.is_mouse}, isWASD: {self.is_wasd}"
 
 class MapperEvent:
-    def __init__(self, action, pac_t = None, pac_n = None, is_visible=True):
-        self.action = action # UP, DOWN, PRESSED, CONFIG, JSON, NETWORK
-        self.pac_t = pac_t
-        self.pac_n = pac_n
+    def __init__(self, action, is_visible=True):
+        self.action = action # CONFIG, JSON, WASD_BLOCK, MENU_MODE_TOGGLE
         self.is_visible = is_visible
     
     def show(self):
-        _ = self.touch.log() if self.touch is not None else ""
-        return f"Action: {self.action}\n Touch: {_}\n Packets (N: {self.pac_n}, Avg Time(1s dur): {self.pac_t})"
+        return f"Action: {self.action}\n Cursor Visible: {self.is_visible})"
         
 class MapperEventDispatcher:
     def __init__(self):    
@@ -212,7 +207,6 @@ class MapperEventDispatcher:
             "ON_CONFIG_RELOAD":     [],
             "ON_JSON_RELOAD":       [],
             "ON_WASD_BLOCK":        [],
-            "ON_NETWORK_LAG":       [],
             "ON_MENU_MODE_TOGGLE":  [],
         }
         
@@ -221,7 +215,6 @@ class MapperEventDispatcher:
             "CONFIG":           "ON_CONFIG_RELOAD",
             "JSON":             "ON_JSON_RELOAD",
             "WASD":             "ON_WASD_BLOCK",
-            "NETWORK":          "ON_NETWORK_LAG",
             "MENU_MODE_TOGGLE": "ON_MENU_MODE_TOGGLE",
         }
 
@@ -245,8 +238,6 @@ class MapperEventDispatcher:
             for func in self.callback_registry[registry_key]:
                 if event_object.action in ["CONFIG", "JSON", "WASD"]:
                     func()
-                elif event_object.action in ["NETWORK"]:
-                    func(event_object.pac_n, event_object.pac_t)
                 elif event_object.action in ["MENU_MODE_TOGGLE"]:
                     func(event_object.is_visible)
 
