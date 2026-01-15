@@ -59,8 +59,10 @@ class WASDMapper():
             raise RuntimeError(_str)
 
     def updateMouseWheel(self):
-        print(f"[Info] WASDMapper updating mousewheel...")
-        self.innerradius, self.outerradius = self.json_loader.get_mouse_wheel_info()
+        with self.config.config_lock:
+            print(f"[Info] WASDMapper updating mousewheel...")
+            self.innerradius, d_radius = self.json_loader.get_mouse_wheel_info()
+            self.outer_radius = self.innerradius + d_radius
     
     def on_wasd_block(self):
         if self.mapper.wasd_block > 0:
