@@ -159,23 +159,23 @@ class TouchReader():
         # Initialize result with current values as a fallback
         res_x, res_y = logic_x, logic_y 
 
-        # Attempt to acquire the config lock
         with self.config.config_lock:
-            try:
-                with self.lock:
-                    if self.rotation == 1:
-                        self.side_limit = self.json_height // 2
-                        res_x, res_y = logic_y, self.json_width - logic_x
-                    elif self.rotation == 2:
-                        self.side_limit = self.json_width // 2
-                        res_x, res_y = self.json_width - logic_x, self.json_height - logic_y
-                    elif self.rotation == 3:
-                        self.side_limit = self.json_height // 2
-                        res_x, res_y = self.json_height - logic_y, logic_x
-                    else:
-                        self.side_limit = self.json_width // 2
-                        res_x, res_y = logic_x, logic_y
-                
+            w = self.json_width
+            h = self.json_height
+
+        with self.lock:
+            if self.rotation == 1:
+                self.side_limit = h // 2
+                res_x, res_y = logic_y, w - logic_x
+            elif self.rotation == 2:
+                self.side_limit = w // 2
+                res_x, res_y = w - logic_x, h - logic_y
+            elif self.rotation == 3:
+                self.side_limit = h // 2
+                res_x, res_y = h - logic_y, logic_x
+            else:
+                self.side_limit = w // 2
+                res_x, res_y = logic_x, logic_y           
     
         return res_x, res_y 
 
