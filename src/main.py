@@ -4,7 +4,7 @@ import psutil
 import win32gui
 import threading
 import time
-from mapper_module.utils import DEFAULT_ADB_RATE_CAP, KEY_DEBOUNCE, DEFAULT_LATENCY_THRESHOLD, UP, set_high_priority
+from mapper_module.utils import DEFAULT_ADB_RATE_CAP, KEY_DEBOUNCE, PPS, UP, set_high_priority
 
 from mapper_module import (
     MapperEventDispatcher, 
@@ -74,9 +74,9 @@ def main():
 
     try:
         rate_cap = float(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_ADB_RATE_CAP
-        latency  = float(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_LATENCY_THRESHOLD
+        pps  = int(sys.argv[2]) if len(sys.argv) > 2 else PPS
     except ValueError:
-        rate_cap, latency = DEFAULT_ADB_RATE_CAP, DEFAULT_LATENCY_THRESHOLD
+        rate_cap, pps = DEFAULT_ADB_RATE_CAP, PPS
 
     mapper_event_dispatcher = MapperEventDispatcher()
     config = AppConfig(mapper_event_dispatcher)
@@ -91,10 +91,10 @@ def main():
         set_high_priority(interception_bridge.k_proc.pid, "Keyboard")
     time.sleep(1)
 
-    touch_reader = TouchReader(config, mapper_event_dispatcher, rate_cap, latency)
+    touch_reader = TouchReader(config, mapper_event_dispatcher, rate_cap)
     json_loader = JSON_Loader(config, FOREGROUND_WINDOW)
 
-    mapper_logic = Mapper(json_loader, interception_bridge)
+    mapper_logic = Mapper(json_loader, interception_bridge, pps)
 
     mouse_mapper = MouseMapper(mapper_logic)
     key_mapper = KeyMapper(mapper_logic, KEY_DEBOUNCE)
