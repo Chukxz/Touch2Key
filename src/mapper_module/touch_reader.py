@@ -5,7 +5,7 @@ import re
 from .utils import (
     TouchEvent, ADB_EXE, DOWN, UP, PRESSED, IDLE,
     ROTATION_POLL_INTERVAL, SHORT_DELAY, LONG_DELAY,
-    get_adb_device, is_device_online, get_screen_size, get_dpi, 
+    get_adb_device, is_device_online, get_screen_size
     )
 
 class TouchReader():
@@ -37,6 +37,7 @@ class TouchReader():
         self.matrix = (0, 0, 0, 0, 0, 0)
         
         init_time = 0
+        self.update_config()
 
         # --- PERFORMANCE TUNING ---
         self.adb_rate_cap = rate_cap
@@ -62,11 +63,10 @@ class TouchReader():
         """
         If the cursor is visible use slot 0 as the Mouse finger and clear the WASD finger else identify the oldest finger on each side to assign as the dedicated Mouse or WASD finger.
         """
-        with self.config.config_lock:
-            if self.is_visible:
-                self.mouse_slot = 0
-                self.wasd_slot = None
-                return
+        if self.is_visible:
+            self.mouse_slot = 0
+            self.wasd_slot = None
+            return
 
         eligible_mouse = []
         eligible_wasd = []
@@ -143,27 +143,32 @@ class TouchReader():
                 for pat in patterns:
                     m = re.search(pat, result.stdout)
                     if m:
-                        with self.lock: self.rotation = int(m.group(1)) % 4
-                        self.update_matrix()
+                        with self.lock: 
+                            self.rotation = int(m.group(1)) % 4
+                            self.update_matrix()
                         break
-            except: pass
+            except: 
+                pass
             time.sleep(self.rotation_poll_interval)
     
     def update_matrix(self):
-        with self.config.config_lock:
-            # Base scaling
-            sx, sy = 1/self.scale_x, 1/self.scale_y
-            w, h = self.json_width, self.json_height
+        sx = 1/self.scale_x
+        sy = 1/self.scale_y
+        w = self.json_width
+        h = self.json_height
         
-        with self.lock:
-            if self.rotation == 0: # 0°
-                self.matrix = (sx, 0, 0, 0, sy, 0)
-            elif self.rotation == 1: # 90° CW
-                self.matrix = (0, sy, 0, -sx, 0, w)
-            elif self.rotation == 2: # 180°
-                self.matrix = (-sx, 0, w, 0, -sy, h)
-            elif self.rotation == 3: # 270° CW
-                self.matrix = (0, -sy, h, sx, 0, 0)
+        if self.rotation == 0: # 0°
+            self.matrix = (sx, 0, 0, 0, sy, 0)
+            self.side_limit = w // 2
+        elif self.rotation == 1: # 90° CW
+            self.matrix = (0, sy, 0, -sx, 0, w)
+            self.side_limit = h // 2
+        elif self.rotation == 2: # 180°
+            self.matrix = (-sx, 0, w, 0, -sy, h)
+            self.side_limit = w // 2
+        elif self.rotation == 3: # 270° CW
+            self.matrix = (0, -sy, h, sx, 0, 0)
+            self.side_limit = h // 2
 
     def rotate_norm_coordinates(self, x, y):
         with self.lock:
@@ -177,7 +182,7 @@ class TouchReader():
         # Standard affine transformation formula
         res_x = a * x + b * y + c
         res_y = d * x + e * y + f
-        
+                
         return res_x, res_y
 
 
@@ -208,8 +213,8 @@ class TouchReader():
         # Physical Device Specs
         res = get_screen_size(self.device)
         if res is None:
+            self.running = False
             raise RuntimeError("Detected resolution invalid.")
-        dpi = get_dpi(self.device)    
         self.width, self.height = res
             
         # Get Configured Specs
@@ -217,7 +222,6 @@ class TouchReader():
         self.json_width, self.json_height = json_res
         self.scale_x = self.width / self.json_width
         self.scale_y = self.height / self.json_height
-        self.update_matrix() # Initialize matrix with starting specs
         
         print(f"[INFO] Auto-Scaling Active: X={self.scale_x:.2f}, Y={self.scale_y:.2f}")
           
@@ -229,6 +233,10 @@ class TouchReader():
             try:
                 with self.config.config_lock:
                     self.configure_device()
+
+                with self.lock:
+                    self.update_matrix() # Initialize matrix with starting specs
+            
             except RuntimeError as e:
                 print(f"Error: {e}. ADB Device disconnected. Retrying in 2s...")
                 time.sleep(LONG_DELAY)
@@ -281,6 +289,7 @@ class TouchReader():
                         if self.slots[current_slot]['start_y'] is None:
                             tmp = self.rotate_norm_coordinates(self.slots[current_slot]['start_x'], val)
                             self.slots[current_slot]['start_x'], self.slots[current_slot]['start_y'] = tmp
+                    
 
                     elif "SYN_REPORT" == code:
                         self.handle_sync()
@@ -323,14 +332,15 @@ class TouchReader():
                     try:
                         action = data['state']                   
                         touch_event = TouchEvent(
-                             slot=slot, 
-                             id=data['tid'], 
-                             x=rx, y=ry,
-                             sx=data['start_x'], sy=data['start_y'],
-                             is_mouse=(slot == self.mouse_slot), 
-                             is_wasd=(slot == self.wasd_slot),
-                             )
+                            slot=slot, 
+                            id=data['tid'], 
+                            x=rx, y=ry,
+                            sx=data['start_x'], sy=data['start_y'],
+                            is_mouse=(slot == self.mouse_slot), 
+                            is_wasd=(slot == self.wasd_slot),
+                            )
                         self.touch_event_processor(action, touch_event)
+                        
                     except:
                         pass
                      

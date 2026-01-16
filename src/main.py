@@ -92,10 +92,9 @@ def main():
         set_high_priority(interception_bridge.k_proc.pid, "Keyboard")
     time.sleep(SHORT_DELAY)
 
-    touch_reader = TouchReader(config, mapper_event_dispatcher, rate_cap)
     json_loader = JSON_Loader(config, FOREGROUND_WINDOW)
-
-    mapper_logic = Mapper(json_loader, interception_bridge, pps)
+    touch_reader = TouchReader(config, mapper_event_dispatcher, rate_cap)
+    mapper_logic = Mapper(json_loader, touch_reader, interception_bridge, pps)
 
     mouse_mapper = MouseMapper(mapper_logic)
     key_mapper = KeyMapper(mapper_logic, KEY_DEBOUNCE)

@@ -9,7 +9,8 @@ from .utils import (
     DEF_DPI, SHORT_DELAY, 
     WINDOW_UPDATE_INTERVAL, MapperEvent,
     set_dpi_awareness, set_high_priority,
-    mouse_worker, keyboard_worker
+    mouse_worker, keyboard_worker,
+    rotate_resolution
     )
 
 MAX_CLASS_NAME = 256
@@ -34,7 +35,7 @@ class Mapper():
     # EnumWindows callback type definition
     EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 
-    def __init__(self, json_loader, interception_bridge, pps, window_title="Gameloop(64beta)"):
+    def __init__(self, json_loader, touch_reader, interception_bridge, pps, window_title="Gameloop(64beta)"):
         set_dpi_awareness()
         self.enumWindowsProc = Mapper.EnumWindowsProc
 
@@ -42,6 +43,7 @@ class Mapper():
         self.json_loader = json_loader
         self.config = self.json_loader.config
         self.mapper_event_dispatcher = self.json_loader.mapper_event_dispatcher
+        self.touch_reader = touch_reader
         self.interception_bridge = interception_bridge
 
         self.pps = pps
@@ -92,7 +94,6 @@ class Mapper():
             raise ValueError("Window_title must be provided.")
 
         class_name = None            
-        print(f"[INFO] Waiting for window: '{window_title}'...")
         hwnd = ctypes.windll.user32.FindWindowW(None, window_title)
         if hwnd != 0:
             class_name = self.get_window_class_name(hwnd)
@@ -159,7 +160,7 @@ class Mapper():
         }
 
     def update_game_window_info(self):
-        """Background thread - optimized to minimize lock hold time."""
+        """Background thread - optimized to minimize lock hold time."""        
         while self.running:
             try:                
                 # Check if current handle is still valid
@@ -181,14 +182,15 @@ class Mapper():
                         self.window_lost = False
                         
                 else:
-                    # 3. WINDOW IS LOST: Handle scanning
+                    # 3. WINDOW IS LOST: Handle scanning                        
                     if not self.window_lost:
                         print("[WARNING] Game window lost! Scanning for new window...")
                         with self.lock:
                             self.window_lost = True
-                    
+                                                
                     try:
                         # Get window title class name if it doesn't exist
+                        
                         if not self.game_window_class_name:
                             self.game_window_class_name = self.get_game_window_class_name(self.window_title_target)
 
@@ -238,18 +240,23 @@ class Mapper():
     def device_to_game_rel(self, dx, dy):
         """Thread-safe relative mapping."""
         with self.lock:
-            if self.window_lost: 
+            rot = self.touch_reader.rotation
+            
+            if self.window_lost:
                 w = self.screen_w
                 h = self.screen_h
             else:
                 w = self.game_window_info['width']
                 h = self.game_window_info['height']
 
-        return (dx / self.device_width) * w, (dy / self.device_height) * h
+        rot_dev_w, rot_dev_h = rotate_resolution(self.device_width, self.device_height, rot)
+        return (dx / rot_dev_w) * w, (dy / rot_dev_h) * h
     
     def device_to_game_abs(self, x, y):
         """Thread-safe absolute mapping."""
         with self.lock:
+            rot = self.touch_reader.rotation
+            
             if self.window_lost:
                 w = self.screen_w
                 h = self.screen_h
@@ -260,8 +267,9 @@ class Mapper():
                 h = self.game_window_info['height']
                 l = self.game_window_info['left']
                 t = self.game_window_info['top']
-            
-        return l + (x / self.device_width) * w, t + (y / self.device_height) * h
+        
+        rot_dev_w, rot_dev_h = rotate_resolution(self.device_width, self.device_height, rot)
+        return l + (x / rot_dev_w) * w, t + (y / rot_dev_h) * h
     
     def dp_to_px(self, dp):
         return dp * (self.dpi / DEF_DPI)
