@@ -470,7 +470,7 @@ class Plotter:
                 "height": self.height,
                 "dpi": self.dpi,
                 "mouse_wheel_radius": self.mouse_wheel_radius,
-                "sprint_distance:": self.sprint_distance
+                "sprint_distance": self.sprint_distance
                 },
             "content": output
         }
