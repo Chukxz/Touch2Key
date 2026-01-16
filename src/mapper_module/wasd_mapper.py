@@ -1,5 +1,4 @@
 import math
-import threading
 from .utils import (
     SCANCODES, DOWN, PRESSED
 )
@@ -93,7 +92,7 @@ class WASDMapper():
         outer_sq = self.outer_radius * self.outer_radius
       
         if dist_sq > outer_sq and outer_sq > 0:
-           dist = dist_sq**0.5 # Only calculate sqrt if we are actually leashing
+            dist = dist_sq**0.5 # Only calculate sqrt if we are actually leashing
             scale = self.outer_radius / dist
             self.center_x = touch_event.x - (vx * scale)
             self.center_y = touch_event.y - (vy * scale)

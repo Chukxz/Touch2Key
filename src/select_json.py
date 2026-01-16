@@ -2,9 +2,7 @@ import os
 import tkinter as tk
 from tkinter import filedialog
 import json
-import tomlkit
-from mapper_module.utils import JSONS_FOLDER, TOML_PATH, update_toml
-from mapper_module.default_toml_helper import create_default_toml
+from mapper_module.utils import JSONS_FOLDER, update_toml
 
 def select_json_profile():
     # Initialize Tkinter and hide the root window

@@ -1,85 +1,19 @@
 import ctypes
 import multiprocessing
-from interception import Interception, KeyStroke, MouseStroke
-from .utils import SCANCODES, M_LEFT, M_RIGHT, M_MIDDLE
+from .utils import (
+    SCANCODES, M_LEFT, M_RIGHT, M_MIDDLE, NT_TIMER_RES,
+    MOUSE_MOVE_ABSOLUTE, MOUSE_VIRTUAL_DESKTOP,
+    LEFT_BUTTON_DOWN, LEFT_BUTTON_UP,
+    RIGHT_BUTTON_DOWN, RIGHT_BUTTON_UP,
+    MIDDLE_BUTTON_DOWN, MIDDLE_BUTTON_UP,
+    mouse_worker, keyboard_worker,
+    )
 
-# --- Mouse Constants ---
-MOUSE_MOVE_RELATIVE = 0x00
-MOUSE_MOVE_ABSOLUTE = 0x01
-MOUSE_VIRTUAL_DESKTOP = 0x02
-
-LEFT_BUTTON_DOWN, LEFT_BUTTON_UP = 0x0001, 0x0002
-RIGHT_BUTTON_DOWN, RIGHT_BUTTON_UP = 0x0004, 0x0008
-MIDDLE_BUTTON_DOWN, MIDDLE_BUTTON_UP = 0x0010, 0x0020
-
-# --- Worker: Keyboard (Isolated) ---
-def keyboard_worker(k_queue):
-    """ Dedicated process for Keyboard events only. """
-    k_ctx = Interception()
-    k_handle = k_ctx.keyboard
-    
-    while True:
-        code, state = k_queue.get() # Blocks until key event
-        k_ctx.send(k_handle, KeyStroke(code, state))
-
-# --- Worker: Mouse (Isolated with Coalescing) ---
-def mouse_worker(m_queue):
-    """ Dedicated process for Mouse events with movement coalescing. """
-    import time
-    import random
-
-    _sleep = time.sleep
-    _random = random.random
-
-    m_ctx = Interception()
-    m_handle = m_ctx.mouse
-    
-    acc_dx, acc_dy = 0, 0
-    pending_task = None
-
-    while True:
-        if pending_task:
-            task, data = pending_task
-            pending_task = None
-        else:
-            task, data = m_queue.get()
-
-        if task == "move_rel":
-            acc_dx += data[0]
-            acc_dy += data[1]
-
-            # Coalesce pending moves
-            while not m_queue.empty():
-                try:
-                    next_task, next_data = m_queue.get_nowait()
-                    if next_task == "move_rel":
-                        acc_dx += next_data[0]
-                        acc_dy += next_data[1]
-                    else:
-                        # If a button/absolute move is next, break to process it
-                        pending_task = (next_task, next_data) # Save for next loop
-                        break 
-                except: 
-                    break
-
-            if acc_dx != 0 or acc_dy != 0:
-                m_ctx.send(m_handle, MouseStroke(0, MOUSE_MOVE_RELATIVE, 0, int(acc_dx), int(acc_dy)))
-                acc_dx, acc_dy = 0, 0
-            
-            _sleep(0.0008 + _random() * 0.0004) # Fast Randomized Pacing (approx. 1000Hz)
-
-        elif task == "move_abs":
-            x, y, flags = data
-            m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_ABSOLUTE, flags, 0, x, y))
-
-        elif task == "button":
-            # Data is the button state flag
-            m_ctx.send(m_handle, MouseStroke(data, MOUSE_MOVE_RELATIVE, 0, 0, 0))
 
 class InterceptionBridge:
     def __init__(self):
         # Set timer resolution to 1ms (10,000 units of 100ns)
-        ctypes.windll.ntdll.NtSetTimerResolution(10000, 1, ctypes.byref(ctypes.c_ulong()))
+        ctypes.windll.ntdll.NtSetTimerResolution(NT_TIMER_RES, 1, ctypes.byref(ctypes.c_ulong()))
 
         self.screen_w = ctypes.windll.user32.GetSystemMetrics(0)
         self.screen_h = ctypes.windll.user32.GetSystemMetrics(1)

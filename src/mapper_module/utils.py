@@ -17,6 +17,7 @@ SRC_DIR = os.path.dirname(CURRENT_DIR)
 PROJECT_ROOT = os.path.dirname(SRC_DIR)
 
 # --- Path Assignments ---
+ADB_EXE = os.path.join(PROJECT_ROOT, "bin", "platform-tools", "adb.exe")
 TOML_PATH = os.path.join(PROJECT_ROOT, "settings.toml")
 IMAGES_FOLDER = os.path.join(SRC_DIR, "resources", "images")
 JSONS_FOLDER = os.path.join(SRC_DIR, "resources", "jsons")
@@ -34,24 +35,37 @@ IDLE = "IDLE"
 
 CIRCLE = "CIRCLE"
 RECT = "RECT"
-RELOAD_DELAY = 0.5
 M_LEFT = 0x9901
 M_RIGHT = 0x9902
 M_MIDDLE = 0x9903
 SPRINT_DISTANCE_CODE = "F11"
 MOUSE_WHEEL_CODE = "F12"
-WINDOW_FIND_DELAY = 1 # in seconds
+
+# Delays (in seconds)
+RELOAD_DELAY = 0.5 
+SHORT_DELAY = 1.0
+LONG_DELAY = 2.0
+WINDOW_UPDATE_INTERVAL = 0.05
+ROTATION_POLL_INTERVAL = 0.5
+
+#  1ms (10,000 units of 100ns)
+NT_TIMER_RES = 10000
 
 # --- Fallback Performance Constants ---
 # Limits PRESSED events to 250 updates per second
 DEFAULT_ADB_RATE_CAP = 250.0  
-
 # Ignores key flickers faster than 10ms
 KEY_DEBOUNCE = 0.01
-
 PPS = 60
 DOUBLE_TAP_DELAY = 0.25
 
+MOUSE_MOVE_RELATIVE = 0x00
+MOUSE_MOVE_ABSOLUTE = 0x01
+MOUSE_VIRTUAL_DESKTOP = 0x02
+
+LEFT_BUTTON_DOWN, LEFT_BUTTON_UP = 0x0001, 0x0002
+RIGHT_BUTTON_DOWN, RIGHT_BUTTON_UP = 0x0004, 0x0008
+MIDDLE_BUTTON_DOWN, MIDDLE_BUTTON_UP = 0x0010, 0x0020
 
 SCANCODES = {
     "ESC": 0x01,
@@ -243,7 +257,7 @@ class MapperEventDispatcher:
 
 
 def get_adb_device():
-    out = subprocess.check_output(["adb", "devices"]).decode().splitlines()
+    out = subprocess.check_output([ADB_EXE, "devices"]).decode().splitlines()
     real = [l.split()[0] for l in out[1:] if "device" in l and not l.startswith("emulator-")]
 
     if not real:
@@ -255,7 +269,7 @@ def get_adb_device():
 def get_screen_size(device):
     """Detect screen resolution (portrait natural)."""
     result = subprocess.run(
-        ["adb", "-s", device, "shell", "wm", "size"], capture_output=True, text=True
+        [ADB_EXE, "-s", device, "shell", "wm", "size"], capture_output=True, text=True
     )
     output = result.stdout.strip()
     if "Physical size" in output:
@@ -268,7 +282,7 @@ def get_screen_size(device):
 def get_dpi(device):
     """Detect screen DPI, fallback to 160."""
     try:
-        result = subprocess.run(["adb", "-s", device, "shell", "getprop", "ro.sf.lcd_density"],
+        result = subprocess.run([ADB_EXE, "-s", device, "shell", "getprop", "ro.sf.lcd_density"],
                                 capture_output=True, text=True, timeout=1)
         val = result.stdout.strip()
         return int(val) if val else DEF_DPI
@@ -277,7 +291,7 @@ def get_dpi(device):
 
 def is_device_online(device):
     try:
-        res = subprocess.run(["adb", "-s", device, "get-state"], 
+        res = subprocess.run([ADB_EXE, "-s", device, "get-state"], 
                             capture_output=True, text=True, timeout=1)
         return "device" in res.stdout
     except:
@@ -358,7 +372,7 @@ def get_rotation(device):
     rotation = 0
     patterns = [r"mCurrentRotation=(\d+)", r"rotation=(\d+)", r"mCurrentOrientation=(\d+)", r"mUserRotation=(\d+)"]
     try:
-        result = subprocess.run(["adb", "-s", device, "shell", "dumpsys", "display"], capture_output=True, text=True, timeout=1)
+        result = subprocess.run([ADB_EXE, "-s", device, "shell", "dumpsys", "display"], capture_output=True, text=True, timeout=1)
         for pat in patterns:
             m = re.search(pat, result.stdout)
             if m:
@@ -391,3 +405,110 @@ def set_high_priority(pid, label, priority_level=psutil.HIGH_PRIORITY_CLASS):
         print(f"[Priority] {label} set to HIGH (Floating Affinity)")
     except Exception as e:
         print(f"[Priority] Warning: {e}")
+        
+
+# --- Worker: Keyboard (Isolated) ---
+def keyboard_worker(k_queue):
+    """ Dedicated process for Keyboard events only. """
+    from interception import Interception, KeyStroke
+    k_ctx = Interception()
+    k_handle = k_ctx.keyboard
+    # Keep track of keys we've pressed so we know what to release
+    pressed_keys = set()
+    
+    while True:
+        try:
+            # 2.0 second timeout: If no heartbeat/input from Main, release everything
+            code, state = k_queue.get(timeout=2.0)
+
+            # state 0 = Down, 1 = Up (Interception standard)
+            if state == 0:
+                pressed_keys.add(code)
+            else:
+                pressed_keys.discard(code)
+            
+            k_ctx.send(k_handle, KeyStroke(code, state))
+  
+        except Exception:
+            # This triggers if k_queue.get(timeout=2.0) times out
+            if pressed_keys:
+                print(f"[Watchdog] Keyboard worker timeout. Releasing {len(pressed_keys)} keys.")
+                for code in list(pressed_keys):
+                    k_ctx.send(k_handle, KeyStroke(code, 1))
+                pressed_keys.clear()
+                
+
+# --- Worker: Mouse (Isolated with Coalescing) ---
+def mouse_worker(m_queue):
+    """ Dedicated process for Mouse events with movement coalescing. """
+    from interception import Interception, MouseStroke
+    import time
+    import random
+
+    _sleep = time.sleep
+    _random = random.random
+
+    m_ctx = Interception()
+    m_handle = m_ctx.mouse
+    
+    acc_dx, acc_dy = 0, 0
+    pending_task = None
+    # Keep track of buttons we've pressed so we know what to release
+    pressed_buttons = set()
+
+    while True:
+        try:
+            # Wait for 2 seconds. If the main process dies, un-stick buttons (respects pending tasks).
+            if pending_task:
+                task, data = pending_task
+                pending_task = None
+            else:
+                task, data = m_queue.get(timeout=2.0)
+
+            if task == "button":
+                # Track button states to release them on timeout
+                # Map DOWN constants to UP constants for the release loop
+                if data == LEFT_BUTTON_DOWN: pressed_buttons.add(LEFT_BUTTON_UP)
+                elif data == LEFT_BUTTON_UP: pressed_buttons.discard(LEFT_BUTTON_UP)
+                if data == RIGHT_BUTTON_DOWN: pressed_buttons.add(RIGHT_BUTTON_UP)
+                elif data == RIGHT_BUTTON_UP: pressed_buttons.discard(RIGHT_BUTTON_UP)
+                if data == MIDDLE_BUTTON_DOWN: pressed_buttons.add(MIDDLE_BUTTON_UP)
+                elif data == MIDDLE_BUTTON_UP: pressed_buttons.discard(MIDDLE_BUTTON_UP)
+                
+                # Data is the button state flag
+                m_ctx.send(m_handle, MouseStroke(data, MOUSE_MOVE_RELATIVE, 0, 0, 0))
+
+            elif task == "move_rel":
+                acc_dx += data[0]
+                acc_dy += data[1]
+
+                # Coalesce pending moves
+                while not m_queue.empty():
+                    try:
+                        next_task, next_data = m_queue.get_nowait()
+                        if next_task == "move_rel":
+                            acc_dx += next_data[0]
+                            acc_dy += next_data[1]
+                        else:
+                            # If a button/absolute move is next, break to process it
+                            pending_task = (next_task, next_data) # Save for next loop
+                            break 
+                    except: 
+                        break
+
+                if acc_dx != 0 or acc_dy != 0:
+                    m_ctx.send(m_handle, MouseStroke(0, MOUSE_MOVE_RELATIVE, 0, int(acc_dx), int(acc_dy)))
+                    acc_dx, acc_dy = 0, 0
+                
+                _sleep(0.0008 + _random() * 0.0004) # Fast Randomized Pacing (approx. 1000Hz)
+
+            elif task == "move_abs":
+                x, y, flags = data
+                m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_ABSOLUTE, flags, 0, x, y))
+
+        except Exception: # Timeout reached
+            if pressed_buttons:
+                print("[Watchdog] Mouse worker timeout. Releasing buttons.")
+                for release_flag in list(pressed_buttons):
+                    m_ctx.send(m_handle, MouseStroke(release_flag, MOUSE_MOVE_RELATIVE, 0, 0, 0))
+                pressed_buttons.clear()

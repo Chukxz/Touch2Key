@@ -3,8 +3,9 @@ import threading
 import subprocess
 import re
 from .utils import (
-    TouchEvent, MapperEvent, get_adb_device, is_device_online, DEF_DPI,
-    get_screen_size, get_dpi, DOWN, UP, PRESSED, IDLE
+    TouchEvent, ADB_EXE, DOWN, UP, PRESSED, IDLE,
+    ROTATION_POLL_INTERVAL, SHORT_DELAY, LONG_DELAY,
+    get_adb_device, is_device_online, get_screen_size, get_dpi, 
     )
 
 class TouchReader():
@@ -18,7 +19,7 @@ class TouchReader():
         self.active_touches = 0
         self.max_slots = self.get_max_slots()
         self.rotation = 0
-        self.rotation_poll_interval = 0.5 
+        self.rotation_poll_interval = ROTATION_POLL_INTERVAL 
         self.lock = threading.Lock()
         self.running = True
         self.is_visible = True
@@ -88,7 +89,7 @@ class TouchReader():
     def find_touch_device_event(self):
         try:
             result = subprocess.run(
-                ["adb", "-s", self.device, "shell", "getevent", "-lp"],
+                [ADB_EXE, "-s", self.device, "shell", "getevent", "-lp"],
                 capture_output=True, text=True, timeout=2
             )
             lines = result.stdout.splitlines()
@@ -110,7 +111,7 @@ class TouchReader():
 
     def get_max_slots(self):
         try:
-            result = subprocess.run(["adb", "-s", self.device, "shell", "getevent", "-p", self.device_touch_event], capture_output=True, text=True)
+            result = subprocess.run([ADB_EXE, "-s", self.device, "shell", "getevent", "-p", self.device_touch_event], capture_output=True, text=True)
             for line in result.stdout.splitlines():
                 if "ABS_MT_SLOT" in line and "max" in line:
                     return int(line.split("max")[1].strip().split(',')[0]) + 1
@@ -138,7 +139,7 @@ class TouchReader():
         patterns = [r"mCurrentRotation=(\d+)", r"rotation=(\d+)", r"mCurrentOrientation=(\d+)", r"mUserRotation=(\d+)"]
         while self.running:
             try:
-                result = subprocess.run(["adb", "-s", self.device, "shell", "dumpsys", "display"], capture_output=True, text=True, timeout=1)
+                result = subprocess.run([ADB_EXE, "-s", self.device, "shell", "dumpsys", "display"], capture_output=True, text=True, timeout=1)
                 for pat in patterns:
                     m = re.search(pat, result.stdout)
                     if m:
@@ -154,7 +155,7 @@ class TouchReader():
             sx, sy = 1/self.scale_x, 1/self.scale_y
             w, h = self.json_width, self.json_height
         
-         with self.lock:
+        with self.lock:
             if self.rotation == 0: # 0°
                 self.matrix = (sx, 0, 0, 0, sy, 0)
             elif self.rotation == 1: # 90° CW
@@ -230,11 +231,11 @@ class TouchReader():
                     self.configure_device()
             except RuntimeError as e:
                 print(f"Error: {e}. ADB Device disconnected. Retrying in 2s...")
-                time.sleep(2.0)
+                time.sleep(LONG_DELAY)
                 continue            
 
             self.process = subprocess.Popen(
-                ["adb", "-s", self.device, "shell", "getevent", "-l", self.device_touch_event],
+                [ADB_EXE, "-s", self.device, "shell", "getevent", "-l", self.device_touch_event],
                 stdout=subprocess.PIPE, text=True, bufsize=0 
             )
 
@@ -292,7 +293,7 @@ class TouchReader():
                         
             if self.running:
                 self.stop_process()
-                time.sleep(1.0)
+                time.sleep(SHORT_DELAY)
 
     def handle_sync(self, lift_up=False):
         now = time.perf_counter()

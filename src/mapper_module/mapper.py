@@ -3,10 +3,13 @@ import ctypes
 from ctypes import wintypes
 import threading
 import win32gui
+import multiprocessing
+import datetime
 from .utils import (
-    DEF_DPI, WINDOW_FIND_DELAY,
-    MapperEvent, set_dpi_awareness,
-    set_high_priority
+    DEF_DPI, SHORT_DELAY, 
+    WINDOW_UPDATE_INTERVAL, MapperEvent,
+    set_dpi_awareness, set_high_priority,
+    mouse_worker, keyboard_worker
     )
 
 MAX_CLASS_NAME = 256
@@ -55,7 +58,7 @@ class Mapper():
         self.game_window_class_name = None
         self.game_window_info = None
         self.window_lost = True
-        self.window_update_interval = 0.05 
+        self.window_update_interval = WINDOW_UPDATE_INTERVAL
         
         # Config & State
         self.wasd_block = 0
@@ -206,7 +209,7 @@ class Mapper():
                 print(f"[ERROR] Window tracking error: {e}")
             
             # Dynamic Sleep: Constant from utils
-            sleep_time = WINDOW_FIND_DELAY if self.window_lost else self.window_update_interval
+            sleep_time = SHORT_DELAY if self.window_lost else self.window_update_interval
             time.sleep(sleep_time)
 
     def get_game_window_info(self):
@@ -307,7 +310,7 @@ class Mapper():
             pps = self.event_count / elapsed # Packets Per Second
         
             # Check if we are lagging
-        status = "HEALTHY" if pps > 60 else "LOW RATE"
+            status = "HEALTHY" if pps >= self.pps else "LOW RATE"
             if pps == 0: status = "IDLE/DISCONNECTED"
 
             print(f"[Monitor] Rate: {pps:.1f} Hz | Status: {status} | WASD Block: {self.wasd_block}")

@@ -1,10 +1,10 @@
 import keyboard
 import sys
-import psutil
+import os
 import win32gui
 import threading
 import time
-from mapper_module.utils import DEFAULT_ADB_RATE_CAP, KEY_DEBOUNCE, PPS, UP, set_high_priority
+from mapper_module.utils import DEFAULT_ADB_RATE_CAP, KEY_DEBOUNCE, PPS, UP, SHORT_DELAY, set_high_priority
 
 from mapper_module import (
     MapperEventDispatcher, 
@@ -21,6 +21,7 @@ from mapper_module import (
 FOREGROUND_WINDOW = win32gui.GetForegroundWindow()
 
 interception_bridge = None
+mapper_logic = None
 mouse_mapper = None
 key_mapper = None
 wasd_mapper = None
@@ -30,7 +31,7 @@ is_shutting_down = False
 
 
 def set_is_visible(_is_visible):
-    global is_visible, lock, interception_bridge, mouse_mapper, key_mapper, wasd_mapper
+    global is_visible
 
     with lock:
         is_visible = _is_visible
@@ -43,9 +44,7 @@ def set_is_visible(_is_visible):
         except: pass
 
 
-def process_touch_event(action, event):
-    global mouse_mapper, key_mapper, wasd_mapper, is_visible
-    
+def process_touch_event(action, event):    
     with lock:
         mapper_logic.event_count += 1 # Tick the counter
 
@@ -66,7 +65,7 @@ def process_touch_event(action, event):
         
     
 def main():
-    global mouse_mapper, key_mapper, wasd_mapper, interception_bridge    
+    global mouse_mapper, key_mapper, wasd_mapper, interception_bridge, mapper_logic   
 
     # --- Elevate Main Process (ADB Parsing & Logic) ---
     # We leave this on default cores (usually all but the last)
@@ -91,7 +90,7 @@ def main():
         
     if hasattr(interception_bridge, 'k_proc'):
         set_high_priority(interception_bridge.k_proc.pid, "Keyboard")
-    time.sleep(1)
+    time.sleep(SHORT_DELAY)
 
     touch_reader = TouchReader(config, mapper_event_dispatcher, rate_cap)
     json_loader = JSON_Loader(config, FOREGROUND_WINDOW)

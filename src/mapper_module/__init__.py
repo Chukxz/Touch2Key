@@ -1,5 +1,5 @@
 # Utilities & Config
-from .utils import MapperEventDispatcher, TOML_PATH
+from .utils import MapperEventDispatcher, MapperEvent, TouchEvent
 from .config import AppConfig
 from .json_loader import JSON_Loader
 
@@ -15,6 +15,8 @@ from .wasd_mapper import WASDMapper
 
 # Optional: Define __all__ to keep namespace clean
 __all__ = [
+    'MapperEvent',
+    'TouchEvent',
     'MapperEventDispatcher', 
     'TOML_PATH',
     'AppConfig',
