@@ -1,10 +1,17 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 import math
 from .utils import (
     SCANCODES, DOWN, PRESSED
 )
 
+if TYPE_CHECKING:
+    from .mapper import Mapper
+    from .utils import TouchEvent
+    
 class WASDMapper():
-    def __init__(self, mapper):
+    def __init__(self, mapper:Mapper):
         self.mapper = mapper
         self.interception_bridge = mapper.interception_bridge
         
@@ -67,13 +74,13 @@ class WASDMapper():
         if self.mapper.wasd_block > 0:
             self.release_all()
         
-    def touch_down(self, touch_event):
+    def touch_down(self, touch_event:TouchEvent):
         if self.mapper.wasd_block == 0:
             self.center_x = touch_event.x
             self.center_y = touch_event.y
             self.release_all()
 
-    def touch_pressed(self, touch_event):
+    def touch_pressed(self, touch_event:TouchEvent):
         if self.mapper.wasd_block > 0:
             self.release_all()
             return
@@ -128,7 +135,7 @@ class WASDMapper():
             
         self.current_keys = target_keys
 
-    def process_touch(self, action, touch_event):
+    def process_touch(self, action, touch_event:TouchEvent):
         if action == PRESSED:
             self.touch_pressed(touch_event)
             

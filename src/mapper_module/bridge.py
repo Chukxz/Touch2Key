@@ -1,7 +1,7 @@
 import ctypes
 import multiprocessing
 from .utils import (
-    SCANCODES, M_LEFT, M_RIGHT, M_MIDDLE, NT_TIMER_RES,
+    SCANCODES, M_LEFT, M_RIGHT, M_MIDDLE,
     MOUSE_MOVE_ABSOLUTE, MOUSE_VIRTUAL_DESKTOP,
     LEFT_BUTTON_DOWN, LEFT_BUTTON_UP,
     RIGHT_BUTTON_DOWN, RIGHT_BUTTON_UP,
@@ -12,22 +12,19 @@ from .utils import (
 
 class InterceptionBridge:
     def __init__(self):
-        # Set timer resolution to 1ms (10,000 units of 100ns)
-        ctypes.windll.ntdll.NtSetTimerResolution(NT_TIMER_RES, 1, ctypes.byref(ctypes.c_ulong()))
-
         self.screen_w = ctypes.windll.user32.GetSystemMetrics(0)
         self.screen_h = ctypes.windll.user32.GetSystemMetrics(1)
 
         # 1. Setup Keyboard Channel (Infinite queue - never drop keys)
         self.k_queue = multiprocessing.Queue()
         self.k_proc = multiprocessing.Process(
-            target=keyboard_worker, args=(self.k_queue,), daemon=True
+            target=keyboard_worker, name="Keyboard Worker", args=(self.k_queue,), daemon=True
         )
         
         # 2. Setup Mouse Channel (Capped queue - drop frames if lagging)
         self.m_queue = multiprocessing.Queue(maxsize=64)
         self.m_proc = multiprocessing.Process(
-            target=mouse_worker, args=(self.m_queue,), daemon=True
+            target=mouse_worker, name="Mouse Worker", args=(self.m_queue,), daemon=True
         )
 
         # Start both engines

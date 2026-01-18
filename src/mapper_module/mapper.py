@@ -1,17 +1,20 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 import time
 import ctypes
 from ctypes import wintypes
 import threading
 import win32gui
-import multiprocessing
-import datetime
 from .utils import (
-    DEF_DPI, SHORT_DELAY, 
-    WINDOW_UPDATE_INTERVAL, MapperEvent,
-    set_dpi_awareness, set_high_priority,
-    mouse_worker, keyboard_worker,
-    rotate_resolution
+    DEF_DPI, LONG_DELAY, WINDOW_UPDATE_INTERVAL,  
+    MapperEvent, set_dpi_awareness, rotate_resolution
     )
+
+if TYPE_CHECKING:
+    from .json_loader import JSONLoader
+    from .touch_reader import TouchReader
+    from .bridge import InterceptionBridge
 
 MAX_CLASS_NAME = 256
 
@@ -35,7 +38,7 @@ class Mapper():
     # EnumWindows callback type definition
     EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 
-    def __init__(self, json_loader, touch_reader, interception_bridge, pps, window_title="Gameloop(64beta)"):
+    def __init__(self, json_loader:JSONLoader, touch_reader:TouchReader, interception_bridge:InterceptionBridge, pps:int, window_title:str):
         set_dpi_awareness()
         self.enumWindowsProc = Mapper.EnumWindowsProc
 
@@ -55,7 +58,7 @@ class Mapper():
         self.screen_h = ctypes.windll.user32.GetSystemMetrics(1)
         self.lock = threading.Lock()
         self.window_lost = False        
-        self.window_title_target = window_title
+        self.window_title = window_title
         self.last_cursor_state = True # Cursor showing (Default)
         self.game_window_class_name = None
         self.game_window_info = None
@@ -134,19 +137,16 @@ class Mapper():
 
         self.pulse_status()
         
-        # Restart failed child processes
-        self.maintain_bridge_health()
-        
         # Check Cursor Visibility
         try:
             flags, hcursor, pos = win32gui.GetCursorInfo()
             # 0x00000001 is CURSOR_SHOWING
-            is_visible = (flags & 1) 
+            is_visible = True if (flags & 1) else False
             
             if not is_visible == self.last_cursor_state:
                 self.last_cursor_state = is_visible
                 # Signal the rest of the app to switch modes
-                self.mapper_event_dispatcher.dispatch(MapperEvent(action="MENU_MODE_TOGGLE", is_visible=is_visible))
+                self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_MENU_MODE_TOGGLE", is_visible=is_visible))
                 
         except Exception:
             print("Could not check cursor visibility.")
@@ -192,7 +192,7 @@ class Mapper():
                         # Get window title class name if it doesn't exist
                         
                         if not self.game_window_class_name:
-                            self.game_window_class_name = self.get_game_window_class_name(self.window_title_target)
+                            self.game_window_class_name = self.get_game_window_class_name(self.window_title)
 
                         # Scan for the window
                         discovered_info = self.get_game_window_info()
@@ -211,7 +211,7 @@ class Mapper():
                 print(f"[ERROR] Window tracking error: {e}")
             
             # Dynamic Sleep: Constant from utils
-            sleep_time = SHORT_DELAY if self.window_lost else self.window_update_interval
+            sleep_time = LONG_DELAY if self.window_lost else self.window_update_interval
             time.sleep(sleep_time)
 
     def get_game_window_info(self):
@@ -276,39 +276,6 @@ class Mapper():
 
     def px_to_dp(self, px):
         return px * (DEF_DPI / self.dpi)
-
-    def maintain_bridge_health(self):
-        """
-        Checks if workers are alive; restarts and re-prioritizes if dead.
-        """
-        bridge = self.interception_bridge
-    
-        # 1. Check Keyboard Worker
-        if not bridge.k_proc.is_alive():
-            print(f"\n[CRITICAL] {datetime.now().strftime('%H:%M:%S')} - Keyboard Worker Died!")
-            bridge.k_proc = multiprocessing.Process(target=keyboard_worker, args=(bridge.k_queue,), daemon=True)
-            bridge.k_proc.start()
-            # Re-apply High Priority to the new PID
-            set_high_priority(bridge.k_proc.pid, "RE-REVived Keyboard")
-            # Safety: Clear the queue to prevent a backlog of old 'stuck' keys firing at once
-            while not bridge.k_queue.empty():
-                try: 
-                    bridge.k_queue.get_nowait()
-                except: 
-                    break
-
-        # 2. Check Mouse Worker
-        if not bridge.m_proc.is_alive():
-            print(f"\n[CRITICAL] {datetime.now().strftime('%H:%M:%S')} - Mouse Worker Died!")
-            bridge.m_proc = multiprocessing.Process(target=mouse_worker, args=(bridge.m_queue,), daemon=True)
-            bridge.m_proc.start()
-            set_high_priority(bridge.m_proc.pid, "RE-REVived Mouse")
-            # Safety: Clear the queue to prevent a backlog of old 'stuck' mouse movements firing at once
-            while not bridge.m_queue.empty():
-                try: 
-                    bridge.m_queue.get_nowait()
-                except: 
-                    break
 
     def pulse_status(self):
         now = time.perf_counter()

@@ -1,3 +1,6 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 import time
 import threading
 import subprocess
@@ -5,14 +8,20 @@ import re
 from .utils import (
     TouchEvent, ADB_EXE, DOWN, UP, PRESSED, IDLE,
     ROTATION_POLL_INTERVAL, SHORT_DELAY, LONG_DELAY,
-    get_adb_device, is_device_online, get_screen_size
+    get_adb_device, is_device_online,
+    get_screen_size, maintain_bridge_health
     )
 
+if TYPE_CHECKING:
+    from .config import AppConfig
+    from .utils import MapperEventDispatcher
+    from .bridge import InterceptionBridge
+
 class TouchReader():
-    def __init__(self, config, dispatcher, rate_cap):
+    def __init__(self, config:AppConfig, dispatcher:MapperEventDispatcher, interception_bridge: InterceptionBridge, rate_cap:float):
         self.config = config
-        self.mapper_event_dispatcher = dispatcher
-           
+        self.mapper_event_dispatcher = dispatcher 
+        self.interception_bridge = interception_bridge
 
         # State Tracking
         self.slots = {}
@@ -23,6 +32,7 @@ class TouchReader():
         self.lock = threading.Lock()
         self.running = True
         self.is_visible = True
+        self.touch_lost = False
 
         # Identity tracking
         self.side_limit = 0
@@ -63,6 +73,7 @@ class TouchReader():
         """
         If the cursor is visible use slot 0 as the Mouse finger and clear the WASD finger else identify the oldest finger on each side to assign as the dedicated Mouse or WASD finger.
         """
+        
         if self.is_visible:
             self.mouse_slot = 0
             self.wasd_slot = None
@@ -238,9 +249,14 @@ class TouchReader():
                     self.update_matrix() # Initialize matrix with starting specs
             
             except RuntimeError as e:
-                print(f"Error: {e}. ADB Device disconnected. Retrying in 2s...")
+                if not self.touch_lost:
+                    self.touch_lost = True
+                    print(f"[ERROR] {e}. ADB Device disconnected. Attempting to connect...")
+                    
                 time.sleep(LONG_DELAY)
-                continue            
+                continue
+            
+            self.touch_lost = False
 
             self.process = subprocess.Popen(
                 [ADB_EXE, "-s", self.device, "shell", "getevent", "-l", self.device_touch_event],
@@ -295,7 +311,7 @@ class TouchReader():
                         self.handle_sync()
                         
             except Exception as e:
-                print(f"[Error] ADB Stream interrupted: {e}")
+                print(f"[ERROR] ADB Stream interrupted: '{e}'. Restarting...")
                 self.handle_sync(True)
                 self.mouse_slot = None
                 self.wasd_slot = None
@@ -325,6 +341,8 @@ class TouchReader():
                     continue
                 self.last_dispatch_times[slot] = now
             
+            # Restart failed child processes
+            maintain_bridge_health(self.interception_bridge, self.is_visible)
             rx, ry = self.rotate_norm_coordinates_local(data['x'], data['y'], matrix_snapshot)
 
             if self.touch_event_processor:
@@ -354,10 +372,8 @@ class TouchReader():
         if self.process:
             try:
                 self.process.terminate()
-                # Wait up to 2 seconds for clean exit
                 self.process.wait(timeout=2)
             except Exception:
-                # Force kill if it hangs
                 if self.process:
                     self.process.kill()
 

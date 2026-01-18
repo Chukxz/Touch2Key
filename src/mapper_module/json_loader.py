@@ -1,17 +1,21 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 import json
 import os
 import time
 import keyboard
 import win32gui
 from .utils import (
-    MapperEvent, CIRCLE, RECT, 
-    RELOAD_DELAY, update_toml
+    MapperEvent, CIRCLE, RECT, RELOAD_DELAY,
+    create_default_toml, update_toml
     )
 
-from .default_toml_helper import create_default_toml
+if TYPE_CHECKING:
+    from .config import AppConfig
 
-class JSON_Loader():
-    def __init__(self, config, foreground_window):
+class JSONLoader():
+    def __init__(self, config:AppConfig, foreground_window:int):
         self.config = config
         self.mapper_event_dispatcher = config.mapper_event_dispatcher
         self.foreground_window = foreground_window
@@ -95,8 +99,8 @@ class JSON_Loader():
                     self.json_data = new_data
                     self.last_loaded_json_path = self.current_path
                     self.last_loaded_json_timestamp = current_file_time
-                self.mapper_event_dispatcher.dispatch(MapperEvent(action="JSON"))
-                self.mapper_event_dispatcher.dispatch(MapperEvent(action="CONFIG"))
+                self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_JSON_RELOAD"))
+                self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
                     
                 print("[System] Layout swapped safely. Game resumed.")
             except Exception as e:

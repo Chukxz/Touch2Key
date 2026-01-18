@@ -1,3 +1,6 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 import time
 from .utils import (
     RECT, CIRCLE, M_LEFT, M_RIGHT, M_MIDDLE,
@@ -6,8 +9,12 @@ from .utils import (
     DOWN, UP
 )
 
+if TYPE_CHECKING:
+    from .mapper import Mapper
+    from .utils import TouchEvent
+    
 class KeyMapper():
-    def __init__(self, mapper, debounce_time):
+    def __init__(self, mapper:Mapper, debounce_time:float):
         self.mapper = mapper
         self.config = mapper.config
         self.mapper_event_dispatcher = self.mapper.mapper_event_dispatcher
@@ -80,7 +87,7 @@ class KeyMapper():
         
         return True
 
-    def touch_down(self, event):        
+    def touch_down(self, event:TouchEvent):        
         """Triggered on finger contact. Scans active_zones for a hit."""
         if self.mapper.device_width <= 0 or self.mapper.device_height <= 0:
             return
@@ -107,11 +114,11 @@ class KeyMapper():
                     self.events_dict[event.slot] = [scancode_int, value, event.is_wasd]
                     if event.is_wasd:
                         self.mapper.wasd_block += 1
-                        self.mapper_event_dispatcher.dispatch(MapperEvent(action="WASD"))
+                        self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_WASD_BLOCK"))
                 return # Stop searching once hit is found
 
 
-    def touch_up(self, event):        
+    def touch_up(self, event:TouchEvent):        
         """O(1) Dictionary lookup to release keys when finger lifts."""
         data = self.events_dict.pop(event.slot, None)
         if data:
@@ -119,9 +126,9 @@ class KeyMapper():
             self._send_key_event(scancode_int, down=False)
             if is_wasd:
                 self.mapper.wasd_block = max(0, self.mapper.wasd_block - 1)
-                self.mapper_event_dispatcher.dispatch(MapperEvent(action="WASD"))
+                self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_WASD_BLOCK"))
     
-    def process_touch(self, action, touch_event):
+    def process_touch(self, action, touch_event:TouchEvent):
         if action == DOWN:
             self.touch_down(touch_event)
         

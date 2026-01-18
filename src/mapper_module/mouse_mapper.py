@@ -1,11 +1,18 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 import time
 from .utils import (
     DEF_DPI, DOWN, UP, PRESSED,
-    DOUBLE_TAP_DELAY
+    DOUBLE_TAP_DELAY, gaming_click
 )
 
+if TYPE_CHECKING:
+    from .mapper import Mapper
+    from .utils import TouchEvent
+
 class MouseMapper():
-    def __init__(self, mapper):
+    def __init__(self, mapper:Mapper):
         self.mapper = mapper
         self.prev_x = None
         self.prev_y = None
@@ -39,7 +46,7 @@ class MouseMapper():
         except Exception as e:
             print(f"[Error] Mouse config update failed: {e}")
 
-    def touch_down(self, touch_event, is_visible):
+    def touch_down(self, touch_event:TouchEvent, is_visible:bool):
         """
         Anchor the start position and reset precision accumulators
         """
@@ -47,6 +54,8 @@ class MouseMapper():
         self.prev_y = touch_event.y
         self.acc_x = 0.0
         self.acc_y = 0.0
+        
+        gaming_click(self.mapper, self.prev_x, self.prev_y)
 
         if is_visible:
             self.double_tap = False
@@ -64,7 +73,7 @@ class MouseMapper():
                 self.interception_bridge.left_click_down()
         
 
-    def touch_pressed(self, touch_event, is_visible):
+    def touch_pressed(self, touch_event:TouchEvent, is_visible:bool):
         """
         The 'Hot Path'. This code runs hundreds of times per second.
         Optimized to minimize branching and float operations.
@@ -115,7 +124,7 @@ class MouseMapper():
         self.interception_bridge.left_click_up()
         self.interception_bridge.right_click_up()
 
-    def process_touch(self, action, touch_event, is_visible):
+    def process_touch(self, action, touch_event:TouchEvent, is_visible:bool):
         if action == PRESSED:
             self.touch_pressed(touch_event, is_visible)
             

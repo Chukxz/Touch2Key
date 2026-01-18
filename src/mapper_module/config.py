@@ -1,11 +1,16 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 import tomllib
 import threading
 import os
-from .default_toml_helper import create_default_toml
-from .utils import MapperEvent, TOML_PATH
+from .utils import  MapperEvent, TOML_PATH, create_default_toml
+
+if TYPE_CHECKING:
+    from .utils import MapperEventDispatcher
 
 class AppConfig:
-    def __init__(self, mapper_event_dispatcher):
+    def __init__(self, mapper_event_dispatcher:MapperEventDispatcher):
         self.mapper_event_dispatcher = mapper_event_dispatcher
         
         # 1. Initialize the lock to protect config_data
@@ -45,8 +50,7 @@ class AppConfig:
         self.load_config()
         
         # Dispatch event so other modules know config changed
-        # Uses action="CONFIG" to match the dispatcher in utils.py
-        self.mapper_event_dispatcher.dispatch(MapperEvent(action="CONFIG"))
+        self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
 
-    def get(self, key, default=None):
+    def get(self, key, default={}):
         return self.config_data.get(key, default)

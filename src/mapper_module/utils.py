@@ -1,3 +1,6 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 import tkinter as tk
 from tkinter import filedialog
 import subprocess
@@ -6,6 +9,17 @@ import ctypes
 import tomlkit
 import re
 import psutil
+import time
+import multiprocessing
+from datetime import datetime as _datetime
+from typing import Literal
+import random
+
+if TYPE_CHECKING:
+    from multiprocessing import Process
+    from multiprocessing import Queue
+    from .bridge import InterceptionBridge
+    from .mapper import Mapper
 
 # Get location of this file: .../mapper_project/src/mapper_module
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -21,8 +35,6 @@ ADB_EXE = os.path.join(PROJECT_ROOT, "bin", "platform-tools", "adb.exe")
 TOML_PATH = os.path.join(PROJECT_ROOT, "settings.toml")
 IMAGES_FOLDER = os.path.join(SRC_DIR, "resources", "images")
 JSONS_FOLDER = os.path.join(SRC_DIR, "resources", "jsons")
-
-from .default_toml_helper import create_default_toml
 
 # --- Constants ---   
 
@@ -66,6 +78,10 @@ MOUSE_VIRTUAL_DESKTOP = 0x02
 LEFT_BUTTON_DOWN, LEFT_BUTTON_UP = 0x0001, 0x0002
 RIGHT_BUTTON_DOWN, RIGHT_BUTTON_UP = 0x0004, 0x0008
 MIDDLE_BUTTON_DOWN, MIDDLE_BUTTON_UP = 0x0010, 0x0020
+
+GLP = "Gameloop(64beta)"
+
+EVENT_TYPE = Literal["ON_CONFIG_RELOAD", "ON_JSON_RELOAD", "ON_WASD_BLOCK", "ON_MENU_MODE_TOGGLE"]
 
 SCANCODES = {
     "ESC": 0x01,
@@ -192,7 +208,7 @@ SCANCODES.update({
 
 
 class TouchEvent:
-    def __init__(self, slot, id, x, y, sx, sy, is_mouse, is_wasd):
+    def __init__(self, slot:float, id:float, x:float, y:float, sx:float, sy:float, is_mouse:bool, is_wasd:bool):
         self.slot = slot
         self.id = id
         self.x = x
@@ -207,13 +223,13 @@ class TouchEvent:
         return f"Slot: {self.slot}, ID: {self.id}, X: {self.x}, Y: {self.y}, SX: {self.sx}, SY: {self.sy}, isMouse: {self.is_mouse}, isWASD: {self.is_wasd}"
 
 class MapperEvent:
-    def __init__(self, action, is_visible=True):
-        self.action = action # CONFIG, JSON, WASD_BLOCK, MENU_MODE_TOGGLE
+    def __init__(self, action:EVENT_TYPE, is_visible=True):
+        self.action: EVENT_TYPE = action # CONFIG, JSON, WASD_BLOCK, MENU_MODE_TOGGLE
         self.is_visible = is_visible
     
     def show(self):
         return f"Action: {self.action}\n Cursor Visible: {self.is_visible})"
-        
+    
 class MapperEventDispatcher:
     def __init__(self):    
         # The Registry
@@ -223,22 +239,14 @@ class MapperEventDispatcher:
             "ON_WASD_BLOCK":        [],
             "ON_MENU_MODE_TOGGLE":  [],
         }
-        
-        # Map simple action names to full registry keys
-        self.action_map = {
-            "CONFIG":           "ON_CONFIG_RELOAD",
-            "JSON":             "ON_JSON_RELOAD",
-            "WASD":             "ON_WASD_BLOCK",
-            "MENU_MODE_TOGGLE": "ON_MENU_MODE_TOGGLE",
-        }
 
-    def register_callback(self, event_type, func):
+    def register_callback(self, event_type:EVENT_TYPE, func):
         if event_type in self.callback_registry:
             self.callback_registry[event_type].append(func)
         else:
             print(f"[Warning] Attempted to register unknown event: {event_type}")
     
-    def unregister_callback(self, event_type, func):
+    def unregister_callback(self, event_type:EVENT_TYPE, func):
         if event_type in self.callback_registry:
             if func in self.callback_registry[event_type]:
                 self.callback_registry[event_type].remove(func)
@@ -246,13 +254,13 @@ class MapperEventDispatcher:
                 print(f"[Warning] Function {func.__name__} was not registered for {event_type}")
 
     def dispatch(self, event_object: MapperEvent):       
-        registry_key = self.action_map.get(event_object.action)
+        registry_key = event_object.action
         
         if registry_key:
             for func in self.callback_registry[registry_key]:
-                if event_object.action in ["CONFIG", "JSON", "WASD"]:
+                if event_object.action in ["ON_CONFIG_RELOAD", "ON_JSON_RELOAD", "ON_WASD_BLOCK"]:
                     func()
-                elif event_object.action in ["MENU_MODE_TOGGLE"]:
+                elif event_object.action in ["ON_MENU_MODE_TOGGLE"]:
                     func(event_object.is_visible)
 
 
@@ -266,7 +274,7 @@ def get_adb_device():
         return real[0]
     
 
-def get_screen_size(device):
+def get_screen_size(device:str):
     """Detect screen resolution (portrait natural)."""
     result = subprocess.run(
         [ADB_EXE, "-s", device, "shell", "wm", "size"], capture_output=True, text=True
@@ -279,7 +287,7 @@ def get_screen_size(device):
     return None
 
 
-def get_dpi(device):
+def get_dpi(device:str):
     """Detect screen DPI, fallback to 160."""
     try:
         result = subprocess.run([ADB_EXE, "-s", device, "shell", "getprop", "ro.sf.lcd_density"],
@@ -289,7 +297,7 @@ def get_dpi(device):
     except Exception:
         return DEF_DPI
 
-def is_device_online(device):
+def is_device_online(device:str):
     try:
         res = subprocess.run([ADB_EXE, "-s", device, "get-state"], 
                             capture_output=True, text=True, timeout=1)
@@ -305,7 +313,7 @@ def set_dpi_awareness():
             ctypes.windll.user32.SetProcessDPIAware()
         except: pass
 
-def select_image_file(base_dir = None):
+def select_image_file(base_dir:str|None = None):
     # Create a root window and hide it immediately
     root = tk.Tk()
     root.withdraw() 
@@ -326,11 +334,48 @@ def select_image_file(base_dir = None):
     
     return file_path
 
-def is_in_circle(px, py, cx, cy, r):
+def is_in_circle(px:float, py:float, cx:float, cy:float, r:float):
     return (px - cx)**2 + (py - cy)**2 <= r*r
 
-def is_in_rect(px, py, left, right, top, bottom):
+def is_in_rect(px:float, py:float, left:float, right:float, top:float, bottom:float):
     return (left <= px <= right) and (top <= py <= bottom)
+
+def create_default_toml():
+    """Wipes the existing settings.toml and creates a fresh default configuration."""
+    print(f"Resetting '{TOML_PATH}' to default (Minimally Viable Version).")
+    
+    # Create the TOML structure in memory
+    doc = tomlkit.document()
+    
+    # [system] - Core paths and hardware baseline
+    system = tomlkit.table()
+    system.add("hud_image_path", "")
+    system.add("json_path", "")
+    system.add("json_dev_res", [2400, 1080]) # Default fallback resolution
+    system.add("json_dev_dpi", 160)
+    doc.add("system", system)
+
+    # [mouse] - Sensitivity settings
+    mouse = tomlkit.table()
+    mouse.add("sensitivity", 1.0)
+    mouse.add("invert_y", False)
+    doc.add("mouse", mouse)
+
+    # [joystick] - Movement and radius settings
+    joystick = tomlkit.table()
+    joystick.add("deadzone", 0.1)
+    joystick.add("hysteresis", 5.0)
+    joystick.add("mouse_wheel_radius", 0.0)
+    joystick.add("sprint_distance", 0.0)
+    doc.add("joystick", joystick)
+
+    try:
+        # Opening with "w" automatically clears (truncates) the file before writing
+        with open(TOML_PATH, "w", encoding="utf-8") as f:
+            tomlkit.dump(doc, f)
+        print(f"[System] Successfully reset and created settings.toml at '{TOML_PATH}'")
+    except Exception as e:
+        print(f"[Error] Failed to create settings.toml: {e}")
 
 def update_toml(w=None, h=None, dpi=None, image_path=None, json_path=None, mouse_wheel_radius=None, sprint_distance=None, strict=False):
     try:
@@ -408,18 +453,19 @@ def set_high_priority(pid, label, priority_level=psutil.HIGH_PRIORITY_CLASS):
         
 
 # --- Worker: Keyboard (Isolated) ---
-def keyboard_worker(k_queue):
+def keyboard_worker(k_queue:Queue):
     """ Dedicated process for Keyboard events only. """
     from interception import Interception, KeyStroke
     k_ctx = Interception()
     k_handle = k_ctx.keyboard
     # Keep track of keys we've pressed so we know what to release
     pressed_keys = set()
+    running = True
     
-    while True:
+    while running:
         try:
-            # 2.0 second timeout: If no heartbeat/input from Main, release everything
-            code, state = k_queue.get(timeout=2.0)
+            # 10.0 seconds timeout: If no heartbeat/input from Main, release everything
+            code, state = k_queue.get(timeout=10.0)
 
             # state 0 = Down, 1 = Up (Interception standard)
             if state == 0:
@@ -430,17 +476,21 @@ def keyboard_worker(k_queue):
             k_ctx.send(k_handle, KeyStroke(code, state))
   
         except Exception:
-            # This triggers if k_queue.get(timeout=2.0) times out
+            # This triggers if k_queue.get(timeout=10.0) times out
             if pressed_keys:
                 print(f"[Watchdog] Keyboard worker timeout. Releasing {len(pressed_keys)} keys.")
                 for code in list(pressed_keys):
                     k_ctx.send(k_handle, KeyStroke(code, 1))
                 pressed_keys.clear()
-                
+            running = False
+                            
 
 # --- Worker: Mouse (Isolated with Coalescing) ---
-def mouse_worker(m_queue):
+def mouse_worker(m_queue:Queue):
     """ Dedicated process for Mouse events with movement coalescing. """
+    # Set timer resolution to 1ms (10,000 units of 100ns)
+    ctypes.windll.ntdll.NtSetTimerResolution(NT_TIMER_RES, 1, ctypes.byref(ctypes.c_ulong()))
+        
     from interception import Interception, MouseStroke
     import time
     import random
@@ -455,15 +505,16 @@ def mouse_worker(m_queue):
     pending_task = None
     # Keep track of buttons we've pressed so we know what to release
     pressed_buttons = set()
+    running = True
 
-    while True:
+    while running:
         try:
-            # Wait for 2 seconds. If the main process dies, un-stick buttons (respects pending tasks).
+            # Wait for 10.0 seconds. If the main process dies, un-stick buttons (respects pending tasks).
             if pending_task:
                 task, data = pending_task
                 pending_task = None
             else:
-                task, data = m_queue.get(timeout=2.0)
+                task, data = m_queue.get(timeout=10.0)
 
             if task == "button":
                 # Track button states to release them on timeout
@@ -512,3 +563,75 @@ def mouse_worker(m_queue):
                 for release_flag in list(pressed_buttons):
                     m_ctx.send(m_handle, MouseStroke(release_flag, MOUSE_MOVE_RELATIVE, 0, 0, 0))
                 pressed_buttons.clear()
+            running = False
+            
+
+def maintain_bridge_health(bridge: InterceptionBridge, is_visible:bool):
+    """
+    Checks if workers are alive; restarts and re-prioritizes if dead.
+    """
+    if not is_visible: # Only restart keyboard worker in gaming mode
+        # 1. Check Keyboard Worker
+        if not bridge.k_proc.is_alive():
+            print(f"\n[CRITICAL] {_datetime.now().strftime('%H:%M:%S')} - Keyboard Worker Died!")
+            bridge.k_proc = multiprocessing.Process(target=keyboard_worker, name="Keyboard Worker", args=(bridge.k_queue,), daemon=True)
+            bridge.k_proc.start()
+            # Re-apply High Priority to the new PID
+            set_high_priority(bridge.k_proc.pid, "Revived Keyboard")
+            # Safety: Clear the queue to prevent a backlog of old 'stuck' keys firing at once
+            while not bridge.k_queue.empty():
+                try: 
+                    bridge.k_queue.get_nowait()
+                except: 
+                    break
+
+    # 2. Check Mouse Worker
+    if not bridge.m_proc.is_alive():
+        print(f"\n[CRITICAL] {_datetime.now().strftime('%H:%M:%S')} - Mouse Worker Died!")
+        bridge.m_proc = multiprocessing.Process(target=mouse_worker, name="Mouse Worker", args=(bridge.m_queue,), daemon=True)
+        bridge.m_proc.start()
+        set_high_priority(bridge.m_proc.pid, "Revived Mouse")
+        # Safety: Clear the queue to prevent a backlog of old 'stuck' mouse movements firing at once
+        while not bridge.m_queue.empty():
+            try: 
+                bridge.m_queue.get_nowait()
+            except: 
+                break
+
+
+def stop_process(process:Process):
+    if process.is_alive():
+        print(f"Closing {process.name}...")
+        process.terminate()
+        time.sleep(2.0)
+        if process.is_alive():
+            process.kill()
+
+def gaming_click(mapper:Mapper, x, y):
+    is_visible = mapper.last_cursor_state
+    
+    if not is_visible: # If in gaming mode
+        window_title = mapper.window_title
+        scancode = None
+        interception_bridge = mapper.interception_bridge
+        if window_title == GLP:
+            scancode = SCANCODES["LCTRL"]
+        
+        if scancode: # If the game has a cursor visiblity toggle key
+            maintain_bridge_health(interception_bridge, True) # Restart child processes as if the cursor is visible
+            
+            # Toggle the cursor visibility via the game's cursor visiblity toggle key             
+            interception_bridge.key_down(scancode)
+            time.sleep(0.2 + random.random() * 0.05)
+            interception_bridge.key_up(scancode)
+            
+            # Perform an absolute mouse click on the mouse finger coordinates
+            _x, _y = mapper.device_to_game_abs(x, y)
+            mapper.interception_bridge.mouse_move_abs(_x, _y)
+            interception_bridge.left_click_down()
+            time.sleep(0.2 + random.random() * 0.05)
+            interception_bridge.left_click_up()
+        
+
+
+

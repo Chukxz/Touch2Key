@@ -1,7 +1,7 @@
 # Utilities & Config
 from .utils import MapperEventDispatcher, MapperEvent, TouchEvent
 from .config import AppConfig
-from .json_loader import JSON_Loader
+from .json_loader import JSONLoader
 
 # Hardware/Input Layers
 from .touch_reader import TouchReader
@@ -20,7 +20,7 @@ __all__ = [
     'MapperEventDispatcher', 
     'TOML_PATH',
     'AppConfig',
-    'JSON_Loader',
+    'JSONLoader',
     'TouchReader',
     'InterceptionBridge',
     'Mapper',
