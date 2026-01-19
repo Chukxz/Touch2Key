@@ -95,8 +95,9 @@ class Plotter:
 
         self.fig, self.ax = plt.subplots()
         self.ax.imshow(img)
-        self.update_title(DEF_STR)
-
+        state_str = "VISIBLE" if self.show_overlays else "HIDDEN"
+        self.update_title(f"Overlays {state_str}. {DEF_STR}")
+        
         # Create the "Shadow" (Black, thicker)
         self.cursor_h_bg = self.ax.axhline(0, color='black', linewidth=1.5, alpha=0.8, visible=False, zorder=10, animated=True)
         self.cursor_v_bg = self.ax.axvline(0, color='black', linewidth=1.5, alpha=0.8, visible=False, zorder=10, animated=True)
@@ -145,8 +146,9 @@ class Plotter:
         self.mode = None
         self.points = []
         self.input_buffer = ""
-        self.update_title(DEF_STR)
-
+        state_str = "VISIBLE" if self.show_overlays else "HIDDEN"
+        self.update_title(f"Overlays {state_str}. {DEF_STR}")
+        
     def start_mode(self, mode, num_points):
         self.reset_state() 
         self.mode = mode
@@ -186,7 +188,7 @@ class Plotter:
             artist.set_visible(self.show_overlays)
         
         self.fig.canvas.draw()
-        self.update_title(f"Overlays {state_str}. Press F4 to Toggle.")
+        self.update_title(f"Overlays {state_str}. {DEF_STR}")
 
 
     # --- Event Handlers ---
