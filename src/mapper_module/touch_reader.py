@@ -31,7 +31,8 @@ class TouchReader():
         self.max_slots = self.get_max_slots()
         self.rotation = 0
         self.rotation_poll_interval = ROTATION_POLL_INTERVAL 
-        self.lock = threading.Lock()
+        self.rotation_lock = threading.Lock()
+        self.finger_lock = threading.Lock()
         self.running = True
         self.is_visible = True
         self.touch_lost = False
@@ -78,8 +79,13 @@ class TouchReader():
         If the cursor is visible use slot 0 as the Mouse finger and clear the WASD finger else identify the oldest finger on each side to assign as the dedicated Mouse or WASD finger.
         """
         
-        if self.is_visible:
-            self.mouse_slot = 0
+        if self.is_visible:            
+            eligible_finger = []
+            for slot, data in list(self.slots.items()):
+                if data['tid'] != -1 and data['start_x'] and ['start_y'] is not None:
+                    eligible_finger.append((slot, data['timestamp']))
+                    
+            self.mouse_slot = min(eligible_finger, key=lambda x: x[1])[0] if eligible_finger else None            
             self.wasd_slot = None
             return
 
@@ -87,7 +93,7 @@ class TouchReader():
         eligible_wasd = []
 
         for slot, data in list(self.slots.items()):
-            if data['tid'] != -1 and data['start_x'] is not None:
+            if data['tid'] != -1 and data['start_x'] and ['start_y'] is not None:
                 # Check which side the finger started on
                 if data['start_x'] >= self.side_limit:
                     eligible_mouse.append((slot, data['timestamp']))
@@ -124,7 +130,7 @@ class TouchReader():
                         with self.config.config_lock:
                             self.device = None
                     else:
-                        with self.lock:
+                        with self.rotation_lock:
                             self.update_matrix()
 
     def find_touch_device_event(self):
@@ -175,7 +181,7 @@ class TouchReader():
                 print(f"[ERROR] Config update failed: {e}")
                 return
             
-        with self.lock:
+        with self.rotation_lock:
             self.update_matrix()         
 
     def update_rotation(self):
@@ -186,7 +192,7 @@ class TouchReader():
                 for pat in patterns:
                     m = re.search(pat, result.stdout)
                     if m:
-                        with self.lock: 
+                        with self.rotation_lock: 
                             self.rotation = int(m.group(1)) % 4
                             self.update_matrix()
                         break
@@ -213,7 +219,7 @@ class TouchReader():
             self.side_limit = h // 2
 
     def rotate_norm_coordinates(self, x, y):
-        with self.lock:
+        with self.rotation_lock:
             return self.rotate_norm_coordinates_local(x, y, self.matrix)    
 
     def rotate_norm_coordinates_local(self, x, y, matrix):
@@ -288,7 +294,7 @@ class TouchReader():
                 continue
             
             else:
-                with self.lock:
+                with self.rotation_lock:
                     self.update_matrix()
             
             self.touch_lost = False
@@ -360,13 +366,14 @@ class TouchReader():
     def handle_sync(self, lift_up=False):
         now = time.perf_counter()
         # Grab a local snapshot of the matrix once per sync
-        with self.lock:
+        with self.rotation_lock:
             matrix_snapshot = self.matrix
 
         # Only update identities if a slot state changed from DOWN or UP
         needs_identity_update = any(s['state'] in [DOWN, UP] for s in self.slots.values())
         if needs_identity_update:
-            self.update_finger_identities()
+            with self.finger_lock:
+                self.update_finger_identities()
                 
         for slot, data in list(self.slots.items()):
             if lift_up: data['state'] = UP
@@ -417,7 +424,8 @@ class TouchReader():
     def set_is_visible(self, _is_visible):
         with self.config.config_lock:
             self.is_visible = _is_visible
-        self.update_finger_identities()
+        with self.finger_lock:
+            self.update_finger_identities()
 
     def stop(self):
         self.running = False

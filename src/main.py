@@ -57,15 +57,16 @@ def process_touch_event(action:EVENT_TYPE, touch_event:TouchEvent):
         try:                   
             if touch_event.is_mouse:
                 mouse_mapper.process_touch(action, touch_event, is_visible)
-           
-            if touch_event.is_key:
-                key_mapper.process_touch(action, touch_event)
             
-                if action == UP:
-                    wasd_mapper.touch_up()
-                   
-                if touch_event.is_wasd:
-                    wasd_mapper.process_touch(action, touch_event) 
+            if not is_visible:
+                if touch_event.is_key:
+                    key_mapper.process_touch(action, touch_event)
+                
+                    if action == UP:
+                        wasd_mapper.touch_up()
+                    
+                    if touch_event.is_wasd:
+                        wasd_mapper.process_touch(action, touch_event) 
         except:
             pass
         

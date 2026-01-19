@@ -628,9 +628,11 @@ def mouse_worker(m_queue:Queue):
             running = False
             
 
-def maintain_bridge_health(bridge: InterceptionBridge, is_visible:bool):
+def maintain_bridge_health(bridge: InterceptionBridge, is_visible=True):
     """
     Checks if workers are alive; restarts and re-prioritizes if dead.
+    Keyboard worker is only restarted if is_visible (cursor visibility) is set to False (gaming mode).
+    Mouse worker is always restarted.
     """
     if not is_visible: # Only restart keyboard worker in gaming mode
         # 1. Check Keyboard Worker
@@ -679,8 +681,8 @@ def gaming_click(mapper:Mapper, x, y):
         if window_title == GLP:
             scancode = SCANCODES["LCTRL"]
 
-        if scancode: # If the game has a cursor visiblity toggle key
-            maintain_bridge_health(interception_bridge, True) # Restart child processes as if the cursor is visible
+        if scancode: # If the current game has a cursor visiblity toggle key
+            maintain_bridge_health(interception_bridge, is_visible)
             
             # Toggle the cursor visibility via the game's cursor visiblity toggle key             
             interception_bridge.key_down(scancode)
