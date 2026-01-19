@@ -9,7 +9,8 @@ from .utils import (
     TouchEvent, ADB_EXE, DOWN, UP, PRESSED, IDLE,
     ROTATION_POLL_INTERVAL, SHORT_DELAY, LONG_DELAY,
     get_adb_device, is_device_online,
-    get_screen_size, maintain_bridge_health
+    get_screen_size, maintain_bridge_health,
+    wireless_connect
     )
 
 if TYPE_CHECKING:
@@ -24,6 +25,7 @@ class TouchReader():
         self.interception_bridge = interception_bridge
 
         # State Tracking
+        self.device = None
         self.slots = {}
         self.active_touches = 0
         self.max_slots = self.get_max_slots()
@@ -66,9 +68,11 @@ class TouchReader():
         self.process = None
         threading.Thread(target=self.update_rotation, daemon=True).start()
         threading.Thread(target=self.get_touches, daemon=True).start()
+        self.wireless_thread = threading.Thread(target=self.connect_wirelessly, daemon=True)
+        self.wireless_thread.start()
 
     # --- FINGER IDENTITY LOGIC ---
-
+    
     def update_finger_identities(self):
         """
         If the cursor is visible use slot 0 as the Mouse finger and clear the WASD finger else identify the oldest finger on each side to assign as the dedicated Mouse or WASD finger.
@@ -97,6 +101,32 @@ class TouchReader():
 
     # --- CONFIG & SPECS ---
 
+    def connect_wirelessly(self):
+        connecting = True
+        while self.running and connecting:
+            with self.config.config_lock:
+                device = self.device
+            
+            ret = wireless_connect(device, False)
+            if ret:
+                error, dev = ret
+                
+                if error:
+                    time.sleep(LONG_DELAY)
+                    continue
+                else:
+                    connecting = False
+                    try:
+                        with self.config.config_lock:
+                            self.device = dev
+                            self.configure_device() 
+                    except:
+                        with self.config.config_lock:
+                            self.device = None
+                    else:
+                        with self.lock:
+                            self.update_matrix()
+
     def find_touch_device_event(self):
         try:
             result = subprocess.run(
@@ -110,7 +140,8 @@ class TouchReader():
                     if current_device: devices[current_device] = "\n".join(block)
                     block = []
                     current_device = line.split(":")[1].strip()
-                else: block.append(line)
+                else: 
+                    block.append(line)
             if current_device: devices[current_device] = "\n".join(block)
 
             for dev, txt in devices.items():
@@ -143,8 +174,9 @@ class TouchReader():
             except Exception as e:
                 print(f"[ERROR] Config update failed: {e}")
                 return
-
-        self.update_matrix()         
+            
+        with self.lock:
+            self.update_matrix()         
 
     def update_rotation(self):
         patterns = [r"mCurrentRotation=(\d+)", r"rotation=(\d+)", r"mCurrentOrientation=(\d+)", r"mUserRotation=(\d+)"]
@@ -158,8 +190,7 @@ class TouchReader():
                             self.rotation = int(m.group(1)) % 4
                             self.update_matrix()
                         break
-            except: 
-                pass
+            except: pass
             time.sleep(self.rotation_poll_interval)
     
     def update_matrix(self):
@@ -213,7 +244,8 @@ class TouchReader():
 
 
     def configure_device(self):
-        self.device = get_adb_device() # Raises runtime error is no eligible adb device is found
+        if self.device is None:
+            self.device = get_adb_device() # Raises runtime error if no eligible adb device is found
         if not is_device_online(self.device):
             raise RuntimeError(f"{self.device} is not online.")
         self.device_touch_event = self.find_touch_device_event()
@@ -244,17 +276,20 @@ class TouchReader():
             try:
                 with self.config.config_lock:
                     self.configure_device()
-
-                with self.lock:
-                    self.update_matrix() # Initialize matrix with starting specs
-            
+                                
             except RuntimeError as e:
+                with self.config.config_lock:
+                    self.device = None
                 if not self.touch_lost:
                     self.touch_lost = True
                     print(f"[ERROR] {e}. ADB Device disconnected. Attempting to connect...")
-                    
+                
                 time.sleep(LONG_DELAY)
                 continue
+            
+            else:
+                with self.lock:
+                    self.update_matrix()
             
             self.touch_lost = False
 
@@ -319,6 +354,8 @@ class TouchReader():
             if self.running:
                 self.stop_process()
                 time.sleep(SHORT_DELAY)
+                if not self.wireless_thread.is_alive():
+                    self.wireless_thread = threading.Thread(target=self.connect_wirelessly, daemon=True)
 
     def handle_sync(self, lift_up=False):
         now = time.perf_counter()
@@ -357,11 +394,8 @@ class TouchReader():
                             is_mouse=(slot == self.mouse_slot), 
                             is_wasd=(slot == self.wasd_slot),
                             )
-                        self.touch_event_processor(action, touch_event)
-                        
-                    except:
-                        pass
-                     
+                        self.touch_event_processor(action, touch_event) 
+                    except: pass                     
 
             if data['state'] == DOWN: 
                 data['state'] = PRESSED
@@ -369,6 +403,9 @@ class TouchReader():
                 self.reset_slot(slot)
 
     def stop_process(self):
+        with self.config.config_lock:
+            self.device = None
+            
         if self.process:
             try:
                 self.process.terminate()
@@ -389,4 +426,3 @@ class TouchReader():
     
     def bind_touch_event(self, touch_event_processor):
         self.touch_event_processor = touch_event_processor
-

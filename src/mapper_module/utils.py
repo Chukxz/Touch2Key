@@ -81,6 +81,8 @@ MIDDLE_BUTTON_DOWN, MIDDLE_BUTTON_UP = 0x0010, 0x0020
 
 GLP = "Gameloop(64beta)"
 
+PORT = '5555'
+
 EVENT_TYPE = Literal["ON_CONFIG_RELOAD", "ON_JSON_RELOAD", "ON_WASD_BLOCK", "ON_MENU_MODE_TOGGLE"]
 
 SCANCODES = {
@@ -266,7 +268,7 @@ class MapperEventDispatcher:
 
 def get_adb_device():
     out = subprocess.check_output([ADB_EXE, "devices"]).decode().splitlines()
-    real = [l.split()[0] for l in out[1:] if "device" in l and not l.startswith("emulator-")]
+    real = [d.split()[0] for d in out[1:] if "device" in d and not d.startswith("emulator-")]
 
     if not real:
         raise RuntimeError("No real device detected")
@@ -304,6 +306,66 @@ def is_device_online(device:str):
         return "device" in res.stdout
     except:
         return False
+
+def wireless_connect(device:str|None=None, continous=True):
+    running = True
+    device = None
+    error_1 = False
+    error_2 = False
+    
+    while running:        
+        if not device:
+            try:
+                device = get_adb_device()
+                
+            except RuntimeError:
+                if continous:
+                    if not error_1:
+                        print("No adb devices detected.")
+                        print("Retrying...")
+                        error_1 = True
+                    time.sleep(SHORT_DELAY)
+                    continue
+                else:
+                    return True, ''
+        
+            error_1 = False
+        
+        try:
+            routes = subprocess.check_output([ADB_EXE,  "-s", device, "shell", "ip", "route"]).decode().splitlines()
+            socket = [s.split()[-1] for s in routes if "dev ap0" in s]
+            
+            if not socket:
+                raise RuntimeError(f"No sockets found for device: {device}")
+            
+            socket_path = socket[0] + ":" + PORT
+             
+            final = subprocess.check_output([ADB_EXE,  "-s", device, "connect", socket_path]).decode().splitlines()[0] # If there's an error its supposed to be raised here.
+            
+            if "(10065)" in final: # Default fallback if no errors were raised in previous line
+                raise RuntimeError(f"cannot connect to {socket_path}: A socket operation was attempted to an unreachable host. (10065)")
+            
+            if device == socket_path:
+                print(f"Connected successfully to device: {socket_path}.")
+            else:
+                print(f"Connected successfully to device: {device} on socket: {socket_path}, device now set to: {socket_path}.")
+            if continous:
+                running = False
+            else:
+                return False, socket_path
+                    
+        except Exception as e:
+            if continous:
+                if not error_2:
+                    print(e)
+                    print("Retrying...")
+                    error_2 = True
+                time.sleep(SHORT_DELAY)
+                continue
+            else:
+                return True, ''
+    
+        error_2 = False
 
 def set_dpi_awareness():
     try:
@@ -616,7 +678,7 @@ def gaming_click(mapper:Mapper, x, y):
         interception_bridge = mapper.interception_bridge
         if window_title == GLP:
             scancode = SCANCODES["LCTRL"]
-        
+
         if scancode: # If the game has a cursor visiblity toggle key
             maintain_bridge_health(interception_bridge, True) # Restart child processes as if the cursor is visible
             
