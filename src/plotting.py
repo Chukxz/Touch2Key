@@ -39,9 +39,7 @@ SPECIAL_MAP = {
 }
 
 class DraggableLabel:
-    draggables = {}
-    
-    def __init__(self, id, artist, plotter_ref):
+    def __init__(self, artist, plotter_ref):
         self.artist = artist
         self.plotter = plotter_ref # Reference to your main Plotter class
         self.canvas = artist.figure.canvas
@@ -54,7 +52,6 @@ class DraggableLabel:
             self.canvas.mpl_connect('motion_notify_event', self.on_motion),
             self.canvas.mpl_connect('button_release_event', self.on_release),
         ]
-        self.draggables[id] = self
 
     def on_press(self, event):
         if event.inaxes != self.artist.axes: return
@@ -137,6 +134,7 @@ class Plotter:
         self.input_buffer = ""
         self.shapes_artists = {}
         self.labels_artists = {}
+        self.drag_managers = {}
         self.init_params_helper()
 
         try:
@@ -195,7 +193,10 @@ class Plotter:
         for uid in self.labels_artists:
             self.labels_artists[uid].remove()
         self.labels_artists = {}
-        
+        for uid in self.drag_managers:
+self.drag_managers[uid].disconnect()     
+        self.drag_managers = {}
+
     def update_title(self, text):
         self.ax.set_title(text)
         self.fig.canvas.draw()
@@ -214,7 +215,6 @@ class Plotter:
         self.input_buffer = ""
         state_str = "VISIBLE" if self.show_overlays else "HIDDEN"
         self.update_title(f"Overlays {state_str}. {DEF_STR}")
-        self.bg_cache = self.fig.canvas.copy_from_bbox(self.ax.bbox)
         
     def start_mode(self, mode, num_points):
         self.reset_state() 
@@ -433,10 +433,9 @@ class Plotter:
                         if uid in self.labels_artists:
                             self.labels_artists[uid].remove()
                             del self.labels_artists[uid]
-                        draggables = DraggableLabel.draggables
-                        if uid in draggables:
-                            draggables[uid].disconnect()
-                            del DraggableLabel.draggables[uid]
+                        if uid in self.drag_managers:
+                            self.drag_managers[uid].disconnect()
+                            del self.drag_managers[uid]
                         print(f"[+] Deleted ID {uid}")
                         
                         if self.saved_mouse_wheel and any(v['key_name'] == MOUSE_WHEEL_CODE for v in self.shapes.values()) == False:
@@ -496,7 +495,7 @@ class Plotter:
                     self.ax.add_artist(label_artist)
                     self.labels_artists[entry_id] = label_artist
                     # Make the labels draggable
-                    DraggableLabel(entry_id, label_artist, self)
+                    self.drag_managers[entry_id] = DraggableLabel(label_artist, self)
                 elif self.mode == RECT and cx and cy and bb:
                     fc = get_vibrant_random_color(0.4)
                     (x1, y1), (x2, y2) = bb
@@ -509,7 +508,7 @@ class Plotter:
                     self.ax.add_artist(label_artist)
                     self.labels_artists[entry_id] = label_artist
                     # Make the labels draggable
-                    DraggableLabel(entry_id, label_artist, self)
+                    self.drag_managers[entry_id] = DraggableLabel(label_artist, self)
                     
         self.reset_state()
 
