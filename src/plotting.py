@@ -666,7 +666,7 @@ class Plotter:
                     # STRICT CHECK: Ensure Sprint is actually outside the Joystick
                     if actual_dist <= self.mouse_wheel_radius:
                         print(f"[!] ERROR: Sprint point must be OUTSIDE the joystick radius!")
-                    return False, id
+                        return False, id
 
                     self.sprint_distance = actual_dist
                     self.saved_sprint_distance = True
