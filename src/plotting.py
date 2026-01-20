@@ -436,6 +436,7 @@ class Plotter:
                         draggables = DraggableLabel.draggables
                         if uid in draggables:
                             draggables[uid].disconnect()
+                            del DraggableLabel.draggables[uid]
                         print(f"[+] Deleted ID {uid}")
                         
                         if self.saved_mouse_wheel and any(v['key_name'] == MOUSE_WHEEL_CODE for v in self.shapes.values()) == False:
