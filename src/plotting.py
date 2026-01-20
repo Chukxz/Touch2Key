@@ -1,5 +1,4 @@
 from __future__ import annotations
-import weakref
 import matplotlib.pyplot as plt
 from PIL import Image
 import tomlkit
@@ -7,7 +6,6 @@ import math
 import json
 import os
 import datetime
-import gc
 from mapper_module.utils import (
     CIRCLE, RECT, SCANCODES, DEF_DPI, IMAGES_FOLDER, JSONS_FOLDER,
     TOML_PATH, MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, select_image_file,
