@@ -194,7 +194,7 @@ class Plotter:
             self.labels_artists[uid].remove()
         self.labels_artists = {}
         for uid in self.drag_managers:
-self.drag_managers[uid].disconnect()     
+            self.drag_managers[uid].disconnect()     
         self.drag_managers = {}
 
     def update_title(self, text):
