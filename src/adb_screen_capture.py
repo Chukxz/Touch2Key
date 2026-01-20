@@ -1,6 +1,6 @@
 import subprocess
-import os
-import time
+import datetime
+from pathlib import Path
 from PIL import Image
 
 from mapper_module.utils import (
@@ -9,51 +9,33 @@ from mapper_module.utils import (
 )
 
 def capture_android_screen():
-    """
-    Captures screen and saves as: {nickname}_{custom_img_name}_{timestamp}.png
-    Handles 4 scenarios: 
-    1. Only image name -> Device_imgname_ts
-    2. Only nickname -> Nickname_ts
-    3. Both -> Nickname_imgname_ts
-    4. Neither -> Device_ts
-    """
     device_id = get_adb_device()
     res = get_screen_size(device_id)
     if res is None:
         raise RuntimeError("Invalid screen resolution.")
 
     dpi = get_dpi(device_id)
+    timestamp = datetime.datetime.now().strftime("hud_%Y%m%d_%H%M%S")
 
-    # --- ROBUST NAMING LOGIC ---
-    timestamp = int(time.time())
+    nickname = input("Enter device nickname (optional): ").strip()
+    custom_img_name = input("Enter optional image name: ").strip()
 
-    # Get inputs from user
-    nickname = input("Enter device nickname (optional, default 'Device'): ").strip()
-    custom_img_name = input("Enter optional image name (e.g. cod_low): ").strip()
-    
-    # Clean and fallback for nickname
-    nick_clean = nickname.strip().replace(" ", "_") if nickname.strip() else "Device"
-    # Clean image name
-    img_clean = custom_img_name.strip().replace(" ", "_")
+    nick_clean = nickname.replace(" ", "_") if nickname else "Device"
+    img_clean = custom_img_name.replace(" ", "_") if custom_img_name else "Image"
     
     img_rotation = get_rotation(device_id)
-
-    # Construct filename based on presence of custom image name
-    if img_clean:
-        filename = f"{nick_clean}_{img_clean}_{timestamp}_r{img_rotation}.png"
-    else:
-        filename = f"{nick_clean}_{timestamp}_r{img_rotation}.png"
-
-    os.makedirs(IMAGES_FOLDER, exist_ok=True)
-    full_save_path = os.path.join(IMAGES_FOLDER, filename)
+    base_dir = Path(IMAGES_FOLDER)
+    
+    relative_filename = Path(nick_clean) / img_clean / f"{timestamp}_r{img_rotation}.png"
+    full_save_path = base_dir / relative_filename
+    full_save_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        print(f"[PROCESS] Capturing {res[0]}x{res[1]} screen from {device_id}...")
+        print(f"[PROCESS] Capturing {res[0]}x{res[1]} screen...")
         android_tmp = '/data/local/tmp/temp_cap.png'
 
-        # ADB Capture sequence (-p forces PNG)
         subprocess.run(['adb', '-s', device_id, 'shell', 'screencap', '-p', android_tmp], check=True)
-        subprocess.run(['adb', '-s', device_id, 'pull', android_tmp, full_save_path], check=True)
+        subprocess.run(['adb', '-s', device_id, 'pull', android_tmp, str(full_save_path)], check=True)
         subprocess.run(['adb', '-s', device_id, 'shell', 'rm', android_tmp], check=True)
 
     except subprocess.CalledProcessError as e:
@@ -62,20 +44,16 @@ def capture_android_screen():
     
     try:
         with Image.open(full_save_path) as img:
-        # PNG stores DPI as a tuple (horizontal, vertical)
-        # We re-save the image with the 'dpi' parameter
             img.save(full_save_path, dpi=(dpi, dpi))
-            print(f"[INFO] DPI ({dpi}) embedded into PNG metadata.")
-
+            print(f"[INFO] DPI ({dpi}) embedded.")
     except Exception as e:
-        print(f"[WARNING] Could not embed DPI into image: {e}")
+        print(f"[WARNING] DPI metadata failed: {e}")
 
     try:
-        update_toml(image_path=full_save_path, strict=True)
+        update_toml(image_path=str(relative_filename), strict=True)
 
         print(f"\n[SUCCESS]")
-        print(f"File:   {filename}")
-        print(f"Device: {nick_clean}")
+        print(f"File:   {relative_filename}")
         print(f"Config: {TOML_PATH} updated.")
 
     except Exception as e:

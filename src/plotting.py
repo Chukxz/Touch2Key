@@ -4,8 +4,8 @@ from PIL import Image
 import tomlkit
 import math
 import json
-import os
 import datetime
+from pathlib import Path
 from mapper_module.utils import (
     CIRCLE, RECT, SCANCODES, DEF_DPI, IMAGES_FOLDER, JSONS_FOLDER,
     TOML_PATH, MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, select_image_file,
@@ -97,34 +97,43 @@ class Plotter:
         set_dpi_awareness()
 
         # SMART PATH DETECTION
+        base_images_folder = Path(IMAGES_FOLDER)
+        toml_file = Path(TOML_PATH)
+
         if image_path is None:
-            if os.path.exists(TOML_PATH):
+            if toml_file.exists():
                 try:
-                    with open(TOML_PATH, "r", encoding="utf-8") as f:
+                    with open(toml_file, "r", encoding="utf-8") as f:
                         doc = tomlkit.load(f)
-                        toml_img = doc.get("system", {}).get("hud_image_path", "")
-                        if toml_img and os.path.exists(toml_img):
-                            image_path = toml_img
-                            print(f"[System] Auto-loading last HUD: {os.path.basename(image_path)}")
-                except: pass
+                        toml_img_str = doc.get("system", {}).get("hud_image_path", "")
+                        if toml_img_str:
+                            potential_path = Path(toml_img_str)
+                            if potential_path.exists():
+                                image_path = potential_path
+                                print(f"[System] Auto-loading last HUD: {image_path.name}")
+                except Exception:
+                    pass
 
             if image_path is None:
-                os.makedirs(IMAGES_FOLDER, exist_ok=True)
+                base_images_folder.mkdir(parents=True, exist_ok=True)
                 print(f"[System] No active HUD found in config. Opening selector...")
-                image_path = select_image_file(IMAGES_FOLDER)
+                selected = select_image_file(str(base_images_folder))
+                image_path = Path(selected) if selected else None
 
         if not image_path:
             print("Exiting: No image selected.")
             return
 
-        self.image_path = image_path
-
+        self.image_path = Path(image_path)
+                
         #  GUI Configuration
         for key in plt.rcParams:
             if key.startswith('keymap.'):
                 plt.rcParams[key] = []
         
         # Initiate Parameters
+        self.fig, self.ax = plt.subplots()
+        
         self.points = []          
         self.drawn_artists = []
         self.mode = None          
@@ -133,26 +142,11 @@ class Plotter:
         self.shapes_artists = {}
         self.labels_artists = {}
         self.drag_managers = {}
-        self.init_params_helper()
-
-        try:
-            img = Image.open(image_path)
-        except Exception as e:
-            raise RuntimeError(f"Error loading image: {e}")
         
-        self.width, self.height = img.size        
-        image_name = os.path.basename(self.image_path)
-        try:
-            _str = image_name.split(".")[0].split("_")[-1]
-            if _str.startswith("r"):
-                rot = int(_str[1:])
-                self.width, self.height = rotate_resolution(self.width, self.height, rot)
-        except:
-            pass
-        self.dpi = int(round(img.info.get("dpi", DEF_DPI)[0]))
-
-        self.fig, self.ax = plt.subplots()
+        self.init_params_helper()
+        img = self.update_image_params()
         self.ax.imshow(img)
+        
         state_str = "VISIBLE" if self.show_overlays else "HIDDEN"
         self.update_title(f"Overlays {state_str}. {DEF_STR}")
         
@@ -174,6 +168,25 @@ class Plotter:
 
     
     # --- Visual & State Management ---
+    
+    def update_image_params(self):
+        try:
+            img = Image.open(self.image_path)
+        except Exception as e:
+            raise RuntimeError(f"Error loading image: {e}")
+        
+        self.width, self.height = img.size      
+        try:
+            # self.image_path.stem gets the filename without extension
+            parts = self.image_path.stem.split("_")
+            rotation_part = parts[-1] 
+            if rotation_part.startswith("r"):
+                rot = int(rotation_part[1:])
+                self.width, self.height = rotate_resolution(self.width, self.height, rot)
+        except Exception:
+            pass
+        self.dpi = int(round(img.info.get("dpi", DEF_DPI)[0]))
+        return img
 
     def init_params_helper(self):
         self.shapes = {}
@@ -185,6 +198,9 @@ class Plotter:
         self.mouse_wheel_cy = 0.0
         self.sprint_distance = 0.0
         self.show_overlays = True
+        self.width = 0
+        self.height = 0
+        self.dpi = 0
         for uid in self.shapes_artists:
             self.shapes_artists[uid].remove()
         self.shapes_artists = {}
@@ -222,27 +238,17 @@ class Plotter:
         self.update_title(f"Mode: {mode}. Click {num_points} points on the image (F8 to Cancel).")
 
     def change_image(self):
-        new_path = select_image_file(IMAGES_FOLDER)
-        if new_path:            
-            # Reload the image and refresh the plot
-            img = Image.open(new_path)
-            self.width, self.height = img.size        
-            image_name = os.path.basename(self.image_path)
-            try:
-                _str = image_name.split(".")[0].split("_")[-1]
-                if _str.startswith("r"):
-                    rot = int(_str[1:])
-                    self.width, self.height = rotate_resolution(self.width, self.height, rot)
-            except:
-                pass
-            self.dpi = int(round(img.info.get("dpi", DEF_DPI)[0]))
-            
+        image_path = select_image_file(IMAGES_FOLDER)
+        if image_path:
+            self.image_path = Path(image_path)
             self.ax.clear()
-            self.ax.imshow(img)
-            self.reset_state()
-            self.image_path = new_path
+            
             self.init_params_helper()
-            print(f"Swapped HUD to: {os.path.basename(self.image_path)}")
+            img = self.update_image_params()
+            self.ax.imshow(img)
+            
+            self.reset_state()
+            print(f"Swapped HUD to: f{self.image_path.relative_to(IMAGES_FOLDER).as_posix()}")
 
     def toggle_visibility(self):
         self.show_overlays = not self.show_overlays
@@ -538,15 +544,17 @@ class Plotter:
         display_name = self.input_buffer if self.input_buffer else "[Default Timestamp]"
         self.update_title(f"SAVE: {display_name} (Enter to Save)")
 
-    def export_data(self, user_name=None):
+    def export_data(self, user_name):
         if not user_name:
             user_name = datetime.datetime.now().strftime("map_%Y%m%d_%H%M%S")
         else:
-            user_name += datetime.datetime.now().strftime("map_%Y%m%d_%H%M%S")
-        
-        os.makedirs(JSONS_FOLDER, exist_ok=True)
-
-        output = []
+            user_name += datetime.datetime.now().strftime("_map_%Y%m%d_%H%M%S")
+            
+        relative_path_parent = self.image_path.relative_to(Path(IMAGES_FOLDER)).parent
+        target_dir = Path(JSONS_FOLDER) / relative_path_parent
+        file_path = target_dir / f"{user_name}.json"        
+        target_dir.mkdir(parents=True, exist_ok=True)       
+        output = []        
 
         for _, data in self.shapes.items():
             entry = {
@@ -582,8 +590,6 @@ class Plotter:
                 },
             "content": output
         }
-
-        file_path = os.path.join(JSONS_FOLDER, f"{user_name}.json")
         
         try:
             if (not self.saved_mouse_wheel) and (not self.saved_sprint_distance):
@@ -591,20 +597,24 @@ class Plotter:
                 self.update_title(f"Error saving: {e}")
                 return
 
-            with open(file_path, 'w', encoding='utf-8') as f:
+            with file_path.open('w', encoding='utf-8') as f:
                 json.dump(json_output, f, indent=4)
+                
+            display_path = file_path.relative_to(Path.cwd())
+            print(f"[+] Saved to: {display_path}")
 
-            msg = f"{JSONS_FOLDER}/{user_name}.json"
-            print(f"[+] {msg}")
-
-            update_toml(self.width, self.height, self.dpi, self.image_path, file_path, self.mouse_wheel_radius, self.sprint_distance, True)
+            update_toml(
+                self.width, self.height, self.dpi, 
+                str(self.image_path), str(file_path), 
+                self.mouse_wheel_radius, self.sprint_distance, True
+            )
 
         except Exception as e:
             print(f"[!] Export Error: {e}")
             self.update_title(f"Error saving: {e}")
             return
             
-        self.update_title(msg)
+        self.update_title(f"Saved: {file_path.name}")
             
     # --- Helper Functions ---
 
