@@ -1,3 +1,5 @@
+from __future__ import annotations
+import weakref
 import matplotlib.pyplot as plt
 from PIL import Image
 import tomlkit
@@ -5,10 +7,11 @@ import math
 import json
 import os
 import datetime
+import gc
 from mapper_module.utils import (
     CIRCLE, RECT, SCANCODES, DEF_DPI, IMAGES_FOLDER, JSONS_FOLDER,
     TOML_PATH, MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, select_image_file,
-    set_dpi_awareness, rotate_resolution, update_toml
+    set_dpi_awareness, rotate_resolution, update_toml, get_vibrant_random_color
 )
 
 # --- Constants ---
@@ -34,6 +37,64 @@ SPECIAL_MAP = {
     "up": "E0_UP", "left": "E0_LEFT", "right": "E0_RIGHT", "down": "E0_DOWN",
     "insert": "E0_INSERT", "delete": "E0_DELETE",
 }
+
+class DraggableLabel:
+    draggables = {}
+    
+    def __init__(self, id, artist, plotter_ref):
+        self.artist = artist
+        self.plotter = plotter_ref # Reference to your main Plotter class
+        self.canvas = artist.figure.canvas
+        self.press = None
+        self.drag_bg = None
+        
+        # Store IDs so we can kill them later
+        self.cids = [
+            self.canvas.mpl_connect('button_press_event', self.on_press),
+            self.canvas.mpl_connect('motion_notify_event', self.on_motion),
+            self.canvas.mpl_connect('button_release_event', self.on_release),
+        ]
+        self.draggables[id] = self
+
+    def on_press(self, event):
+        if event.inaxes != self.artist.axes: return
+        contains, _ = self.artist.contains(event)
+        if not contains: return
+
+        # Prepare Background for Blitting
+        self.artist.set_visible(False)
+        self.canvas.draw() 
+        self.drag_bg = self.canvas.copy_from_bbox(self.artist.axes.bbox)
+        self.artist.set_visible(True)
+
+        x0, y0 = self.artist.get_position()
+        self.press = x0, y0, event.xdata, event.ydata
+
+    def on_motion(self, event):
+        if self.press is None or event.inaxes != self.artist.axes or self.drag_bg is None:
+            return
+
+        x0, y0, xpress, ypress = self.press
+        dx = event.xdata - xpress
+        dy = event.ydata - ypress
+
+        # Blitting Loop
+        self.canvas.restore_region(self.drag_bg)
+        self.artist.set_position((x0 + dx, y0 + dy))
+        self.artist.axes.draw_artist(self.artist)
+        self.canvas.blit(self.artist.axes.bbox)
+
+    def on_release(self, event):
+        self.press = None
+        self.drag_bg = None
+        self.canvas.draw_idle()
+
+    def disconnect(self):
+        """The 'Leak Killer': Call this when deleting the label."""
+        for cid in self.cids:
+            self.canvas.mpl_disconnect(cid)
+        print(f"[System] Event listeners for {self.artist} disconnected.")
+
 
 class Plotter:
     def __init__(self, image_path=None):
@@ -75,6 +136,7 @@ class Plotter:
         self.state = IDLE         
         self.input_buffer = ""
         self.shapes_artists = {}
+        self.labels_artists = {}
         self.init_params_helper()
 
         try:
@@ -101,10 +163,11 @@ class Plotter:
         # Create the "Shadow" (Black, thicker)
         self.cursor_h_bg = self.ax.axhline(0, color='black', linewidth=1.5, alpha=0.8, visible=False, zorder=10, animated=True)
         self.cursor_v_bg = self.ax.axvline(0, color='black', linewidth=1.5, alpha=0.8, visible=False, zorder=10, animated=True)
-
+        
         # Create the "Core" (White, thinner)
         self.cursor_h_fg = self.ax.axhline(0, color='white', linewidth=0.6, alpha=1.0, visible=False, zorder=11, animated=True)
         self.cursor_v_fg = self.ax.axvline(0, color='white', linewidth=0.6, alpha=1.0, visible=False, zorder=11, animated=True)
+        
         self.bg_cache = None
         
         self.fig.canvas.mpl_connect("motion_notify_event", self.on_mouse_move)
@@ -119,7 +182,7 @@ class Plotter:
     def init_params_helper(self):
         self.shapes = {}
         self.count = 0
-        self.target_points = 0
+        self.artists_points = 0
         self.saved_mouse_wheel = False
         self.saved_sprint_distance = False
         self.mouse_wheel_radius = 0.0
@@ -129,6 +192,9 @@ class Plotter:
         for uid in self.shapes_artists:
             self.shapes_artists[uid].remove()
         self.shapes_artists = {}
+        for uid in self.labels_artists:
+            self.labels_artists[uid].remove()
+        self.labels_artists = {}
         
     def update_title(self, text):
         self.ax.set_title(text)
@@ -148,11 +214,12 @@ class Plotter:
         self.input_buffer = ""
         state_str = "VISIBLE" if self.show_overlays else "HIDDEN"
         self.update_title(f"Overlays {state_str}. {DEF_STR}")
+        self.bg_cache = self.fig.canvas.copy_from_bbox(self.ax.bbox)
         
     def start_mode(self, mode, num_points):
         self.reset_state() 
         self.mode = mode
-        self.target_points = num_points
+        self.artists_points = num_points
         self.state = COLLECTING
         self.update_title(f"Mode: {mode}. Click {num_points} points on the image (F8 to Cancel).")
 
@@ -186,10 +253,28 @@ class Plotter:
         
         for artist in self.shapes_artists.values():
             artist.set_visible(self.show_overlays)
+        for artist in self.labels_artists.values():
+            artist.set_visible(self.show_overlays)
         
         self.fig.canvas.draw()
         self.update_title(f"Overlays {state_str}. {DEF_STR}")
 
+
+    def label(self, center_x, center_y, label, fc):
+        return plt.Text(
+            center_x, center_y, 
+            label, 
+            color='white',            # Text color
+            fontsize=6,
+            fontweight='bold',
+            ha='center',              # Horizontal center
+            va='center',              # Vertical center
+            bbox=dict(
+                fc=fc,  # Background color
+                ec='none',     # Remove the border line
+                boxstyle='round,pad=0.5' # Add some padding and rounded corners
+            )
+        )
 
     # --- Event Handlers ---
 
@@ -259,7 +344,7 @@ class Plotter:
         self.fig.canvas.draw()
         self.bg_cache = None
 
-        remaining = self.target_points - len(self.points)
+        remaining = self.artists_points - len(self.points)
         if remaining > 0:
             self.update_title(f"Mode: {self.mode}. {remaining} points remaining.")
         else:
@@ -344,6 +429,13 @@ class Plotter:
                         del self.shapes[uid]
                         if uid in self.shapes_artists:
                             self.shapes_artists[uid].remove()
+                            del self.shapes_artists[uid]
+                        if uid in self.labels_artists:
+                            self.labels_artists[uid].remove()
+                            del self.labels_artists[uid]
+                        draggables = DraggableLabel.draggables
+                        if uid in draggables:
+                            draggables[uid].disconnect()
                         print(f"[+] Deleted ID {uid}")
                         
                         if self.saved_mouse_wheel and any(v['key_name'] == MOUSE_WHEEL_CODE for v in self.shapes.values()) == False:
@@ -393,14 +485,30 @@ class Plotter:
             if saved:
                 print(f"[+] Saved ID {self.count-1}: {self.mode} bound to key '{key_name}' with interception key: '{interception_key}'")
                 if self.mode == CIRCLE and cx and cy and r:
-                    artist = plt.Circle((cx, cy), r, color='green', fill=False)
-                    self.ax.add_patch(artist)
-                    self.shapes_artists[entry_id] = artist
-                elif self.mode == RECT and bb:
+                    fc = get_vibrant_random_color(0.4)
+                    # Add shape artist
+                    shape_artist = plt.Circle((cx, cy), r, fill=True, lw=2, fc=fc, ec="black")
+                    self.ax.add_patch(shape_artist)
+                    self.shapes_artists[entry_id] = shape_artist
+                    # Add label artist
+                    label_artist = self.label(cx, cy, interception_key, fc)
+                    self.ax.add_artist(label_artist)
+                    self.labels_artists[entry_id] = label_artist
+                    # Make the labels draggable
+                    DraggableLabel(entry_id, label_artist, self)
+                elif self.mode == RECT and cx and cy and bb:
+                    fc = get_vibrant_random_color(0.4)
                     (x1, y1), (x2, y2) = bb
-                    artist = plt.Rectangle((x1, y1), x2-x1, y2-y1, color='green', fill=False, lw=2)
-                    self.ax.add_patch(artist)
-                    self.shapes_artists[entry_id] = artist
+                    # Add shape artist
+                    shape_artist = plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=True, lw=2, fc=fc, ec="black")
+                    self.ax.add_patch(shape_artist)
+                    self.shapes_artists[entry_id] = shape_artist
+                    # Add label artist
+                    label_artist = self.label(cx, cy, interception_key, fc)
+                    self.ax.add_artist(label_artist)
+                    self.labels_artists[entry_id] = label_artist
+                    # Make the labels draggable
+                    DraggableLabel(entry_id, label_artist, self)
                     
         self.reset_state()
 
@@ -606,6 +714,7 @@ class Plotter:
         xs = [pt[0] for pt in self.points]
         ys = [pt[1] for pt in self.points]
         return int(sum(xs)/4), int(sum(ys)/4), None, ((min(xs), min(ys)), (max(xs), max(ys)))
+    
 
 if __name__ == "__main__":
     Plotter()

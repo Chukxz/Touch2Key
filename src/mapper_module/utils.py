@@ -14,6 +14,7 @@ import multiprocessing
 from datetime import datetime as _datetime
 from typing import Literal
 import random
+import colorsys
 
 if TYPE_CHECKING:
     from multiprocessing import Process
@@ -630,7 +631,7 @@ def mouse_worker(m_queue:Queue):
 
 def maintain_bridge_health(bridge: InterceptionBridge, is_visible=True):
     """
-    Checks if workers are alive; restarts and re-prioritizes if dead.
+    Checks if workers are alive, restarts and re-prioritizes if dead.
     Keyboard worker is only restarted if is_visible (cursor visibility) is set to False (gaming mode).
     Mouse worker is always restarted.
     """
@@ -670,32 +671,13 @@ def stop_process(process:Process):
         time.sleep(2.0)
         if process.is_alive():
             process.kill()
+            
 
-def gaming_click(mapper:Mapper, x, y):
-    is_visible = mapper.last_cursor_state
+def get_vibrant_random_color(alpha=1.0):
+    # Random Hue, High Saturation (0.7-1.0), High Value (0.9)
+    h = random.random()
+    s = random.uniform(0.7, 1.0)
+    v = 0.9
+    r, g, b = colorsys.hsv_to_rgb(h, s, v)
+    return (r, g, b, alpha)
     
-    if not is_visible: # If in gaming mode
-        window_title = mapper.window_title
-        scancode = None
-        interception_bridge = mapper.interception_bridge
-        if window_title == GLP:
-            scancode = SCANCODES["LCTRL"]
-
-        if scancode: # If the current game has a cursor visiblity toggle key
-            maintain_bridge_health(interception_bridge, is_visible)
-            
-            # Toggle the cursor visibility via the game's cursor visiblity toggle key             
-            interception_bridge.key_down(scancode)
-            time.sleep(0.2 + random.random() * 0.05)
-            interception_bridge.key_up(scancode)
-            
-            # Perform an absolute mouse click on the mouse finger coordinates
-            _x, _y = mapper.device_to_game_abs(x, y)
-            mapper.interception_bridge.mouse_move_abs(_x, _y)
-            interception_bridge.left_click_down()
-            time.sleep(0.2 + random.random() * 0.05)
-            interception_bridge.left_click_up()
-        
-
-
-

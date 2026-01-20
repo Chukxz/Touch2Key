@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 import time
 from .utils import (
     DEF_DPI, DOWN, UP, PRESSED,
-    DOUBLE_TAP_DELAY, gaming_click
+    DOUBLE_TAP_DELAY
 )
 
 if TYPE_CHECKING:
@@ -55,8 +55,6 @@ class MouseMapper():
         self.acc_x = 0.0
         self.acc_y = 0.0
         
-        gaming_click(self.mapper, self.prev_x, self.prev_y)
-
         if is_visible:
             self.double_tap = False
             now = time.monotonic()
