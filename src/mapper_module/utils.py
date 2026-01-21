@@ -14,6 +14,7 @@ import multiprocessing
 from datetime import datetime as _datetime
 from typing import Literal
 import random
+from pathlib import Path
 import colorsys
 
 if TYPE_CHECKING:
@@ -470,9 +471,9 @@ def update_toml(w=None, h=None, dpi=None, image_path=None, json_path=None, mouse
         if dpi:
             doc["system"]["json_dev_dpi"] = dpi        
         if image_path is not None:
-            doc["system"]["hud_image_path"] = os.path.normpath(image_path)            
+            doc["system"]["hud_image_path"] = Path(image_path).as_posix()            
         if json_path is not None:
-            doc["system"]["json_path"] = os.path.normpath(json_path)
+            doc["system"]["json_path"] = Path(image_path).as_posix()
 
         with open(TOML_PATH, "w", encoding="utf-8") as f:
             tomlkit.dump(doc, f)
@@ -657,7 +658,7 @@ def maintain_bridge_health(bridge: InterceptionBridge, is_visible=True):
             set_high_priority(bridge.k_proc.pid, "Revived Keyboard")
             # Safety: Clear the queue to prevent a backlog of old 'stuck' keys firing at once
             while not bridge.k_queue.empty():
-                try: 
+                try:
                     bridge.k_queue.get_nowait()
                 except: 
                     break
@@ -692,5 +693,3 @@ def get_vibrant_random_color(alpha=1.0):
     v = 0.9
     r, g, b = colorsys.hsv_to_rgb(h, s, v)
     return (r, g, b, alpha)
-
-    

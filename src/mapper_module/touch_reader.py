@@ -189,7 +189,8 @@ class TouchReader():
                 continue
                 
             # Restart failed child processes
-            maintain_bridge_health(self.interception_bridge, self.is_visible)
+            with self.interception_bridge.bridge_lock:
+                maintain_bridge_health(self.interception_bridge, self.is_visible)
             try:
                 result = subprocess.run([ADB_EXE, "-s", self.device, "shell", "dumpsys", "display"], capture_output=True, text=True, timeout=1)
                 for pat in patterns:

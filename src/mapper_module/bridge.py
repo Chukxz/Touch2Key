@@ -1,5 +1,6 @@
 import ctypes
 import multiprocessing
+import threading
 from .utils import (
     SCANCODES, M_LEFT, M_RIGHT, M_MIDDLE,
     MOUSE_MOVE_ABSOLUTE, MOUSE_VIRTUAL_DESKTOP,
@@ -14,6 +15,7 @@ class InterceptionBridge:
     def __init__(self):
         self.screen_w = ctypes.windll.user32.GetSystemMetrics(0)
         self.screen_h = ctypes.windll.user32.GetSystemMetrics(1)
+        self.bridge_lock = threading.Lock()
 
         # Setup Keyboard Channel (Infinite queue - never drop keys)
         self.k_queue = multiprocessing.Queue()
@@ -59,15 +61,16 @@ class InterceptionBridge:
     def release_all(self):
         """Sends 'UP' signals for all critical keys and mouse buttons."""
         print("[Bridge] Emergency Release: Clearing all input states...")
-        maintain_bridge_health(self, False)
-        
-        # Clear Mouse buttons
-        for btn_up in [LEFT_BUTTON_UP, RIGHT_BUTTON_UP, MIDDLE_BUTTON_UP]:
-            self.m_queue.put(("button", btn_up))
+        with self.bridge_lock:
+            maintain_bridge_health(self, False)
+            
+            # Clear Mouse buttons
+            for btn_up in [LEFT_BUTTON_UP, RIGHT_BUTTON_UP, MIDDLE_BUTTON_UP]:
+                self.m_queue.put(("button", btn_up))
 
-        internal_mouse_codes = {M_LEFT, M_RIGHT, M_MIDDLE}
-        unique_codes = set(SCANCODES.values()) - internal_mouse_codes
-        for code in unique_codes:
-            self.k_queue.put((code, 1))
+            internal_mouse_codes = {M_LEFT, M_RIGHT, M_MIDDLE}
+            unique_codes = set(SCANCODES.values()) - internal_mouse_codes
+            for code in unique_codes:
+                self.k_queue.put((code, 1))
             
         print("[Bridge] Release signals dispatched.")

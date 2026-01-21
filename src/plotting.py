@@ -653,10 +653,11 @@ class Plotter:
                             inc_count = False
                             self.shapes.pop(k)
                             break
-                    self.saved_mouse_wheel = True
+                        
                 self.mouse_wheel_radius = r
                 self.mouse_wheel_cx = cx
                 self.mouse_wheel_cy = cy
+                self.saved_mouse_wheel = True
                 
             elif self.mode == RECT:
                 print(f"[!] Error: Mouse Wheel can only be assigned to '{CIRCLE}' not '{RECT} shapes.")
@@ -664,11 +665,11 @@ class Plotter:
         
         elif interception_key == SPRINT_DISTANCE_CODE:
             if self.mode == CIRCLE:
-                if self.saved_sprint_distance:
-                    if not self.saved_mouse_wheel:
-                        print(f"[!] Mouse Wheel not assigned yet. Please assign it first.")
-                        return saved, id
+                if not self.saved_mouse_wheel:
+                    print(f"[!] Mouse Wheel not assigned yet. Please assign it first.")
+                    return saved, id
                     
+                if self.saved_sprint_distance:                    
                     print(f"[!] Sprint Threshold already assigned. Overwriting previous assignment.")
                     for k, v in self.shapes.items():
                         if v['key_name'] == SPRINT_DISTANCE_CODE:
@@ -677,18 +678,18 @@ class Plotter:
                             self.shapes.pop(k)
                             break
                             
-                    # Use Pythagorean theorem for the true radius/distance
-                    dx = cx - self.mouse_wheel_cx
-                    dy = cy - self.mouse_wheel_cy
-                    actual_dist = (dx**2 + dy**2)**0.5
+                # Use Pythagorean theorem for the true radius/distance
+                dx = cx - self.mouse_wheel_cx
+                dy = cy - self.mouse_wheel_cy
+                actual_dist = (dx**2 + dy**2)**0.5
 
-                    # STRICT CHECK: Ensure Sprint is actually outside the Joystick
-                    if actual_dist <= self.mouse_wheel_radius:
-                        print(f"[!] ERROR: Sprint point must be OUTSIDE the joystick radius!")
-                        return False, id
+                # STRICT CHECK: Ensure Sprint is actually outside the Joystick
+                if actual_dist <= self.mouse_wheel_radius:
+                    print(f"[!] ERROR: Sprint point must be OUTSIDE the joystick radius!")
+                    return False, id
 
-                    self.sprint_distance = actual_dist
-                    self.saved_sprint_distance = True
+                self.sprint_distance = actual_dist
+                self.saved_sprint_distance = True
                 
             elif self.mode == RECT:
                 print(f"[!] Error: Sprint Button can only be assigned to '{CIRCLE}' not '{RECT} shapes.")
