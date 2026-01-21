@@ -112,18 +112,19 @@ class KeyMapper():
             if hit:
                 # Successfully mapped finger to key
                 if self._send_key_event(scancode, down=True):
-                    self.events_dict[event.slot] = [scancode, value, event.is_wasd]
+                    # Create a list if it doesn't exist, then append
+                    if event.slot not in self.events_dict:
+                        self.events_dict[event.slot] = []
+                    self.events_dict[event.slot].append([scancode, value, event.is_wasd])
                     if event.is_wasd:
                         self.mapper.wasd_block += 1
                         self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_WASD_BLOCK"))
-                return # Stop searching once hit is found
 
 
     def touch_up(self, event:TouchEvent):        
         """O(1) Dictionary lookup to release keys when finger lifts."""
-        data = self.events_dict.pop(event.slot, None)
-        if data:
-            scancode, _, is_wasd = data
+        data_list = self.events_dict.pop(event.slot, [])
+        for scancode, _, is_wasd in data_list:
             self._send_key_event(scancode, down=False)
             if is_wasd:
                 self.mapper.wasd_block = max(0, self.mapper.wasd_block - 1)
