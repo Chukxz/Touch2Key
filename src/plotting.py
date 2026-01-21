@@ -12,7 +12,7 @@ from mapper_module.utils import (
     set_dpi_awareness, rotate_resolution, update_toml, get_vibrant_random_color
 )
 
-# --- Constants ---
+# Constants
 IDLE = "IDLE"
 COLLECTING = "COLLECTING"
 WAITING_FOR_KEY = "WAITING_FOR_KEY"
@@ -37,7 +37,8 @@ SPECIAL_MAP = {
 }
 
 class DraggableLabel:
-    def __init__(self, artist, plotter_ref):
+    def __init__(self, entry_id:int, artist:plt.Text, plotter_ref:Plotter):
+        self.entry_id = entry_id
         self.artist = artist
         self.plotter = plotter_ref # Reference to your main Plotter class
         self.canvas = artist.figure.canvas
@@ -58,13 +59,17 @@ class DraggableLabel:
 
         # Prepare Background for Blitting
         self.artist.set_visible(False)
+        if self.entry_id in self.plotter.shapes_artists:
+            artist = self.plotter.shapes_artists[self.entry_id]
+            artist.set_linewidth(3)
+            artist.set_edgecolor((0.7, 0.7, 0.7, 0.8))
         self.canvas.draw() 
         self.drag_bg = self.canvas.copy_from_bbox(self.artist.axes.bbox)
         self.artist.set_visible(True)
 
         x0, y0 = self.artist.get_position()
         self.press = x0, y0, event.xdata, event.ydata
-
+        
     def on_motion(self, event):
         if self.press is None or event.inaxes != self.artist.axes or self.drag_bg is None:
             return
@@ -82,6 +87,10 @@ class DraggableLabel:
     def on_release(self, event):
         self.press = None
         self.drag_bg = None
+        if self.entry_id in self.plotter.shapes_artists:
+            artist = self.plotter.shapes_artists[self.entry_id]
+            artist.set_linewidth(2)
+            artist.set_edgecolor((0.3, 0.3, 0.3, 0.8))
         self.canvas.draw_idle()
 
     def disconnect(self):
@@ -139,9 +148,9 @@ class Plotter:
         self.mode = None          
         self.state = IDLE         
         self.input_buffer = ""
-        self.shapes_artists = {}
-        self.labels_artists = {}
-        self.drag_managers = {}
+        self.shapes_artists: dict[int, plt.Circle | plt.Rectangle] = {}
+        self.labels_artists: dict[int, plt.Text] = {}
+        self.drag_managers: dict[int, DraggableLabel] = {}
         
         self.init_params_helper()
         img = self.update_image_params()
@@ -167,8 +176,7 @@ class Plotter:
         plt.show()
 
     
-    # --- Visual & State Management ---
-    
+    # Visual & State Management
     def update_image_params(self):
         try:
             img = Image.open(self.image_path)
@@ -265,23 +273,29 @@ class Plotter:
 
 
     def label(self, center_x, center_y, label, fc):
+        # Get the height of the figure in inches and convert to points
+        fig_height_pts = self.fig.get_size_inches()[1] * 72
+        scaled_font = max(7, int(fig_height_pts * 0.03)) 
+
         return plt.Text(
             center_x, center_y, 
             label, 
-            color='white',            # Text color
-            fontsize=6,
+            color='white',
+            fontsize=scaled_font,
             fontweight='bold',
-            ha='center',              # Horizontal center
-            va='center',              # Vertical center
+            ha='center',
+            va='center',
+            # This zorder keeps the label above the shape
+            zorder=12, 
             bbox=dict(
-                fc=fc,  # Background color
-                ec='none',     # Remove the border line
-                boxstyle='round,pad=0.5' # Add some padding and rounded corners
+                fc=fc,
+                ec='black',
+                lw=1.5,
+                boxstyle='round,pad=0.3'
             )
         )
 
-    # --- Event Handlers ---
-
+    # Event Handlers
     def on_mouse_move(self, event):
         if self.state == COLLECTING and event.inaxes == self.ax:
             # Round to integer for the "Snap to Pixel" feel
@@ -307,7 +321,7 @@ class Plotter:
                 line.set_xdata([x, x])
                 self.ax.draw_artist(line)
 
-            # Push these updates specifically to the axes area
+            # Push these updates specifically to the axes area (using blitting)
             self.fig.canvas.blit(self.ax.bbox)
             
         else:
@@ -318,7 +332,7 @@ class Plotter:
                 self.fig.canvas.draw_idle()
 
     def on_click(self, event):
-        # 1. NEW: Handle Binding via Mouse Click
+        # Handle Binding via Mouse Click
         if self.state == WAITING_FOR_KEY:
             # Matplotlib button codes: 1=Left, 2=Middle, 3=Right
             mouse_map = {
@@ -334,7 +348,7 @@ class Plotter:
                 self.finalize_shape(button_name)
             return
 
-        # 2. Existing: Handle Drawing Points
+        # Handle Drawing Points
         if self.state != COLLECTING:
             return
         
@@ -407,8 +421,7 @@ class Plotter:
                 self.state = CONFIRM_EXIT
                 self.update_title("[EXIT?] Press ENTER to Quit or Any other key to Cancel.")
 
-    # --- Delete Logic ---
-
+    # Delete Logic
     def enter_delete_mode(self):
         if not self.shapes:
             print("[!] No shapes to delete.")
@@ -468,8 +481,7 @@ class Plotter:
         elif key in ['f6', 'f7', 'delete', 'f10']:
             print("[!] Blocked: Exit Delete Mode (Esc) first.")
 
-    # --- Core Logic ---
-
+    # Core Logic
     def finalize_shape(self, key_name):
         # 'key_name' might be a key string ('a', 'f1') OR a mouse string ('MOUSE_LEFT')
         hex_code, interception_key = self.get_interception_code(key_name)
@@ -491,7 +503,7 @@ class Plotter:
                 if self.mode == CIRCLE and cx and cy and r:
                     fc = get_vibrant_random_color(0.4)
                     # Add shape artist
-                    shape_artist = plt.Circle((cx, cy), r, fill=True, lw=2, fc=fc, ec="black")
+                    shape_artist = plt.Circle((cx, cy), r, fill=True, lw=2, fc=fc, ec=(0.3, 0.3, 0.3, 0.8))
                     self.ax.add_patch(shape_artist)
                     self.shapes_artists[entry_id] = shape_artist
                     # Add label artist
@@ -499,12 +511,12 @@ class Plotter:
                     self.ax.add_artist(label_artist)
                     self.labels_artists[entry_id] = label_artist
                     # Make the labels draggable
-                    self.drag_managers[entry_id] = DraggableLabel(label_artist, self)
+                    self.drag_managers[entry_id] = DraggableLabel(entry_id, label_artist, self)
                 elif self.mode == RECT and cx and cy and bb:
                     fc = get_vibrant_random_color(0.4)
                     (x1, y1), (x2, y2) = bb
                     # Add shape artist
-                    shape_artist = plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=True, lw=2, fc=fc, ec="black")
+                    shape_artist = plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=True, lw=2, fc=fc, ec=(0.3, 0.3, 0.3, 0.8))
                     self.ax.add_patch(shape_artist)
                     self.shapes_artists[entry_id] = shape_artist
                     # Add label artist
@@ -512,12 +524,11 @@ class Plotter:
                     self.ax.add_artist(label_artist)
                     self.labels_artists[entry_id] = label_artist
                     # Make the labels draggable
-                    self.drag_managers[entry_id] = DraggableLabel(label_artist, self)
+                    self.drag_managers[entry_id] = DraggableLabel(entry_id, label_artist, self)
                     
         self.reset_state()
 
-    # --- Naming / Saving Logic ---
-
+    # Naming / Saving Logic
     def enter_naming_mode(self):
         if not self.shapes:
             self.update_title("Nothing to save!")
@@ -616,8 +627,7 @@ class Plotter:
             
         self.update_title(f"Saved: {file_path.name}")
             
-    # --- Helper Functions ---
-
+    # Helper Functions
     def get_interception_code(self, key):
         mapped_key = key
         val = SCANCODES.get(mapped_key)
@@ -704,7 +714,7 @@ class Plotter:
             print(k, v)
         print("="*45 + "\n")
 
-    # --- Math ---
+    # Math
     def calculate_circle(self):
         x1, y1 = self.points[0]
         x2, y2 = self.points[1]

@@ -52,7 +52,7 @@ class TouchReader():
         init_time = 0
         self.update_config()
 
-        # --- PERFORMANCE TUNING ---
+        # PERFORMANCE TUNING
         self.adb_rate_cap = rate_cap
         self.move_interval = 1.0 / self.adb_rate_cap if self.adb_rate_cap > 0 else 0
         self.last_dispatch_times = []
@@ -64,16 +64,14 @@ class TouchReader():
         self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
         self.mapper_event_dispatcher.register_callback("ON_MENU_MODE_TOGGLE", self.set_is_visible)
 
-        # --- SELF STARTING THREADS ---
-        print(f"[INFO] Reading pressed touches at {self.adb_rate_cap}Hz Cap.")
+        # SELF STARTING THREADS
         self.process = None
         threading.Thread(target=self.update_rotation, daemon=True).start()
         threading.Thread(target=self.get_touches, daemon=True).start()
         self.wireless_thread = threading.Thread(target=self.connect_wirelessly, daemon=True)
         self.wireless_thread.start()
 
-    # --- FINGER IDENTITY LOGIC ---
-    
+    # FINGER IDENTITY LOGIC    
     def update_finger_identities(self):
         """
         If the cursor is visible use slot 0 as the Mouse finger and clear the WASD finger else identify the oldest finger on each side to assign as the dedicated Mouse or WASD finger.
@@ -105,8 +103,7 @@ class TouchReader():
         self.mouse_slot = min(eligible_mouse, key=lambda x: x[1])[0] if eligible_mouse else None
         self.wasd_slot = min(eligible_wasd, key=lambda x: x[1])[0] if eligible_wasd else None
 
-    # --- CONFIG & SPECS ---
-
+    # CONFIG & SPECS
     def connect_wirelessly(self):
         connecting = True
         while self.running and connecting:
@@ -187,6 +184,12 @@ class TouchReader():
     def update_rotation(self):
         patterns = [r"mCurrentRotation=(\d+)", r"rotation=(\d+)", r"mCurrentOrientation=(\d+)", r"mUserRotation=(\d+)"]
         while self.running:
+            if not self.device:
+                time.sleep(SHORT_DELAY)
+                continue
+                
+            # Restart failed child processes
+            maintain_bridge_health(self.interception_bridge, self.is_visible)
             try:
                 result = subprocess.run([ADB_EXE, "-s", self.device, "shell", "dumpsys", "display"], capture_output=True, text=True, timeout=1)
                 for pat in patterns:
@@ -385,8 +388,6 @@ class TouchReader():
                     continue
                 self.last_dispatch_times[slot] = now
             
-            # Restart failed child processes
-            maintain_bridge_health(self.interception_bridge, self.is_visible)
             rx, ry = self.rotate_norm_coordinates_local(data['x'], data['y'], matrix_snapshot)
 
             if self.touch_event_processor:
@@ -394,7 +395,7 @@ class TouchReader():
                     try:
                         action = data['state']                   
                         touch_event = TouchEvent(
-                            slot=slot, 
+                            slot=slot,
                             id=data['tid'], 
                             x=rx, y=ry,
                             sx=data['start_x'], sy=data['start_y'],

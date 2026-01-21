@@ -6,7 +6,7 @@ from .utils import (
     LEFT_BUTTON_DOWN, LEFT_BUTTON_UP,
     RIGHT_BUTTON_DOWN, RIGHT_BUTTON_UP,
     MIDDLE_BUTTON_DOWN, MIDDLE_BUTTON_UP,
-    mouse_worker, keyboard_worker,
+    mouse_worker, keyboard_worker, maintain_bridge_health
     )
 
 
@@ -15,13 +15,13 @@ class InterceptionBridge:
         self.screen_w = ctypes.windll.user32.GetSystemMetrics(0)
         self.screen_h = ctypes.windll.user32.GetSystemMetrics(1)
 
-        # 1. Setup Keyboard Channel (Infinite queue - never drop keys)
+        # Setup Keyboard Channel (Infinite queue - never drop keys)
         self.k_queue = multiprocessing.Queue()
         self.k_proc = multiprocessing.Process(
             target=keyboard_worker, name="Keyboard Worker", args=(self.k_queue,), daemon=True
         )
         
-        # 2. Setup Mouse Channel (Capped queue - drop frames if lagging)
+        # Setup Mouse Channel (Capped queue - drop frames if lagging)
         self.m_queue = multiprocessing.Queue(maxsize=64)
         self.m_proc = multiprocessing.Process(
             target=mouse_worker, name="Mouse Worker", args=(self.m_queue,), daemon=True
@@ -33,11 +33,11 @@ class InterceptionBridge:
         
         print(f"[Bridge] Dual Engine Started. K-PID: {self.k_proc.pid} | M-PID: {self.m_proc.pid}")
 
-    # --- Keyboard API ---
+    # Keyboard API
     def key_down(self, code): self.k_queue.put((code, 0))
     def key_up(self, code): self.k_queue.put((code, 1))
 
-    # --- Mouse API ---
+    # Mouse API
     def mouse_move_rel(self, dx, dy):
         try:
             self.m_queue.put_nowait(("move_rel", (dx, dy)))
@@ -59,19 +59,15 @@ class InterceptionBridge:
     def release_all(self):
         """Sends 'UP' signals for all critical keys and mouse buttons."""
         print("[Bridge] Emergency Release: Clearing all input states...")
+        maintain_bridge_health(self, False)
         
         # Clear Mouse buttons
         for btn_up in [LEFT_BUTTON_UP, RIGHT_BUTTON_UP, MIDDLE_BUTTON_UP]:
-            try:
-                self.m_queue.put(("button", btn_up))
-            except: pass
+            self.m_queue.put(("button", btn_up))
 
         internal_mouse_codes = {M_LEFT, M_RIGHT, M_MIDDLE}
-        
-        for code in SCANCODES.values():
-            if code not in internal_mouse_codes:
-                try:
-                    self.k_queue.put((code, 1))
-                except: pass
+        unique_codes = set(SCANCODES.values()) - internal_mouse_codes
+        for code in unique_codes:
+            self.k_queue.put((code, 1))
             
         print("[Bridge] Release signals dispatched.")

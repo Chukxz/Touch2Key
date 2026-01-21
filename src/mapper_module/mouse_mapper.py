@@ -80,24 +80,24 @@ class MouseMapper():
             self.touch_down(touch_event, is_visible)
             return      
             
-        # 1. Calculate Raw Delta
+        # Calculate Raw Delta
         raw_dx = touch_event.x - self.prev_x
         raw_dy = touch_event.y - self.prev_y
 
-        # 2. Update anchors immediately
+        # Update anchors immediately
         self.prev_x = touch_event.x
         self.prev_y = touch_event.y
 
-        # 3. Apply Multiplier and add previous remainders (Sub-pixel precision)
+        # Apply Multiplier and add previous remainders (Sub-pixel precision)
         # Using float math here is necessary for 1:1 feel
         calc_dx = (raw_dx * self.TOTAL_MULT) + self.acc_x
         calc_dy = (raw_dy * self.TOTAL_MULT) + self.acc_y
 
-        # 4. Truncate to Integer (Actual pixels to move)
+        # Truncate to Integer (Actual pixels to move)
         final_dx = int(calc_dx)
         final_dy = int(calc_dy)
 
-        # 5. Fast-Exit for Noise
+        # Fast-Exit for Noise
         # If the delta is less than 1 physical pixel, just keep the remainder and exit.
         # This prevents the Interception Bridge from being flooded with 0-pixel movements.
         if final_dx == 0 and final_dy == 0:
@@ -105,11 +105,11 @@ class MouseMapper():
             self.acc_y = calc_dy
             return
 
-        # 6. Save remainders for next packet
+        # Save remainders for next packet
         self.acc_x = calc_dx - final_dx
         self.acc_y = calc_dy - final_dy
 
-        # 7. Physical movement execution
+        # Physical movement execution
         self.interception_bridge.mouse_move_rel(final_dx, final_dy)
         
     def touch_up(self):

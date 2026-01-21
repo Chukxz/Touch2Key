@@ -7,7 +7,7 @@ from ctypes import wintypes
 import threading
 import win32gui
 from .utils import (
-    DEF_DPI, LONG_DELAY, WINDOW_UPDATE_INTERVAL,  
+    DEF_DPI, LONG_DELAY, WINDOW_UPDATE_INTERVAL,
     MapperEvent, set_dpi_awareness, rotate_resolution
     )
 
@@ -38,7 +38,7 @@ class Mapper():
     # EnumWindows callback type definition
     EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 
-    def __init__(self, json_loader:JSONLoader, touch_reader:TouchReader, interception_bridge:InterceptionBridge, pps:int, window_title:str):
+    def __init__(self, json_loader:JSONLoader, touch_reader:TouchReader, interception_bridge:InterceptionBridge, pps:int, emulator:dict[str, str | None]):
         set_dpi_awareness()
         self.enumWindowsProc = Mapper.EnumWindowsProc
 
@@ -48,7 +48,8 @@ class Mapper():
         self.mapper_event_dispatcher = self.json_loader.mapper_event_dispatcher
         self.touch_reader = touch_reader
         self.interception_bridge = interception_bridge
-
+        self.emulator = emulator
+        self.window_title = emulator['window_title']
         self.pps = pps
         self.event_count = 0
         self.last_pulse_time = time.perf_counter()
@@ -58,7 +59,6 @@ class Mapper():
         self.screen_h = ctypes.windll.user32.GetSystemMetrics(1)
         self.lock = threading.Lock()
         self.window_lost = False        
-        self.window_title = window_title
         self.last_cursor_state = True # Cursor showing (Default)
         self.game_window_class_name = None
         self.game_window_info = None
@@ -84,7 +84,7 @@ class Mapper():
             self.dpi = self.json_loader.dpi
             print(f"[INFO] Mapping from Device synced to Resolution: {self.device_width}x{self.device_height}, DPI: {self.dpi}")
             
-    # --- Window Management ---
+    # Window Management
     
     def get_window_class_name(self, hwnd):
         buffer = ctypes.create_unicode_buffer(MAX_CLASS_NAME)
@@ -123,13 +123,13 @@ class Mapper():
         return results
 
     def get_window_info(self, hwnd):
-        # 1. Get the Client Area (The pure game content size)
+        # Get the Client Area (The pure game content size)
         client_rect = RECT()
         ctypes.windll.user32.GetClientRect(hwnd, ctypes.byref(client_rect))
         width = client_rect.right - client_rect.left
         height = client_rect.bottom - client_rect.top
         
-        # 2. Find where top-left (0,0) of the Client Area is on the Screen
+        # Find where top-left (0,0) of the Client Area is on the Screen
         pt = POINT()
         pt.x = 0
         pt.y = 0
@@ -170,19 +170,19 @@ class Mapper():
                         current_hwnd = self.game_window_info.get('hwnd')
 
                 if current_hwnd and ctypes.windll.user32.IsWindow(current_hwnd):
-                    # 1. WINDOW IS ACTIVE: Get fresh coordinates
+                    # WINDOW IS ACTIVE: Get fresh coordinates
                     new_info = self.get_window_info(current_hwnd)
                     
                     if self.window_lost:
                         print(f"[INFO] Acquired game window!")
                                             
-                    # 2. ATOMIC SWAP: Only hold lock to update the dict reference
+                    # ATOMIC SWAP: Only hold lock to update the dict reference
                     with self.lock:
                         self.game_window_info = new_info
                         self.window_lost = False
                         
                 else:
-                    # 3. WINDOW IS LOST: Handle scanning                        
+                    # WINDOW IS LOST: Handle scanning                        
                     if not self.window_lost:
                         print("[WARNING] Game window lost! Scanning for new window...")
                         with self.lock:
@@ -281,17 +281,17 @@ class Mapper():
         now = time.perf_counter()
         elapsed = now - self.last_pulse_time
     
-        if elapsed >= 5.0: # Every 5 seconds
-            pps = self.event_count / elapsed # Packets Per Second
+        if elapsed >= 5.0:
+            current_count = self.event_count
+            self.event_count = 0
+            self.last_pulse_time = now
+            pps = current_count / elapsed
         
             # Check if we are lagging
             status = "HEALTHY" if pps >= self.pps else "LOW RATE"
             if pps == 0: status = "IDLE/DISCONNECTED"
+            block_indicator = f"[BLOCK ON ({self.wasd_block})]" if self.wasd_block > 0 else "[OPEN]"
 
-            print(f"[Monitor] Rate: {pps:.1f} Hz | Status: {status} | WASD Block: {self.wasd_block}")
-        
-            # Reset
-            self.event_count = 0
-            self.last_pulse_time = now
+            print(f"[Monitor] Rate: {pps:>5.1f} Hz | Status: {status:<15} | WASD: {block_indicator:<12}")
 
 

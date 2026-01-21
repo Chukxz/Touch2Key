@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import keyboard
-import sys
 import os
 import win32gui
 import threading
 import time
 from mapper_module.utils import (
-    DEFAULT_ADB_RATE_CAP, KEY_DEBOUNCE, PPS, UP, SHORT_DELAY, GLP,
-    EVENT_TYPE, TouchEvent, set_high_priority, stop_process
+    DEFAULT_ADB_RATE_CAP, KEY_DEBOUNCE, PPS, UP, SHORT_DELAY, EMULATORS,
+    ADB_EXE, EVENT_TYPE, DEF_EMULATOR_ID, TouchEvent, set_high_priority, stop_process
 )
 
 from mapper_module import (
@@ -50,42 +49,87 @@ def set_is_visible(_is_visible):
         except: pass
 
 
-def process_touch_event(action:EVENT_TYPE, touch_event:TouchEvent):    
-    with lock:
-        mapper_logic.event_count += 1 # Tick the counter
-
-        try:                   
-            if touch_event.is_mouse:
-                mouse_mapper.process_touch(action, touch_event, is_visible)
-            
-            if not is_visible:
-                if touch_event.is_key:
-                    key_mapper.process_touch(action, touch_event)
-                
-                    if action == UP:
-                        wasd_mapper.touch_up()
-                    
-                    if touch_event.is_wasd:
-                        wasd_mapper.process_touch(action, touch_event) 
-        except:
-            pass
+def process_touch_event(action: EVENT_TYPE, touch_event: TouchEvent):
+    local_visible = is_visible
+    mapper_logic.event_count += 1
+    
+    try:                   
+        if touch_event.is_mouse:
+            mouse_mapper.process_touch(action, touch_event, local_visible)
         
+        if not local_visible:
+            if touch_event.is_key:
+                key_mapper.process_touch(action, touch_event)
+            
+                if action == UP:
+                    wasd_mapper.touch_up()
+                
+                if touch_event.is_wasd:
+                    wasd_mapper.process_touch(action, touch_event) 
+    except:
+        pass
+
+def select_emulator():
+    print("Touch2Key Emulator Selector")
+    emulators_list = list(EMULATORS.keys())
+    emulators_len = len(emulators_list)
+    
+    if emulators_len == 0:
+        return None
+
+    print("Supported Emulators:")
+    for id, name in enumerate(emulators_list):
+        print(f"ID: [{id}] Name: {name}")
+
+    try:
+        choice = input(f"Select Emulator ID [Default {emulators_list[DEF_EMULATOR_ID]}]: ").strip()
+        if not choice:
+            emulator_id = DEF_EMULATOR_ID
+        else:
+            emulator_id = int(choice)
+            # Boundary Check
+            if not (0 <= emulator_id < emulators_len):
+                print(f"[!] ID {emulator_id} out of range. Using default.")
+                emulator_id = DEF_EMULATOR_ID
+    except ValueError:
+        print("[!] Invalid input. Using defaults.")
+        emulator_id = DEF_EMULATOR_ID
+
+    emulator_name = emulators_list[emulator_id]
+    print(f"[Config] {emulator_name} selected.")
+    return EMULATORS[emulator_name]
+   
     
 def main():
     global mouse_mapper, key_mapper, wasd_mapper, interception_bridge, mapper_logic, touch_reader
     keyboard.add_hotkey('esc', shutdown)
 
-    # --- Elevate Main Process (ADB Parsing & Logic) ---
+    # Elevate Main Process (ADB Parsing & Logic)
     # We leave this on default cores (usually all but the last)
     set_high_priority(os.getpid(), "Main Loop")
 
     print("[System] Initializing Dual-Engine Mapper... Press 'ESC' to Stop.")
-
+    print(f"ADB Executable File Path: {ADB_EXE}")
+    
+    emulator = select_emulator()
+    if emulator is None:
+        print("No emulators supported. Exiting")
+        return
+    
     try:
-        rate_cap = float(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_ADB_RATE_CAP
-        pps  = int(sys.argv[2]) if len(sys.argv) > 2 else PPS
+        # Rate Cap (The actual hardware limit)
+        rate_input = input(f"Enter ADB rate cap [Default {DEFAULT_ADB_RATE_CAP}, Min 60, Blank for Default]: ").strip()
+        rate_cap = max(60.0, float(rate_input)) if rate_input else DEFAULT_ADB_RATE_CAP
+
+        # PPS Threshold (The notification trigger)
+        pps_input = input(f"Enter target PPS for health alerts [Default {PPS}, Range 30-120]: ").strip()
+        pps = max(30.0, min(120.0, float(pps_input))) if pps_input else PPS
+
     except ValueError:
+        print("[!] Invalid input. Using defaults.")
         rate_cap, pps = DEFAULT_ADB_RATE_CAP, PPS
+
+    print(f"[Config] ADB Cap: {rate_cap}Hz | Alert Threshold: {pps}PPS")
 
     mapper_event_dispatcher = MapperEventDispatcher()
     config = AppConfig(mapper_event_dispatcher)
@@ -102,7 +146,7 @@ def main():
 
     json_loader = JSONLoader(config, FOREGROUND_WINDOW)
     touch_reader = TouchReader(config, mapper_event_dispatcher, interception_bridge, rate_cap)
-    mapper_logic = Mapper(json_loader, touch_reader, interception_bridge, pps, GLP)
+    mapper_logic = Mapper(json_loader, touch_reader, interception_bridge, pps, emulator)
 
     mouse_mapper = MouseMapper(mapper_logic)
     key_mapper = KeyMapper(mapper_logic, KEY_DEBOUNCE)
@@ -120,7 +164,7 @@ def shutdown():
         
     if is_shutting_down:
         return
-    is_shutting_down = True        
+    is_shutting_down = True 
     
     print("\n[System] 'ESC' detected. Cleaning up...")
     

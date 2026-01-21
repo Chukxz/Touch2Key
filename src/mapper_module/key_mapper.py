@@ -22,15 +22,15 @@ class KeyMapper():
 
         # Performance: Debouncing logic
         self.debounce_interval = debounce_time  
-        self.last_action_times = {} # { scancode_int: float_timestamp }
+        self.last_action_times = {} # { scancode(int): timestamp(float) }
 
-        # State Tracking: { slot_id: [scancode_int, zone_data, is_wasd_finger] }
+        # State Tracking: { slot_int: [scancode(int), zone_data(dict), is_wasd_finger(bool)] }
         self.events_dict = {} 
         
-        # 1. Blacklist for O(1) filtering
+        # Blacklist for O(1) filtering
         self.ignored_names = {MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE}
         
-        # 2. Optimized List for the Touch Loop
+        # Optimized List for the Touch Loop
         self.active_zones = []
         
         # Initialize data structures
@@ -38,10 +38,7 @@ class KeyMapper():
         self.mapper_event_dispatcher.register_callback("ON_JSON_RELOAD", self.process_json_data)
 
     def process_json_data(self):
-        """Pre-processes JSON into a high-speed iteration list."""
-        self.release_all()
-        self.events_dict.clear()
-        
+        """Pre-processes JSON into a high-speed iteration list."""        
         temp_zones = []
         # Get raw data from the loader
         raw_data = self.mapper.json_loader.json_data
@@ -58,7 +55,11 @@ class KeyMapper():
             except (ValueError, TypeError):
                 continue
         
-        self.active_zones = temp_zones
+        with self.config.config_lock:
+            self.release_all()
+            self.events_dict.clear()
+            self.active_zones = temp_zones
+            self.wasd_block = 0
         print(f"[KeyMapper] Hot-path ready: {len(self.active_zones)} zones active.")
 
     def _send_key_event(self, scancode, down=True, force=False):
@@ -97,7 +98,7 @@ class KeyMapper():
         ny = event.y / self.mapper.device_height
 
         # Fast iteration through the pre-filtered list
-        for scancode_int, value in self.active_zones:
+        for scancode, value in self.active_zones:
             hit = False
             v_type = value['type']
             
@@ -110,8 +111,8 @@ class KeyMapper():
 
             if hit:
                 # Successfully mapped finger to key
-                if self._send_key_event(scancode_int, down=True):
-                    self.events_dict[event.slot] = [scancode_int, value, event.is_wasd]
+                if self._send_key_event(scancode, down=True):
+                    self.events_dict[event.slot] = [scancode, value, event.is_wasd]
                     if event.is_wasd:
                         self.mapper.wasd_block += 1
                         self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_WASD_BLOCK"))
@@ -122,8 +123,8 @@ class KeyMapper():
         """O(1) Dictionary lookup to release keys when finger lifts."""
         data = self.events_dict.pop(event.slot, None)
         if data:
-            scancode_int, _, is_wasd = data
-            self._send_key_event(scancode_int, down=False)
+            scancode, _, is_wasd = data
+            self._send_key_event(scancode, down=False)
             if is_wasd:
                 self.mapper.wasd_block = max(0, self.mapper.wasd_block - 1)
                 self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_WASD_BLOCK"))

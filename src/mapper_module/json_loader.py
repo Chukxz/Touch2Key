@@ -29,7 +29,7 @@ class JSONLoader():
         # Load immediately
         self.load_json()
         
-        # --- REGISTER HOTKEY ---
+        # REGISTER HOTKEY
         print("[INFO] Press F5 to hot reload json data.")
         keyboard.add_hotkey('f5', self.reload)
 
@@ -99,8 +99,8 @@ class JSONLoader():
                     self.json_data = new_data
                     self.last_loaded_json_path = self.current_path
                     self.last_loaded_json_timestamp = current_file_time
+                self.config.reload_config()
                 self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_JSON_RELOAD"))
-                self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
                     
                 print("[System] Layout swapped safely. Game resumed.")
             except Exception as e:

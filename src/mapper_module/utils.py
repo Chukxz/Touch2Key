@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from multiprocessing import Process
     from multiprocessing import Queue
     from .bridge import InterceptionBridge
-    from .mapper import Mapper
 
 # Get location of this file: .../mapper_project/src/mapper_module
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -31,13 +30,13 @@ SRC_DIR = os.path.dirname(CURRENT_DIR)
 # Go up another level to 'mapper_project' (Root)
 PROJECT_ROOT = os.path.dirname(SRC_DIR)
 
-# --- Path Assignments ---
+# Path Assignments
 ADB_EXE = os.path.join(PROJECT_ROOT, "bin", "platform-tools", "adb.exe")
 TOML_PATH = os.path.join(PROJECT_ROOT, "settings.toml")
 IMAGES_FOLDER = os.path.join(SRC_DIR, "resources", "images")
 JSONS_FOLDER = os.path.join(SRC_DIR, "resources", "jsons")
 
-# --- Constants ---   
+# Constants   
 
 DEF_DPI = 160
 
@@ -64,9 +63,9 @@ ROTATION_POLL_INTERVAL = 0.5
 #  1ms (10,000 units of 100ns)
 NT_TIMER_RES = 10000
 
-# --- Fallback Performance Constants ---
+# Fallback Performance Constants
 # Limits PRESSED events to 250 updates per second
-DEFAULT_ADB_RATE_CAP = 250.0  
+DEFAULT_ADB_RATE_CAP = 250
 # Ignores key flickers faster than 10ms
 KEY_DEBOUNCE = 0.01
 PPS = 60
@@ -80,7 +79,17 @@ LEFT_BUTTON_DOWN, LEFT_BUTTON_UP = 0x0001, 0x0002
 RIGHT_BUTTON_DOWN, RIGHT_BUTTON_UP = 0x0004, 0x0008
 MIDDLE_BUTTON_DOWN, MIDDLE_BUTTON_UP = 0x0010, 0x0020
 
-GLP = "Gameloop(64beta)"
+DEF_EMULATOR_ID = 0
+EMULATORS = {
+    "GameLoop": {
+        "window_title": "Gameloop(64beta)",
+        "sprint_key": None,
+    },
+    # "BlueStacks": {
+    #     "window_title": "BlueStacks App Player",
+    #     "sprint_key": "LSHIFT",
+    # }
+}
 
 PORT = '5555'
 
@@ -278,15 +287,15 @@ def get_adb_device():
     
 
 def get_screen_size(device:str):
-    """Detect screen resolution (portrait natural)."""
-    result = subprocess.run(
-        [ADB_EXE, "-s", device, "shell", "wm", "size"], capture_output=True, text=True
-    )
-    output = result.stdout.strip()
-    if "Physical size" in output:
-        w, h = map(int, output.split(":")[-1].strip().split("x"))
+    result = subprocess.run([ADB_EXE, "-s", device, "shell", "wm", "size"], capture_output=True, text=True)
+    output = result.stdout.strip().splitlines()
+    
+    # Check for "Override size" first, then fallback to "Physical size"
+    # This ensures we use the ACTUAL resolution being rendered
+    size_line = output[-1] 
+    if ":" in size_line:
+        w, h = map(int, size_line.split(":")[-1].strip().split("x"))
         return w, h
-
     return None
 
 
@@ -334,22 +343,22 @@ def wireless_connect(device:str|None=None, continous=True):
         
         try:
             routes = subprocess.check_output([ADB_EXE,  "-s", device, "shell", "ip", "route"]).decode().splitlines()
-            socket = [s.split()[-1] for s in routes if "dev ap0" in s]
+            socket = [s.split()[-1] for s in routes if "dev ap0" in s or "dev wlan0" in s]
             
             if not socket:
                 raise RuntimeError(f"No sockets found for device: {device}")
-            
             socket_path = socket[0] + ":" + PORT
-             
-            final = subprocess.check_output([ADB_EXE,  "-s", device, "connect", socket_path]).decode().splitlines()[0] # If there's an error its supposed to be raised here.
-            
-            if "(10065)" in final: # Default fallback if no errors were raised in previous line
-                raise RuntimeError(f"cannot connect to {socket_path}: A socket operation was attempted to an unreachable host. (10065)")
             
             if device == socket_path:
                 print(f"Connected successfully to device: {socket_path}.")
-            else:
+            else:                
+                final = subprocess.check_output([ADB_EXE,  "-s", device, "connect", socket_path]).decode().splitlines()[0] # If there's an error its supposed to be raised here.
+                
+                if "(10065)" in final: # Default fallback if no errors were raised in previous line
+                    raise RuntimeError(f"cannot connect to {socket_path}: A socket operation was attempted to an unreachable host. (10065)")
+            
                 print(f"Connected successfully to device: {device} on socket: {socket_path}, device now set to: {socket_path}.")
+                
             if continous:
                 running = False
             else:
@@ -469,6 +478,9 @@ def update_toml(w=None, h=None, dpi=None, image_path=None, json_path=None, mouse
             tomlkit.dump(doc, f)
             
     except Exception as e:
+        if os.path.exists(TOML_PATH):
+            os.replace(TOML_PATH, TOML_PATH + ".bak")
+            print(f"[System] Settings were corrupted and reset. Backup created.")
         create_default_toml()
         print("Resetting to defaults...")
         if strict:
@@ -515,7 +527,7 @@ def set_high_priority(pid, label, priority_level=psutil.HIGH_PRIORITY_CLASS):
         print(f"[Priority] Warning: {e}")
         
 
-# --- Worker: Keyboard (Isolated) ---
+# Worker: Keyboard (Isolated)
 def keyboard_worker(k_queue:Queue):
     """ Dedicated process for Keyboard events only. """
     from interception import Interception, KeyStroke
@@ -548,7 +560,7 @@ def keyboard_worker(k_queue:Queue):
             running = False
                             
 
-# --- Worker: Mouse (Isolated with Coalescing) ---
+# Worker: Mouse (Isolated with Coalescing)
 def mouse_worker(m_queue:Queue):
     """ Dedicated process for Mouse events with movement coalescing. """
     # Set timer resolution to 1ms (10,000 units of 100ns)
@@ -636,7 +648,7 @@ def maintain_bridge_health(bridge: InterceptionBridge, is_visible=True):
     Mouse worker is always restarted.
     """
     if not is_visible: # Only restart keyboard worker in gaming mode
-        # 1. Check Keyboard Worker
+        # Check Keyboard Worker
         if not bridge.k_proc.is_alive():
             print(f"\n[CRITICAL] {_datetime.now().strftime('%H:%M:%S')} - Keyboard Worker Died!")
             bridge.k_proc = multiprocessing.Process(target=keyboard_worker, name="Keyboard Worker", args=(bridge.k_queue,), daemon=True)
@@ -650,7 +662,7 @@ def maintain_bridge_health(bridge: InterceptionBridge, is_visible=True):
                 except: 
                     break
 
-    # 2. Check Mouse Worker
+    # Check Mouse Worker
     if not bridge.m_proc.is_alive():
         print(f"\n[CRITICAL] {_datetime.now().strftime('%H:%M:%S')} - Mouse Worker Died!")
         bridge.m_proc = multiprocessing.Process(target=mouse_worker, name="Mouse Worker", args=(bridge.m_queue,), daemon=True)
@@ -680,4 +692,5 @@ def get_vibrant_random_color(alpha=1.0):
     v = 0.9
     r, g, b = colorsys.hsv_to_rgb(h, s, v)
     return (r, g, b, alpha)
+
     

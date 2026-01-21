@@ -14,15 +14,25 @@ class WASDMapper():
     def __init__(self, mapper:Mapper):
         self.mapper = mapper
         self.interception_bridge = mapper.interception_bridge
+        self.json_loader = mapper.json_loader
+        self.config = mapper.config
+        self.mapper_event_dispatcher = self.mapper.mapper_event_dispatcher
+        sprint_key = mapper.emulator['sprint_key']
+        
+        if sprint_key is not None:
+            try:
+                self.sprint_key = SCANCODES[sprint_key]
+            except:
+                self.sprint_key = None
         
         # Pre-convert scancodes to Integers once for faster Bridge interaction
-        self.KEY_W = int(SCANCODES["w"], 16) if isinstance(SCANCODES["w"], str) else int(SCANCODES["w"])
-        self.KEY_A = int(SCANCODES["a"], 16) if isinstance(SCANCODES["a"], str) else int(SCANCODES["a"])
-        self.KEY_S = int(SCANCODES["s"], 16) if isinstance(SCANCODES["s"], str) else int(SCANCODES["s"])
-        self.KEY_D = int(SCANCODES["d"], 16) if isinstance(SCANCODES["d"], str) else int(SCANCODES["d"])
+        self.KEY_W = SCANCODES["w"]
+        self.KEY_A = SCANCODES["a"]
+        self.KEY_S = SCANCODES["s"]
+        self.KEY_D = SCANCODES["d"]
         
         # State Tracking
-        self.current_keys = set() 
+        self.current_keys = set()
         self.center_x = 0.0
         self.center_y = 0.0
         self.inner_radius = 0.0
@@ -39,10 +49,10 @@ class WASDMapper():
             {self.KEY_W},               # 6: Up
             {self.KEY_W, self.KEY_D}     # 7: Up-Right
         ]
-
-        self.json_loader = mapper.json_loader
-        self.config = mapper.config
-        self.mapper_event_dispatcher = self.mapper.mapper_event_dispatcher
+        
+        # Math.PI fractional constants
+        self.PI_8 = math.pi / 8
+        self.INV_PI_4 = 1.0 / (math.pi / 4.0)
         
         # Initial Load
         self.update_config()
@@ -54,7 +64,7 @@ class WASDMapper():
         self.mapper_event_dispatcher.register_callback("ON_WASD_BLOCK", self.on_wasd_block)
 
     def update_config(self):
-        print(f"[Info] WASDMapper reloading config...")
+        print(f"[WASDMapper] Reloading config...")
         try:
             with self.config.config_lock:
                 conf = self.config.config_data.get('joystick', {})
@@ -66,7 +76,7 @@ class WASDMapper():
 
     def updateMouseWheel(self):
         with self.config.config_lock:
-            print(f"[Info] WASDMapper updating mousewheel...")
+            print(f"[WASDMapper] Updating mousewheel...")
             self.inner_radius, d_radius = self.json_loader.get_mouse_wheel_info()
             self.outer_radius = self.inner_radius + d_radius
     
@@ -97,7 +107,6 @@ class WASDMapper():
         
         # Leash Logic (Floating Joystick center follow)
         outer_sq = self.outer_radius * self.outer_radius
-      
         if dist_sq > outer_sq and outer_sq > 0:
             dist = dist_sq**0.5 # Only calculate sqrt if we are actually leashing
             scale = self.outer_radius / dist
@@ -105,7 +114,7 @@ class WASDMapper():
             self.center_y = touch_event.y - (vy * scale)
             vx = touch_event.x - self.center_x
             vy = touch_event.y - self.center_y
-            # dist is now effectively self.outer_radius
+            # dist is now effectively self.outer_radius 
 
         # FAST ANGLE TO SECTOR INDEX
         # atan2 gives -pi to pi; we shift to 0 to 2pi and offset by pi/8 (22.5°)
@@ -113,8 +122,17 @@ class WASDMapper():
         if angle_rad < 0: angle_rad += 2 * math.pi
         
         # Divide circle into 8 segments of 45°
-        sector = int((angle_rad + (math.pi / 8)) / (math.pi / 4)) % 8
-        self.apply_keys(self.DIRECTION_LOOKUP[sector])
+        sector = int((angle_rad + self.PI_8) * self.INV_PI_4) % 8
+        new_keys = self.DIRECTION_LOOKUP[sector]
+        
+        # Sprint Check
+        if self.sprint_key is not None:
+            inner_sq = self.inner_radius * self.inner_radius
+            if dist_sq > inner_sq:
+                new_keys = new_keys | {self.sprint_key}
+        
+        # Apply the keys
+        self.apply_keys(new_keys)                
 
     def touch_up(self):
         # Only release if the finger that lifted is the designated WASD finger (handled in main.py)
@@ -141,6 +159,7 @@ class WASDMapper():
             
         elif action == DOWN:
             self.touch_down(touch_event)
+            
 
     def release_all(self):
         if not self.current_keys: return
