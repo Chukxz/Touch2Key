@@ -237,6 +237,7 @@ class Plotter:
         self.input_buffer = ""
         state_str = "VISIBLE" if self.show_overlays else "HIDDEN"
         self.update_title(f"Overlays {state_str}. {DEF_STR}")
+        self.bg_cache = self.fig.canvas.copy_from_bbox(self.ax.bbox)
         
     def start_mode(self, mode, num_points):
         self.reset_state() 
