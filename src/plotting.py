@@ -588,7 +588,7 @@ class Plotter:
                 
             elif data['type'] == CIRCLE:
                 entry["val1"] = data['r']
-                # val2, 3, 4 remain 0
+                # val 2, 3, 4 remain 0
             
             output.append(entry)
 
@@ -606,14 +606,13 @@ class Plotter:
         try:
             if (not self.saved_mouse_wheel) and (not self.saved_sprint_distance):
                 print("Error: mouse wheel and sprint distance not configured.")
-                self.update_title(f"Error saving: {e}")
+                self.update_title(f"Error saving: {file_path.name}")
                 return
 
             with file_path.open('w', encoding='utf-8') as f:
                 json.dump(json_output, f, indent=4)
                 
-            display_path = file_path.relative_to(Path.cwd())
-            print(f"[+] Saved to: {display_path}")
+            print(f"[+] JSON file saved to: {file_path.as_posix()}")
 
             update_toml(
                 self.width, self.height, self.dpi, 
@@ -623,7 +622,7 @@ class Plotter:
 
         except Exception as e:
             print(f"[!] Export Error: {e}")
-            self.update_title(f"Error saving: {e}")
+            self.update_title(f"Error saving: {file_path.name}")
             return
             
         self.update_title(f"Saved: {file_path.name}")
