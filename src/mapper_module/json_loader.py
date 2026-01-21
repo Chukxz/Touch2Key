@@ -30,7 +30,7 @@ class JSONLoader():
         self.load_json()
         
         # REGISTER HOTKEY
-        print("[INFO] Press F5 to hot reload json data.")
+        print("[INFO] Press F5 to hot reload json data (always reloads config).")
         keyboard.add_hotkey('f5', self.reload)
 
     def get_mouse_wheel_info(self):
@@ -42,13 +42,12 @@ class JSONLoader():
             create_default_toml()
             raise RuntimeError("JSON path not found or misconfigured (json_path).")
 
-        self.current_path = system_config['json_path']
+        current_path = system_config['json_path']
+        self.json_data = self.process_json(current_path)
         
-        self.json_data = self.process_json(self.current_path)
-        
-        self.last_loaded_json_path = self.current_path
-        if os.path.exists(self.current_path):
-            self.last_loaded_json_timestamp = os.path.getmtime(self.current_path)
+        self.last_loaded_json_path = current_path
+        if os.path.exists(current_path):
+            self.last_loaded_json_timestamp = os.path.getmtime(current_path)
 
     def should_reload(self, old_path, new_path, last_timestamp):
         need_reload = False
@@ -92,14 +91,13 @@ class JSONLoader():
         if need_reload:
             try:
                 print("[System] Parsing new JSON...")
-                new_data = self.process_json(self.current_path)
+                new_data = self.process_json(current_path)
                 
                 with self.config.config_lock:
                     print("[System] Applying new layout...")
                     self.json_data = new_data
-                    self.last_loaded_json_path = self.current_path
+                    self.last_loaded_json_path = current_path
                     self.last_loaded_json_timestamp = current_file_time
-                self.config.reload_config()
                 self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_JSON_RELOAD"))
                     
                 print("[System] Layout swapped safely. Game resumed.")
@@ -108,6 +106,8 @@ class JSONLoader():
         
         else:
             print("Hot reloading skipped as no file or file path changes were detected.")
+        
+        self.config.reload_config()            
         
     def process_json(self, json_file_path):
         normalized_zones = {}

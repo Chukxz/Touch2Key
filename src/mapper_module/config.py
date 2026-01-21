@@ -45,7 +45,7 @@ class AppConfig:
 
     def reload_config(self):
         """Reloads from disk and notifies listeners."""
-        print("Reloading TOML configuration...")
+        print(f"Reloading TOML configuration from {TOML_PATH}...")
         self.load_config()
         
         # Dispatch event so other modules know config changed
