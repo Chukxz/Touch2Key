@@ -655,6 +655,7 @@ class Plotter:
                             break
                     self.saved_mouse_wheel = True
                 self.mouse_wheel_radius = r
+                self.mouse_wheel_cx = cx
                 self.mouse_wheel_cy = cy
                 
             elif self.mode == RECT:
