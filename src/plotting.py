@@ -203,6 +203,7 @@ class Plotter:
         self.saved_mouse_wheel = False
         self.saved_sprint_distance = False
         self.mouse_wheel_radius = 0.0
+        self.mouse_wheel_cx = 0.0
         self.mouse_wheel_cy = 0.0
         self.sprint_distance = 0.0
         self.show_overlays = True
