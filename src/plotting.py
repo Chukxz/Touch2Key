@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import matplotlib.pyplot as plt
 from PIL import Image
 import tomlkit
@@ -101,7 +102,7 @@ class DraggableLabel:
 
 
 class Plotter:
-    def __init__(self, image_path=None):
+    def __init__(self, image_path:str|None=None):
         # DPI Awareness MUST be first to ensure coordinates match the screen
         set_dpi_awareness()
 

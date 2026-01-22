@@ -358,7 +358,7 @@ def wireless_connect(device:str|None=None, continous=True):
                 if "(10065)" in final: # Default fallback if no errors were raised in previous line
                     raise RuntimeError(f"cannot connect to {socket_path}: A socket operation was attempted to an unreachable host. (10065)")
             
-                print(f"Connected successfully to device: {device} on socket: {socket_path}, device now set to: {socket_path}.")
+            print(f"Connected successfully to device: {device} on socket: {socket_path}, device now set to: {socket_path}.")
                 
             if continous:
                 running = False
