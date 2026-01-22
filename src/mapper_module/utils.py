@@ -471,9 +471,9 @@ def update_toml(w=None, h=None, dpi=None, image_path=None, json_path=None, mouse
         if dpi:
             doc["system"]["json_dev_dpi"] = dpi        
         if image_path is not None:
-            doc["system"]["hud_image_path"] = Path(image_path).as_posix()            
+            doc["system"]["hud_image_path"] = Path(image_path).as_posix() if image_path else ""           
         if json_path is not None:
-            doc["system"]["json_path"] = Path(image_path).as_posix()
+            doc["system"]["json_path"] = Path(json_path).as_posix() if json_path else ""
 
         with open(TOML_PATH, "w", encoding="utf-8") as f:
             tomlkit.dump(doc, f)

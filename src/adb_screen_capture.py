@@ -17,16 +17,18 @@ def capture_android_screen():
     dpi = get_dpi(device_id)
     timestamp = datetime.datetime.now().strftime("hud_%Y%m%d_%H%M%S")
 
-    nickname = input("Enter device nickname (optional): ").strip()
-    custom_img_name = input("Enter optional image name: ").strip()
+    nickname = input("Enter device nickname [Default 'Device', Blank for Default]: ").strip()
+    custom_img_folder_name = input("Enter image folder name [Default 'Image', Blank for Default]: ").strip()
+    custom_img_name = input("Enter image name prefix [Default '', Blank for Default]: ").strip()
 
     nick_clean = nickname.replace(" ", "_") if nickname else "Device"
-    img_clean = custom_img_name.replace(" ", "_") if custom_img_name else "Image"
+    img_folder_clean = custom_img_folder_name.replace(" ", "_") if custom_img_folder_name else "Image"
+    img_clean = custom_img_name.replace(" ", "_") + "_" if custom_img_name else ""
     
     img_rotation = get_rotation(device_id)
     base_dir = Path(IMAGES_FOLDER)
     
-    relative_filename = Path(nick_clean) / img_clean / f"{timestamp}_r{img_rotation}.png"
+    relative_filename = Path(nick_clean) / img_folder_clean / f"{img_clean}{timestamp}_r{img_rotation}.png"
     full_save_path = base_dir / relative_filename
     full_save_path.parent.mkdir(parents=True, exist_ok=True)
 

@@ -157,7 +157,7 @@ class Plotter:
         self.ax.imshow(img)
         
         state_str = "VISIBLE" if self.show_overlays else "HIDDEN"
-        self.update_title(f"Overlays {state_str}. {DEF_STR}")
+        self.update_title(f"OVERLAYS: {state_str}. {DEF_STR}")
         
         # Create the "Shadow" (Black, thicker)
         self.cursor_h_bg = self.ax.axhline(0, color='black', linewidth=1.5, alpha=0.8, visible=False, zorder=10, animated=True)
@@ -237,7 +237,7 @@ class Plotter:
         self.points = []
         self.input_buffer = ""
         state_str = "VISIBLE" if self.show_overlays else "HIDDEN"
-        self.update_title(f"Overlays {state_str}. {DEF_STR}")
+        self.update_title(f"OVERLAYS: {state_str}. {DEF_STR}")
         self.bg_cache = self.fig.canvas.copy_from_bbox(self.ax.bbox)
         
     def start_mode(self, mode, num_points):
@@ -245,20 +245,20 @@ class Plotter:
         self.mode = mode
         self.artists_points = num_points
         self.state = COLLECTING
-        self.update_title(f"Mode: {mode}. Click {num_points} points on the image (F8 to Cancel).")
+        self.update_title(f"MODE: {mode}. Click {num_points} points on the image (F8 to Cancel).")
 
     def change_image(self):
         image_path = select_image_file(IMAGES_FOLDER)
         if image_path:
             self.image_path = Path(image_path)
-            self.ax.clear()
             
             self.init_params_helper()
             img = self.update_image_params()
+            self.ax.clear()
             self.ax.imshow(img)
             
             self.reset_state()
-            print(f"Swapped HUD to: f{self.image_path.relative_to(IMAGES_FOLDER).as_posix()}")
+            print(f"Swapped HUD to: {self.image_path.as_posix()}")
 
     def toggle_visibility(self):
         self.show_overlays = not self.show_overlays
@@ -271,7 +271,7 @@ class Plotter:
             artist.set_visible(self.show_overlays)
         
         self.fig.canvas.draw()
-        self.update_title(f"Overlays {state_str}. {DEF_STR}")
+        self.update_title(f"OVERLAYS: {state_str}. {DEF_STR}")
 
 
     def label(self, center_x, center_y, label, fc):
@@ -366,10 +366,10 @@ class Plotter:
 
         remaining = self.artists_points - len(self.points)
         if remaining > 0:
-            self.update_title(f"Mode: {self.mode}. {remaining} points remaining.")
+            self.update_title(f"MODE: {self.mode}. {remaining} points remaining (F8 to Cancel).")
         else:
             self.state = WAITING_FOR_KEY
-            self.update_title(f"Shape Defined! Press KEY or CLICK MOUSE to bind (F8 to Cancel).")
+            self.update_title(f"Shape Defined! Press KEY or CLICK MOUSE to bind.")
 
     def on_key_press(self, event):
         """Main Input Router."""
@@ -390,20 +390,20 @@ class Plotter:
                 self.reset_state()
             return
 
-        if self.state in [COLLECTING, WAITING_FOR_KEY]:
+        if self.state == COLLECTING:
             if event.key == 'f8':
                 print("[-] Action Cancelled.")
                 self.reset_state()
-                return
-            
-            if self.state == WAITING_FOR_KEY:
-                self.finalize_shape(event.key)
                 return
             
             if event.key in ['f6', 'f7', 'delete', 'f10']:
                 print(f"[!] Blocked: Finish or Cancel (F8) current shape first.")
             return
 
+        if self.state == WAITING_FOR_KEY:
+            self.finalize_shape(event.key)
+            return
+            
         if self.state == IDLE:
             if event.key == 'f4':
                 self.toggle_visibility()
@@ -506,10 +506,12 @@ class Plotter:
                     fc = get_vibrant_random_color(0.4)
                     # Add shape artist
                     shape_artist = plt.Circle((cx, cy), r, fill=True, lw=2, fc=fc, ec=(0.3, 0.3, 0.3, 0.8))
+                    shape_artist.set_visible(self.show_overlays)
                     self.ax.add_patch(shape_artist)
                     self.shapes_artists[entry_id] = shape_artist
                     # Add label artist
                     label_artist = self.label(cx, cy, interception_key, fc)
+                    label_artist.set_visible(self.show_overlays)
                     self.ax.add_artist(label_artist)
                     self.labels_artists[entry_id] = label_artist
                     # Make the labels draggable
@@ -519,10 +521,12 @@ class Plotter:
                     (x1, y1), (x2, y2) = bb
                     # Add shape artist
                     shape_artist = plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=True, lw=2, fc=fc, ec=(0.3, 0.3, 0.3, 0.8))
+                    shape_artist.set_visible(self.show_overlays)
                     self.ax.add_patch(shape_artist)
                     self.shapes_artists[entry_id] = shape_artist
                     # Add label artist
                     label_artist = self.label(cx, cy, interception_key, fc)
+                    label_artist.set_visible(self.show_overlays)
                     self.ax.add_artist(label_artist)
                     self.labels_artists[entry_id] = label_artist
                     # Make the labels draggable
@@ -555,7 +559,7 @@ class Plotter:
             self.input_buffer += key
         
         display_name = self.input_buffer if self.input_buffer else "[Default Timestamp]"
-        self.update_title(f"SAVE: {display_name} (Enter to Save)")
+        self.update_title(f"SAVE: {display_name} (Enter to Save, Default '')")
 
     def export_data(self, user_name):
         if not user_name:
@@ -605,8 +609,8 @@ class Plotter:
         }
         
         try:
-            if (not self.saved_mouse_wheel) and (not self.saved_sprint_distance):
-                print("Error: mouse wheel and sprint distance not configured.")
+            if (not self.saved_mouse_wheel) or (not self.saved_sprint_distance):
+                print("[!] ERROR: Mouse wheel or sprint distance not configured.")
                 self.update_title(f"Error saving: {file_path.name}")
                 return
 
@@ -626,7 +630,7 @@ class Plotter:
             self.update_title(f"Error saving: {file_path.name}")
             return
             
-        self.update_title(f"Saved: {file_path.name}")
+        self.update_title(f"SAVED: {file_path.name}")
             
     # Helper Functions
     def get_interception_code(self, key):
@@ -639,7 +643,7 @@ class Plotter:
         return hex(val) if val is not None else None, mapped_key if val is not None else None
 
     def save_entry(self, interception_key, hex_code, cx, cy, r, bb):
-        id = self.count
+        uid = self.count
         inc_count = True
         saved = False
         
@@ -649,9 +653,19 @@ class Plotter:
                     print(f"[!] Mouse Wheel already assigned. Overwriting previous assignment.")
                     for k, v in self.shapes.items():
                         if v['key_name'] == MOUSE_WHEEL_CODE:
-                            id = k
+                            uid = k
                             inc_count = False
                             self.shapes.pop(k)
+                            
+                            if uid in self.shapes_artists:
+                                self.shapes_artists[uid].remove()
+                                del self.shapes_artists[uid]
+                            if uid in self.labels_artists:
+                                self.labels_artists[uid].remove()
+                                del self.labels_artists[uid]
+                            if uid in self.drag_managers:
+                                self.drag_managers[uid].disconnect()
+                                del self.drag_managers[uid]
                             break
                         
                 self.mouse_wheel_radius = r
@@ -660,22 +674,32 @@ class Plotter:
                 self.saved_mouse_wheel = True
                 
             elif self.mode == RECT:
-                print(f"[!] Error: Mouse Wheel can only be assigned to '{CIRCLE}' not '{RECT} shapes.")
-                return saved, id
+                print(f"[!] ERROR: Mouse Wheel can only be assigned to '{CIRCLE}' not '{RECT} shapes.")
+                return saved, uid
         
         elif interception_key == SPRINT_DISTANCE_CODE:
             if self.mode == CIRCLE:
                 if not self.saved_mouse_wheel:
-                    print(f"[!] Mouse Wheel not assigned yet. Please assign it first.")
-                    return saved, id
+                    print(f"[!] ERROR: Mouse Wheel not assigned yet. Please assign it first.")
+                    return saved, uid
                     
                 if self.saved_sprint_distance:                    
-                    print(f"[!] Sprint Threshold already assigned. Overwriting previous assignment.")
+                    print(f"[!] ERROR: Sprint Threshold already assigned. Overwriting previous assignment.")
                     for k, v in self.shapes.items():
                         if v['key_name'] == SPRINT_DISTANCE_CODE:
-                            id = k
+                            uid = k
                             inc_count = False
                             self.shapes.pop(k)
+                            
+                            if uid in self.shapes_artists:
+                                self.shapes_artists[uid].remove()
+                                del self.shapes_artists[uid]
+                            if uid in self.labels_artists:
+                                self.labels_artists[uid].remove()
+                                del self.labels_artists[uid]
+                            if uid in self.drag_managers:
+                                self.drag_managers[uid].disconnect()
+                                del self.drag_managers[uid]
                             break
                             
                 # Use Pythagorean theorem for the true radius/distance
@@ -686,14 +710,14 @@ class Plotter:
                 # STRICT CHECK: Ensure Sprint is actually outside the Joystick
                 if actual_dist <= self.mouse_wheel_radius:
                     print(f"[!] ERROR: Sprint point must be OUTSIDE the joystick radius!")
-                    return False, id
+                    return False, uid
 
                 self.sprint_distance = actual_dist
                 self.saved_sprint_distance = True
                 
             elif self.mode == RECT:
-                print(f"[!] Error: Sprint Button can only be assigned to '{CIRCLE}' not '{RECT} shapes.")
-                return saved, id
+                print(f"[!] ERROR: Sprint Button can only be assigned to '{CIRCLE}' not '{RECT} shapes.")
+                return saved, uid
         
         entry = {
             "key_name": interception_key,
@@ -702,12 +726,12 @@ class Plotter:
             "cx": cx, "cy": cy, "r": r, "bb": bb
         }
         
-        self.shapes[id] = entry
+        self.shapes[uid] = entry
         if inc_count:
             self.count += 1
         
         saved = True
-        return saved, id
+        return saved, uid
 
     def print_data(self):
         print("\n" + "="*45)
