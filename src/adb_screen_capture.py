@@ -55,7 +55,7 @@ def capture_android_screen():
         update_toml(image_path=str(relative_filename), strict=True)
 
         print(f"\n[SUCCESS]")
-        print(f"File:   {relative_filename}")
+        print(f"File:   {full_save_path}")
         print(f"Config: {TOML_PATH} updated.")
 
     except Exception as e:
