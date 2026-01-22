@@ -349,10 +349,11 @@ def wireless_connect(device:str|None=None, continous=True):
             if not socket:
                 raise RuntimeError(f"No sockets found for device: {device}")
             socket_path = socket[0] + ":" + PORT
-            
+
             if device == socket_path:
                 print(f"Connected successfully to device: {socket_path}.")
-            else:                
+            else:
+                subprocess.run([ADB_EXE, "-s", device, "tcpip", PORT])
                 final = subprocess.check_output([ADB_EXE,  "-s", device, "connect", socket_path]).decode().splitlines()[0] # If there's an error its supposed to be raised here.
                 
                 if "(10065)" in final: # Default fallback if no errors were raised in previous line
