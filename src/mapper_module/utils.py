@@ -631,8 +631,8 @@ def mouse_worker(m_queue:Queue):
                 _sleep(0.0008 + _random() * 0.0004) # Fast Randomized Pacing (approx. 1000Hz)
 
             elif task == "move_abs":
-                x, y, flags = data
-                m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_ABSOLUTE, flags, 0, x, y))
+                x, y = data
+                m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_ABSOLUTE | MOUSE_VIRTUAL_DESKTOP, MOUSE_MOVE_ABSOLUTE, 0, x, y))
 
         except Exception: # Timeout reached
             if pressed_buttons:
