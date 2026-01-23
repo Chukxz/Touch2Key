@@ -130,16 +130,6 @@ class WASDMapper():
             vy = touch_event.y - self.center_y
             # dist is now effectively self.outer_radius
 
-
-    def touch_pressed(self, touch_event: TouchEvent, is_visible: bool):
-        if self.mapper.wasd_block > 0 or is_visible:
-            self.touch_up()
-            return
-
-        vx = touch_event.x - self.center_x
-        vy = touch_event.y - self.center_y
-        dist_sq = vx*vx + vy*vy
-
         # Deadzone check
         dz_px = self.inner_radius * self.DEADZONE
         if dist_sq < (dz_px * dz_px):
