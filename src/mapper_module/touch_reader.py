@@ -34,7 +34,7 @@ class TouchReader():
         self.rotation_lock = threading.Lock()
         self.finger_lock = threading.Lock()
         self.running = True
-        self.is_visible = True
+        self.is_visible = False
         self.touch_lost = False
 
         # Identity tracking

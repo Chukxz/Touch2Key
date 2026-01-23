@@ -65,6 +65,11 @@ class WASDMapper():
         self.INV_PI_4 = 1.0 / (math.pi / 4.0)
         self.sprinting = False
         self.current_mask = State.NONE
+        self.center_x = 0
+        self.center_y = 0
+        
+        self.update_config()
+        self.updateMouseWheel()
 
         # Register Callbacks
         self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
@@ -153,9 +158,6 @@ class WASDMapper():
         target_mask = self.sector_to_state[sector]
         to_release = self.current_mask & ~target_mask
         to_press = target_mask & ~self.current_mask
-        
-        print(to_release)
-        print(to_press)
         
         for k in to_release: 
             if k.value > 0:

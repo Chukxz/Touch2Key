@@ -31,7 +31,7 @@ mapper_logic = None
 mouse_mapper = None
 key_mapper = None
 wasd_mapper = None
-is_visible = True
+is_visible = False
 lock = threading.Lock()
 is_shutting_down = False
 
