@@ -27,7 +27,7 @@ class AppConfig:
         try:
             # Check if file exists, if not create it using your helper
             toml_path = Path(TOML_PATH)
-            if not Path.exists(TOML_PATH):
+            if not Path.exists(toml_path):
                 print(f"Config file {TOML_PATH} not found! Creating default...")
                 create_default_toml()
 
@@ -37,7 +37,7 @@ class AppConfig:
 
             with self.config_lock:
                 self.config_data = new_data
-                
+                            
         except tomllib.TOMLDecodeError as e:
             print(f"CRITICAL: Failed to parse TOML. Keeping previous config. Error: {e}")
         except Exception as e:

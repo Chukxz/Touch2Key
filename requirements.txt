@@ -1,6 +1,7 @@
 contourpy==1.3.3
 cycler==0.12.1
 fonttools==4.61.1
+interception-python==1.13.6
 keyboard==0.13.5
 kiwisolver==1.4.9
 matplotlib==3.10.8
