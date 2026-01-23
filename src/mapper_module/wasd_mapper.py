@@ -83,8 +83,8 @@ class WASDMapper():
         try:
             with self.config.config_lock:
                 conf = self.config.config_data.get('joystick', {})
-                self.DEADZONE = conf.get('deadzone', 0.1)
-                self.HYSTERESIS = conf.get('hysteresis', 5.0)
+                self.deadzone = conf.get('deadzone', 0.1)
+                self.hysterisis = math.radians(conf.get('hysteresis', 5.0))
         except Exception as e:
             _str = f"Error loading joystick config: {e}"
             raise RuntimeError(_str)
@@ -114,7 +114,7 @@ class WASDMapper():
         dist_sq = vx*vx + vy*vy
 
         # Optimization: Deadzone check using squared distance
-        dz_px = self.inner_radius * self.DEADZONE
+        dz_px = self.inner_radius * self.deadzone
         if dist_sq < (dz_px * dz_px):
             self.touch_up()
             return
@@ -133,15 +133,11 @@ class WASDMapper():
         # Angle Calculation
         # atan2 gives -pi to pi, we shift to 0 to 2pi
         angle_rad = math.atan2(vy, vx)
-        if angle_rad < 0: angle_rad += 2 * math.pi
-
-        # Hysteresis Logic
-        # Convert hysterisis in degrees to radians
-        h_rad = math.radians(self.HYSTERESIS) 
-        
+        if angle_rad < 0: angle_rad += 2 * math.pi  
         # Calculate the potential new sector
         new_sector = int((angle_rad + self.PI_8) * self.INV_PI_4) % 8
 
+        # Hysteresis Logic     
         if self.last_sector is not None:
             # Calculate the center angle of the CURRENT sector
             # Sectors are 45 degrees (pi/4) apart
@@ -150,9 +146,8 @@ class WASDMapper():
             # Find the shortest distance between the new angle and current center
             angle_diff = (angle_rad - current_sector_center + math.pi) % (2 * math.pi) - math.pi
             
-            # If the movement is smaller than the hysteresis buffer, keep the old sector
-            # 0.3927 rad is half a sector (22.5 deg). We add hysteresis to that boundary.
-            if abs(angle_diff) < (self.PI_8 + h_rad):
+            # If the movement is smaller than the hysteresis buffer, keep the old sector 
+            if abs(angle_diff) < (self.PI_8 + self.hysterisis):
                 new_sector = self.last_sector
 
         self.last_sector = new_sector
