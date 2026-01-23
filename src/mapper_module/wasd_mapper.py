@@ -1,6 +1,15 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 
+from enum import IntFlag
+class State(IntFlag):
+    NONE = 0
+    W = 1 << 0
+    A = 1 << 1
+    S = 1 << 2
+    D = 1 << 3
+
+    
 import math
 from .utils import (
     SCANCODES, UP, DOWN, PRESSED
@@ -9,7 +18,8 @@ from .utils import (
 if TYPE_CHECKING:
     from .mapper import Mapper
     from .utils import TouchEvent
-    
+
+
 class WASDMapper():
     def __init__(self, mapper:Mapper):
         self.mapper = mapper
@@ -18,50 +28,49 @@ class WASDMapper():
         self.config = mapper.config
         self.mapper_event_dispatcher = self.mapper.mapper_event_dispatcher
         sprint_key = mapper.emulator['sprint_key']
-        
+        self.sprint_key_code = None
+
         if sprint_key is not None:
             try:
-                self.sprint_key = SCANCODES[sprint_key]
+                self.sprint_key_code = int(SCANCODES[sprint_key], 16) if isinstance(SCANCODES[sprint_key], str) else int(SCANCODES[sprint_key])
             except:
-                self.sprint_key = None
-        
+                self.sprint_key_code = None
+
         # Pre-convert scancodes to Integers once for faster Bridge interaction
-        self.KEY_W = SCANCODES["w"]
-        self.KEY_A = SCANCODES["a"]
-        self.KEY_S = SCANCODES["s"]
-        self.KEY_D = SCANCODES["d"]
+        self.KEY_W = int(SCANCODES["w"], 16) if isinstance(SCANCODES["w"], str) else int(SCANCODES["w"])
+        self.KEY_A = int(SCANCODES["a"], 16) if isinstance(SCANCODES["a"], str) else int(SCANCODES["a"])
+        self.KEY_S = int(SCANCODES["s"], 16) if isinstance(SCANCODES["s"], str) else int(SCANCODES["s"])
+        self.KEY_D = int(SCANCODES["d"], 16) if isinstance(SCANCODES["d"], str) else int(SCANCODES["d"])
         
-        # State Tracking
-        self.current_keys = set()
-        self.center_x = 0.0
-        self.center_y = 0.0
-        self.inner_radius = 0.0
-        self.outer_radius = 0.0
-        
-        # O(1) Lookup Table: Maps sector index (0-7) to physical key sets
-        self.DIRECTION_LOOKUP = [
-            {self.KEY_D},               # 0: Right (-22.5° to 22.5°)
-            {self.KEY_S, self.KEY_D},    # 1: Down-Right
-            {self.KEY_S},               # 2: Down
-            {self.KEY_S, self.KEY_A},    # 3: Down-Left
-            {self.KEY_A},               # 4: Left
-            {self.KEY_W, self.KEY_A},    # 5: Up-Left
-            {self.KEY_W},               # 6: Up
-            {self.KEY_W, self.KEY_D}     # 7: Up-Right
-        ]
+        self.sector_to_state = {
+            0: State.D,                      # 0: Right (-22.5° to 22.5°)
+            1: State.S | State.D,            # 1: Down-Right
+            2: State.S,                      # 2: Down
+            3: State.S | State.A,            # 3: Down-Left
+            4: State.A,                      # 4: Left
+            5: State.W | State.A,            # 5: Up-Left
+            6: State.W,                      # 6: Up
+            7: State.W | State.D             # 7: Up-Right
+        }
+                
+        self.state_value_to_key = {
+            1: self.KEY_W,
+            2: self.KEY_A,
+            4: self.KEY_S,
+            8: self.KEY_D       
+        }
         
         # Math.PI fractional constants
         self.PI_8 = math.pi / 8
         self.INV_PI_4 = 1.0 / (math.pi / 4.0)
-        
-        # Initial Load
-        self.update_config()
-        self.updateMouseWheel()
-                
+        self.sprinting = False
+        self.current_mask = State.NONE
+
         # Register Callbacks
         self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self.update_config)
         self.mapper_event_dispatcher.register_callback("ON_JSON_RELOAD", self.updateMouseWheel)
         self.mapper_event_dispatcher.register_callback("ON_WASD_BLOCK", self.on_wasd_block)
+        
 
     def update_config(self):
         print(f"[WASDMapper] Reloading config...")
@@ -79,32 +88,31 @@ class WASDMapper():
             print(f"[WASDMapper] Updating mousewheel...")
             self.inner_radius, d_radius = self.json_loader.get_mouse_wheel_info()
             self.outer_radius = self.inner_radius + d_radius
-    
+
     def on_wasd_block(self):
         if self.mapper.wasd_block > 0:
-            self.release_all()
-        
-    def touch_down(self, touch_event:TouchEvent):
-        if self.mapper.wasd_block == 0:
+            self.touch_up()
+            
+    def touch_down(self, touch_event:TouchEvent, is_visible:bool):
+        if self.mapper.wasd_block == 0 and not is_visible:
             self.center_x = touch_event.x
             self.center_y = touch_event.y
-            self.release_all()
 
-    def touch_pressed(self, touch_event:TouchEvent):
-        if self.mapper.wasd_block > 0:
-            self.release_all()
+    def touch_pressed(self, touch_event:TouchEvent, is_visible:bool):
+        if self.mapper.wasd_block > 0 or is_visible:
+            self.touch_up()
             return
 
         vx = touch_event.x - self.center_x
         vy = touch_event.y - self.center_y
         dist_sq = vx*vx + vy*vy
-        
-        # Optimization: Deadzone check using squared distance avoids math.sqrt()
+
+        # Optimization: Deadzone check using squared distance
         dz_px = self.inner_radius * self.DEADZONE
         if dist_sq < (dz_px * dz_px):
-            self.release_all()
+            self.touch_up()
             return
-        
+
         # Leash Logic (Floating Joystick center follow)
         outer_sq = self.outer_radius * self.outer_radius
         if dist_sq > outer_sq and outer_sq > 0:
@@ -114,57 +122,66 @@ class WASDMapper():
             self.center_y = touch_event.y - (vy * scale)
             vx = touch_event.x - self.center_x
             vy = touch_event.y - self.center_y
-            # dist is now effectively self.outer_radius 
+            # dist is now effectively self.outer_radius
 
         # FAST ANGLE TO SECTOR INDEX
         # atan2 gives -pi to pi; we shift to 0 to 2pi and offset by pi/8 (22.5°)
         angle_rad = math.atan2(vy, vx)
         if angle_rad < 0: angle_rad += 2 * math.pi
-        
+
         # Divide circle into 8 segments of 45°
         sector = int((angle_rad + self.PI_8) * self.INV_PI_4) % 8
-        new_keys = self.DIRECTION_LOOKUP[sector]
-        
+
         # Sprint Check
-        if self.sprint_key is not None:
+        sprint = False
+        if self.sprint_key_code is not None:
             inner_sq = self.inner_radius * self.inner_radius
             if dist_sq > inner_sq:
-                new_keys = new_keys | {self.sprint_key}
-        
+                sprint = True
+                
         # Apply the keys
-        self.apply_keys(new_keys)                
+        self.apply_keys(sector, sprint)
 
-    def touch_up(self):
-        # Only release if the finger that lifted is the designated WASD finger (handled in main.py)
-        # OR if we have keys down and want to be safe (Emergency release)
-        if self.current_keys:
-            self.release_all()
-
-    def apply_keys(self, target_keys):
-        if target_keys == self.current_keys:
-            return
-
-        # Bitmask-style diffing to minimize Interception Bridge overhead
-        to_release = self.current_keys - target_keys
-        to_press = target_keys - self.current_keys
-
-        for k in to_release: self.interception_bridge.key_up(k)
-        for k in to_press: self.interception_bridge.key_down(k)
-            
-        self.current_keys = target_keys
-
-    def process_touch(self, action, touch_event:TouchEvent):
-        if action == PRESSED:
-            self.touch_pressed(touch_event)
-            
-        elif action == DOWN:
-            self.touch_down(touch_event)
+    def touch_up(self):        
+        for k in self.current_mask:
+            if k.value > 0:
+                self.interception_bridge.key_up(self.state_value_to_key[k.value])
+        self.current_mask = State.NONE
         
-        elif action == UP:
-            self.touch_up()            
+    def apply_keys(self, sector, sprint):
+        # Bitmask-style diffing to minimize Interception Bridge overhead
+        target_mask = self.sector_to_state[sector]
+        to_release = self.current_mask & ~target_mask
+        to_press = target_mask & ~self.current_mask
+        
+        print(to_release)
+        print(to_press)
+        
+        for k in to_release: 
+            if k.value > 0:
+                self.interception_bridge.key_up(self.state_value_to_key[k.value])
 
-    def release_all(self):
-        if not self.current_keys: return
-        for k in self.current_keys:
-            self.interception_bridge.key_up(k)
-        self.current_keys = set()
+        if self.sprint_key_code is not None and self.sprinting and not sprint:
+            self.sprinting = sprint
+            self.interception_bridge.key_up(self.sprint_key_code)
+        
+        if self.sprint_key_code is not None and not self.sprinting and sprint:
+            self.sprinting = sprint            
+            self.interception_bridge.key_down(self.sprint_key_code)
+            
+        for k in to_press:
+            if k.value > 0:
+                self.interception_bridge.key_down(self.state_value_to_key[k.value])
+        
+        self.current_mask = target_mask
+
+    def process_touch(self, action, touch_event:TouchEvent, is_visible:bool):
+        if action == PRESSED:
+            self.touch_pressed(touch_event, is_visible)
+
+        elif action == DOWN:
+            self.touch_down(touch_event, is_visible)
+
+        elif action == UP:
+            self.touch_up()
+

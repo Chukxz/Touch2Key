@@ -83,6 +83,7 @@ EMULATORS = {
     "GameLoop": {
         "window_title": "Gameloop(64beta)",
         "sprint_key": None,
+        "toggle_key": "LCTRL",
     },
     # "BlueStacks": {
     #     "window_title": "BlueStacks App Player",
@@ -539,7 +540,7 @@ def keyboard_worker(k_queue:Queue):
     while running:
         try:
             # 10.0 seconds timeout: If no heartbeat/input from Main, release everything
-            code, state = k_queue.get(timeout=10.0)
+            code, state = k_queue.get(timeout=60.0)
 
             # state 0 = Down, 1 = Up (Interception standard)
             if state == 0:
@@ -588,7 +589,7 @@ def mouse_worker(m_queue:Queue):
                 task, data = pending_task
                 pending_task = None
             else:
-                task, data = m_queue.get(timeout=10.0)
+                task, data = m_queue.get(timeout=60.0)
 
             if task == "button":
                 # Track button states to release them on timeout
@@ -640,26 +641,20 @@ def mouse_worker(m_queue:Queue):
             running = False
             
 
-def maintain_bridge_health(bridge: InterceptionBridge, is_visible=True):
-    """
-    Checks if workers are alive, restarts and re-prioritizes if dead.
-    Keyboard worker is only restarted if is_visible (cursor visibility) is set to False (gaming mode).
-    Mouse worker is always restarted.
-    """
-    if not is_visible: # Only restart keyboard worker in gaming mode
-        # Check Keyboard Worker
-        if not bridge.k_proc.is_alive():
-            print(f"\n[CRITICAL] {_datetime.now().strftime('%H:%M:%S')} - Keyboard Worker Died!")
-            bridge.k_proc = multiprocessing.Process(target=keyboard_worker, name="Keyboard Worker", args=(bridge.k_queue,), daemon=True)
-            bridge.k_proc.start()
-            # Re-apply High Priority to the new PID
-            set_high_priority(bridge.k_proc.pid, "Revived Keyboard")
-            # Safety: Clear the queue to prevent a backlog of old 'stuck' keys firing at once
-            while not bridge.k_queue.empty():
-                try:
-                    bridge.k_queue.get_nowait()
-                except: 
-                    break
+def maintain_bridge_health(bridge: InterceptionBridge):
+    # Check Keyboard Worker
+    if not bridge.k_proc.is_alive():
+        print(f"\n[CRITICAL] {_datetime.now().strftime('%H:%M:%S')} - Keyboard Worker Died!")
+        bridge.k_proc = multiprocessing.Process(target=keyboard_worker, name="Keyboard Worker", args=(bridge.k_queue,), daemon=True)
+        bridge.k_proc.start()
+        # Re-apply High Priority to the new PID
+        set_high_priority(bridge.k_proc.pid, "Revived Keyboard")
+        # Safety: Clear the queue to prevent a backlog of old 'stuck' keys firing at once
+        while not bridge.k_queue.empty():
+            try:
+                bridge.k_queue.get_nowait()
+            except: 
+                break
 
     # Check Mouse Worker
     if not bridge.m_proc.is_alive():

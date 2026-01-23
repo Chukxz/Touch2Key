@@ -39,7 +39,9 @@ class TouchReader():
 
         # Identity tracking
         self.side_limit = 0
+        self.last_mouse_slot = None
         self.mouse_slot = None
+        self.last_wasd_slot = None
         self.wasd_slot = None
         self.width = 1080
         self.height = 1920
@@ -80,10 +82,12 @@ class TouchReader():
         if self.is_visible:            
             eligible_finger = []
             for slot, data in list(self.slots.items()):
-                if data['state'] != IDLE and data['start_x'] and ['start_y'] is not None:
+                if data['tid'] != -1 and data['start_x'] and ['start_y'] is not None:
                     eligible_finger.append((slot, data['timestamp']))
                     
-            self.mouse_slot = min(eligible_finger, key=lambda x: x[1])[0] if eligible_finger else None            
+            self.last_mouse_slot = self.mouse_slot
+            self.mouse_slot = min(eligible_finger, key=lambda x: x[1])[0] if eligible_finger else None
+            self.last_wasd_slot = self.wasd_slot          
             self.wasd_slot = None
             return
 
@@ -91,7 +95,7 @@ class TouchReader():
         eligible_wasd = []
 
         for slot, data in list(self.slots.items()):
-            if data['state'] != IDLE and data['start_x'] and ['start_y'] is not None:
+            if data['tid'] != -1 and data['start_x'] and ['start_y'] is not None:
                 # Check which side the finger started on
                 if data['start_x'] >= self.side_limit:
                     eligible_mouse.append((slot, data['timestamp']))
@@ -100,7 +104,9 @@ class TouchReader():
         
 
         # Use the finger with the earliest timestamp (oldest) for each role
+        self.last_mouse_slot = self.mouse_slot
         self.mouse_slot = min(eligible_mouse, key=lambda x: x[1])[0] if eligible_mouse else None
+        self.last_wasd_slot = self.wasd_slot
         self.wasd_slot = min(eligible_wasd, key=lambda x: x[1])[0] if eligible_wasd else None
 
     # CONFIG & SPECS
@@ -190,7 +196,7 @@ class TouchReader():
                 
             # Restart failed child processes
             with self.interception_bridge.bridge_lock:
-                maintain_bridge_health(self.interception_bridge, self.is_visible)
+                maintain_bridge_health(self.interception_bridge)
             try:
                 result = subprocess.run([ADB_EXE, "-s", self.device, "shell", "dumpsys", "display"], capture_output=True, text=True, timeout=1)
                 for pat in patterns:
@@ -390,6 +396,12 @@ class TouchReader():
                 self.last_dispatch_times[slot] = now
             
             rx, ry = self.rotate_norm_coordinates_local(data['x'], data['y'], matrix_snapshot)
+            m_s = self.mouse_slot
+            w_s = self.wasd_slot
+            
+            if data['state'] == UP:
+                m_s = self.last_mouse_slot
+                w_s = self.last_wasd_slot
 
             if self.touch_event_processor:
                 with self.config.config_lock:
@@ -400,8 +412,8 @@ class TouchReader():
                             id=data['tid'], 
                             x=rx, y=ry,
                             sx=data['start_x'], sy=data['start_y'],
-                            is_mouse=(slot == self.mouse_slot), 
-                            is_wasd=(slot == self.wasd_slot),
+                            is_mouse=(slot == m_s), 
+                            is_wasd=(slot == w_s),
                             )
                         self.touch_event_processor(action, touch_event) 
                     except: pass                     

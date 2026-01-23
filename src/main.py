@@ -6,7 +6,7 @@ import win32gui
 import threading
 import time
 from mapper_module.utils import (
-    DEFAULT_ADB_RATE_CAP, KEY_DEBOUNCE, PPS, SHORT_DELAY, EMULATORS, ADB_EXE,
+    DEFAULT_ADB_RATE_CAP, KEY_DEBOUNCE, PPS, SHORT_DELAY, EMULATORS, ADB_EXE, UP,
     DEF_EMULATOR_ID, TouchEvent, set_high_priority, stop_process, maintain_bridge_health
 )
 
@@ -41,30 +41,25 @@ def set_is_visible(_is_visible):
     with lock:
         is_visible = _is_visible
         # Clean up keys and state
-        try:
-            with interception_bridge.bridge_lock:
-                maintain_bridge_health(interception_bridge, False)
-            mouse_mapper.touch_up()
-            key_mapper.release_all()
-            wasd_mapper.release_all()
-        except: pass
+        with interception_bridge.bridge_lock:
+            maintain_bridge_health(interception_bridge)
+        mouse_mapper.touch_up()
+        key_mapper.release_all()
+        wasd_mapper.touch_up()
 
 
 def process_touch_event(action, touch_event: TouchEvent):
     local_visible = is_visible
     mapper_logic.event_count += 1
     
-    try:                   
-        if touch_event.is_mouse:
-            mouse_mapper.process_touch(action, touch_event, local_visible)
+    if touch_event.is_mouse:
+        mouse_mapper.process_touch(action, touch_event, local_visible)
         
-        if not local_visible:
-            key_mapper.process_touch(action, touch_event)
-            
-            if touch_event.is_wasd:
-                wasd_mapper.process_touch(action, touch_event) 
-    except:
-        pass
+    key_mapper.process_touch(action, touch_event, local_visible)
+        
+    if touch_event.is_wasd:
+        wasd_mapper.process_touch(action, touch_event, is_visible)
+        
 
 def select_emulator():
     print("Touch2Key Emulator Selector")

@@ -60,7 +60,7 @@ class InterceptionBridge:
         """Sends 'UP' signals for all critical keys and mouse buttons."""
         print("[Bridge] Emergency Release: Clearing all input states...")
         with self.bridge_lock:
-            maintain_bridge_health(self, False)
+            maintain_bridge_health(self)
             
             # Clear Mouse buttons
             for btn_up in [LEFT_BUTTON_UP, RIGHT_BUTTON_UP, MIDDLE_BUTTON_UP]:

@@ -6,7 +6,7 @@ from .utils import (
     RECT, CIRCLE, M_LEFT, M_RIGHT, M_MIDDLE,
     MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, 
     is_in_circle, is_in_rect, MapperEvent,
-    DOWN, UP
+    DOWN, UP, SCANCODES
 )
 
 if TYPE_CHECKING:
@@ -88,7 +88,7 @@ class KeyMapper():
         
         return True
 
-    def touch_down(self, event:TouchEvent):        
+    def touch_down(self, event:TouchEvent, is_visible:bool):        
         """Triggered on finger contact. Scans active_zones for a hit."""
         if self.mapper.device_width <= 0 or self.mapper.device_height <= 0:
             return
@@ -108,7 +108,11 @@ class KeyMapper():
             elif v_type == RECT:
                 if is_in_rect(nx, ny, value['x1'], value['x2'], value['y1'], value['y2']):
                     hit = True
-
+            
+            if is_visible:
+                if scancode != SCANCODES[self.mapper.emulator["toggle_key"]]:
+                    hit = False
+            
             if hit:
                 # Successfully mapped finger to key
                 if self._send_key_event(scancode, down=True):
@@ -130,9 +134,9 @@ class KeyMapper():
                 self.mapper.wasd_block = max(0, self.mapper.wasd_block - 1)
                 self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_WASD_BLOCK"))
     
-    def process_touch(self, action, touch_event:TouchEvent):
+    def process_touch(self, action, touch_event:TouchEvent, is_visible:bool):
         if action == DOWN:
-            self.touch_down(touch_event)
+            self.touch_down(touch_event, is_visible)
         
         elif action == UP:
             self.touch_up(touch_event)        
