@@ -152,7 +152,7 @@ class WASDMapper():
             if k.value > 0:
                 self.interception_bridge.key_up(self.state_value_to_key[k.value])
         if self.sprint_key_code is not None and self.sprinting:
-        self.interception_bridge.key_up(self.sprint_key_code)
+            self.interception_bridge.key_up(self.sprint_key_code)
 
         self.sprinting = False
         self.current_mask = State.NONE
