@@ -1,11 +1,8 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 
-import time
-import threading
 from .utils import (
     DEF_DPI, DOWN, UP, PRESSED,
-    DOUBLE_TAP_DELAY
 )
 
 if TYPE_CHECKING:

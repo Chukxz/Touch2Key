@@ -6,8 +6,8 @@ import win32gui
 import threading
 import time
 from mapper_module.utils import (
-    DEFAULT_ADB_RATE_CAP, KEY_DEBOUNCE, PPS, SHORT_DELAY, EMULATORS,
-    ADB_EXE, DEF_EMULATOR_ID, TouchEvent, set_high_priority, stop_process
+    DEFAULT_ADB_RATE_CAP, KEY_DEBOUNCE, PPS, SHORT_DELAY, EMULATORS, ADB_EXE,
+    DEF_EMULATOR_ID, TouchEvent, set_high_priority, stop_process, maintain_bridge_health
 )
 
 from mapper_module import (
@@ -42,7 +42,8 @@ def set_is_visible(_is_visible):
         is_visible = _is_visible
         # Clean up keys and state
         try:
-            interception_bridge.release_all()
+            with interception_bridge.bridge_lock:
+                maintain_bridge_health(interception_bridge, False)
             mouse_mapper.touch_up()
             key_mapper.release_all()
             wasd_mapper.release_all()
