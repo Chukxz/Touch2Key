@@ -67,6 +67,7 @@ class WASDMapper():
         self.current_mask = State.NONE
         self.center_x = 0.0
         self.center_y = 0.0
+        self.last_sector = None
         
         self.update_config()
         self.updateMouseWheel()
@@ -129,13 +130,59 @@ class WASDMapper():
             vy = touch_event.y - self.center_y
             # dist is now effectively self.outer_radius
 
-        # FAST ANGLE TO SECTOR INDEX
-        # atan2 gives -pi to pi; we shift to 0 to 2pi and offset by pi/8 (22.5°)
+
+    def touch_pressed(self, touch_event: TouchEvent, is_visible: bool):
+        if self.mapper.wasd_block > 0 or is_visible:
+            self.touch_up()
+            return
+
+        vx = touch_event.x - self.center_x
+        vy = touch_event.y - self.center_y
+        dist_sq = vx*vx + vy*vy
+
+        # Deadzone check
+        dz_px = self.inner_radius * self.DEADZONE
+        if dist_sq < (dz_px * dz_px):
+            self.touch_up()
+            return
+
+        # Leash Logic
+        outer_sq = self.outer_radius * self.outer_radius
+        if dist_sq > outer_sq and outer_sq > 0:
+            dist = dist_sq**0.5
+            scale = self.outer_radius / dist
+            self.center_x = touch_event.x - (vx * scale)
+            self.center_y = touch_event.y - (vy * scale)
+            vx = touch_event.x - self.center_x
+            vy = touch_event.y - self.center_y
+
+        # Angle Calculation
+        # atan2 gives -pi to pi, we shift to 0 to 2pi
         angle_rad = math.atan2(vy, vx)
         if angle_rad < 0: angle_rad += 2 * math.pi
 
-        # Divide circle into 8 segments of 45°
-        sector = int((angle_rad + self.PI_8) * self.INV_PI_4) % 8
+        # Hysteresis Logic
+        # Convert hysterisis in degrees to radians
+        h_rad = math.radians(self.HYSTERESIS) 
+        
+        # Calculate the potential new sector
+        new_sector = int((angle_rad + self.PI_8) * self.INV_PI_4) % 8
+
+        if self.last_sector is not None:
+            # Calculate the center angle of the CURRENT sector
+            # Sectors are 45 degrees (pi/4) apart
+            current_sector_center = self.last_sector * (math.pi / 4)
+            
+            # Find the shortest distance between the new angle and current center
+            angle_diff = (angle_rad - current_sector_center + math.pi) % (2 * math.pi) - math.pi
+            
+            # If the movement is smaller than the hysteresis buffer, keep the old sector
+            # 0.3927 rad is half a sector (22.5 deg). We add hysteresis to that boundary.
+            if abs(angle_diff) < (self.PI_8 + h_rad):
+                new_sector = self.last_sector
+
+        self.last_sector = new_sector
+
 
         # Sprint Check
         sprint = False
@@ -145,7 +192,7 @@ class WASDMapper():
                 sprint = True
                 
         # Apply the keys
-        self.apply_keys(sector, sprint)
+        self.apply_keys(new_sector, sprint)
 
     def touch_up(self):        
         for k in self.current_mask:
@@ -158,6 +205,7 @@ class WASDMapper():
         self.current_mask = State.NONE
         self.center_x = 0.0
         self.center_y = 0.0
+        self.last_sector = None
         
     def apply_keys(self, sector, sprint):
         # Bitmask-style diffing to minimize Interception Bridge overhead
