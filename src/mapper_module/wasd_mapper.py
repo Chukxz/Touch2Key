@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 
 import math
 from .utils import (
-    SCANCODES, DOWN, PRESSED
+    SCANCODES, UP, DOWN, PRESSED
 )
 
 if TYPE_CHECKING:
@@ -159,7 +159,9 @@ class WASDMapper():
             
         elif action == DOWN:
             self.touch_down(touch_event)
-            
+        
+        elif action == UP:
+            self.touch_up()            
 
     def release_all(self):
         if not self.current_keys: return

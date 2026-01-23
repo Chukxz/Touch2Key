@@ -71,7 +71,7 @@ DEFAULT_ADB_RATE_CAP = 250
 KEY_DEBOUNCE = 0.01
 PPS = 60
 DOUBLE_TAP_DELAY = 0.25
-
+MIN_SWIPE_DISTANCE = 8 # dp (dependent pixels)
 MOUSE_MOVE_RELATIVE = 0x00
 MOUSE_MOVE_ABSOLUTE = 0x01
 MOUSE_VIRTUAL_DESKTOP = 0x02
@@ -230,7 +230,6 @@ class TouchEvent:
         self.sy = sy
         self.is_mouse = is_mouse
         self.is_wasd = is_wasd
-        self.is_key = not self.is_mouse
         
     def show(self):
         return f"Slot: {self.slot}, ID: {self.id}, X: {self.x}, Y: {self.y}, SX: {self.sx}, SY: {self.sy}, isMouse: {self.is_mouse}, isWASD: {self.is_wasd}"
@@ -604,7 +603,7 @@ def mouse_worker(m_queue:Queue):
                 elif data == MIDDLE_BUTTON_UP: pressed_buttons.discard(MIDDLE_BUTTON_UP)
                 
                 # Data is the button state flag
-                m_ctx.send(m_handle, MouseStroke(data, MOUSE_MOVE_RELATIVE, 0, 0, 0))
+                m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_RELATIVE, data, 0, 0, 0))
 
             elif task == "move_rel":
                 acc_dx += data[0]
@@ -638,7 +637,7 @@ def mouse_worker(m_queue:Queue):
             if pressed_buttons:
                 print("[Watchdog] Mouse worker timeout. Releasing buttons.")
                 for release_flag in list(pressed_buttons):
-                    m_ctx.send(m_handle, MouseStroke(release_flag, MOUSE_MOVE_RELATIVE, 0, 0, 0))
+                    m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_RELATIVE, release_flag, 0, 0, 0))
                 pressed_buttons.clear()
             running = False
             
@@ -682,7 +681,7 @@ def stop_process(process:Process):
     if process.is_alive():
         print(f"Closing {process.name}...")
         process.terminate()
-        time.sleep(2.0)
+        time.sleep(1.0)
         if process.is_alive():
             process.kill()
             

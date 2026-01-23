@@ -6,8 +6,8 @@ import win32gui
 import threading
 import time
 from mapper_module.utils import (
-    DEFAULT_ADB_RATE_CAP, KEY_DEBOUNCE, PPS, UP, SHORT_DELAY, EMULATORS,
-    ADB_EXE, EVENT_TYPE, DEF_EMULATOR_ID, TouchEvent, set_high_priority, stop_process
+    DEFAULT_ADB_RATE_CAP, KEY_DEBOUNCE, PPS, SHORT_DELAY, EMULATORS,
+    ADB_EXE, DEF_EMULATOR_ID, TouchEvent, set_high_priority, stop_process
 )
 
 from mapper_module import (
@@ -49,7 +49,7 @@ def set_is_visible(_is_visible):
         except: pass
 
 
-def process_touch_event(action: EVENT_TYPE, touch_event: TouchEvent):
+def process_touch_event(action, touch_event: TouchEvent):
     local_visible = is_visible
     mapper_logic.event_count += 1
     
@@ -58,14 +58,10 @@ def process_touch_event(action: EVENT_TYPE, touch_event: TouchEvent):
             mouse_mapper.process_touch(action, touch_event, local_visible)
         
         if not local_visible:
-            if touch_event.is_key:
-                key_mapper.process_touch(action, touch_event)
+            key_mapper.process_touch(action, touch_event)
             
-                if action == UP:
-                    wasd_mapper.touch_up()
-                
-                if touch_event.is_wasd:
-                    wasd_mapper.process_touch(action, touch_event) 
+            if touch_event.is_wasd:
+                wasd_mapper.process_touch(action, touch_event) 
     except:
         pass
 

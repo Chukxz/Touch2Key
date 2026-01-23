@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import time
+import threading
 from .utils import (
     DEF_DPI, DOWN, UP, PRESSED,
     DOUBLE_TAP_DELAY
@@ -14,17 +15,15 @@ if TYPE_CHECKING:
 class MouseMapper():
     def __init__(self, mapper:Mapper):
         self.mapper = mapper
+        self.mapper_event_dispatcher = self.mapper.mapper_event_dispatcher
+        self.interception_bridge = mapper.interception_bridge
+        self.config = mapper.config
+        
         self.prev_x = None
         self.prev_y = None
         self.acc_x = 0.0
         self.acc_y = 0.0
-        self.last_touch = 0
-        self.double_tap = False
-
-        self.config = mapper.config
-        self.mapper_event_dispatcher = self.mapper.mapper_event_dispatcher
-        self.interception_bridge = mapper.interception_bridge
-
+        self.left_down = False
         self.TOTAL_MULT = 1.0
         self.update_config()
 
@@ -55,20 +54,11 @@ class MouseMapper():
         self.acc_x = 0.0
         self.acc_y = 0.0
         
-        if is_visible:
-            self.double_tap = False
-            now = time.monotonic()
-            if now - self.last_touch < DOUBLE_TAP_DELAY:
-                self.double_tap = True
-            
+        if is_visible:           
             _x, _y = self.mapper.device_to_game_abs(self.prev_x, self.prev_y)
             self.interception_bridge.mouse_move_abs(_x, _y)
-            
-            self.last_touch = now
-            if self.double_tap:
-                self.interception_bridge.right_click_down()
-            else:
-                self.interception_bridge.left_click_down()
+            self.interception_bridge.left_click_down()
+            self.left_down = True
         
 
     def touch_pressed(self, touch_event:TouchEvent, is_visible:bool):
@@ -78,8 +68,9 @@ class MouseMapper():
         """
         if self.prev_x is None or self.prev_y is None:
             self.touch_down(touch_event, is_visible)
-            return      
-            
+            return
+
+                    
         # Calculate Raw Delta
         raw_dx = touch_event.x - self.prev_x
         raw_dy = touch_event.y - self.prev_y
@@ -113,14 +104,14 @@ class MouseMapper():
         self.interception_bridge.mouse_move_rel(final_dx, final_dy)
         
     def touch_up(self):
-        """Clears state."""
         self.prev_x = None
         self.prev_y = None
         self.acc_x = 0.0
         self.acc_y = 0.0
-        self.double_tap = False
-        self.interception_bridge.left_click_up()
-        self.interception_bridge.right_click_up()
+        if self.left_down:
+            self.interception_bridge.left_click_up()
+            self.left_down = False
+            
 
     def process_touch(self, action, touch_event:TouchEvent, is_visible:bool):
         if action == PRESSED:

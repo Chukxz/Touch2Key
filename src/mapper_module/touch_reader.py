@@ -80,7 +80,7 @@ class TouchReader():
         if self.is_visible:            
             eligible_finger = []
             for slot, data in list(self.slots.items()):
-                if data['tid'] != -1 and data['start_x'] and ['start_y'] is not None:
+                if data['state'] != IDLE and data['start_x'] and ['start_y'] is not None:
                     eligible_finger.append((slot, data['timestamp']))
                     
             self.mouse_slot = min(eligible_finger, key=lambda x: x[1])[0] if eligible_finger else None            
@@ -91,7 +91,7 @@ class TouchReader():
         eligible_wasd = []
 
         for slot, data in list(self.slots.items()):
-            if data['tid'] != -1 and data['start_x'] and ['start_y'] is not None:
+            if data['state'] != IDLE and data['start_x'] and ['start_y'] is not None:
                 # Check which side the finger started on
                 if data['start_x'] >= self.side_limit:
                     eligible_mouse.append((slot, data['timestamp']))
@@ -408,7 +408,7 @@ class TouchReader():
 
             if data['state'] == DOWN: 
                 data['state'] = PRESSED
-            elif data['state'] == UP: 
+            elif data['state'] == UP:
                 self.reset_slot(slot)
 
     def stop_process(self):
