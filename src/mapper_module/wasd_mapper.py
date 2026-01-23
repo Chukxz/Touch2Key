@@ -173,7 +173,6 @@ class WASDMapper():
 
         self.last_sector = new_sector
 
-
         # Sprint Check
         sprint = False
         if self.sprint_key_code is not None:
