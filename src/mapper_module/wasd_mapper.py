@@ -65,8 +65,8 @@ class WASDMapper():
         self.INV_PI_4 = 1.0 / (math.pi / 4.0)
         self.sprinting = False
         self.current_mask = State.NONE
-        self.center_x = 0
-        self.center_y = 0
+        self.center_x = 0.0
+        self.center_y = 0.0
         
         self.update_config()
         self.updateMouseWheel()
@@ -151,7 +151,13 @@ class WASDMapper():
         for k in self.current_mask:
             if k.value > 0:
                 self.interception_bridge.key_up(self.state_value_to_key[k.value])
+        if self.sprint_key_code is not None and self.sprinting:
+        self.interception_bridge.key_up(self.sprint_key_code)
+
+        self.sprinting = False
         self.current_mask = State.NONE
+        self.center_x = 0.0
+        self.center_y = 0.0
         
     def apply_keys(self, sector, sprint):
         # Bitmask-style diffing to minimize Interception Bridge overhead
@@ -164,12 +170,12 @@ class WASDMapper():
                 self.interception_bridge.key_up(self.state_value_to_key[k.value])
 
         if self.sprint_key_code is not None and self.sprinting and not sprint:
-            self.sprinting = sprint
-            self.interception_bridge.key_up(self.sprint_key_code)
+        self.interception_bridge.key_up(self.sprint_key_code)
+        self.sprinting = sprint
         
-        if self.sprint_key_code is not None and not self.sprinting and sprint:
-            self.sprinting = sprint            
+        if self.sprint_key_code is not None and not self.sprinting and sprint:          
             self.interception_bridge.key_down(self.sprint_key_code)
+        self.sprinting = sprint
             
         for k in to_press:
             if k.value > 0:
