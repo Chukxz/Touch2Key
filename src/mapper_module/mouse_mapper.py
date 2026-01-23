@@ -38,7 +38,7 @@ class MouseMapper():
                 # Ensure we don't divide by zero
                 device_dpi = self.mapper.dpi if self.mapper.dpi > 0 else DEF_DPI
                 dpi_scale = DEF_DPI / device_dpi
-                self.TOTAL_MULT = base_sens * dpi_scale
+                self.scaling_factor = base_sens * dpi_scale
         except Exception as e:
             print(f"[Error] Mouse config update failed: {e}")
 
@@ -78,8 +78,8 @@ class MouseMapper():
 
         # Apply Multiplier and add previous remainders (Sub-pixel precision)
         # Using float math here is necessary for 1:1 feel
-        calc_dx = (raw_dx * self.TOTAL_MULT) + self.acc_x
-        calc_dy = (raw_dy * self.TOTAL_MULT) + self.acc_y
+        calc_dx = (raw_dx * self.scaling_factor) + self.acc_x
+        calc_dy = (raw_dy * self.scaling_factor) + self.acc_y
 
         # Truncate to Integer (Actual pixels to move)
         final_dx = int(calc_dx)
