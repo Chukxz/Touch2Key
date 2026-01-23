@@ -84,7 +84,7 @@ class WASDMapper():
             with self.config.config_lock:
                 conf = self.config.config_data.get('joystick', {})
                 self.deadzone = conf.get('deadzone', 0.1)
-                self.hysterisis = math.radians(conf.get('hysteresis', 5.0))
+                self.hysteresis = math.radians(conf.get('hysteresis', 5.0))
         except Exception as e:
             _str = f"Error loading joystick config: {e}"
             raise RuntimeError(_str)
@@ -147,7 +147,7 @@ class WASDMapper():
             angle_diff = (angle_rad - current_sector_center + math.pi) % (2 * math.pi) - math.pi
             
             # If the movement is smaller than the hysteresis buffer, keep the old sector 
-            if abs(angle_diff) < (self.PI_8 + self.hysterisis):
+            if abs(angle_diff) < (self.PI_8 + self.hysteresis):
                 new_sector = self.last_sector
 
         self.last_sector = new_sector
