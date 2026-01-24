@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import time
+import threading
 from .utils import (
     RECT, CIRCLE, M_LEFT, M_RIGHT, M_MIDDLE,
     MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, 
@@ -21,7 +22,8 @@ class KeyMapper():
         self.interception_bridge = mapper.interception_bridge
 
         # State Tracking: { slot_int: [[scancode(int), zone_data(dict), is_wasd_finger(bool)],...] }
-        self.events_dict = {} 
+        self.events_dict = {}
+        self.events_lock = threading.Lock
         
         # Blacklist for O(1) filtering
         self.ignored_names = {MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE}
@@ -101,7 +103,7 @@ class KeyMapper():
                 # Successfully mapped finger to key
                 self.send_key_event(scancode, down=True)
                 # Create a list if it doesn't exist, then append
-                with self.config.config_lock:
+                with self.events_lock:
                     if event.slot not in self.events_dict:
                         self.events_dict[event.slot] = []
                     self.events_dict[event.slot].append([scancode, value, event.is_wasd])
@@ -113,7 +115,7 @@ class KeyMapper():
 
     def touch_up(self, event:TouchEvent):        
         """O(1) Dictionary lookup to release keys when finger lifts."""
-        with self.config.config_lock:
+        with self.events_lock:
             data_list = self.events_dict.pop(event.slot, [])
             for scancode, _, is_wasd in data_list:
                 self.send_key_event(scancode, down=False)
@@ -130,7 +132,7 @@ class KeyMapper():
 
     def release_all(self):
         """Flushes all current input states."""
-        with self.config.config_lock:
+        with self.events_lock:
             for slot in list(self.events_dict.keys()]:
                 data_list = self.events_dict.pop(slot, [])
                 for scancode, _, __ in data_list:
