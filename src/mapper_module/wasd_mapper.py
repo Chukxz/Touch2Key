@@ -1,4 +1,4 @@
-From __future__ import annotations
+from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from enum import IntFlag
@@ -72,6 +72,7 @@ class WASDMapper():
         self.raw_inner_radius = 100.0
         self.raw_outer_radius = 150.0
         self.effective_inner_sq = 10000.0
+        self.deadzone = 10
         self.deadzone_sq = 100.0
         self.sensitivity = 1.0
 
@@ -88,17 +89,17 @@ class WASDMapper():
         print(f"[WASDMapper] Reloading config...")
         try:
             with self.config.config_lock:
-                # 1. Get Joystick Settings (Deadzone, Hysteresis)
-                joy_conf = self.config.config_data.get('joystick', {})
-                self.deadzone = joy_conf.get('deadzone', 0.1)
-                self.hysteresis = math.radians(joy_conf.get('hysteresis', 5.0))
+                # Get Joystick Settings (Deadzone, Hysteresis)
+                joystick_conf = self.config.config_data.get('joystick', {})
+                self.deadzone = joystick_conf.get('deadzone', 0.1)
+                self.hysteresis = math.radians(joystick_conf.get('hysteresis', 5.0))
                 
-                # 2. Get Mouse Settings (Sensitivity)
+                # Get Mouse Settings (Sensitivity)
                 # We reuse the mouse sensitivity here!
                 mouse_conf = self.config.config_data.get('mouse', {})
                 self.sensitivity = mouse_conf.get('sensitivity', 1.0)
                 
-                # 3. Recalculate Thresholds
+                # Recalculate Thresholds
                 self.recalc_thresholds()
                 
         except Exception as e:
@@ -125,10 +126,10 @@ class WASDMapper():
         # e.g. Radius 200px / Sens 2.0 = Effective 100px activation
         effective_inner = self.raw_inner_radius / sens
         
-        # 1. Calculate Sprint Threshold (Squared)
+        # Calculate Sprint Threshold (Squared)
         self.effective_inner_sq = effective_inner * effective_inner
         
-        # 2. Calculate Deadzone Threshold (Squared)
+        # Calculate Deadzone Threshold (Squared)
         # Deadzone is % of the EFFECTIVE radius.
         dz_px = effective_inner * self.deadzone
         self.deadzone_sq = dz_px * dz_px
@@ -155,14 +156,14 @@ class WASDMapper():
         vy = touch_event.y - self.center_y
         dist_sq = vx*vx + vy*vy
 
-        # 1. Deadzone Check (Optimized)
+        # Deadzone Check (Optimized)
         if dist_sq < self.deadzone_sq:
             # If we are inside deadzone, lift keys
             if self.current_mask != State.NONE:
                 self.touch_up()
             return
 
-        # 2. Leash Logic (Floating Joystick center follow)
+        # Leash Logic (Floating Joystick center follow)
         # We use RAW outer radius for leashing so the joystick center visually 
         # follows your thumb naturally, even if sensitivity is high.
         outer_sq = self.raw_outer_radius * self.raw_outer_radius
@@ -174,12 +175,12 @@ class WASDMapper():
             vx = touch_event.x - self.center_x
             vy = touch_event.y - self.center_y
 
-        # 3. Angle Calculation
+        # Angle Calculation
         angle_rad = math.atan2(vy, vx)
         if angle_rad < 0: angle_rad += 2 * math.pi  
         new_sector = int((angle_rad + self.PI_8) * self.INV_PI_4) % 8
 
-        # 4. Hysteresis Logic     
+        # Hysteresis Logic     
         if self.last_sector is not None:
             current_sector_center = self.last_sector * (math.pi / 4)
             angle_diff = (angle_rad - current_sector_center + math.pi) % (2 * math.pi) - math.pi
@@ -188,7 +189,7 @@ class WASDMapper():
 
         self.last_sector = new_sector
 
-        # 5. Sprint Check
+        # Sprint Check
         # Uses the SENSITIVITY-SCALED threshold
         sprint = False
         if self.sprint_key_code is not None:

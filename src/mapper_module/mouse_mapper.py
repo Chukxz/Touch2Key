@@ -1,4 +1,4 @@
-From __future__ import annotations
+from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .utils import (
@@ -38,9 +38,8 @@ class MouseMapper():
                 base_sens = mouse_cfg.get('sensitivity', 1.0)
                 
                 pc_w = self.mapper.screen_w
-                dev_w = self.mapper.json_loader.width # Uses .width per your version
+                dev_w = self.mapper.json_loader.width
 
-                # Standard logic first (Most common path)
                 if dev_w > 0:
                     resolution_ratio = pc_w / dev_w
                 else:
@@ -50,7 +49,7 @@ class MouseMapper():
                 self.scaling_factor = base_sens * resolution_ratio
                 
                 print(f"[Mouse] Sync: PC({pc_w}) / Phone({dev_w}) = Ratio({resolution_ratio:.2f})")
-                print(f"[Mouse] Final Scaling Factor: {self.scaling_factor:.4f} (User Sens: {base_sens})")
+                print(f"[Mouse] Final Scaling Factor: {self.scaling_factor:.4f} (User Sensitivity: {base_sens}x)")
 
         except Exception as e:
             print(f"[Error] Mouse config update failed: {e}")

@@ -429,7 +429,6 @@ def create_default_toml():
     # [mouse] - Sensitivity settings
     mouse = tomlkit.table()
     mouse.add("sensitivity", 1.0)
-    mouse.add("invert_y", False)
     doc.add("mouse", mouse)
 
     # [joystick] - Movement and radius settings
@@ -602,6 +601,8 @@ def mouse_worker(m_queue:Queue):
                 
                 # Data is the button state flag
                 m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_RELATIVE, data, 0, 0, 0))
+                
+                _sleep(0.020 + _random() * 0.015)
 
             elif task == "move_rel":
                 acc_dx += data[0]
@@ -625,11 +626,12 @@ def mouse_worker(m_queue:Queue):
                     m_ctx.send(m_handle, MouseStroke(0, MOUSE_MOVE_RELATIVE, 0, int(acc_dx), int(acc_dy)))
                     acc_dx, acc_dy = 0, 0
                 
-                _sleep(0.0008 + _random() * 0.0004) # Fast Randomized Pacing (approx. 1000Hz)
 
             elif task == "move_abs":
                 x, y = data
                 m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_ABSOLUTE | MOUSE_VIRTUAL_DESKTOP, MOUSE_MOVE_ABSOLUTE, 0, x, y))
+                
+            _sleep(0.0008 + _random() * 0.0004) # Fast Randomized Pacing (approx. 1000Hz)
 
         except Exception: # Timeout reached
             if pressed_buttons:
