@@ -67,9 +67,8 @@ NT_TIMER_RES = 10000
 # Fallback Performance Constants
 # Limits PRESSED events to 250 updates per second
 DEFAULT_ADB_RATE_CAP = 250
-# Ignores key flickers faster than 10ms
-KEY_DEBOUNCE = 0.01
 PPS = 60
+
 MOUSE_MOVE_RELATIVE = 0x00
 MOUSE_MOVE_ABSOLUTE = 0x01
 MOUSE_VIRTUAL_DESKTOP = 0x02
