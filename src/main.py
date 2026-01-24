@@ -6,7 +6,8 @@ import win32gui
 import threading
 import time
 from mapper_module.utils import (
-    DEFAULT_ADB_RATE_CAP, KEY_DEBOUNCE, PPS, SHORT_DELAY, EMULATORS, ADB_EXE, UP,
+    DEFAULT_ADB_RATE_CAP, SHORT_DELAY,
+    PPS, EMULATORS, ADB_EXE, UP,
     DEF_EMULATOR_ID, TouchEvent, set_high_priority, stop_process, maintain_bridge_health
 )
 
@@ -141,7 +142,7 @@ def main():
     mapper_logic = Mapper(json_loader, touch_reader, interception_bridge, pps, emulator)
 
     mouse_mapper = MouseMapper(mapper_logic)
-    key_mapper = KeyMapper(mapper_logic, KEY_DEBOUNCE)
+    key_mapper = KeyMapper(mapper_logic)
     wasd_mapper = WASDMapper(mapper_logic)
         
     touch_reader.bind_touch_event(process_touch_event)
