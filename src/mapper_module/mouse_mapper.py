@@ -35,7 +35,7 @@ class MouseMapper():
             with self.config.config_lock:
                 mouse_cfg = self.config.config_data.get('mouse', {})
                 base_sens = mouse_cfg.get('sensitivity', 1.0)
-                self.scaling_factor = base_sens * self.mapper.screen_w / self.mapper.device_width
+                self.scaling_factor = base_sens * self.mapper.screen_w / self.mapper.json_loader.device_width
         except Exception as e:
             print(f"[Error] Mouse config update failed: {e}")
 
