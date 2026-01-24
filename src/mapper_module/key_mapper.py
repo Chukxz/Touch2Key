@@ -62,7 +62,7 @@ class KeyMapper():
             self.wasd_block = 0
         print(f"[KeyMapper] Hot-path ready: {len(self.active_zones)} zones active.")
 
-    def _send_key_event(self, scancode, down=True, force=False):
+    def send_key_event(self, scancode, down=True, force=False):
         """Dispatches input to Interception Bridge with debounce filtering."""
         now = time.perf_counter()
 
@@ -115,7 +115,7 @@ class KeyMapper():
             
             if hit:
                 # Successfully mapped finger to key
-                if self._send_key_event(scancode, down=True):
+                if self.send_key_event(scancode, down=True):
                     # Create a list if it doesn't exist, then append
                     if event.slot not in self.events_dict:
                         self.events_dict[event.slot] = []
@@ -145,7 +145,7 @@ class KeyMapper():
         """Flushes all current input states."""
         # We iterate over last_action_times to catch every key that was touched
         for scancode in list(self.last_action_times.keys()):
-            self._send_key_event(scancode, down=False, force=True)
+            self.send_key_event(scancode, down=False, force=True)
         self.last_action_times.clear()
         self.mapper.wasd_block = 0
         
