@@ -23,7 +23,7 @@ class KeyMapper():
 
         # State Tracking: { slot_int: [[scancode(int), zone_data(dict), is_wasd_finger(bool)],...] }
         self.events_dict = {}
-        self.events_lock = threading.Lock
+        self.events_lock = threading.Lock()
         
         # Blacklist for O(1) filtering
         self.ignored_names = {MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE}
@@ -108,9 +108,9 @@ class KeyMapper():
                         self.events_dict[event.slot] = []
                     self.events_dict[event.slot].append([scancode, value, event.is_wasd])
 
-                if event.is_wasd:
-                    self.mapper.wasd_block += 1
-                    self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_WASD_BLOCK"))
+                    if event.is_wasd:
+                        self.mapper.wasd_block += 1
+                        self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_WASD_BLOCK"))
 
 
     def touch_up(self, event:TouchEvent):        
