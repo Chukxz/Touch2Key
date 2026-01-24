@@ -36,7 +36,7 @@ class MouseMapper():
                 mouse_cfg = self.config.config_data.get('mouse', {})
                 base_sens = mouse_cfg.get('sensitivity', 1.0)
                 pc_w = self.mapper.screen_w
-                dev_w = self.mapper.json_loader.device_width
+                dev_w = self.mapper.json_loader.width
                 if dev_w > 0:
                     resolution_ratio = pc_w / dev_w
                 else:
