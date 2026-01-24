@@ -21,7 +21,7 @@ class MouseMapper():
         self.acc_x = 0.0
         self.acc_y = 0.0
         self.left_down = False
-        self.TOTAL_MULT = 1.0
+        self.scaling_factor = 1.0
         self.update_config()
 
         # Register Callbacks
