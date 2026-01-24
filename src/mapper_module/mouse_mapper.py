@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .utils import (
-    DEF_DPI, DOWN, UP, PRESSED,
+    DOWN, UP, PRESSED,
 )
 
 if TYPE_CHECKING:
@@ -35,10 +35,7 @@ class MouseMapper():
             with self.config.config_lock:
                 mouse_cfg = self.config.config_data.get('mouse', {})
                 base_sens = mouse_cfg.get('sensitivity', 1.0)
-                # Ensure we don't divide by zero
-                device_dpi = self.mapper.dpi if self.mapper.dpi > 0 else DEF_DPI
-                dpi_scale = DEF_DPI / device_dpi
-                self.scaling_factor = base_sens * dpi_scale
+                self.scaling_factor = base_sens * self.mapper.screen_w / self.mapper.device_width
         except Exception as e:
             print(f"[Error] Mouse config update failed: {e}")
 
