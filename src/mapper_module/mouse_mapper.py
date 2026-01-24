@@ -1,4 +1,4 @@
-from __future__ import annotations
+From __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .utils import (
@@ -15,13 +15,14 @@ class MouseMapper():
         self.mapper_event_dispatcher = self.mapper.mapper_event_dispatcher
         self.interception_bridge = mapper.interception_bridge
         self.config = mapper.config
-        
+
         self.prev_x = None
         self.prev_y = None
         self.acc_x = 0.0
         self.acc_y = 0.0
         self.left_down = False
         self.scaling_factor = 1.0
+
         self.update_config()
 
         # Register Callbacks
@@ -35,16 +36,25 @@ class MouseMapper():
             with self.config.config_lock:
                 mouse_cfg = self.config.config_data.get('mouse', {})
                 base_sens = mouse_cfg.get('sensitivity', 1.0)
+                
                 pc_w = self.mapper.screen_w
-                dev_w = self.mapper.json_loader.width
+                dev_w = self.mapper.json_loader.width # Uses .width per your version
+
+                # Standard logic first (Most common path)
                 if dev_w > 0:
                     resolution_ratio = pc_w / dev_w
                 else:
+                    print("[Error] Device width is not a positive integer. Defaulting ratio to 1.0")
                     resolution_ratio = 1.0
-                    print("[Warning] Device width is zero or negative in JSON. Defaulting to 1.0")
+
                 self.scaling_factor = base_sens * resolution_ratio
+                
+                print(f"[Mouse] Sync: PC({pc_w}) / Phone({dev_w}) = Ratio({resolution_ratio:.2f})")
+                print(f"[Mouse] Final Scaling Factor: {self.scaling_factor:.4f} (User Sens: {base_sens})")
+
         except Exception as e:
             print(f"[Error] Mouse config update failed: {e}")
+            self.scaling_factor = 1.0
 
     def touch_down(self, touch_event:TouchEvent, is_visible:bool):
         """
@@ -54,13 +64,13 @@ class MouseMapper():
         self.prev_y = touch_event.y
         self.acc_x = 0.0
         self.acc_y = 0.0
-        
+
         if is_visible:           
             _x, _y = self.mapper.device_to_game_abs(self.prev_x, self.prev_y)
             self.interception_bridge.mouse_move_abs(_x, _y)
             self.interception_bridge.left_click_down()
             self.left_down = True
-        
+
 
     def touch_pressed(self, touch_event:TouchEvent, is_visible:bool):
         """
@@ -71,7 +81,6 @@ class MouseMapper():
             self.touch_down(touch_event, is_visible)
             return
 
-                    
         # Calculate Raw Delta
         raw_dx = touch_event.x - self.prev_x
         raw_dy = touch_event.y - self.prev_y
@@ -91,7 +100,6 @@ class MouseMapper():
 
         # Fast-Exit for Noise
         # If the delta is less than 1 physical pixel, just keep the remainder and exit.
-        # This prevents the Interception Bridge from being flooded with 0-pixel movements.
         if final_dx == 0 and final_dy == 0:
             self.acc_x = calc_dx
             self.acc_y = calc_dy
@@ -103,7 +111,7 @@ class MouseMapper():
 
         # Physical movement execution
         self.interception_bridge.mouse_move_rel(final_dx, final_dy)
-        
+
     def touch_up(self):
         self.prev_x = None
         self.prev_y = None
@@ -112,14 +120,14 @@ class MouseMapper():
         if self.left_down:
             self.interception_bridge.left_click_up()
             self.left_down = False
-            
+
 
     def process_touch(self, action, touch_event:TouchEvent, is_visible:bool):
         if action == PRESSED:
             self.touch_pressed(touch_event, is_visible)
-            
+
         elif action == DOWN:
             self.touch_down(touch_event, is_visible)
-        
+
         elif action == UP:
-            self.touch_up() 
+            self.touch_up()
