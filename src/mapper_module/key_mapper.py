@@ -54,7 +54,7 @@ class KeyMapper():
                 continue
 
         self.release_all()
-        with self.config.config_lock:
+        with self.events_lock:
             self.active_zones = temp_zones
 
         print(f"[KeyMapper] Hot-path ready: {len(self.active_zones)} zones active.")
@@ -84,26 +84,27 @@ class KeyMapper():
         ny = event.y / self.mapper.device_height
 
         # Fast iteration through the pre-filtered list
-        for scancode, value in self.active_zones:
-            hit = False
-            v_type = value['type']
+        with self.events_lock:
+            for scancode, value in self.active_zones:
+                hit = False
+                v_type = value['type']
             
-            if v_type == CIRCLE:
-                if is_in_circle(nx, ny, value['cx'], value['cy'], value['r']):
-                    hit = True
-            elif v_type == RECT:
-                if is_in_rect(nx, ny, value['x1'], value['x2'], value['y1'], value['y2']):
-                    hit = True
+                if v_type == CIRCLE:
+                    if is_in_circle(nx, ny, value['cx'], value['cy'], value['r']):
+                        hit = True
+                elif v_type == RECT:
+                    if is_in_rect(nx, ny, value['x1'], value['x2'], value['y1'], value['y2']):
+                        hit = True
             
-            if is_visible:
-                if scancode != SCANCODES[self.mapper.emulator["toggle_key"]]:
-                    hit = False
+                if is_visible:
+                    if scancode != SCANCODES[self.mapper.emulator["toggle_key"]]:
+                        hit = False
             
-            if hit:
-                # Successfully mapped finger to key
-                self.send_key_event(scancode, down=True)
-                # Create a list if it doesn't exist, then append
-                with self.events_lock:
+                if hit:
+                    # Successfully mapped finger to key
+                    self.send_key_event(scancode, down=True)
+                    # Create a list if it doesn't exist, then append
+                
                     if event.slot not in self.events_dict:
                         self.events_dict[event.slot] = []
                     self.events_dict[event.slot].append([scancode, value, event.is_wasd])
