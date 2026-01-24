@@ -8,7 +8,9 @@ import time
 from mapper_module.utils import (
     DEFAULT_ADB_RATE_CAP, SHORT_DELAY,
     PPS, EMULATORS, ADB_EXE, UP,
-    DEF_EMULATOR_ID, TouchEvent, set_high_priority, stop_process, maintain_bridge_health
+    DEF_EMULATOR_ID, TouchEvent,
+    set_high_priority, stop_process,
+    maintain_bridge_health
 )
 
 from mapper_module import (
