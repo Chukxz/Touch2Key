@@ -134,7 +134,7 @@ class KeyMapper():
     def release_all(self):
         """Flushes all current input states."""
         with self.events_lock:
-            for slot in list(self.events_dict.keys()]:
+            for slot in list(self.events_dict.keys()):
                 data_list = self.events_dict.pop(slot, [])
                 for scancode, _, __ in data_list:
                     self.send_key_event(scancode, down=False)
