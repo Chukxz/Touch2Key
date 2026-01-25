@@ -577,7 +577,9 @@ def mouse_worker(m_queue:Queue):
     acc_dx, acc_dy = 0, 0
     pending_task = None
     # Keep track of buttons we've pressed so we know what to release
-    pressed_buttons = set()
+    left_down = False
+    right_down = False
+    middle_down = False
     running = True
 
     while running:
@@ -592,15 +594,22 @@ def mouse_worker(m_queue:Queue):
             if task == "button":
                 # Track button states to release them on timeout
                 # Map DOWN constants to UP constants for the release loop
-                if data == LEFT_BUTTON_DOWN: pressed_buttons.add(LEFT_BUTTON_UP)
-                elif data == LEFT_BUTTON_UP: pressed_buttons.discard(LEFT_BUTTON_UP)
-                if data == RIGHT_BUTTON_DOWN: pressed_buttons.add(RIGHT_BUTTON_UP)
-                elif data == RIGHT_BUTTON_UP: pressed_buttons.discard(RIGHT_BUTTON_UP)
-                if data == MIDDLE_BUTTON_DOWN: pressed_buttons.add(MIDDLE_BUTTON_UP)
-                elif data == MIDDLE_BUTTON_UP: pressed_buttons.discard(MIDDLE_BUTTON_UP)
+                m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_RELATIVE, data, 0, 0, 0))
+                
+                if data == LEFT_BUTTON_DOWN: 
+                    left_down = True
+                elif data == LEFT_BUTTON_UP: 
+                    left_down = False
+                if data == RIGHT_BUTTON_DOWN: 
+                    right_down = True
+                elif data == RIGHT_BUTTON_UP: 
+                    right_down = False
+                if data == MIDDLE_BUTTON_DOWN: 
+                    middle_down = True
+                elif data == MIDDLE_BUTTON_UP: 
+                    middle_down = False
                 
                 # Data is the button state flag
-                m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_RELATIVE, data, 0, 0, 0))
                 
                 _sleep(0.020 + _random() * 0.015)
 
@@ -634,11 +643,16 @@ def mouse_worker(m_queue:Queue):
             _sleep(0.0008 + _random() * 0.0004) # Fast Randomized Pacing (approx. 1000Hz)
 
         except Exception: # Timeout reached
-            if pressed_buttons:
-                print("[Watchdog] Mouse worker timeout. Releasing buttons.")
-                for release_flag in list(pressed_buttons):
-                    m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_RELATIVE, release_flag, 0, 0, 0))
-                pressed_buttons.clear()
+            print("[Watchdog] Mouse worker timeout. Releasing buttons.")
+            if left_down:
+                m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_RELATIVE, LEFT_BUTTON_UP, 0, 0, 0))
+                left_down = False
+            if right_down:
+                m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_RELATIVE, RIGHT_BUTTON_UP, 0, 0, 0))
+                right_down = False
+            if middle_down:
+                m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_RELATIVE, MIDDLE_BUTTON_UP, 0, 0, 0))
+                middle_down = False
             running = False
             
 

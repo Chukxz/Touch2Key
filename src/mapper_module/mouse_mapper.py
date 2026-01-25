@@ -48,7 +48,7 @@ class MouseMapper():
 
                 self.scaling_factor = base_sens * resolution_ratio
                 
-                print(f"[Mouse] Sync: PC({pc_w}) / Phone({dev_w}) = Ratio({resolution_ratio:.2f})")
+                print(f"[Mouse] Sync: PC width ({pc_w}px) / Phone width ({dev_w}px) = Ratio ({resolution_ratio:.2f})")
                 print(f"[Mouse] Final Scaling Factor: {self.scaling_factor:.4f} (User Sensitivity: {base_sens}x)")
 
         except Exception as e:

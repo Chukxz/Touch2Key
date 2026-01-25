@@ -105,7 +105,7 @@ class JSONLoader():
                 print(f"[Error] Failed to reload JSON layout: {e}")
         
         else:
-            print("Hot reloading skipped as no file or file path changes were detected.")
+            print("JSON hot reloading skipped as no file or file path changes were detected.")
         
         self.config.reload_config()            
         
