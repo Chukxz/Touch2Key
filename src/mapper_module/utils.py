@@ -560,8 +560,7 @@ def keyboard_worker(k_queue:Queue):
 
 # Worker: Mouse (Isolated with Coalescing)
 def mouse_worker(m_queue:Queue):
-    """ Dedicated process for Mouse events with movement coalescing. """
-    # Set timer resolution to 1ms (10,000 units of 100ns)
+    """ Dedicated process for Mouse events only. """
     ctypes.windll.ntdll.NtSetTimerResolution(NT_TIMER_RES, 1, ctypes.byref(ctypes.c_ulong()))
         
     from interception import Interception, MouseStroke
@@ -576,15 +575,20 @@ def mouse_worker(m_queue:Queue):
     
     acc_dx, acc_dy = 0, 0
     pending_task = None
-    # Keep track of buttons we've pressed so we know what to release
+    
     left_down = False
     right_down = False
     middle_down = False
     running = True
 
+    MAX_COALESCE = 20  # Limit move processing to prevent button lag
+    MIN_DWELL = 0.025 
+    DELTA_DWELL = 0.015
+    DOWN_TUPLE = (LEFT_BUTTON_DOWN, RIGHT_BUTTON_DOWN, MIDDLE_BUTTON_DOWN)
+
     while running:
         try:
-            # Wait for 10.0 seconds. If the main process dies, un-stick buttons (respects pending tasks).
+            # 10.0 seconds timeout: If no heartbeat/input from Main, release everything
             if pending_task:
                 task, data = pending_task
                 pending_task = None
@@ -592,57 +596,53 @@ def mouse_worker(m_queue:Queue):
                 task, data = m_queue.get(timeout=60.0)
 
             if task == "button":
-                # Track button states to release them on timeout
-                # Map DOWN constants to UP constants for the release loop
                 m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_RELATIVE, data, 0, 0, 0))
                 
-                if data == LEFT_BUTTON_DOWN: 
-                    left_down = True
-                elif data == LEFT_BUTTON_UP: 
-                    left_down = False
-                if data == RIGHT_BUTTON_DOWN: 
-                    right_down = True
-                elif data == RIGHT_BUTTON_UP: 
-                    right_down = False
-                if data == MIDDLE_BUTTON_DOWN: 
-                    middle_down = True
-                elif data == MIDDLE_BUTTON_UP: 
-                    middle_down = False
+                if data == LEFT_BUTTON_DOWN: left_down = True
+                elif data == LEFT_BUTTON_UP: left_down = False
+                elif data == RIGHT_BUTTON_DOWN: right_down = True
+                elif data == RIGHT_BUTTON_UP: right_down = False
+                elif data == MIDDLE_BUTTON_DOWN: middle_down = True
+                elif data == MIDDLE_BUTTON_UP: middle_down = False
                 
-                # Data is the button state flag
-                
-                _sleep(0.020 + _random() * 0.015)
+                # Check for "DOWN" mouse button events
+                if data in DOWN_TUPLE:
+                     _sleep(MIN_DWELL + _random() * DELTA_DWELL)
+                else:
+                    _sleep(0.005) # Tiny release gap
 
             elif task == "move_rel":
                 acc_dx += data[0]
                 acc_dy += data[1]
 
-                # Coalesce pending moves
-                while not m_queue.empty():
+                # Capped Coalescing
+                # Only eat 20 moves max before checking for a click
+                coalesce_count = 0
+                while not m_queue.empty() and coalesce_count < MAX_COALESCE:
                     try:
                         next_task, next_data = m_queue.get_nowait()
                         if next_task == "move_rel":
                             acc_dx += next_data[0]
                             acc_dy += next_data[1]
+                            coalesce_count += 1
                         else:
-                            # If a button/absolute move is next, break to process it
-                            pending_task = (next_task, next_data) # Save for next loop
+                            pending_task = (next_task, next_data)
                             break 
                     except: 
                         break
 
                 if acc_dx != 0 or acc_dy != 0:
-                    m_ctx.send(m_handle, MouseStroke(0, MOUSE_MOVE_RELATIVE, 0, int(acc_dx), int(acc_dy)))
+                    m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_RELATIVE, MOUSE_MOVE_RELATIVE, 0, int(acc_dx), int(acc_dy)))
                     acc_dx, acc_dy = 0, 0
                 
+                _sleep(0.0005)
 
             elif task == "move_abs":
                 x, y = data
                 m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_ABSOLUTE | MOUSE_VIRTUAL_DESKTOP, MOUSE_MOVE_ABSOLUTE, 0, x, y))
-                
-            _sleep(0.0008 + _random() * 0.0004) # Fast Randomized Pacing (approx. 1000Hz)
+                _sleep(0.001)
 
-        except Exception: # Timeout reached
+        except Exception: # Timeout
             print("[Watchdog] Mouse worker timeout. Releasing buttons.")
             if left_down:
                 m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_RELATIVE, LEFT_BUTTON_UP, 0, 0, 0))
