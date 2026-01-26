@@ -58,11 +58,9 @@ class Mapper():
         self.screen_w = ctypes.windll.user32.GetSystemMetrics(0)
         self.screen_h = ctypes.windll.user32.GetSystemMetrics(1)
         self.lock = threading.Lock()
-        self.window_lost = False        
         self.last_cursor_state = True # Cursor showing (Default)
         self.game_window_class_name = None
         self.game_window_info = None
-        self.window_lost = True
         self.window_update_interval = WINDOW_UPDATE_INTERVAL
         
         # Config & State
@@ -168,11 +166,11 @@ class Mapper():
                 with self.lock:
                     if self.game_window_info:
                         current_hwnd = self.game_window_info.get('hwnd')
-
+                        
                 if current_hwnd and ctypes.windll.user32.IsWindow(current_hwnd):
                     # WINDOW IS ACTIVE: Get fresh coordinates
                     new_info = self.get_window_info(current_hwnd)
-                    
+                                        
                     if self.window_lost:
                         print(f"[INFO] Acquired game window!")
                                             
@@ -187,6 +185,7 @@ class Mapper():
                         print("[WARNING] Game window lost! Scanning for new window...")
                         with self.lock:
                             self.window_lost = True
+                            self.game_window_info = None
                                                 
                     try:
                         # Get window title class name if it doesn't exist
@@ -204,6 +203,7 @@ class Mapper():
                         print("[INFO] New window handle bound.")
                             
                     except RuntimeError:
+                        self.game_window_info = None
                         # Game isn't open yet, just keep waiting
                         pass
                     
@@ -236,40 +236,14 @@ class Mapper():
             raise RuntimeError(_str)
         
         return target_info
-
-    def device_to_game_rel(self, dx, dy):
-        """Thread-safe relative mapping."""
-        with self.lock:
-            rot = self.touch_reader.rotation
-            
-            if self.window_lost:
-                w = self.screen_w
-                h = self.screen_h
-            else:
-                w = self.game_window_info['width']
-                h = self.game_window_info['height']
-
-        rot_dev_w, rot_dev_h = rotate_resolution(self.device_width, self.device_height, rot)
-        return (dx / rot_dev_w) * w, (dy / rot_dev_h) * h
     
     def device_to_game_abs(self, x, y):
         """Thread-safe absolute mapping."""
         with self.lock:
             rot = self.touch_reader.rotation
-            
-            if self.window_lost:
-                w = self.screen_w
-                h = self.screen_h
-                l = 0
-                t = 0
-            else:
-                w = self.game_window_info['width']
-                h = self.game_window_info['height']
-                l = self.game_window_info['left']
-                t = self.game_window_info['top']
         
         rot_dev_w, rot_dev_h = rotate_resolution(self.device_width, self.device_height, rot)
-        return l + (x / rot_dev_w) * w, t + (y / rot_dev_h) * h
+        return (x / rot_dev_w) * self.screen_w, (y / rot_dev_h) * self.screen_h
     
     def dp_to_px(self, dp):
         return dp * (self.dpi / DEF_DPI)

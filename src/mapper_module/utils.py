@@ -537,8 +537,8 @@ def keyboard_worker(k_queue:Queue):
     
     while running:
         try:
-            # 10.0 seconds timeout: If no heartbeat/input from Main, release everything
-            code, state = k_queue.get(timeout=60.0)
+            # 15.0 seconds timeout: If no heartbeat/input from Main, release everything
+            code, state = k_queue.get(timeout=15.0)
 
             # state 0 = Down, 1 = Up (Interception standard)
             if state == 0:
@@ -549,7 +549,7 @@ def keyboard_worker(k_queue:Queue):
             k_ctx.send(k_handle, KeyStroke(code, state))
   
         except Exception:
-            # This triggers if k_queue.get(timeout=10.0) times out
+            # This triggers if k_queue.get(timeout=15.0) times out
             if pressed_keys:
                 print(f"[Watchdog] Keyboard worker timeout. Releasing {len(pressed_keys)} keys.")
                 for code in list(pressed_keys):
@@ -588,12 +588,12 @@ def mouse_worker(m_queue:Queue):
 
     while running:
         try:
-            # 10.0 seconds timeout: If no heartbeat/input from Main, release everything
+            # 15.0 seconds timeout: If no heartbeat/input from Main, release everything
             if pending_task:
                 task, data = pending_task
                 pending_task = None
             else:
-                task, data = m_queue.get(timeout=60.0)
+                task, data = m_queue.get(timeout=15.0)
 
             if task == "button":
                 m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_RELATIVE, data, 0, 0, 0))
