@@ -632,7 +632,7 @@ def mouse_worker(m_queue:Queue):
                         break
 
                 if acc_dx != 0 or acc_dy != 0:
-                    m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_RELATIVE, MOUSE_MOVE_RELATIVE, 0, int(acc_dx), int(acc_dy)))
+                    m_ctx.send(m_handle, MouseStroke(MOUSE_MOVE_RELATIVE, MOUSE_MOVE_RELATIVE, 0, acc_dx, acc_dy))
                     acc_dx, acc_dy = 0, 0
                 
                 _sleep(0.0005)
