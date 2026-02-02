@@ -544,8 +544,7 @@ class Plotter:
         self.labels_artists: dict[int, plt.Text] = {}
         self.label_drag_managers: dict[int, DraggableLabel] = {}
         self.shape_drag_managers: dict[int, DraggableShape] = {}
-                
-        
+                       
         self.init_params_helper()
         self.update_image_params(img)
         self.ax.imshow(img)
