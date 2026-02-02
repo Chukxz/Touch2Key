@@ -77,17 +77,15 @@ class Draggable:
         return current_artist_id
     
     def clean_up_current_artist_id(self):
-        if self.plotter.current_artist_id is None:
-            self.plotter.current_artist_id = self.select_current_artist_id()
+        self.plotter.drawn = False
         self.plotter.last_artist_id = self.plotter.current_artist_id
         self.plotter.current_artist_id = None
-        self.plotter.artists_ids = []
         self.plotter.last_move_distance = self.plotter.current_move_distance
         self.plotter.current_move_distance = 0
 
 class DraggableLabel(Draggable):
     def __init__(self, entry_id:int, plotter_ref:Plotter):
-        super.__init__(entry_id, False, plotter_ref)        
+        super().__init__(entry_id, False, plotter_ref)        
         self.label_artist = self.plotter.labels_artists[entry_id]
         self.shape_artist = self.plotter.shapes_artists[entry_id]
         self.canvas = self.label_artist.figure.canvas
@@ -149,6 +147,9 @@ class DraggableLabel(Draggable):
         self.press = None
         self.drag_bg = None
         
+        if self.plotter.artists_ids:
+            self.plotter.artists_ids = []
+        
         if self.plotter.current_artist_id == self.artist_id:
             self.shape_artist.set_linewidth(2)
             self.shape_artist.set_edgecolor((0.3, 0.3, 0.3, 0.8))
@@ -168,7 +169,7 @@ class DraggableLabel(Draggable):
 
 class DraggableShape(Draggable):
     def __init__(self, entry_id:int, plotter_ref:Plotter, shape_type:str):
-        super.__init__(entry_id, True, plotter_ref)
+        super().__init__(entry_id, True, plotter_ref)
         self.label_artist = self.plotter.labels_artists[entry_id]
         self.shape_artist = self.plotter.shapes_artists[entry_id]
         self.shape_type = shape_type
@@ -464,6 +465,9 @@ class DraggableShape(Draggable):
         self.press = None
         self.drag_bg = None
         self.shape_mode = None
+
+        if self.plotter.artists_ids:
+            self.plotter.artists_ids = []
 
         if self.plotter.current_artist_id == self.artist_id:
             label_bbox = self.label_artist.get_bbox_patch()
