@@ -698,8 +698,8 @@ class Plotter:
             print(f"Error loading json file")
             return
         
-        x_diff = (self.width - screen_width) // 2
-        y_diff = (self.height - screen_height) // 2
+        scale_x = self.width /  screen_width
+        scale_y = self.height / screen_height
         item_id = 0
         json_shapes:dict[int, dict] = {}
 
@@ -729,17 +729,22 @@ class Plotter:
             json_shape['key_name'] = key_name
             json_shape['m_code'] = scancode
             json_shape['type'] = zone_type
-            json_shape['cx'] = cx + x_diff
-            json_shape['cy'] = cy + y_diff 
-            json_shape['interception_key'] = interception_key if interception_key is not None else ''  
-            is_circ = zone_type == CIRCLE
-            is_rect = zone_type == RECT
+            json_shape['cx'] = int(cx * scale_x)
+            json_shape['cy'] = int(cy * scale_y)
+            json_shape['interception_key'] = interception_key if interception_key is not None else ''
             
-            if is_circ:
-                json_shape['r'] = val1 + x_diff
-            elif is_rect:
-                json_shape['bb'] = (val1 + x_diff, val2 + y_diff), (val3 + x_diff, val4 + y_diff)
+            if zone_type == CIRCLE:
+                scale_r = (scale_x + scale_y) / 2
+                json_shape['r'] = int(val1 * scale_r)
+
+            elif zone_type == RECT:
+                new_x1 = int(val1 * scale_x)
+                new_y1 = int(val2 * scale_y)
+                new_x2 = int(val3 * scale_x)
+                new_y2 = int(val4 * scale_y)
                 
+                json_shape['bb'] = ((new_x1, new_y1), (new_x2, new_y2))
+
             item_id += 1
             json_shapes[item_id] = json_shape
             
