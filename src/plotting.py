@@ -552,15 +552,8 @@ class Plotter:
         
         state_str = "VISIBLE" if self.show_overlays else "HIDDEN"
         self.update_title(f"OVERLAYS: {state_str}. {DEF_STR}")
-        
-        # Create the "Shadow" (Black, thicker)
-        self.cursor_h_bg = self.ax.axhline(0, color='black', linewidth=1.5, alpha=0.8, visible=False, zorder=10, animated=True)
-        self.cursor_v_bg = self.ax.axvline(0, color='black', linewidth=1.5, alpha=0.8, visible=False, zorder=10, animated=True)
-        
-        # Create the "Core" (White, thinner)
-        self.cursor_h_fg = self.ax.axhline(0, color='white', linewidth=0.6, alpha=1.0, visible=False, zorder=11, animated=True)
-        self.cursor_v_fg = self.ax.axvline(0, color='white', linewidth=0.6, alpha=1.0, visible=False, zorder=11, animated=True)
-        
+  
+        self.init_crosshairs()
         self.bg_cache = None
         
         self.fig.canvas.mpl_connect("motion_notify_event", self.on_mouse_move)
@@ -591,6 +584,15 @@ class Plotter:
         except Exception:
             pass
         self.dpi = int(round(img.info.get("dpi", DEF_DPI)[0]))
+
+    def init_crosshairs(self):        
+        # Create the "Shadow" (Black, thicker)
+        self.crosshair_h_bg = self.ax.axhline(0, color='black', linewidth=1.5, alpha=0.8, visible=False, zorder=10, animated=True)
+        self.crosshair_v_bg = self.ax.axvline(0, color='black', linewidth=1.5, alpha=0.8, visible=False, zorder=10, animated=True)
+        
+        # Create the "Core" (White, thinner)
+        self.crosshair_h_fg = self.ax.axhline(0, color='white', linewidth=0.6, alpha=1.0, visible=False, zorder=11, animated=True)
+        self.crosshair_v_fg = self.ax.axvline(0, color='white', linewidth=0.6, alpha=1.0, visible=False, zorder=11, animated=True)
 
     def init_params_helper(self):
         self.shapes = {}
@@ -782,7 +784,8 @@ class Plotter:
             self.clear_visuals()
             self.ax.clear()
             self.ax.imshow(img)
-            
+
+            self.init_crosshairs()     
             self.reset_state()
             print(f"Swapped HUD to: {self.image_path.as_posix()}")
 
@@ -838,13 +841,13 @@ class Plotter:
             self.fig.canvas.restore_region(self.bg_cache)
 
             # Update and draw Horizontal lines (BG then FG for proper z-order layering)
-            for line in [self.cursor_h_bg, self.cursor_h_fg]:
+            for line in [self.crosshair_h_bg, self.crosshair_h_fg]:
                 line.set_visible(True)
                 line.set_ydata([y, y])
                 self.ax.draw_artist(line)
             
             # Update and draw Vertical lines (BG then FG for proper z-order layering)
-            for line in [self.cursor_v_bg, self.cursor_v_fg]:
+            for line in [self.crosshair_v_bg, self.crosshair_v_fg]:
                 line.set_visible(True)
                 line.set_xdata([x, x])
                 self.ax.draw_artist(line)
@@ -854,8 +857,8 @@ class Plotter:
             
         else:
             # If mouse leaves the area or we stop collecting, hide lines and redraw once
-            if self.cursor_h_bg.get_visible():
-                for line in [self.cursor_h_bg, self.cursor_h_fg, self.cursor_v_bg, self.cursor_v_fg]:
+            if self.crosshair_h_bg.get_visible():
+                for line in [self.crosshair_h_bg, self.crosshair_h_fg, self.crosshair_v_bg, self.crosshair_v_fg]:
                     line.set_visible(False)
                 self.fig.canvas.draw_idle()
 
