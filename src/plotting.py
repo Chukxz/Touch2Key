@@ -4,6 +4,9 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import tomlkit
 import math
+import os
+import tkinter as tk
+from tkinter import filedialog
 import json
 import datetime
 from pathlib import Path
@@ -20,7 +23,7 @@ WAITING_FOR_KEY = "WAITING_FOR_KEY"
 DELETING = "DELETING"
 CONFIRM_EXIT = "CONFIRM_EXIT"
 NAMING = "NAMING"
-DEF_STR = "MODE: IDLE\nF4(Toggle Shapes Visibility) | F5(Change Image)\nF6(Circle) | F7(Rect) | F8(Cancel) | F9(List) | F10(Save)\nF11(Sprint Threshold) | F12(Mouse Wheel) | Delete(Delete) | Esc(Exit)"
+DEF_STR = "MODE: IDLE\nF3(Load JSON) | F4(Toggle Shapes Visibility) | F5(Change Image)\nF6(Circle) | F7(Rect) | F8(Cancel) | F9(List) | F10(Save)\nF11(Sprint Threshold) | F12(Mouse Wheel) | Delete(Delete) | Esc(Exit)"
 
 SPECIAL_MAP = {
     "escape": "ESC", "enter": "ENTER", "backspace": "BACKSPACE", "tab": "TAB",
@@ -37,12 +40,57 @@ SPECIAL_MAP = {
     "insert": "E0_INSERT", "delete": "E0_DELETE",
 }
 
-class DraggableLabel:
-    def __init__(self, entry_id:int, artist:plt.Text, plotter_ref:Plotter):
+class Draggable:
+    def __init__(self, entry_id:int, is_shape:bool, plotter_ref: Plotter):
         self.entry_id = entry_id
-        self.artist = artist
-        self.plotter = plotter_ref # Reference to your main Plotter class
-        self.canvas = artist.figure.canvas
+        self.plotter = plotter_ref
+        self.min_move_distance = 7
+        if is_shape:
+            self.artist_id = "shape_" + entry_id
+        else:
+            self.artist_id = "label_" + entry_id
+            
+    def populate_artist_list(self):
+        self.plotter.artists_ids.append(self.artist_id)
+    
+    def select_current_artist_id(self):
+        current_artist_id = None
+        
+        if not self.plotter.artists_ids:
+            return None
+        
+        if self.plotter.last_artist_id is None:
+            return self.plotter.artists_ids[0]
+        
+        if self.plotter.last_artist_id in self.plotter.artists_ids:
+            if self.plotter.last_move_distance >= self.min_move_distance:
+                current_artist_id = self.plotter.last_artist_id
+            else:
+                l = len(self.plotter.artists_ids)
+                i = self.plotter.artists_ids.index(self.plotter.last_artist_id)
+                n = (i + 1) % l
+                current_artist_id = self.plotter.artists_ids[n]
+                
+        else:
+            current_artist_id = self.plotter.artists_ids[0]
+            
+        return current_artist_id
+    
+    def clean_up_current_artist_id(self):
+        if self.plotter.current_artist_id is None:
+            self.plotter.current_artist_id = self.select_current_artist_id()
+        self.plotter.last_artist_id = self.plotter.current_artist_id
+        self.plotter.current_artist_id = None
+        self.plotter.artists_ids = []
+        self.plotter.last_move_distance = self.plotter.current_move_distance
+        self.plotter.current_move_distance = 0
+
+class DraggableLabel(Draggable):
+    def __init__(self, entry_id:int, plotter_ref:Plotter):
+        super.__init__(entry_id, False, plotter_ref)        
+        self.label_artist = self.plotter.labels_artists[entry_id]
+        self.shape_artist = self.plotter.shapes_artists[entry_id]
+        self.canvas = self.label_artist.figure.canvas
         self.press = None
         self.drag_bg = None
         
@@ -54,55 +102,390 @@ class DraggableLabel:
         ]
 
     def on_press(self, event):
-        if event.inaxes != self.artist.axes: return
-        contains, _ = self.artist.contains(event)
+        if event.inaxes != self.label_artist.axes: return
+        contains, _ = self.label_artist.contains(event)
         if not contains: return
+        
+        # Populate the artists list
+        self.populate_artist_list()
 
-        # Prepare Background for Blitting
-        self.artist.set_visible(False)
-        if self.entry_id in self.plotter.shapes_artists:
-            artist = self.plotter.shapes_artists[self.entry_id]
-            artist.set_linewidth(3)
-            artist.set_edgecolor((0.7, 0.7, 0.7, 0.8))
-        self.canvas.draw() 
-        self.drag_bg = self.canvas.copy_from_bbox(self.artist.axes.bbox)
-        self.artist.set_visible(True)
-
-        x0, y0 = self.artist.get_position()
-        self.press = x0, y0, event.xdata, event.ydata
+        x0, y0 = self.label_artist.get_position()
+        self.press = x0, y0, event.xdata, event.ydata, event.x, event.y
         
     def on_motion(self, event):
-        if self.press is None or event.inaxes != self.artist.axes or self.drag_bg is None:
+        if self.press is None or event.inaxes != self.label_artist.axes or self.drag_bg is None:
             return
-
-        x0, y0, xpress, ypress = self.press
-        dx = event.xdata - xpress
-        dy = event.ydata - ypress
+        
+        if self.plotter.current_artist_id is None:
+            self.plotter.current_artist_id = self.select_current_artist_id()
+            
+        if not self.plotter.current_artist_id == self.artist_id:
+            return
+        
+        if not self.plotter.drawn:
+            # Prepare Background for Blitting
+            self.label_artist.set_visible(False)
+            self.shape_artist.set_linewidth(3)
+            self.shape_artist.set_edgecolor((0.7, 0.7, 0.7, 0.8))
+            self.canvas.draw()
+            self.drag_bg = self.canvas.copy_from_bbox(self.label_artist.axes.bbox)
+            self.label_artist.set_visible(True)
+            self.plotter.drawn = True
+        
+        x0, y0, xdata_press, ydata_press, xpx_press, ypx_press = self.press
+        dx = event.xdata - xdata_press
+        dy = event.ydata - ydata_press
+        
+        dist_px = ((xpx_press**2) + (ypx_press**2))**0.5
+        self.plotter.current_move_distance += dist_px
 
         # Blitting Loop
         self.canvas.restore_region(self.drag_bg)
-        self.artist.set_position((x0 + dx, y0 + dy))
-        self.artist.axes.draw_artist(self.artist)
-        self.canvas.blit(self.artist.axes.bbox)
+        self.label_artist.set_position((x0 + dx, y0 + dy))
+        self.label_artist.axes.draw_artist(self.label_artist)
+        self.canvas.blit(self.label_artist.axes.bbox)
 
     def on_release(self, event):
         self.press = None
         self.drag_bg = None
-        if self.entry_id in self.plotter.shapes_artists:
-            artist = self.plotter.shapes_artists[self.entry_id]
-            artist.set_linewidth(2)
-            artist.set_edgecolor((0.3, 0.3, 0.3, 0.8))
-        self.canvas.draw_idle()
+        
+        if self.plotter.current_artist_id == self.artist_id:
+            self.shape_artist.set_linewidth(2)
+            self.shape_artist.set_edgecolor((0.3, 0.3, 0.3, 0.8))
+        
+            self.clean_up_current_artist_id()
+            self.label_artist.remove()
+            self.plotter.ax.add_artist(self.label_artist)
+            
+            self.canvas.draw_idle()
 
     def disconnect(self):
         """The 'Leak Killer': Call this when deleting the label."""
         for cid in self.cids:
             self.canvas.mpl_disconnect(cid)
-        print(f"[System] Event listeners for {self.artist} disconnected.")
+        print(f"[System] Event listeners for {self.label_artist} disconnected.")
 
 
+class DraggableShape(Draggable):
+    def __init__(self, entry_id:int, plotter_ref:Plotter, shape_type:str):
+        super.__init__(entry_id, True, plotter_ref)
+        self.label_artist = self.plotter.labels_artists[entry_id]
+        self.shape_artist = self.plotter.shapes_artists[entry_id]
+        self.shape_type = shape_type
+        self.canvas = self.shape_artist.figure.canvas
+        self.press = None
+        self.drag_bg = None
+        self.radial_tolerance = 5 # Pixel coordinates
+        self.edge_tolerance = 5 # Pixel coordinates
+        self.vertex_tolerance = 10 # Pixel coordinates
+        self.min_dist = 1 # Data coordinates
+        self.shape_mode = None
+        
+        # Store IDs so we can kill them later
+        self.cids = [
+            self.canvas.mpl_connect('button_press_event', self.on_press),
+            self.canvas.mpl_connect('motion_notify_event', self.on_motion),
+            self.canvas.mpl_connect('button_release_event', self.on_release),
+        ]
+        
+    def on_press(self, event):
+        if event.inaxes != self.shape_artist.axes: return
+        contains, _ = self.shape_artist.contains(event)
+        if not contains: return
+        
+        # Populate the artists list
+        self.populate_artist_list()
+        
+        if self.shape_type == CIRCLE:
+            cx, cy = self.shape_artist.get_center()
+            self.shape_mode = self.get_circumference(event, cx, cy)
+            self.press = cx, cy, event.xdata, event.ydata
+            
+        elif self.shape_type == RECT:
+            bbox = self.shape_artist.get_window_extent()
+            self.shape_mode = self.get_corner_under_mouse(event)
+            if self.shape_mode is None:
+                self.shape_mode = self.get_edge_under_mouse(event, bbox)
+            self.press = bbox.x0, bbox.y0, event.xdata, event.ydata, event.x, event.y
+        
+        else:
+            self.press = None           
+        
+    def on_motion(self, event):
+        if self.press is None or event.inaxes != self.shape_artist.axes or self.drag_bg is None:
+            return
+    
+        if self.plotter.current_artist_id is None:
+            self.plotter.current_artist_id = self.select_current_artist_id()
+            
+        if not self.plotter.current_artist_id == self.artist_id:
+            return
+        
+        if not self.plotter.drawn:
+            # Prepare Background for Blitting
+            self.shape_artist.set_visible(False)
+            label_bbox = self.label_artist.get_bbox_patch()
+            if label_bbox:
+                label_bbox.set_edgecolor(0.7, 0.7, 0.7, 0.8)
+                label_bbox.set_linewidth(3)
+            self.canvas.draw() 
+            self.drag_bg = self.canvas.copy_from_bbox(self.shape_artist.axes.bbox)
+            self.shape_artist.set_visible(True)
+            self.plotter.drawn = True
+        
+        _, _, _, _, xpx_press, ypx_press = self.press
+
+        dist_px = ((xpx_press**2) + (ypx_press**2))**0.5
+        self.plotter.current_move_distance += dist_px
+
+        # Blitting Loop
+        self.canvas.restore_region(self.drag_bg)
+        if self.shape_type == CIRCLE:
+            self.circle_transform(event)
+        elif self.shape_type == RECT:
+            self.rect_transform(event)        
+        self.shape_artist.axes.draw_artist(self.shape_artist)
+        self.canvas.blit(self.shape_artist.axes.bbox)    
+    
+    def get_display_point(self, xdata, ydata):
+        """
+        Convert data pints to pixel coordinates
+        """
+        return self.shape_artist.axes.transData.transform((xdata, ydata))
+    
+    def circle_transform(self, event):
+        if self.press is None:
+            return
+        xdata = event.xdata
+        ydata = event.ydata
+
+        if self.shape_mode == 'resize':
+            self.update_radius(xdata, ydata)
+            return
+        if self.shape_mode == 'drag':
+            x0, y0, xdata_press, ydata_press, _, _ = self.press
+            dx = event.xdata - xdata_press
+            dy = event.ydata - ydata_press
+            self.shape_artist.set_center((x0 + dx, y0 + dy))
+            
+    def rect_transform(self, event):
+        if self.press is None:
+            return
+        xdata = event.xdata
+        ydata = event.ydata
+        
+        if self.update_corner(self.shape_mode, xdata, ydata):
+            return
+        if self.update_edge(self.shape_mode, xdata, ydata):
+            return
+        if self.shape_mode == 'drag':
+            x0, y0, xdata_press, ydata_press, _, _ = self.press
+            dx = xdata - xdata_press
+            dy = ydata - ydata_press
+            self.shape_artist.set_xy(((x0 + dx, y0 + dy)))
+
+    def get_circumference(self, event, cx, cy):
+        # Get circle data
+        r = self.shape_artist.get_radius()
+        # Convert center to pixels
+        cx_px, cy_px = self.shape_artist.axes.transData.transform((cx, cy))
+        # Calculate radius in pixels
+        rim_x_px, _ = self.shape_artist.axes.transData.transform((cx + r, cy))
+        r_px = abs(rim_x_px - cx_px)
+        # Calculate distance from mouse to center
+        dist_px = ((event.x - cx_px)**2 + (event.y - cy_px)**2)**0.5
+        # Check if distance is within tolerance of radius, if not check if it is inside the circle
+        diff_px = abs(dist_px - r_px)
+        if diff_px <= self.radial_tolerance:
+            return 'resize'
+        if dist_px <= r_px:
+            return 'drag'
+        return None
+    
+    def update_radius(self, xdata, ydata):
+        # Get the fixed center
+        cx, cy = self.shape_artist.get_center()
+        # Calculate distance from center to mouse
+        new_r = ((xdata - cx)**2 + (ydata - cy)**2)**0.5
+        self.shape_artist.set_radius(new_r)
+        
+    def get_corner_under_mouse(self, event):
+        x, y = self.shape_artist.get_xy()
+        w, h = self.shape_artist.get_width(), self.shape_artist.get_height()
+        # Define corners in Data Coordinates
+        corners = {
+            'bottom_left': (x, y),
+            'bottom_right': (x + w, y),
+            'top_left': (x, y + h),
+            'top_right': (x + w, y + h)
+        }
+        
+        # Check pixel distance for each corner
+        for name, (cx, cy) in corners.items():
+            # Convert corner to pixels
+            cx_px, cy_px = self.shape_artist.axes.transData.transform((cx, cy))
+            # Distance formula in pixels
+            dist_px = ((event.x - cx_px)**2 + (event.y - cy_px)**2)**0.5
+            if dist_px <= self.vertex_tolerance:
+                return name
+        return None
+    
+    def get_edge_under_mouse(self, event, bbox):
+        # Get rect bbox in pixels and perform limit checks
+        mx, my = event.x, event.y
+        is_within_horizontal = bbox.x0 <= mx <= bbox.x1
+        is_within_vertical = bbox.y0 <= my <= bbox.y1
+        
+        # Check left edge
+        if abs(mx - bbox.x0) <= self.edge_tolerance and is_within_vertical:
+            return 'left'
+        # Check right edge
+        if abs(mx - bbox.x1) <= self.edge_tolerance and is_within_vertical:
+            return 'right'
+        # Check bottom edge
+        if abs(my - bbox.y0) <= self.edge_tolerance and is_within_horizontal:
+            return 'bottom'
+        # Check top edge
+        if abs(my - bbox.y1) <= self.edge_tolerance and is_within_horizontal:
+            return 'top'
+        if is_within_horizontal and is_within_vertical:
+            return 'drag'
+        return None        
+    
+    def update_corner(self, corner, xdata, ydata):
+        if corner is None:
+            return False
+        
+        # Get current state
+        x, y = self.shape_artist.get_xy()
+        w = self.shape_artist.get_width()
+        h = self.shape_artist.get_height()
+        # Calculate the fixed boundaries
+        right_edge = x + w
+        top_edge = y + h
+        
+        # Update based on corner
+        # Top-Left corner
+        if corner == 'top_right':
+            # Anchor (x, y) stays fixed
+            new_w = xdata - x
+            new_h = ydata - y
+            if new_w >= self.min_dist and new_h >= self.min_dist:
+                self.shape_artist.set_width(new_w)
+                self.shape_artist.set_height(new_h)
+            return True
+                
+        # Top-Right corner
+        if corner == 'top_left':
+            # Right edge stays fixed and y stays fixed
+            new_w = right_edge - xdata
+            new_h = ydata - y
+            if new_w >= self.min_dist and new_h >= self.min_dist:
+                self.shape_artist.set_xy((xdata, y)) # Shift x
+                self.shape_artist.set_width(new_w)
+                self.shape_artist.set_height(new_h)
+            return True
+                
+        # Bottom-Right corner
+        if corner == 'bottom_right':
+            # Top edge stays fixed and x stays fixed
+            new_w = xdata - x
+            new_h = top_edge - ydata
+            if new_w >= self.min_dist and new_h >= self.min_dist:
+                self.shape_artist.set_xy((x, ydata)) # Shift y
+                self.shape_artist.set_width(new_w)
+                self.shape_artist.set_height(new_h)
+            return True
+                
+        # Bottom-Left corner
+        if corner == 'bottom_left':
+            # Opposite corner (Top-Right) stays fixed, both x and y must shift
+            new_w = right_edge - xdata
+            new_h = top_edge - ydata
+            if new_w >= self.min_dist and new_h >= self.min_dist:
+                self.shape_artist.set_xy((xdata, ydata))
+                self.shape_artist.set_width(new_w)
+                self.shape_artist.set_height(new_h)
+            return True
+        
+        return False
+                
+    def update_edge(self, edge, xdata, ydata):
+        if edge is None:
+            return False
+        
+        # Get current state
+        x, y = self.shape_artist.get_xy()
+        w = self.shape_artist.get_width()
+        h = self.shape_artist.get_height()
+        
+        # Calcuate fixed edges
+        right_edge = x + w
+        top_edge = y + h 
+        
+        # Update based on edge
+        # Right edge
+        if edge == 'right':
+            # Resize width, anchor (x) stays the same
+            new_w = xdata - x
+            if new_w >= self.min_dist:
+                self.shape_artist.set_width(new_w)
+            return True
+        
+        # Left edge
+        if edge == 'left':
+            # Mouse becomes new x, width shrinks/grows to compensate
+            new_w = right_edge - xdata
+            if new_w >= self.min_dist:
+                self.shape_artist.set_xy((xdata, y)) # Move anchor
+                self.shape_artist.set_width(new_w)
+            return True
+        
+        # Top edge
+        if edge == 'top':
+            # Resize height, anchor (y) stays the same
+            new_h = ydata - y
+            if new_h >= self.min_dist:
+                self.shape_artist.set_height(new_h)
+            return True
+        
+        # Bottom edge
+        if edge == 'bottom':
+            # Mouse becomes new y, height shrinks/grows to compensate
+            new_h = top_edge - ydata
+            if new_h >= self.min_dist:
+                self.shape_artist.set_xy((x, ydata)) # Move anchor
+                self.shape_artist.set_height(new_h)
+            return True
+            
+        return False
+
+    def on_release(self, event):
+        self.press = None
+        self.drag_bg = None
+        self.shape_mode = None
+
+        if self.plotter.current_artist_id == self.artist_id:
+            label_bbox = self.label_artist.get_bbox_patch()
+            if label_bbox:
+                label_bbox.set_edgecolor('black')
+                label_bbox.set_linewidth(1.5)
+            
+            self.clean_up_current_artist_id()
+            self.shape_artist.remove()
+            self.plotter.ax.add_patch(self.shape_artist)
+            
+            self.canvas.draw_idle()
+
+    def disconnect(self):
+        """The 'Leak Killer': Call this when deleting the shape."""
+        for cid in self.cids:
+            self.canvas.mpl_disconnect(cid)
+        print(f"[System] Event listeners for {self.shape_artist} disconnected.")
+
+        
 class Plotter:
-    def __init__(self, image_path:str|None=None):
+    def __init__(self, image_path):
         # DPI Awareness MUST be first to ensure coordinates match the screen
         set_dpi_awareness()
 
@@ -115,12 +498,12 @@ class Plotter:
                 try:
                     with open(toml_file, "r", encoding="utf-8") as f:
                         doc = tomlkit.load(f)
-                        toml_img_str = doc.get("system", {}).get("hud_image_path", "")
-                        if toml_img_str:
-                            potential_path = Path(toml_img_str)
-                            if potential_path.exists():
-                                image_path = potential_path
-                                print(f"[System] Auto-loading last HUD: {image_path.name}")
+                    toml_img_str = doc.get("system", {}).get("hud_image_path", "")
+                    if toml_img_str:
+                        potential_path = Path(toml_img_str)
+                        if potential_path.exists():
+                            image_path = potential_path
+                            print(f"[System] Auto-loading last HUD: {image_path.as_posix()}")
                 except Exception:
                     pass
 
@@ -135,6 +518,10 @@ class Plotter:
             return
 
         self.image_path = Path(image_path)
+        img = self.load_image()
+        if img is None:
+            print("Could not load image, exiting...")
+            return
                 
         #  GUI Configuration
         for key in plt.rcParams:
@@ -145,16 +532,18 @@ class Plotter:
         self.fig, self.ax = plt.subplots()
         
         self.points = []          
-        self.drawn_artists = []
+        self.point_artists = []
         self.mode = None          
         self.state = IDLE         
         self.input_buffer = ""
         self.shapes_artists: dict[int, plt.Circle | plt.Rectangle] = {}
         self.labels_artists: dict[int, plt.Text] = {}
-        self.drag_managers: dict[int, DraggableLabel] = {}
+        self.label_drag_managers: dict[int, DraggableLabel] = {}
+        self.shape_drag_managers: dict[int, DraggableShape] = {}
+                
         
         self.init_params_helper()
-        img = self.update_image_params()
+        self.update_image_params(img)
         self.ax.imshow(img)
         
         state_str = "VISIBLE" if self.show_overlays else "HIDDEN"
@@ -178,12 +567,15 @@ class Plotter:
 
     
     # Visual & State Management
-    def update_image_params(self):
+    def load_image(self):
         try:
             img = Image.open(self.image_path)
         except Exception as e:
-            raise RuntimeError(f"Error loading image: {e}")
+            print(f"Error loading image: {e}")
+            return None
+        return img
         
+    def update_image_params(self, img):
         self.width, self.height = img.size      
         try:
             # self.image_path.stem gets the filename without extension
@@ -195,7 +587,6 @@ class Plotter:
         except Exception:
             pass
         self.dpi = int(round(img.info.get("dpi", DEF_DPI)[0]))
-        return img
 
     def init_params_helper(self):
         self.shapes = {}
@@ -217,18 +608,27 @@ class Plotter:
         for uid in self.labels_artists:
             self.labels_artists[uid].remove()
         self.labels_artists = {}
-        for uid in self.drag_managers:
-            self.drag_managers[uid].disconnect()     
-        self.drag_managers = {}
-
+        for uid in self.label_drag_managers:
+            self.label_drag_managers[uid].disconnect()     
+        self.label_drag_managers = {}
+        for uid in self.shape_drag_managers:
+            self.shape_drag_managers[uid].disconnect()     
+        self.shape_drag_managers = {}
+        self.last_artist_id = None
+        self.current_artist_id = None
+        self.artists_ids = []
+        self.drawn = False
+        self.last_move_distance = 0.0
+        self.current_move_distance = 0.0
+        
     def update_title(self, text):
         self.ax.set_title(text)
         self.fig.canvas.draw()
 
     def clear_visuals(self):
-        for artist in self.drawn_artists:
+        for artist in self.point_artists:
             artist.remove()
-        self.drawn_artists = []
+        self.point_artists = []
         self.fig.canvas.draw()
 
     def reset_state(self):
@@ -247,14 +647,129 @@ class Plotter:
         self.artists_points = num_points
         self.state = COLLECTING
         self.update_title(f"MODE: {mode}. Click {num_points} points on the image (F8 to Cancel).")
+    
+    
+    def load_json(self, json_path):
+        # Initialize Tkinter and hide the root window
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True) 
+
+        os.makedirs(JSONS_FOLDER, exist_ok=True)
+        
+        # Open File Dialog
+        file_path = filedialog.askopenfilename(
+            initialdir=JSONS_FOLDER,
+            title="Select JSON Mapping Profile",
+            filetypes=(("JSON files", "*.json"), ("All files", "*.*"))
+        )
+
+        if not file_path:
+            print("[!] Selection cancelled.")
+            root.destroy()
+            return
+
+        root.destroy()
+            
+        if not os.path.exists(file_path):
+            print(f"Error: File '{file_path}' not found.")
+            return
+
+        with open(file_path, mode='r', encoding='utf-8') as f:
+            try:
+                data = json.load(f)
+            except json.JSONDecodeError as e:
+                print(f"Invalid JSON syntax in '{file_path}': {e}")
+                return
+
+        try:
+            metadata = data["metadata"]
+            content = data["content"]
+            screen_width = metadata["width"]
+            screen_height = metadata["height"]
+            metadata["dpi"]
+            metadata["mouse_wheel_radius"]
+            metadata["sprint_distance"]
+        except:
+            print(f"Error loading json file")
+            return
+        
+        x_diff = self.width - screen_width
+        y_diff = self.height - screen_height
+        item_id = 0
+        json_shapes:dict[int, dict] = {}
+
+        for item in content:
+            scancode = item.get("scancode")
+            if scancode is None: 
+                continue
+                            
+            zone_type = item.get("type", '')
+            name = item.get('name', '')
+                            
+            try:
+                cx = float(item['cx'])
+                cy = float(item['cy'])
+                val1 = float(item['val1'])
+                val2 = float(item['val2'])
+                val3 = float(item['val3'])
+                val4 = float(item['val4'])
+
+            except (ValueError, KeyError) as e:
+                print(f"Skipping invalid item: {scancode} with name: {name}. Error: {e}")
+                continue
+            
+            json_shape = {}
+            key_name = self.get_event_key(scancode)
+            _, interception_key = self.get_interception_code(key_name)
+            json_shape['key_name'] = key_name
+            json_shape['m_code'] = scancode
+            json_shape['type'] = zone_type
+            json_shape['cx'] = cx + x_diff
+            json_shape['cy'] = cy + y_diff 
+            json_shape['interception_key'] = interception_key if interception_key is not None else ''  
+            is_circ = zone_type == CIRCLE
+            is_rect = zone_type == RECT
+            
+            if is_circ:
+                json_shape['r'] = val1 + x_diff
+            elif is_rect:
+                json_shape['bb'] = (val1 + x_diff, val2 + y_diff), (val3 + x_diff, val4 + y_diff)
+                
+            item_id += 1
+            json_shapes[item_id] = json_shape
+            
+
+        if item_id > 0:
+            w, h, dpi = self.width, self.height, self.dpi
+            self.init_params_helper()
+            self.width, self.height, self.dpi = w, h, dpi
+            
+            for shape in json_shapes.values():
+                cx = shape['cx']
+                cy = shape['cy']
+                r = shape.get('r', None)
+                bb = shape.get('bb', None)
+                key_name = shape['key_name']
+                interception_key = shape['interception_key']
+                hex_code = shape['m_code']
+                self.finalize_shape(cx, cy, r, bb, key_name, interception_key, hex_code)
+            self.reset_state()                 
+    
 
     def change_image(self):
         image_path = select_image_file(IMAGES_FOLDER)
         if image_path:
+            last_image_path = self.image_path
             self.image_path = Path(image_path)
+            img = self.load_image()
+            if img is None:
+                self.image_path = last_image_path
+                print("Could not load image, image path reset to the last value")
+                return
             
             self.init_params_helper()
-            img = self.update_image_params()
+            self.update_image_params(img)
             self.ax.clear()
             self.ax.imshow(img)
             
@@ -348,7 +863,7 @@ class Plotter:
             
             if button_name:
                 print(f"[-] Mouse Click Detected: {button_name}")
-                self.finalize_shape(button_name)
+                self.calculate_shape(button_name)
             return
 
         # Handle Drawing Points
@@ -361,7 +876,7 @@ class Plotter:
         self.points.append((int(event.xdata), int(event.ydata)))
         
         dot, = self.ax.plot(event.xdata, event.ydata, 'ro')
-        self.drawn_artists.append(dot)
+        self.point_artists.append(dot)
         self.fig.canvas.draw()
         self.bg_cache = None
 
@@ -402,10 +917,12 @@ class Plotter:
             return
 
         if self.state == WAITING_FOR_KEY:
-            self.finalize_shape(event.key)
+            self.calculate_shape(event.key)
             return
             
         if self.state == IDLE:
+            if event.key == 'f3':
+                self.load_json()
             if event.key == 'f4':
                 self.toggle_visibility()
             if event.key == 'f5':
@@ -445,6 +962,7 @@ class Plotter:
             if self.input_buffer:
                 try:
                     uid = int(self.input_buffer)
+                    
                     if uid in self.shapes:
                         del self.shapes[uid]
                         if uid in self.shapes_artists:
@@ -453,9 +971,16 @@ class Plotter:
                         if uid in self.labels_artists:
                             self.labels_artists[uid].remove()
                             del self.labels_artists[uid]
-                        if uid in self.drag_managers:
-                            self.drag_managers[uid].disconnect()
-                            del self.drag_managers[uid]
+                        if uid in self.label_drag_managers:
+                            self.label_drag_managers[uid].disconnect()
+                            del self.label_drag_managers[uid]
+                        if uid in self.shape_drag_managers:
+                            self.shape_drag_managers[uid].disconnect()
+                            del self.shape_drag_managers[uid]
+                            
+                        if self.last_artist_id == "shape_" + uid or self.last_artist_id == "label_" + uid:
+                            self.last_artist_id = None
+                            
                         print(f"[+] Deleted ID {uid}")
                         
                         if self.saved_mouse_wheel and any(v['key_name'] == MOUSE_WHEEL_CODE for v in self.shapes.values()) == False:
@@ -484,8 +1009,9 @@ class Plotter:
         elif key in ['f6', 'f7', 'delete', 'f10']:
             print("[!] Blocked: Exit Delete Mode (Esc) first.")
 
+
     # Core Logic
-    def finalize_shape(self, key_name):
+    def calculate_shape(self, key_name):
         # 'key_name' might be a key string ('a', 'f1') OR a mouse string ('MOUSE_LEFT')
         hex_code, interception_key = self.get_interception_code(key_name)
         
@@ -498,7 +1024,12 @@ class Plotter:
             cx, cy, r, bb = self.calculate_circle()
         elif self.mode == RECT:
             cx, cy, r, bb = self.calculate_rect()
-
+        
+        self.finalize_shape(cx, cy, r, bb, key_name, interception_key, hex_code)
+        self.reset_state()
+    
+    
+    def finalize_shape(self, cx, cy, r, bb, key_name, interception_key, hex_code):
         if cx is not None:
             saved, entry_id = self.save_entry(interception_key, hex_code, cx, cy, r, bb)
             if saved:
@@ -515,8 +1046,11 @@ class Plotter:
                     label_artist.set_visible(self.show_overlays)
                     self.ax.add_artist(label_artist)
                     self.labels_artists[entry_id] = label_artist
-                    # Make the labels draggable
-                    self.drag_managers[entry_id] = DraggableLabel(entry_id, label_artist, self)
+                    # Make the label draggable
+                    self.label_drag_managers[entry_id] = DraggableLabel(entry_id, self)
+                    # Make the shape draggable
+                    self.shape_drag_managers[entry_id] = DraggableShape(entry_id, self, CIRCLE)
+                    
                 elif self.mode == RECT and cx and cy and bb:
                     fc = get_vibrant_random_color(0.4)
                     (x1, y1), (x2, y2) = bb
@@ -530,10 +1064,10 @@ class Plotter:
                     label_artist.set_visible(self.show_overlays)
                     self.ax.add_artist(label_artist)
                     self.labels_artists[entry_id] = label_artist
-                    # Make the labels draggable
-                    self.drag_managers[entry_id] = DraggableLabel(entry_id, label_artist, self)
-                    
-        self.reset_state()
+                    # Make the label draggable
+                    self.label_drag_managers[entry_id] = DraggableLabel(entry_id, self)
+                    # Make the shape draggable
+                    self.shape_drag_managers[entry_id] = DraggableShape(entry_id, self, RECT)                   
 
     # Naming / Saving Logic
     def enter_naming_mode(self):
@@ -585,16 +1119,17 @@ class Plotter:
                 "val1": 0, "val2": 0, "val3": 0, "val4": 0
             }
             
-            if data['type'] == RECT:
+            if data['type'] == CIRCLE:
+                entry["val1"] = data['r']
+                # val 2, 3, 4 remain 0
+                
+            elif data['type'] == RECT:
                 (x_min, y_min), (x_max, y_max) = data['bb']
                 entry["val1"] = x_min
                 entry["val2"] = y_min
                 entry["val3"] = x_max
                 entry["val4"] = y_max
                 
-            elif data['type'] == CIRCLE:
-                entry["val1"] = data['r']
-                # val 2, 3, 4 remain 0
             
             output.append(entry)
 
@@ -643,6 +1178,17 @@ class Plotter:
                 val = SCANCODES.get(mapped_key)
         return hex(val) if val is not None else None, mapped_key if val is not None else None
 
+    def get_event_key(self, scancode):
+        mapped_scancode = scancode
+        for key, val in SCANCODES.items():
+            if hex(val) == mapped_scancode:
+                for sp_key, sp_val in SPECIAL_MAP.items():
+                    if sp_val == key:
+                        return sp_key
+                return key
+        return ""
+        
+
     def save_entry(self, interception_key, hex_code, cx, cy, r, bb):
         uid = self.count
         inc_count = True
@@ -664,9 +1210,9 @@ class Plotter:
                             if uid in self.labels_artists:
                                 self.labels_artists[uid].remove()
                                 del self.labels_artists[uid]
-                            if uid in self.drag_managers:
-                                self.drag_managers[uid].disconnect()
-                                del self.drag_managers[uid]
+                            if uid in self.label_drag_managers:
+                                self.label_drag_managers[uid].disconnect()
+                                del self.label_drag_managers[uid]
                             break
                         
                 self.mouse_wheel_radius = r
@@ -698,9 +1244,9 @@ class Plotter:
                             if uid in self.labels_artists:
                                 self.labels_artists[uid].remove()
                                 del self.labels_artists[uid]
-                            if uid in self.drag_managers:
-                                self.drag_managers[uid].disconnect()
-                                del self.drag_managers[uid]
+                            if uid in self.label_drag_managers:
+                                self.label_drag_managers[uid].disconnect()
+                                del self.label_drag_managers[uid]
                             break
                             
                 # Use Pythagorean theorem for the true radius/distance

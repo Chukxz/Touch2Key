@@ -123,56 +123,56 @@ class JSONLoader():
                 _str = f"Invalid JSON syntax in '{json_file_path}': {e}"
                 raise RuntimeError(_str)
 
+        try:
+            metadata = data["metadata"]
+            content = data["content"]
+            screen_width = metadata["width"]
+            screen_height = metadata["height"]
+            self.dpi = metadata["dpi"]
+            self.mouse_wheel_radius = metadata["mouse_wheel_radius"]
+            self.sprint_distance = metadata["sprint_distance"]
+        except:
+            raise RuntimeError(f"Error loading json file")
+
+        self.width = screen_width
+        self.height = screen_height
+
+        for item in content:
+            scancode = item.get("scancode")
+            if scancode is None: 
+                continue
+                            
+            zone_type = item.get("type")
+            is_circ = zone_type == CIRCLE
+            is_rect = zone_type == RECT 
+
+            zone_data = {}                
+            zone_data['name'] = item.get('name', '')
+            zone_data['type'] = zone_type
+            
             try:
-                metadata = data["metadata"]
-                content = data["content"]
-                screen_width = metadata["width"]
-                screen_height = metadata["height"]
-                self.dpi = metadata["dpi"]
-                self.mouse_wheel_radius = metadata["mouse_wheel_radius"]
-                self.sprint_distance = metadata["sprint_distance"]
-            except:
-                raise RuntimeError(f"Error loading json file")
+                if is_circ:
+                    zone_data['cx'] = float(item['cx']) / screen_width
+                    zone_data['cy'] = float(item['cy']) / screen_height
+                    zone_data['r'] = float(item['val1']) / screen_width
+                    zone_data['val1'] = float(item['val1'])
 
-            self.width = screen_width
-            self.height = screen_height
-
-            for item in content:
-                scancode = item.get("scancode")
-                if scancode is None: 
-                    continue
-                                
-                zone_type = item.get("type")
-                is_circ = zone_type == CIRCLE
-                is_rect = zone_type == RECT 
-
-                zone_data = {}                
-                zone_data['name'] = item.get('name', '')
-                zone_data['type'] = zone_type
+                elif is_rect:
+                    zone_data['x1'] = float(item['val1']) / screen_width
+                    zone_data['y1'] = float(item['val2']) / screen_height
+                    zone_data['x2'] = float(item['val3']) / screen_width
+                    zone_data['y2'] = float(item['val4']) / screen_height
+                    
+                    zone_data['val1'] = float(item['val1'])
+                    zone_data['val2'] = float(item['val2'])
+                    zone_data['val3'] = float(item['val3'])
+                    zone_data['val4'] = float(item['val4'])
                 
-                try:
-                    if is_circ:
-                        zone_data['cx'] = float(item['cx']) / screen_width
-                        zone_data['cy'] = float(item['cy']) / screen_height
-                        zone_data['r'] = float(item['val1']) / screen_width
-                        zone_data['val1'] = float(item['val1'])
-
-                    elif is_rect:
-                        zone_data['x1'] = float(item['val1']) / screen_width
-                        zone_data['y1'] = float(item['val2']) / screen_height
-                        zone_data['x2'] = float(item['val3']) / screen_width
-                        zone_data['y2'] = float(item['val4']) / screen_height
-                        
-                        zone_data['val1'] = float(item['val1'])
-                        zone_data['val2'] = float(item['val2'])
-                        zone_data['val3'] = float(item['val3'])
-                        zone_data['val4'] = float(item['val4'])
-                    
-                    normalized_zones[scancode] = zone_data
-                    
-                except (ValueError, KeyError) as e:
-                    print(f"Skipping invalid item: {scancode}. Error: {e}")
-                    continue
+                normalized_zones[scancode] = zone_data
+                
+            except (ValueError, KeyError) as e:
+                print(f"Skipping invalid item: {scancode} with name: {zone_data['name']}. Error: {e}")
+                continue
         
         update_toml(w=self.width, h=self.height, dpi=self.dpi, mouse_wheel_radius=self.mouse_wheel_radius, sprint_distance=self.sprint_distance, strict=True)
         return normalized_zones
