@@ -779,6 +779,7 @@ class Plotter:
             
             self.init_params_helper()
             self.update_image_params(img)
+            self.clear_visuals()
             self.ax.clear()
             self.ax.imshow(img)
             
