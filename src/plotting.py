@@ -46,9 +46,9 @@ class Draggable:
         self.plotter = plotter_ref
         self.min_move_distance = 7
         if is_shape:
-            self.artist_id = "shape_" + entry_id
+            self.artist_id = "shape_" + str(entry_id)
         else:
-            self.artist_id = "label_" + entry_id
+            self.artist_id = "label_" + str(entry_id)
             
     def populate_artist_list(self):
         self.plotter.artists_ids.append(self.artist_id)
@@ -489,7 +489,7 @@ class DraggableShape(Draggable):
 
         
 class Plotter:
-    def __init__(self, image_path):
+    def __init__(self, image_path=None):
         # DPI Awareness MUST be first to ensure coordinates match the screen
         set_dpi_awareness()
 
