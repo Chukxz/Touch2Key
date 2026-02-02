@@ -698,7 +698,7 @@ class Plotter:
             print(f"Error loading json file")
             return
         
-        scale_x = self.width /  screen_width
+        scale_x = self.width / screen_width
         scale_y = self.height / screen_height
         item_id = 0
         json_shapes:dict[int, dict] = {}
