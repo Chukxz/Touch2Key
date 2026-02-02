@@ -990,7 +990,7 @@ class Plotter:
                             self.shape_drag_managers[uid].disconnect()
                             del self.shape_drag_managers[uid]
                             
-                        if self.last_artist_id == "shape_" + uid or self.last_artist_id == "label_" + uid:
+                        if self.last_artist_id == "shape_" + str(uid) or self.last_artist_id == "label_" + str(uid):
                             self.last_artist_id = None
                             
                         print(f"[+] Deleted ID {uid}")
