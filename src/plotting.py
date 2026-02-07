@@ -10,6 +10,7 @@ from tkinter import filedialog
 import json
 import datetime
 from pathlib import Path
+import time
 from mapper_module.utils import (
     CIRCLE, RECT, SCANCODES, DEF_DPI, IMAGES_FOLDER, JSONS_FOLDER,
     TOML_PATH, MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, select_image_file,
@@ -23,7 +24,12 @@ WAITING_FOR_KEY = "WAITING_FOR_KEY"
 DELETING = "DELETING"
 CONFIRM_EXIT = "CONFIRM_EXIT"
 NAMING = "NAMING"
-DEF_STR = "MODE: IDLE\nF3(Load JSON) | F4(Toggle Shapes Visibility) | F5(Change Image)\nF6(Circle) | F7(Rect) | F8(Cancel) | F9(List) | F10(Save)\nF11(Sprint Threshold) | F12(Mouse Wheel) | Delete(Delete) | Esc(Exit)"
+DEF_STR = \
+    "MODE: IDLE\n\
+    F3(Load JSON) | F4(Toggle Shapes Visibility) | F5(Change Image)\n\
+    F6(Circle) | F7(Rect) | F8(Cancel) | F9(List) | F10(Save)\n\
+    F11(Sprint Threshold) | F12(Mouse Wheel) | Delete(Delete) | Esc(Exit)\n\
+    Double click to iterate between artists under the mouse"
 
 SPECIAL_MAP = {
     "escape": "ESC", "enter": "ENTER", "backspace": "BACKSPACE", "tab": "TAB",
@@ -44,7 +50,7 @@ class Draggable:
     def __init__(self, entry_id:int, is_shape:bool, plotter_ref: Plotter):
         self.entry_id = entry_id
         self.plotter = plotter_ref
-        self.min_move_distance = 7
+        self.min_move_distance = 0
         if is_shape:
             self.artist_id = "shape_" + str(entry_id)
         else:
@@ -52,36 +58,65 @@ class Draggable:
             
     def populate_artist_list(self):
         self.plotter.artists_ids.append(self.artist_id)
+
+    def indicate_current_artist_id(self):
+        if self.plotter.current_artist_id is not None:
+            if self.plotter.current_artist_id.startswith('label_'):
+                for artist in self.plotter.label_drag_managers.values():
+                    if artist.artist_id == self.plotter.current_artist_id:
+                        label_bbox = artist.label_artist.get_bbox_patch()
+                        if label_bbox:
+                            label_bbox.set_edgecolor((0.85, 0.88, 0.92))
+                            label_bbox.set_linewidth(2)
+                        break
+            
+            elif self.plotter.current_artist_id.startswith('shape_'):
+                for artist in self.plotter.shape_drag_managers.values():
+                    if artist.artist_id == self.plotter.current_artist_id:
+                        artist.shape_artist.set_edgecolor((0.85, 0.88, 0.92))
+                        artist.shape_artist.set_linewidth(3)
+                        break
     
     def select_current_artist_id(self):
-        current_artist_id = None
-        
+        current_artist_id = None        
         if not self.plotter.artists_ids:
+            self.plotter.iter_count = 0
             return None
-        
+                
         if self.plotter.last_artist_id is None:
+            self.plotter.iter_count = 0
             return self.plotter.artists_ids[0]
         
         if self.plotter.last_artist_id in self.plotter.artists_ids:
-            if self.plotter.last_move_distance >= self.min_move_distance:
-                current_artist_id = self.plotter.last_artist_id
-            else:
+            if self.plotter.iter_count >= 2:
                 l = len(self.plotter.artists_ids)
                 i = self.plotter.artists_ids.index(self.plotter.last_artist_id)
                 n = (i + 1) % l
+                self.plotter.iter_count = 0
                 current_artist_id = self.plotter.artists_ids[n]
+            else:
+                current_artist_id = self.plotter.last_artist_id
                 
         else:
+            self.plotter.iter_count = 0
             current_artist_id = self.plotter.artists_ids[0]
-            
+        
         return current_artist_id
+
     
-    def clean_up_current_artist_id(self):
+    def clean_up_current_artist_id(self):        
+        self.indicate_current_artist_id()
+
+        if self.plotter.current_move_distance <= self.min_move_distance:
+            self.plotter.iter_count += 1
+        else:
+            self.plotter.iter_count = 0
+
         self.plotter.drawn = False
         self.plotter.last_artist_id = self.plotter.current_artist_id
         self.plotter.current_artist_id = None
-        self.plotter.last_move_distance = self.plotter.current_move_distance
-        self.plotter.current_move_distance = 0
+        self.plotter.current_move_distance = 0.0
+        self.plotter.artists_ids = []
 
 class DraggableLabel(Draggable):
     def __init__(self, entry_id:int, plotter_ref:Plotter):
@@ -100,31 +135,42 @@ class DraggableLabel(Draggable):
         ]
 
     def on_press(self, event):
-        if event.inaxes != self.label_artist.axes: return
+        if event.inaxes != self.shape_artist.axes: return
+        
         contains, _ = self.label_artist.contains(event)
         if not contains: return
         
-        # Populate the artists list
-        self.populate_artist_list()
-
         x0, y0 = self.label_artist.get_position()
         self.press = x0, y0, event.xdata, event.ydata, event.x, event.y
+
+        label_bbox = self.label_artist.get_bbox_patch()
+        if label_bbox:
+            label_bbox.set_edgecolor('black')
+            self.canvas.draw_idle()    
+        self.populate_artist_list()
         
     def on_motion(self, event):
-        if self.press is None or event.inaxes != self.label_artist.axes or self.drag_bg is None:
+        if self.press is None or event.inaxes != self.label_artist.axes:
             return
         
-        if self.plotter.current_artist_id is None:
+        if self.plotter.current_artist_id is None and self.plotter.iter_count == 0:
             self.plotter.current_artist_id = self.select_current_artist_id()
+            self.indicate_current_artist_id()
             
         if not self.plotter.current_artist_id == self.artist_id:
             return
         
         if not self.plotter.drawn:
             # Prepare Background for Blitting
+            label_bbox = self.label_artist.get_bbox_patch()
+            if label_bbox:
+                label_bbox.set_edgecolor((0.7, 0.7, 0.7, 0.8))
+                label_bbox.set_linewidth(3)
             self.label_artist.set_visible(False)
-            self.shape_artist.set_linewidth(3)
+            
             self.shape_artist.set_edgecolor((0.7, 0.7, 0.7, 0.8))
+            self.shape_artist.set_linewidth(3)
+            
             self.canvas.draw()
             self.drag_bg = self.canvas.copy_from_bbox(self.label_artist.axes.bbox)
             self.label_artist.set_visible(True)
@@ -132,9 +178,10 @@ class DraggableLabel(Draggable):
         
         x0, y0, xdata_press, ydata_press, xpx_press, ypx_press = self.press
         dx = event.xdata - xdata_press
-        dy = event.ydata - ydata_press
-        
-        dist_px = ((xpx_press**2) + (ypx_press**2))**0.5
+        dy = event.ydata - ydata_press   
+        dx_press = event.x - xpx_press
+        dy_press = event.y - ypx_press
+        dist_px = ((dx_press**2) + (dy_press**2))**0.5
         self.plotter.current_move_distance += dist_px
 
         # Blitting Loop
@@ -146,22 +193,29 @@ class DraggableLabel(Draggable):
     def on_release(self, event):
         self.press = None
         self.drag_bg = None
+
+        label_bbox = self.label_artist.get_bbox_patch()
+        if label_bbox:
+            label_bbox.set_edgecolor('black')
+            label_bbox.set_linewidth(1.5)
         
-        if self.plotter.artists_ids:
-            self.plotter.artists_ids = []
+        if self.plotter.current_artist_id is None and self.plotter.artists_ids:
+            self.plotter.current_artist_id = self.select_current_artist_id()
+            self.indicate_current_artist_id()
         
-        if self.plotter.current_artist_id == self.artist_id:
-            self.shape_artist.set_linewidth(2)
-            self.shape_artist.set_edgecolor((0.3, 0.3, 0.3, 0.8))
-        
+        if self.artist_id == self.plotter.current_artist_id:
+            if self.plotter.drawn:
+                # Reset blitted background                    
+                self.shape_artist.set_edgecolor((0.3, 0.3, 0.3, 0.8))
+                self.shape_artist.set_linewidth(2)
+            
             self.clean_up_current_artist_id()
             self.label_artist.remove()
             self.plotter.ax.add_artist(self.label_artist)
             
-            self.canvas.draw_idle()
+        self.canvas.draw_idle()
 
     def disconnect(self):
-        """The 'Leak Killer': Call this when deleting the label."""
         for cid in self.cids:
             self.canvas.mpl_disconnect(cid)
         print(f"[System] Event listeners for {self.label_artist} disconnected.")
@@ -170,17 +224,27 @@ class DraggableLabel(Draggable):
 class DraggableShape(Draggable):
     def __init__(self, entry_id:int, plotter_ref:Plotter, shape_type:str):
         super().__init__(entry_id, True, plotter_ref)
+        self.shape_type = shape_type
         self.label_artist = self.plotter.labels_artists[entry_id]
         self.shape_artist = self.plotter.shapes_artists[entry_id]
-        self.shape_type = shape_type
         self.canvas = self.shape_artist.figure.canvas
         self.press = None
         self.drag_bg = None
-        self.radial_tolerance = 5 # Pixel coordinates
-        self.edge_tolerance = 5 # Pixel coordinates
-        self.vertex_tolerance = 10 # Pixel coordinates
-        self.min_dist = 1 # Data coordinates
+        self.radial_tolerance = 10 # Pixel coordinates
+        self.edge_tolerance = 10 # Pixel coordinates
+        self.vertex_tolerance = 15 # Pixel coordinates
+        self.min_rect_dist = 80 # Data coordinates
+        self.min_circ_dist = 50 # Data coordinates
         self.shape_mode = None
+        
+        if self.shape_type == CIRCLE:
+            r = self.shape_artist.get_radius()
+            self.shape_artist.set_radius(max(r, self.min_circ_dist))
+        elif self.shape_type == RECT:
+            w = self.shape_artist.get_width()
+            h = self.shape_artist.get_height()
+            self.shape_artist.set_width(max(w, self.min_rect_dist))
+            self.shape_artist.set_height(max(h, self.min_rect_dist))
         
         # Store IDs so we can kill them later
         self.cids = [
@@ -189,54 +253,58 @@ class DraggableShape(Draggable):
             self.canvas.mpl_connect('button_release_event', self.on_release),
         ]
         
-    def on_press(self, event):
+    def on_press(self, event):        
         if event.inaxes != self.shape_artist.axes: return
-        contains, _ = self.shape_artist.contains(event)
+            
+        contains, _ = self.shape_artist.contains(event,)
         if not contains: return
-        
-        # Populate the artists list
-        self.populate_artist_list()
         
         if self.shape_type == CIRCLE:
             cx, cy = self.shape_artist.get_center()
             self.shape_mode = self.get_circumference(event, cx, cy)
-            self.press = cx, cy, event.xdata, event.ydata
-            
+            self.press = cx, cy, event.xdata, event.ydata, event.x, event.y
         elif self.shape_type == RECT:
-            bbox = self.shape_artist.get_window_extent()
+            x, y = self.shape_artist.get_xy()
             self.shape_mode = self.get_corner_under_mouse(event)
             if self.shape_mode is None:
-                self.shape_mode = self.get_edge_under_mouse(event, bbox)
-            self.press = bbox.x0, bbox.y0, event.xdata, event.ydata, event.x, event.y
-        
-        else:
-            self.press = None           
+                self.shape_mode = self.get_edge_under_mouse(event)
+            self.press = x, y, event.xdata, event.ydata, event.x, event.y
+
+        self.shape_artist.set_edgecolor((0.3, 0.3, 0.3, 0.8))
+        self.canvas.draw_idle()
+        self.populate_artist_list()
         
     def on_motion(self, event):
-        if self.press is None or event.inaxes != self.shape_artist.axes or self.drag_bg is None:
+        if self.press is None or event.inaxes != self.shape_artist.axes:
             return
-    
+
         if self.plotter.current_artist_id is None:
             self.plotter.current_artist_id = self.select_current_artist_id()
+            self.indicate_current_artist_id()
             
         if not self.plotter.current_artist_id == self.artist_id:
             return
-        
+                
         if not self.plotter.drawn:
             # Prepare Background for Blitting
+            self.shape_artist.set_edgecolor((0.7, 0.7, 0.7, 0.8))
+            self.shape_artist.set_linewidth(3)
             self.shape_artist.set_visible(False)
+            
             label_bbox = self.label_artist.get_bbox_patch()
             if label_bbox:
-                label_bbox.set_edgecolor(0.7, 0.7, 0.7, 0.8)
+                label_bbox.set_edgecolor((0.7, 0.7, 0.7, 0.8))
                 label_bbox.set_linewidth(3)
+                
             self.canvas.draw() 
             self.drag_bg = self.canvas.copy_from_bbox(self.shape_artist.axes.bbox)
             self.shape_artist.set_visible(True)
             self.plotter.drawn = True
         
         _, _, _, _, xpx_press, ypx_press = self.press
-
-        dist_px = ((xpx_press**2) + (ypx_press**2))**0.5
+        dx_press = event.x - xpx_press
+        dy_press = event.y - ypx_press
+        dist_px = ((dx_press**2) + (dy_press**2))**0.5
         self.plotter.current_move_distance += dist_px
 
         # Blitting Loop
@@ -246,8 +314,8 @@ class DraggableShape(Draggable):
         elif self.shape_type == RECT:
             self.rect_transform(event)        
         self.shape_artist.axes.draw_artist(self.shape_artist)
-        self.canvas.blit(self.shape_artist.axes.bbox)    
-    
+        self.canvas.blit(self.shape_artist.axes.bbox)
+                    
     def get_display_point(self, xdata, ydata):
         """
         Convert data pints to pixel coordinates
@@ -265,16 +333,21 @@ class DraggableShape(Draggable):
             return
         if self.shape_mode == 'drag':
             x0, y0, xdata_press, ydata_press, _, _ = self.press
-            dx = event.xdata - xdata_press
-            dy = event.ydata - ydata_press
-            self.shape_artist.set_center((x0 + dx, y0 + dy))
+            dx = xdata - xdata_press
+            dy = ydata - ydata_press
+            new_cx = int(x0 + dx)
+            new_cy = int(y0 + dy)
+            self.shape_artist.set_center((new_cx, new_cy))
+            self.plotter.shapes[self.entry_id]['cx'] = new_cx
+            self.plotter.shapes[self.entry_id]['cy'] = new_cy
+
             
     def rect_transform(self, event):
         if self.press is None:
             return
         xdata = event.xdata
         ydata = event.ydata
-        
+                        
         if self.update_corner(self.shape_mode, xdata, ydata):
             return
         if self.update_edge(self.shape_mode, xdata, ydata):
@@ -283,7 +356,19 @@ class DraggableShape(Draggable):
             x0, y0, xdata_press, ydata_press, _, _ = self.press
             dx = xdata - xdata_press
             dy = ydata - ydata_press
-            self.shape_artist.set_xy(((x0 + dx, y0 + dy)))
+            new_x = int(x0 + dx)
+            new_y = int(y0 + dy)
+            self.shape_artist.set_xy((new_x, new_y))
+            
+            _bb = self.plotter.shapes[self.entry_id]['bb']
+            (x1, y1), (x2, y2) = _bb
+            prev_w = x2 - x1
+            prev_h = y2 - y1
+            raw_bb = (new_x, new_y), (new_x + prev_w, new_y + prev_h)
+            cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
+            self.plotter.shapes[self.entry_id]['cx'] = cx
+            self.plotter.shapes[self.entry_id]['cy'] = cy
+            self.plotter.shapes[self.entry_id]['bb'] = bb
 
     def get_circumference(self, event, cx, cy):
         # Get circle data
@@ -307,8 +392,10 @@ class DraggableShape(Draggable):
         # Get the fixed center
         cx, cy = self.shape_artist.get_center()
         # Calculate distance from center to mouse
-        new_r = ((xdata - cx)**2 + (ydata - cy)**2)**0.5
-        self.shape_artist.set_radius(new_r)
+        new_r = int(((xdata - cx)**2 + (ydata - cy)**2)**0.5)
+        if new_r >= self.min_circ_dist:
+            self.shape_artist.set_radius(new_r)
+            self.plotter.shapes[self.entry_id]['r'] = new_r
         
     def get_corner_under_mouse(self, event):
         x, y = self.shape_artist.get_xy()
@@ -331,13 +418,13 @@ class DraggableShape(Draggable):
                 return name
         return None
     
-    def get_edge_under_mouse(self, event, bbox):
+    def get_edge_under_mouse(self, event):
         # Get rect bbox in pixels and perform limit checks
         mx, my = event.x, event.y
+        bbox = self.shape_artist.get_window_extent()
         is_within_horizontal = bbox.x0 <= mx <= bbox.x1
         is_within_vertical = bbox.y0 <= my <= bbox.y1
         
-        # Check left edge
         if abs(mx - bbox.x0) <= self.edge_tolerance and is_within_vertical:
             return 'left'
         # Check right edge
@@ -345,10 +432,10 @@ class DraggableShape(Draggable):
             return 'right'
         # Check bottom edge
         if abs(my - bbox.y0) <= self.edge_tolerance and is_within_horizontal:
-            return 'bottom'
+            return 'top'
         # Check top edge
         if abs(my - bbox.y1) <= self.edge_tolerance and is_within_horizontal:
-            return 'top'
+            return 'bottom'
         if is_within_horizontal and is_within_vertical:
             return 'drag'
         return None        
@@ -361,52 +448,112 @@ class DraggableShape(Draggable):
         x, y = self.shape_artist.get_xy()
         w = self.shape_artist.get_width()
         h = self.shape_artist.get_height()
+        
         # Calculate the fixed boundaries
         right_edge = x + w
         top_edge = y + h
         
+        _bb = self.plotter.shapes[self.entry_id]['bb']
+        (x1, y1), (x2, y2) = _bb
+        
         # Update based on corner
-        # Top-Left corner
+        # Top-Right corner
         if corner == 'top_right':
             # Anchor (x, y) stays fixed
-            new_w = xdata - x
-            new_h = ydata - y
-            if new_w >= self.min_dist and new_h >= self.min_dist:
+            new_w = int(xdata - x)
+            new_h = int(ydata - y)
+            
+            if abs(new_w) >= self.min_rect_dist:
                 self.shape_artist.set_width(new_w)
+                raw_bb = (x1, y1), (x1 + new_w, y2)
+                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
+                self.plotter.shapes[self.entry_id]['cx'] = cx
+                self.plotter.shapes[self.entry_id]['cy'] = cy
+                self.plotter.shapes[self.entry_id]['bb'] = bb
+                
+            if abs(new_h) >= self.min_rect_dist:
                 self.shape_artist.set_height(new_h)
+                raw_bb = (x1, y1), (x2, y1 + new_h)
+                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
+                self.plotter.shapes[self.entry_id]['cx'] = cx
+                self.plotter.shapes[self.entry_id]['cy'] = cy
+                self.plotter.shapes[self.entry_id]['bb'] = bb
+                
             return True
                 
-        # Top-Right corner
+        # Top-Left corner
         if corner == 'top_left':
             # Right edge stays fixed and y stays fixed
-            new_w = right_edge - xdata
-            new_h = ydata - y
-            if new_w >= self.min_dist and new_h >= self.min_dist:
+            new_w = int(right_edge - xdata)
+            new_h = int(ydata - y)
+            
+            if abs(new_w) >= self.min_rect_dist:
                 self.shape_artist.set_xy((xdata, y)) # Shift x
                 self.shape_artist.set_width(new_w)
+                raw_bb = (x2 - new_w, y1), (x2, y2)
+                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
+                self.plotter.shapes[self.entry_id]['cx'] = cx
+                self.plotter.shapes[self.entry_id]['cy'] = cy
+                self.plotter.shapes[self.entry_id]['bb'] = bb
+                
+            if abs(new_h) >= self.min_rect_dist:
                 self.shape_artist.set_height(new_h)
+                raw_bb = (x1, y1), (x2, y1 + new_h)
+                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
+                self.plotter.shapes[self.entry_id]['cx'] = cx
+                self.plotter.shapes[self.entry_id]['cy'] = cy
+                self.plotter.shapes[self.entry_id]['bb'] = bb
+                
             return True
                 
         # Bottom-Right corner
         if corner == 'bottom_right':
             # Top edge stays fixed and x stays fixed
-            new_w = xdata - x
-            new_h = top_edge - ydata
-            if new_w >= self.min_dist and new_h >= self.min_dist:
-                self.shape_artist.set_xy((x, ydata)) # Shift y
+            new_w = int(xdata - x)
+            new_h = int(top_edge - ydata)
+            
+            if abs(new_w) >= self.min_rect_dist:
                 self.shape_artist.set_width(new_w)
+                raw_bb = (x1, y1), (x1 + new_w, y2)
+                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
+                self.plotter.shapes[self.entry_id]['cx'] = cx
+                self.plotter.shapes[self.entry_id]['cy'] = cy
+                self.plotter.shapes[self.entry_id]['bb'] = bb
+                
+            if abs(new_h) >= self.min_rect_dist:
+                self.shape_artist.set_xy((x, ydata)) # Shift y
                 self.shape_artist.set_height(new_h)
+                raw_bb = (x1, y2 - new_h), (x2, y2)
+                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
+                self.plotter.shapes[self.entry_id]['cx'] = cx
+                self.plotter.shapes[self.entry_id]['cy'] = cy
+                self.plotter.shapes[self.entry_id]['bb'] = bb
+                
             return True
                 
         # Bottom-Left corner
         if corner == 'bottom_left':
             # Opposite corner (Top-Right) stays fixed, both x and y must shift
-            new_w = right_edge - xdata
-            new_h = top_edge - ydata
-            if new_w >= self.min_dist and new_h >= self.min_dist:
-                self.shape_artist.set_xy((xdata, ydata))
+            new_w = int(right_edge - xdata)
+            new_h = int(top_edge - ydata)
+            shift = False
+            
+            
+            if abs(new_w) >= self.min_rect_dist:
+                shift = True
                 self.shape_artist.set_width(new_w)
+            if abs(new_h) >= self.min_rect_dist:
+                shift = True
                 self.shape_artist.set_height(new_h)
+                
+            if shift:
+                self.shape_artist.set_xy((xdata, ydata)) # Shift x, y
+                raw_bb = (x2 - new_w, y2 - new_h), (x2, y2)
+                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
+                self.plotter.shapes[self.entry_id]['cx'] = cx
+                self.plotter.shapes[self.entry_id]['cy'] = cy
+                self.plotter.shapes[self.entry_id]['bb'] = bb
+        
             return True
         
         return False
@@ -422,67 +569,103 @@ class DraggableShape(Draggable):
         
         # Calcuate fixed edges
         right_edge = x + w
-        top_edge = y + h 
+        top_edge = y + h
+        
+        _bb = self.plotter.shapes[self.entry_id]['bb']
+        (x1, y1), (x2, y2) = _bb
         
         # Update based on edge
         # Right edge
         if edge == 'right':
             # Resize width, anchor (x) stays the same
-            new_w = xdata - x
-            if new_w >= self.min_dist:
+            new_w = int(xdata - x)
+            
+            if abs(new_w) >= self.min_rect_dist:
                 self.shape_artist.set_width(new_w)
+                raw_bb = (x1, y1), (x1 + new_w, y2)
+                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
+                self.plotter.shapes[self.entry_id]['cx'] = cx
+                self.plotter.shapes[self.entry_id]['cy'] = cy
+                self.plotter.shapes[self.entry_id]['bb'] = bb
+                                
             return True
         
         # Left edge
         if edge == 'left':
             # Mouse becomes new x, width shrinks/grows to compensate
-            new_w = right_edge - xdata
-            if new_w >= self.min_dist:
+            new_w = int(right_edge - xdata)
+            
+            if abs(new_w) >= self.min_rect_dist:
                 self.shape_artist.set_xy((xdata, y)) # Move anchor
                 self.shape_artist.set_width(new_w)
+                raw_bb = (x2 - new_w, y1), (x2, y2)
+                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
+                self.plotter.shapes[self.entry_id]['cx'] = cx
+                self.plotter.shapes[self.entry_id]['cy'] = cy
+                self.plotter.shapes[self.entry_id]['bb'] = bb
+            
             return True
         
         # Top edge
         if edge == 'top':
             # Resize height, anchor (y) stays the same
-            new_h = ydata - y
-            if new_h >= self.min_dist:
+            new_h = int(ydata - y)
+            
+            if abs(new_h) >= self.min_rect_dist:
                 self.shape_artist.set_height(new_h)
+                raw_bb = (x1, y1), (x2, y1 + new_h)
+                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
+                self.plotter.shapes[self.entry_id]['cx'] = cx
+                self.plotter.shapes[self.entry_id]['cy'] = cy
+                self.plotter.shapes[self.entry_id]['bb'] = bb
+                
             return True
         
         # Bottom edge
         if edge == 'bottom':
             # Mouse becomes new y, height shrinks/grows to compensate
-            new_h = top_edge - ydata
-            if new_h >= self.min_dist:
+            new_h = int(top_edge - ydata)
+            
+            if abs(new_h) >= self.min_rect_dist:
                 self.shape_artist.set_xy((x, ydata)) # Move anchor
                 self.shape_artist.set_height(new_h)
+                raw_bb = (x1, y2 - new_h), (x2, y2)
+                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
+                self.plotter.shapes[self.entry_id]['cx'] = cx
+                self.plotter.shapes[self.entry_id]['cy'] = cy
+                self.plotter.shapes[self.entry_id]['bb'] = bb
+            
             return True
             
         return False
 
-    def on_release(self, event):
+    def on_release(self, event):        
         self.press = None
         self.drag_bg = None
         self.shape_mode = None
 
-        if self.plotter.artists_ids:
-            self.plotter.artists_ids = []
+        self.shape_artist.set_edgecolor((0.3, 0.3, 0.3, 0.8))
+        self.shape_artist.set_linewidth(2)
+        
+        if self.plotter.current_artist_id is None and self.plotter.artists_ids:
+            self.plotter.current_artist_id = self.select_current_artist_id()
+            self.indicate_current_artist_id()
 
-        if self.plotter.current_artist_id == self.artist_id:
-            label_bbox = self.label_artist.get_bbox_patch()
-            if label_bbox:
-                label_bbox.set_edgecolor('black')
-                label_bbox.set_linewidth(1.5)
+        if self.artist_id == self.plotter.current_artist_id:
+            if self.plotter.drawn:
+                # Reset blitted background
+                label_bbox = self.label_artist.get_bbox_patch()
+                if label_bbox:
+                    label_bbox.set_edgecolor('black')
+                    label_bbox.set_linewidth(1.5)
             
             self.clean_up_current_artist_id()
             self.shape_artist.remove()
             self.plotter.ax.add_patch(self.shape_artist)
             
-            self.canvas.draw_idle()
-
+        self.canvas.draw_idle()
+                
     def disconnect(self):
-        """The 'Leak Killer': Call this when deleting the shape."""
         for cid in self.cids:
             self.canvas.mpl_disconnect(cid)
         print(f"[System] Event listeners for {self.shape_artist} disconnected.")
@@ -569,6 +752,7 @@ class Plotter:
         except Exception as e:
             print(f"Error loading image: {e}")
             return None
+        print(f"Image:{self.image_path.as_posix()} loaded successfully.")
         return img
         
     def update_image_params(self, img):
@@ -623,8 +807,8 @@ class Plotter:
         self.current_artist_id = None
         self.artists_ids = []
         self.drawn = False
-        self.last_move_distance = 0.0
         self.current_move_distance = 0.0
+        self.iter_count = 0
         
     def update_title(self, text):
         self.ax.set_title(text)
@@ -654,7 +838,7 @@ class Plotter:
         self.update_title(f"MODE: {mode}. Click {num_points} points on the image (F8 to Cancel).")
     
     
-    def load_json(self, json_path):
+    def load_json(self):
         # Initialize Tkinter and hide the root window
         root = tk.Tk()
         root.withdraw()
@@ -737,23 +921,25 @@ class Plotter:
             if zone_type == CIRCLE:
                 scale_r = (scale_x + scale_y) / 2
                 json_shape['r'] = int(val1 * scale_r)
+                json_shape['mode'] = CIRCLE
 
             elif zone_type == RECT:
                 new_x1 = int(val1 * scale_x)
                 new_y1 = int(val2 * scale_y)
                 new_x2 = int(val3 * scale_x)
                 new_y2 = int(val4 * scale_y)
-                
                 json_shape['bb'] = ((new_x1, new_y1), (new_x2, new_y2))
+                json_shape['mode'] = RECT
 
             item_id += 1
             json_shapes[item_id] = json_shape
-            
 
         if item_id > 0:
             w, h, dpi = self.width, self.height, self.dpi
             self.init_params_helper()
             self.width, self.height, self.dpi = w, h, dpi
+            self.reset_state()
+            print("Cleared previous shapes and artists, figure reset.")
             
             for shape in json_shapes.values():
                 cx = shape['cx']
@@ -763,9 +949,11 @@ class Plotter:
                 key_name = shape['key_name']
                 interception_key = shape['interception_key']
                 hex_code = shape['m_code']
+                self.mode = shape['mode']
+                                
                 self.finalize_shape(cx, cy, r, bb, key_name, interception_key, hex_code)
-            self.reset_state()                 
-    
+            self.reset_state()
+            print(f"Loaded JSON file: {Path(file_path).as_posix()}")
 
     def change_image(self):
         image_path = select_image_file(IMAGES_FOLDER)
@@ -786,6 +974,7 @@ class Plotter:
 
             self.init_crosshairs()     
             self.reset_state()
+            print("Cleared previous shapes and artists, figure reset.")
             print(f"Swapped HUD to: {self.image_path.as_posix()}")
 
     def toggle_visibility(self):
@@ -1301,7 +1490,7 @@ class Plotter:
         print("="*45 + "\n")
 
     # Math
-    def calculate_circle(self):
+    def calculate_circle(self): # 3 Points
         x1, y1 = self.points[0]
         x2, y2 = self.points[1]
         x3, y3 = self.points[2]
@@ -1314,11 +1503,16 @@ class Plotter:
         r = math.sqrt((x1 - h)**2 + (y1 - k)**2)
         return int(h), int(k), int(r), None
 
-    def calculate_rect(self):
+    def calculate_rect(self): # 4 Points
         xs = [pt[0] for pt in self.points]
         ys = [pt[1] for pt in self.points]
         return int(sum(xs)/4), int(sum(ys)/4), None, ((min(xs), min(ys)), (max(xs), max(ys)))
-    
+        
+    def calculate_raw_rect(self, values): # 2 Points
+        xs = [abs(v[0]) for v in values]
+        ys = [abs(v[1]) for v in values]
+        return int(sum(xs)/2), int(sum(ys)/2), None, ((min(xs), min(ys)), (max(xs), max(ys)))
+
 
 if __name__ == "__main__":
     Plotter()
