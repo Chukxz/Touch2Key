@@ -50,7 +50,7 @@ class Draggable:
     def __init__(self, entry_id:int, is_shape:bool, plotter_ref: Plotter):
         self.entry_id = entry_id
         self.plotter = plotter_ref
-        self.min_move_distance = 0
+        self.min_move_distance = 3
         if is_shape:
             self.artist_id = "shape_" + str(entry_id)
         else:
