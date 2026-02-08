@@ -1151,9 +1151,8 @@ class Plotter:
             if event.key == 'f8':
                 print("[-] Action Cancelled.")
                 self.reset_state()
-                return
             
-            if not event.key == 'f8':
+            else:
                 print(f"[!] Blocked: Finish or Cancel (F8) current shape first.")
             return
 
@@ -1277,7 +1276,7 @@ class Plotter:
         elif key == 'backspace':
             self.input_buffer = self.input_buffer[:-1]
             self.update_title(f"DELETE MODE: ID [{self.input_buffer}] (Enter to delete)")
-        elif key in ['f6', 'f7', 'delete', 'f10']:
+        else:
             print("[!] Blocked: Exit Delete Mode (Esc) first.")
 
     def delete_entry(self, uid):
