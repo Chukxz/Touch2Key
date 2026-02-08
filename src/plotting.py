@@ -57,7 +57,7 @@ class Draggable:
             self.artist_id = "label_" + str(entry_id)
             
     def populate_artist_list(self):
-        self.plotter.artists_ids.append(self.artist_id)
+            self.plotter.artists_ids.append(self.artist_id)
 
     def indicate_current_artist_id(self):
         if self.plotter.current_artist_id is not None:
@@ -146,9 +146,13 @@ class DraggableLabel(Draggable):
         label_bbox = self.label_artist.get_bbox_patch()
         if label_bbox:
             label_bbox.set_edgecolor('black')
-            self.canvas.draw_idle()    
-        self.populate_artist_list()
         
+        if self.label_artist.get_visible():
+            self.shape_artist.set_visible(True)
+            self.populate_artist_list()
+        
+        self.canvas.draw_idle()
+            
     def on_motion(self, event):
         if self.press is None or event.inaxes != self.label_artist.axes:
             return
@@ -179,10 +183,8 @@ class DraggableLabel(Draggable):
         x0, y0, xdata_press, ydata_press, xpx_press, ypx_press = self.press
         dx = event.xdata - xdata_press
         dy = event.ydata - ydata_press   
-        dx_press = event.x - xpx_press
-        dy_press = event.y - ypx_press
-        dist_px = ((dx_press**2) + (dy_press**2))**0.5
-        self.plotter.current_move_distance += dist_px
+        dist_from_origin = ((event.x - xpx_press)**2 + (event.y - ypx_press)**2)**0.5
+        self.plotter.current_move_distance = dist_from_origin
 
         # Blitting Loop
         self.canvas.restore_region(self.drag_bg)
@@ -230,21 +232,25 @@ class DraggableShape(Draggable):
         self.canvas = self.shape_artist.figure.canvas
         self.press = None
         self.drag_bg = None
-        self.radial_tolerance = 10 # Pixel coordinates
-        self.edge_tolerance = 10 # Pixel coordinates
-        self.vertex_tolerance = 15 # Pixel coordinates
-        self.min_rect_dist = 80 # Data coordinates
-        self.min_circ_dist = 50 # Data coordinates
+        self.radial_tolerance = 5 # Pixel coordinates
+        self.edge_tolerance = 5 # Pixel coordinates
+        self.vertex_tolerance = 10 # Pixel coordinates
+        self.min_rect_dist = 50 # Data coordinates
+        self.min_circ_dist = 30 # Data coordinates
         self.shape_mode = None
+        self.spec_max_ratio = 0.3 # max ratio for joystick and sprint distance relative to image size
         
         if self.shape_type == CIRCLE:
             r = self.shape_artist.get_radius()
-            self.shape_artist.set_radius(max(r, self.min_circ_dist))
+            new_r = max(r, self.min_circ_dist)
+            self.shape_artist.set_radius(new_r)
+            self.plotter.shapes[self.entry_id]['r'] = new_r            
+            
         elif self.shape_type == RECT:
+            x, y = self.shape_artist.get_xy()
             w = self.shape_artist.get_width()
             h = self.shape_artist.get_height()
-            self.shape_artist.set_width(max(w, self.min_rect_dist))
-            self.shape_artist.set_height(max(h, self.min_rect_dist))
+            self.update_rect_safe(x, y, w, h)
         
         # Store IDs so we can kill them later
         self.cids = [
@@ -269,10 +275,14 @@ class DraggableShape(Draggable):
             if self.shape_mode is None:
                 self.shape_mode = self.get_edge_under_mouse(event)
             self.press = x, y, event.xdata, event.ydata, event.x, event.y
-
+        
         self.shape_artist.set_edgecolor((0.3, 0.3, 0.3, 0.8))
+        
+        if self.shape_artist.get_visible():
+            self.label_artist.set_visible(True)
+            self.populate_artist_list()
+            
         self.canvas.draw_idle()
-        self.populate_artist_list()
         
     def on_motion(self, event):
         if self.press is None or event.inaxes != self.shape_artist.axes:
@@ -302,10 +312,8 @@ class DraggableShape(Draggable):
             self.plotter.drawn = True
         
         _, _, _, _, xpx_press, ypx_press = self.press
-        dx_press = event.x - xpx_press
-        dy_press = event.y - ypx_press
-        dist_px = ((dx_press**2) + (dy_press**2))**0.5
-        self.plotter.current_move_distance += dist_px
+        dist_from_origin = ((event.x - xpx_press)**2 + (event.y - ypx_press)**2)**0.5
+        self.plotter.current_move_distance = dist_from_origin
 
         # Blitting Loop
         self.canvas.restore_region(self.drag_bg)
@@ -327,21 +335,62 @@ class DraggableShape(Draggable):
             return
         xdata = event.xdata
         ydata = event.ydata
+        
+        old_cx, old_cy = self.shape_artist.get_center()
+        old_r = self.shape_artist.get_radius()
+        new_cx, new_cy = old_cx, old_cy
 
         if self.shape_mode == 'resize':
             self.update_radius(xdata, ydata)
-            return
-        if self.shape_mode == 'drag':
+
+        elif self.shape_mode == 'drag':
             x0, y0, xdata_press, ydata_press, _, _ = self.press
             dx = xdata - xdata_press
             dy = ydata - ydata_press
-            new_cx = int(x0 + dx)
-            new_cy = int(y0 + dy)
+            new_cx = int(round(x0 + dx))
+            new_cy = int(round(y0 + dy))
             self.shape_artist.set_center((new_cx, new_cy))
             self.plotter.shapes[self.entry_id]['cx'] = new_cx
             self.plotter.shapes[self.entry_id]['cy'] = new_cy
 
+        if self.plotter.saved_mouse_wheel and self.plotter.shapes[self.entry_id]['key_name'] == MOUSE_WHEEL_CODE:
+            self.plotter.mouse_wheel_cx = new_cx
+            self.plotter.mouse_wheel_cy = new_cy
             
+            if self.plotter.saved_sprint_distance and self.plotter.sprint_artist_id is not None:
+                sprint_manager = self.plotter.shape_drag_managers[self.plotter.sprint_artist_id]
+                sp_cx, sp_cy = sprint_manager.shape_artist.get_center()
+                
+                actual_dist = self.plotter.euclidean_distance(sp_cx, sp_cy, new_cx, new_cy)
+                
+                # STRICT CHECK: If Joystick gets too close to Sprint point -> BLOCK MOVEMENT
+                if actual_dist <= self.plotter.mouse_wheel_radius:                                        
+                    # Revert Joystick Visuals (CRITICAL FIX)
+                    self.shape_artist.set_center((old_cx, old_cy))
+                    
+                    # Revert Joystick Data
+                    self.plotter.shapes[self.entry_id]['cx'] = old_cx
+                    self.plotter.shapes[self.entry_id]['cy'] = old_cy
+                    
+                    # Revert Global State
+                    self.plotter.mouse_wheel_cx = old_cx
+                    self.plotter.mouse_wheel_cy = old_cy
+                else:
+                    self.plotter.sprint_distance = actual_dist
+            
+        if self.plotter.saved_sprint_distance and self.plotter.shapes[self.entry_id]['key_name'] == SPRINT_DISTANCE_CODE:
+            actual_dist = self.plotter.euclidean_distance(new_cx, new_cy, self.plotter.mouse_wheel_cx, self.plotter.mouse_wheel_cy)
+            
+            # STRICT CHECK: Ensure Sprint is actually outside the Joystick
+            if actual_dist <= self.plotter.mouse_wheel_radius:                
+                self.shape_artist.set_center((old_cx, old_cy))
+                self.shape_artist.set_radius(old_r)
+                self.plotter.shapes[self.entry_id]['cx'] = old_cx
+                self.plotter.shapes[self.entry_id]['cy'] = old_cy
+                self.plotter.shapes[self.entry_id]['r'] = old_r             
+            else:
+                self.plotter.sprint_distance = actual_dist
+
     def rect_transform(self, event):
         if self.press is None:
             return
@@ -356,19 +405,11 @@ class DraggableShape(Draggable):
             x0, y0, xdata_press, ydata_press, _, _ = self.press
             dx = xdata - xdata_press
             dy = ydata - ydata_press
-            new_x = int(x0 + dx)
-            new_y = int(y0 + dy)
-            self.shape_artist.set_xy((new_x, new_y))
-            
-            _bb = self.plotter.shapes[self.entry_id]['bb']
-            (x1, y1), (x2, y2) = _bb
-            prev_w = x2 - x1
-            prev_h = y2 - y1
-            raw_bb = (new_x, new_y), (new_x + prev_w, new_y + prev_h)
-            cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
-            self.plotter.shapes[self.entry_id]['cx'] = cx
-            self.plotter.shapes[self.entry_id]['cy'] = cy
-            self.plotter.shapes[self.entry_id]['bb'] = bb
+            new_x = int(round(x0 + dx))
+            new_y = int(round(y0 + dy))
+            w = self.shape_artist.get_width()
+            h = self.shape_artist.get_height()
+            self.update_rect_safe(new_x, new_y, w, h)
 
     def get_circumference(self, event, cx, cy):
         # Get circle data
@@ -387,257 +428,226 @@ class DraggableShape(Draggable):
         if dist_px <= r_px:
             return 'drag'
         return None
-    
+
     def update_radius(self, xdata, ydata):
-        # Get the fixed center
         cx, cy = self.shape_artist.get_center()
-        # Calculate distance from center to mouse
-        new_r = int(((xdata - cx)**2 + (ydata - cy)**2)**0.5)
+        new_r = int(round(((xdata - cx)**2 + (ydata - cy)**2)**0.5))
+        
+        # Screen Size Constraint
+        max_screen_r = int(round((self.spec_max_ratio * ((self.plotter.width + self.plotter.height) / 2))))
+        new_r = min(new_r, max_screen_r)
+
+        # Joystick vs Sprint Constraint (NEW)
+        if self.plotter.saved_mouse_wheel and self.plotter.shapes[self.entry_id]['key_name'] == MOUSE_WHEEL_CODE:
+            if self.plotter.saved_sprint_distance and self.plotter.sprint_artist_id is not None:
+                sprint_manager = self.plotter.shape_drag_managers[self.plotter.sprint_artist_id]
+                sp_cx, sp_cy = sprint_manager.shape_artist.get_center()
+                dist_to_sprint = self.plotter.euclidean_distance(cx, cy, sp_cx, sp_cy)
+                
+                # Clamp radius so it stops 1 pixel before hitting the sprint point
+                if new_r >= dist_to_sprint:
+                    new_r = int(dist_to_sprint) - 1
+
+        # Apply changes
         if new_r >= self.min_circ_dist:
             self.shape_artist.set_radius(new_r)
             self.plotter.shapes[self.entry_id]['r'] = new_r
-        
+            
+            # Update global state
+            if self.plotter.saved_mouse_wheel and self.plotter.shapes[self.entry_id]['key_name'] == MOUSE_WHEEL_CODE:
+                 self.plotter.mouse_wheel_radius = new_r
+    
     def get_corner_under_mouse(self, event):
         x, y = self.shape_artist.get_xy()
         w, h = self.shape_artist.get_width(), self.shape_artist.get_height()
-        # Define corners in Data Coordinates
-        corners = {
-            'bottom_left': (x, y),
-            'bottom_right': (x + w, y),
-            'top_left': (x, y + h),
-            'top_right': (x + w, y + h)
-        }
         
+        # VISUAL CORNERS (Adjusted for imshow Y-inversion)
+        # (x, y) is visually TOP-LEFT
+        # (x, y+h) is visually BOTTOM-LEFT
+        corners = {
+            'top_left':     (x, y),
+            'top_right':    (x + w, y),
+            'bottom_left':  (x, y + h),
+            'bottom_right': (x + w, y + h)
+        }
+
         # Check pixel distance for each corner
         for name, (cx, cy) in corners.items():
-            # Convert corner to pixels
             cx_px, cy_px = self.shape_artist.axes.transData.transform((cx, cy))
-            # Distance formula in pixels
             dist_px = ((event.x - cx_px)**2 + (event.y - cy_px)**2)**0.5
             if dist_px <= self.vertex_tolerance:
                 return name
         return None
     
     def get_edge_under_mouse(self, event):
-        # Get rect bbox in pixels and perform limit checks
         mx, my = event.x, event.y
         bbox = self.shape_artist.get_window_extent()
+        
         is_within_horizontal = bbox.x0 <= mx <= bbox.x1
         is_within_vertical = bbox.y0 <= my <= bbox.y1
-        
+
+        # NOTE: bbox.y0 is the BOTTOM pixel, bbox.y1 is the TOP pixel in Matplotlib
+        # But in imshow (inverted), visual layout is different. 
+        # We rely on visual consistency relative to the mouse.
+
         if abs(mx - bbox.x0) <= self.edge_tolerance and is_within_vertical:
             return 'left'
-        # Check right edge
         if abs(mx - bbox.x1) <= self.edge_tolerance and is_within_vertical:
             return 'right'
-        # Check bottom edge
-        if abs(my - bbox.y0) <= self.edge_tolerance and is_within_horizontal:
-            return 'top'
-        # Check top edge
+        
+        # Visual TOP edge is mathematically the 'min y' (y0 in data, but y1 in pixels typically)
+        # Let's trust the pixel bbox: y1 is usually visually Top in MPL GUI, y0 is Bottom
         if abs(my - bbox.y1) <= self.edge_tolerance and is_within_horizontal:
+            return 'top'
+        if abs(my - bbox.y0) <= self.edge_tolerance and is_within_horizontal:
             return 'bottom'
+
         if is_within_horizontal and is_within_vertical:
             return 'drag'
-        return None        
+        return None
     
     def update_corner(self, corner, xdata, ydata):
         if corner is None:
             return False
-        
-        # Get current state
+
+        xdata, ydata = int(round(xdata)), int(round(ydata))
+
+        # Get current RAW bounds (un-normalized)
         x, y = self.shape_artist.get_xy()
         w = self.shape_artist.get_width()
         h = self.shape_artist.get_height()
-        
-        # Calculate the fixed boundaries
-        right_edge = x + w
-        top_edge = y + h
-        
-        _bb = self.plotter.shapes[self.entry_id]['bb']
-        (x1, y1), (x2, y2) = _bb
-        
-        # Update based on corner
-        # Top-Right corner
-        if corner == 'top_right':
-            # Anchor (x, y) stays fixed
-            new_w = int(xdata - x)
-            new_h = int(ydata - y)
-            
-            if abs(new_w) >= self.min_rect_dist:
-                self.shape_artist.set_width(new_w)
-                raw_bb = (x1, y1), (x1 + new_w, y2)
-                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
-                self.plotter.shapes[self.entry_id]['cx'] = cx
-                self.plotter.shapes[self.entry_id]['cy'] = cy
-                self.plotter.shapes[self.entry_id]['bb'] = bb
-                
-            if abs(new_h) >= self.min_rect_dist:
-                self.shape_artist.set_height(new_h)
-                raw_bb = (x1, y1), (x2, y1 + new_h)
-                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
-                self.plotter.shapes[self.entry_id]['cx'] = cx
-                self.plotter.shapes[self.entry_id]['cy'] = cy
-                self.plotter.shapes[self.entry_id]['bb'] = bb
-                
-            return True
-                
-        # Top-Left corner
-        if corner == 'top_left':
-            # Right edge stays fixed and y stays fixed
-            new_w = int(right_edge - xdata)
-            new_h = int(ydata - y)
-            
-            if abs(new_w) >= self.min_rect_dist:
-                self.shape_artist.set_xy((xdata, y)) # Shift x
-                self.shape_artist.set_width(new_w)
-                raw_bb = (x2 - new_w, y1), (x2, y2)
-                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
-                self.plotter.shapes[self.entry_id]['cx'] = cx
-                self.plotter.shapes[self.entry_id]['cy'] = cy
-                self.plotter.shapes[self.entry_id]['bb'] = bb
-                
-            if abs(new_h) >= self.min_rect_dist:
-                self.shape_artist.set_height(new_h)
-                raw_bb = (x1, y1), (x2, y1 + new_h)
-                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
-                self.plotter.shapes[self.entry_id]['cx'] = cx
-                self.plotter.shapes[self.entry_id]['cy'] = cy
-                self.plotter.shapes[self.entry_id]['bb'] = bb
-                
-            return True
-                
-        # Bottom-Right corner
+
+        # Identify fixed anchor points based on the corner being dragged
+        # Note: We use the VISUAL names we defined in get_corner_under_mouse
         if corner == 'bottom_right':
-            # Top edge stays fixed and x stays fixed
-            new_w = int(xdata - x)
-            new_h = int(top_edge - ydata)
-            
-            if abs(new_w) >= self.min_rect_dist:
-                self.shape_artist.set_width(new_w)
-                raw_bb = (x1, y1), (x1 + new_w, y2)
-                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
-                self.plotter.shapes[self.entry_id]['cx'] = cx
-                self.plotter.shapes[self.entry_id]['cy'] = cy
-                self.plotter.shapes[self.entry_id]['bb'] = bb
-                
-            if abs(new_h) >= self.min_rect_dist:
-                self.shape_artist.set_xy((x, ydata)) # Shift y
-                self.shape_artist.set_height(new_h)
-                raw_bb = (x1, y2 - new_h), (x2, y2)
-                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
-                self.plotter.shapes[self.entry_id]['cx'] = cx
-                self.plotter.shapes[self.entry_id]['cy'] = cy
-                self.plotter.shapes[self.entry_id]['bb'] = bb
-                
+            # Fixed Anchor is Top-Left (x, y)
+            new_w = xdata - x
+            new_h = ydata - y
+            self.update_rect_safe(x, y, new_w, new_h)
             return True
-                
-        # Bottom-Left corner
+
+        if corner == 'top_left':
+            # Fixed Anchor is Bottom-Right (x+w, y+h)
+            # New x is mouse_x, New y is mouse_y
+            # Width changes by (old_right - mouse_x)
+            new_w = (x + w) - xdata
+            new_h = (y + h) - ydata
+            self.update_rect_safe(xdata, ydata, new_w, new_h)
+            return True
+
+        if corner == 'top_right':
+            # Fixed Anchor is Bottom-Left (x, y+h)
+            # x is unchanged (visually left), y becomes mouse_y (visually top)
+            new_w = xdata - x
+            new_h = (y + h) - ydata
+            self.update_rect_safe(x, ydata, new_w, new_h)
+            return True
+
         if corner == 'bottom_left':
-            # Opposite corner (Top-Right) stays fixed, both x and y must shift
-            new_w = int(right_edge - xdata)
-            new_h = int(top_edge - ydata)
-            shift = False
-            
-            
-            if abs(new_w) >= self.min_rect_dist:
-                shift = True
-                self.shape_artist.set_width(new_w)
-            if abs(new_h) >= self.min_rect_dist:
-                shift = True
-                self.shape_artist.set_height(new_h)
-                
-            if shift:
-                self.shape_artist.set_xy((xdata, ydata)) # Shift x, y
-                raw_bb = (x2 - new_w, y2 - new_h), (x2, y2)
-                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
-                self.plotter.shapes[self.entry_id]['cx'] = cx
-                self.plotter.shapes[self.entry_id]['cy'] = cy
-                self.plotter.shapes[self.entry_id]['bb'] = bb
-        
+            # Fixed Anchor is Top-Right (x+w, y)
+            # x becomes mouse_x, y is unchanged
+            new_w = (x + w) - xdata
+            new_h = ydata - y
+            self.update_rect_safe(xdata, y, new_w, new_h)
             return True
-        
+
         return False
                 
     def update_edge(self, edge, xdata, ydata):
         if edge is None:
             return False
+
+        xdata, ydata = int(round(xdata)), int(round(ydata))
         
-        # Get current state
+        # Get current RAW bounds
         x, y = self.shape_artist.get_xy()
         w = self.shape_artist.get_width()
         h = self.shape_artist.get_height()
-        
-        # Calcuate fixed edges
-        right_edge = x + w
-        top_edge = y + h
-        
-        _bb = self.plotter.shapes[self.entry_id]['bb']
-        (x1, y1), (x2, y2) = _bb
-        
-        # Update based on edge
-        # Right edge
+
+        # Determine limits based on the visual edge being dragged
+        #    We calculate the new proposed dimensions, then Normalize.
+
         if edge == 'right':
-            # Resize width, anchor (x) stays the same
-            new_w = int(xdata - x)
-            
-            if abs(new_w) >= self.min_rect_dist:
-                self.shape_artist.set_width(new_w)
-                raw_bb = (x1, y1), (x1 + new_w, y2)
-                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
-                self.plotter.shapes[self.entry_id]['cx'] = cx
-                self.plotter.shapes[self.entry_id]['cy'] = cy
-                self.plotter.shapes[self.entry_id]['bb'] = bb
-                                
+            # Anchor: Left Edge (x) stays fixed.
+            # New Width = Mouse X - Left Edge
+            new_w = xdata - x
+            # Height and Y unchanged
+            self.update_rect_safe(x, y, new_w, h)
             return True
-        
-        # Left edge
+
         if edge == 'left':
-            # Mouse becomes new x, width shrinks/grows to compensate
-            new_w = int(right_edge - xdata)
-            
-            if abs(new_w) >= self.min_rect_dist:
-                self.shape_artist.set_xy((xdata, y)) # Move anchor
-                self.shape_artist.set_width(new_w)
-                raw_bb = (x2 - new_w, y1), (x2, y2)
-                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
-                self.plotter.shapes[self.entry_id]['cx'] = cx
-                self.plotter.shapes[self.entry_id]['cy'] = cy
-                self.plotter.shapes[self.entry_id]['bb'] = bb
-            
+            # Anchor: Right Edge (x + w) stays fixed.
+            # New Width = Right Edge - Mouse X
+            # New X = Mouse X
+            right_edge = x + w
+            new_w = right_edge - xdata
+            # Height and Y unchanged
+            self.update_rect_safe(xdata, y, new_w, h)
             return True
-        
-        # Top edge
-        if edge == 'top':
-            # Resize height, anchor (y) stays the same
-            new_h = int(ydata - y)
-            
-            if abs(new_h) >= self.min_rect_dist:
-                self.shape_artist.set_height(new_h)
-                raw_bb = (x1, y1), (x2, y1 + new_h)
-                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
-                self.plotter.shapes[self.entry_id]['cx'] = cx
-                self.plotter.shapes[self.entry_id]['cy'] = cy
-                self.plotter.shapes[self.entry_id]['bb'] = bb
-                
-            return True
-        
-        # Bottom edge
+
         if edge == 'bottom':
-            # Mouse becomes new y, height shrinks/grows to compensate
-            new_h = int(top_edge - ydata)
+            # Visual Bottom means mathematically HIGHER Y in typical plots, 
+            # BUT in imshow (y=0 at top), Bottom has a HIGHER pixel value.
             
-            if abs(new_h) >= self.min_rect_dist:
-                self.shape_artist.set_xy((x, ydata)) # Move anchor
-                self.shape_artist.set_height(new_h)
-                raw_bb = (x1, y2 - new_h), (x2, y2)
-                cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
-                self.plotter.shapes[self.entry_id]['cx'] = cx
-                self.plotter.shapes[self.entry_id]['cy'] = cy
-                self.plotter.shapes[self.entry_id]['bb'] = bb
-            
+            # Anchor: Top Edge (y) stays fixed.
+            # New Height = Mouse Y - Top Edge
+            new_h = ydata - y
+            # Width and X unchanged
+            self.update_rect_safe(x, y, w, new_h)
             return True
+
+        if edge == 'top':
+            # Visual Top means mathematically LOWER Y in typical plots.
+            # In imshow: Top is y=0.
             
+            # Anchor: Bottom Edge (y + h) stays fixed.
+            # New Height = Bottom Edge - Mouse Y
+            # New Y = Mouse Y
+            bottom_edge = y + h
+            new_h = bottom_edge - ydata
+            # Width and X unchanged
+            self.update_rect_safe(x, ydata, w, new_h)
+            return True
+
         return False
+
+    def update_rect_safe(self, x, y, w, h):
+        """
+        Normalizes rect to always have positive W and H.
+        This prevents hit-testing bugs when shapes are inverted.
+        """
+        x, y, w, h = int(round(x)), int(round(y)), int(round(w)), int(round(h))
+                
+        if w < 0:
+            return
+        
+        if h < 0:
+            return
+            
+        if w >= self.min_rect_dist:
+            self.shape_artist.set_x(x)
+            self.shape_artist.set_width(w)
+        else:
+            old_x = int(round(self.shape_artist.get_x()))
+            x = old_x
+            old_w = int(round(self.shape_artist.get_width()))
+            w = max(old_w, self.min_rect_dist)
+        
+        if h >= self.min_rect_dist:
+            self.shape_artist.set_y(y)
+            self.shape_artist.set_height(h)
+        else:
+            old_y = int(round(self.shape_artist.get_y()))
+            y = old_y
+            old_h = int(round(self.shape_artist.get_height()))
+            h = max(old_h, self.min_rect_dist)
+                
+        # Recalculate based on new visual shape
+        raw_bb = (x, y), (x + w, y + h)
+        cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
+        self.plotter.shapes[self.entry_id]['cx'] = cx
+        self.plotter.shapes[self.entry_id]['cy'] = cy
+        self.plotter.shapes[self.entry_id]['bb'] = bb
 
     def on_release(self, event):        
         self.press = None
@@ -679,6 +689,7 @@ class Plotter:
         # SMART PATH DETECTION
         base_images_folder = Path(IMAGES_FOLDER)
         toml_file = Path(TOML_PATH)
+        json_file_str = None
 
         if image_path is None:
             if toml_file.exists():
@@ -686,6 +697,7 @@ class Plotter:
                     with open(toml_file, "r", encoding="utf-8") as f:
                         doc = tomlkit.load(f)
                     toml_img_str = doc.get("system", {}).get("hud_image_path", "")
+                    json_file_str = doc.get("system", {}).get("json_path", "")
                     if toml_img_str:
                         potential_path = Path(toml_img_str)
                         if potential_path.exists():
@@ -742,9 +754,15 @@ class Plotter:
         self.fig.canvas.mpl_connect("key_press_event", self.on_key_press)
         self.fig.canvas.mpl_connect("button_press_event", self.on_click)
 
+        if json_file_str:
+            json_path = Path(json_file_str)
+            if json_path.exists():
+                print(f"[System] Auto-loading last JSON: {json_path.as_posix()}")
+                self.load_json_from_path(json_path)
+                
         plt.show()
+        
 
-    
     # Visual & State Management
     def load_image(self):
         try:
@@ -783,6 +801,7 @@ class Plotter:
         self.artists_points = 0
         self.saved_mouse_wheel = False
         self.saved_sprint_distance = False
+        self.sprint_artist_id = None
         self.mouse_wheel_radius = 0.0
         self.mouse_wheel_cx = 0.0
         self.mouse_wheel_cy = 0.0
@@ -859,7 +878,10 @@ class Plotter:
             return
 
         root.destroy()
-            
+        
+        self.load_json_from_path(file_path)
+    
+    def load_json_from_path(self, file_path):  
         if not os.path.exists(file_path):
             print(f"Error: File '{file_path}' not found.")
             return
@@ -914,20 +936,20 @@ class Plotter:
             json_shape['key_name'] = key_name
             json_shape['m_code'] = scancode
             json_shape['type'] = zone_type
-            json_shape['cx'] = int(cx * scale_x)
-            json_shape['cy'] = int(cy * scale_y)
+            json_shape['cx'] = int(round(cx * scale_x))
+            json_shape['cy'] = int(round(cy * scale_y))
             json_shape['interception_key'] = interception_key if interception_key is not None else ''
             
             if zone_type == CIRCLE:
                 scale_r = (scale_x + scale_y) / 2
-                json_shape['r'] = int(val1 * scale_r)
+                json_shape['r'] = int(round(val1 * scale_r))
                 json_shape['mode'] = CIRCLE
 
             elif zone_type == RECT:
-                new_x1 = int(val1 * scale_x)
-                new_y1 = int(val2 * scale_y)
-                new_x2 = int(val3 * scale_x)
-                new_y2 = int(val4 * scale_y)
+                new_x1 = int(round(val1 * scale_x))
+                new_y1 = int(round(val2 * scale_y))
+                new_x2 = int(round(val3 * scale_x))
+                new_y2 = int(round(val4 * scale_y))
                 json_shape['bb'] = ((new_x1, new_y1), (new_x2, new_y2))
                 json_shape['mode'] = RECT
 
@@ -994,7 +1016,7 @@ class Plotter:
     def label(self, center_x, center_y, label, fc):
         # Get the height of the figure in inches and convert to points
         fig_height_pts = self.fig.get_size_inches()[1] * 72
-        scaled_font = max(7, int(fig_height_pts * 0.03)) 
+        scaled_font = max(7, int(round(fig_height_pts * 0.03))) 
 
         return plt.Text(
             center_x, center_y, 
@@ -1074,7 +1096,7 @@ class Plotter:
         if event.xdata is None or event.ydata is None:
             return
 
-        self.points.append((int(event.xdata), int(event.ydata)))
+        self.points.append((int(round(event.xdata)), int(round(event.ydata))))
         
         dot, = self.ax.plot(event.xdata, event.ydata, 'ro')
         self.point_artists.append(dot)
@@ -1188,6 +1210,7 @@ class Plotter:
                             self.saved_mouse_wheel = False
                         if self.saved_sprint_distance and any(v['key_name'] == SPRINT_DISTANCE_CODE for v in self.shapes.values()) == False:
                             self.saved_sprint_distance = False
+                            self.sprint_artist_id = None
                             
                         self.update_title(f"Deleted ID {uid}. Returning to IDLE...")
                         self.reset_state()
@@ -1236,7 +1259,12 @@ class Plotter:
             if saved:
                 print(f"[+] Saved ID {self.count-1}: {self.mode} bound to key '{key_name}' with interception key: '{interception_key}'")
                 if self.mode == CIRCLE and cx and cy and r:
-                    fc = get_vibrant_random_color(0.4)
+                    if interception_key == MOUSE_WHEEL_CODE:
+                        fc = (0.0, 0.8, 0.8, 0.4) # Bright Cyan/Teal
+                    elif interception_key == SPRINT_DISTANCE_CODE:
+                        fc = (1.0, 0.2, 0.2, 0.5) # Bright Red
+                    else:
+                        fc = get_vibrant_random_color(0.4)
                     # Add shape artist
                     shape_artist = plt.Circle((cx, cy), r, fill=True, lw=2, fc=fc, ec=(0.3, 0.3, 0.3, 0.8))
                     shape_artist.set_visible(self.show_overlays)
@@ -1414,6 +1442,9 @@ class Plotter:
                             if uid in self.label_drag_managers:
                                 self.label_drag_managers[uid].disconnect()
                                 del self.label_drag_managers[uid]
+                            if uid in self.shape_drag_managers:
+                                self.shape_drag_managers[uid].disconnect()
+                                del self.shape_drag_managers[uid]
                             break
                         
                 self.mouse_wheel_radius = r
@@ -1448,13 +1479,12 @@ class Plotter:
                             if uid in self.label_drag_managers:
                                 self.label_drag_managers[uid].disconnect()
                                 del self.label_drag_managers[uid]
+                            if uid in self.shape_drag_managers:
+                                self.shape_drag_managers[uid].disconnect()
+                                del self.shape_drag_managers[uid]
                             break
                             
-                # Use Pythagorean theorem for the true radius/distance
-                dx = cx - self.mouse_wheel_cx
-                dy = cy - self.mouse_wheel_cy
-                actual_dist = (dx**2 + dy**2)**0.5
-
+                actual_dist = self.euclidean_distance(cx, cy, self.mouse_wheel_cx, self.mouse_wheel_cy)
                 # STRICT CHECK: Ensure Sprint is actually outside the Joystick
                 if actual_dist <= self.mouse_wheel_radius:
                     print(f"[!] ERROR: Sprint point must be OUTSIDE the joystick radius!")
@@ -1462,6 +1492,7 @@ class Plotter:
 
                 self.sprint_distance = actual_dist
                 self.saved_sprint_distance = True
+                self.sprint_artist_id = uid
                 
             elif self.mode == RECT:
                 print(f"[!] ERROR: Sprint Button can only be assigned to '{CIRCLE}' not '{RECT} shapes.")
@@ -1501,18 +1532,120 @@ class Plotter:
         h = ((x1**2 + y1**2) * (y2 - y3) + (x2**2 + y2**2) * (y3 - y1) + (x3**2 + y3**2) * (y1 - y2)) / D
         k = ((x1**2 + y1**2) * (x3 - x2) + (x2**2 + y2**2) * (x1 - x3) + (x3**2 + y3**2) * (x2 - x1)) / D
         r = math.sqrt((x1 - h)**2 + (y1 - k)**2)
-        return int(h), int(k), int(r), None
+        return int(round(h)), int(round(k)), int(round(r)), None
 
     def calculate_rect(self): # 4 Points
         xs = [pt[0] for pt in self.points]
         ys = [pt[1] for pt in self.points]
-        return int(sum(xs)/4), int(sum(ys)/4), None, ((min(xs), min(ys)), (max(xs), max(ys)))
+        return int(round(sum(xs)/4)), int(round(sum(ys)/4)), None, ((min(xs), min(ys)), (max(xs), max(ys)))
         
     def calculate_raw_rect(self, values): # 2 Points
-        xs = [abs(v[0]) for v in values]
-        ys = [abs(v[1]) for v in values]
-        return int(sum(xs)/2), int(sum(ys)/2), None, ((min(xs), min(ys)), (max(xs), max(ys)))
+        xs = [v[0] for v in values]
+        ys = [v[1] for v in values]
+        return int(round(sum(xs)/2)), int(round(sum(ys)/2)), None, ((min(xs), min(ys)), (max(xs), max(ys)))
 
+
+    def euclidean_distance(self, x1, y1, x2, y2):
+        return ((x2 - x1)**2 + (y2 - y1)**2)**0.5
+
+    def constrain_point_to_rect_radial(self, cx, cy, px, py, rect_bb):
+        """
+        Rotates a point (cx, cy) around a pivot (px, py) until it fits inside a rectangle.
+        Maintains the original distance (radius) from the pivot.
+        
+        Args:
+            cx, cy:   The center of the 'Main Circle' (Sprint point)
+            px, py:   The center of the 'Provided Point' (Pivot/Joystick center)
+            rect_bb:  Tuple ((x_min, y_min), (x_max, y_max)) bounding box
+        
+        Returns:
+            (new_x, new_y): The corrected coordinates.
+        """
+        (x_min, y_min), (x_max, y_max) = rect_bb
+
+        # Check if already inside (Optimization)
+        if x_min <= cx <= x_max and y_min <= cy <= y_max:
+            return cx, cy
+
+        # Define the fixed orbit radius
+        radius = math.sqrt((cx - px)**2 + (cy - py)**2)
+        if radius < 1e-9: return cx, cy # Pivot and point are identical
+
+        current_angle = math.atan2(cy - py, cx - px)
+        valid_intersections = []
+
+        # Helper: Check if a point lies on a specific line segment
+        def on_segment(x, y, x1, y1, x2, y2):
+            # Use epsilon for float comparison stability
+            epsilon = 1e-9
+            return min(x1, x2) - epsilon <= x <= max(x1, x2) + epsilon and \
+                min(y1, y2) - epsilon <= y <= max(y1, y2) + epsilon
+
+        # Intersect Orbit Circle with all 4 Rectangle Edges
+        # Edges defined as (x1, y1, x2, y2)
+        edges = [
+            (x_min, y_min, x_min, y_max), # Left
+            (x_max, y_min, x_max, y_max), # Right
+            (x_min, y_min, x_max, y_min), # Bottom
+            (x_min, y_max, x_max, y_max)  # Top
+        ]
+
+        for (x1, y1, x2, y2) in edges:
+            # Vertical Edge (x is constant)
+            if abs(x1 - x2) < 1e-9:
+                dx = x1 - px
+                # Does the circle reach this x-coordinate?
+                if abs(dx) <= radius:
+                    # Solve: y = py +/- sqrt(r^2 - dx^2)
+                    dy = math.sqrt(radius**2 - dx**2)
+                    candidates = [(x1, py + dy), (x1, py - dy)]
+                    for ix, iy in candidates:
+                        if on_segment(ix, iy, x1, y1, x2, y2):
+                            valid_intersections.append((ix, iy))
+
+            # Horizontal Edge (y is constant)
+            else:
+                dy = y1 - py
+                # Does the circle reach this y-coordinate?
+                if abs(dy) <= radius:
+                    # Solve: x = px +/- sqrt(r^2 - dy^2)
+                    dx = math.sqrt(radius**2 - dy**2)
+                    candidates = [(px + dx, y1), (px - dx, y1)]
+                    for ix, iy in candidates:
+                        if on_segment(ix, iy, x1, y1, x2, y2):
+                            valid_intersections.append((ix, iy))
+
+        # Find the intersection closest to the original angle
+        if not valid_intersections:
+            # Fallback: Clamp to nearest point on box (changing radius)
+            clamped_x = max(x_min, min(cx, x_max))
+            clamped_y = max(y_min, min(cy, y_max))
+            return clamped_x, clamped_y
+
+        candidates = []
+
+        for ix, iy in valid_intersections:
+            # Calculate angle of intersection point
+            target_angle = math.atan2(iy - py, ix - px)
+            
+            # Get shortest difference between angles
+            # This handles the -180 to 180 wrap-around gracefully
+            diff = math.atan2(math.sin(target_angle - current_angle), 
+                            math.cos(target_angle - current_angle))
+            
+            candidates.append({
+                'pt': (ix, iy),
+                'diff': abs(diff),
+                'y': iy
+            })
+
+        # SORTING LOGIC:
+        # Primary: Angle Difference (Round to 5 decimals to force ties on float errors)
+        # Secondary: Y Coordinate (Ascending = Top of Screen preference)
+        candidates.sort(key=lambda c: (round(c['diff'], 5), c['y']))
+
+        # Return the coordinate of the winner
+        return candidates[0]['pt']
 
 if __name__ == "__main__":
     Plotter()
