@@ -1277,7 +1277,7 @@ class Plotter:
         elif key == 'backspace':
             self.input_buffer = self.input_buffer[:-1]
             self.update_title(f"DELETE MODE: ID [{self.input_buffer}] (Enter to delete)")
-        elif not key == 'escape':
+        elif key in ['f6', 'f7', 'delete', 'f10']:
             print("[!] Blocked: Exit Delete Mode (Esc) first.")
 
     def delete_entry(self, uid):
