@@ -1096,7 +1096,6 @@ class Plotter:
             button_name = mouse_map.get(event.button)
             
             if button_name:
-                print(f"[-] Mouse Click Detected: {button_name}")
                 self.calculate_shape(button_name)
             return
 
