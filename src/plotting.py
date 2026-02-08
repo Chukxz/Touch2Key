@@ -22,10 +22,12 @@ IDLE = "IDLE"
 COLLECTING = "COLLECTING"
 WAITING_FOR_KEY = "WAITING_FOR_KEY"
 DELETING = "DELETING"
+CONFIRM_DELETE_ALL = "CONFIRM_DELETE_ALL"
 CONFIRM_EXIT = "CONFIRM_EXIT"
 NAMING = "NAMING"
+HELP_STR = "F1(Help)"
 DEF_STR = \
-    "MODE: IDLE\n\
+    "MODE: IDLE | F2(Delete All)\n\
     F3(Load JSON) | F4(Toggle Shapes Visibility) | F5(Change Image)\n\
     F6(Circle) | F7(Rect) | F8(Cancel) | F9(List) | F10(Save)\n\
     F11(Sprint Threshold) | F12(Mouse Wheel) | Delete(Delete) | Esc(Exit)\n\
@@ -183,8 +185,10 @@ class DraggableLabel(Draggable):
         x0, y0, xdata_press, ydata_press, xpx_press, ypx_press = self.press
         dx = event.xdata - xdata_press
         dy = event.ydata - ydata_press   
-        dist_from_origin = ((event.x - xpx_press)**2 + (event.y - ypx_press)**2)**0.5
-        self.plotter.current_move_distance = dist_from_origin
+        dx_press = event.x - xpx_press
+        dy_press = event.y - ypx_press
+        dist_px = ((dx_press**2) + (dy_press**2))**0.5
+        self.plotter.current_move_distance = dist_px
 
         # Blitting Loop
         self.canvas.restore_region(self.drag_bg)
@@ -312,8 +316,10 @@ class DraggableShape(Draggable):
             self.plotter.drawn = True
         
         _, _, _, _, xpx_press, ypx_press = self.press
-        dist_from_origin = ((event.x - xpx_press)**2 + (event.y - ypx_press)**2)**0.5
-        self.plotter.current_move_distance = dist_from_origin
+        dx_press = event.x - xpx_press
+        dy_press = event.y - ypx_press
+        dist_px = ((dx_press**2) + (dy_press**2))**0.5
+        self.plotter.current_move_distance = dist_px
 
         # Blitting Loop
         self.canvas.restore_region(self.drag_bg)
@@ -339,6 +345,7 @@ class DraggableShape(Draggable):
         old_cx, old_cy = self.shape_artist.get_center()
         old_r = self.shape_artist.get_radius()
         new_cx, new_cy = old_cx, old_cy
+        current_shape = self.plotter.shapes[self.entry_id]
 
         if self.shape_mode == 'resize':
             self.update_radius(xdata, ydata)
@@ -350,44 +357,46 @@ class DraggableShape(Draggable):
             new_cx = int(round(x0 + dx))
             new_cy = int(round(y0 + dy))
             self.shape_artist.set_center((new_cx, new_cy))
-            self.plotter.shapes[self.entry_id]['cx'] = new_cx
-            self.plotter.shapes[self.entry_id]['cy'] = new_cy
-
-        if self.plotter.saved_mouse_wheel and self.plotter.shapes[self.entry_id]['key_name'] == MOUSE_WHEEL_CODE:
+            current_shape['cx'] = new_cx
+            current_shape['cy'] = new_cy
+                        
+        if self.plotter.saved_mouse_wheel and current_shape['key_name'] == MOUSE_WHEEL_CODE:
             self.plotter.mouse_wheel_cx = new_cx
             self.plotter.mouse_wheel_cy = new_cy
+            self.plotter.mouse_wheel_radius = current_shape['r']
             
             if self.plotter.saved_sprint_distance and self.plotter.sprint_artist_id is not None:
-                sprint_manager = self.plotter.shape_drag_managers[self.plotter.sprint_artist_id]
-                sp_cx, sp_cy = sprint_manager.shape_artist.get_center()
+                sprint_artist = self.plotter.shape_drag_managers[self.plotter.sprint_artist_id]
+                sprint_shape = self.plotter.shapes[self.plotter.sprint_artist_id]
+                cx, cy = sprint_artist.shape_artist.get_center()
+                actual_dist = self.plotter.euclidean_distance(cx, cy, new_cx, new_cy)
                 
-                actual_dist = self.plotter.euclidean_distance(sp_cx, sp_cy, new_cx, new_cy)
-                
-                # STRICT CHECK: If Joystick gets too close to Sprint point -> BLOCK MOVEMENT
-                if actual_dist <= self.plotter.mouse_wheel_radius:                                        
-                    # Revert Joystick Visuals (CRITICAL FIX)
-                    self.shape_artist.set_center((old_cx, old_cy))
+                # STRICT CHECK: Ensure Sprint is actually outside the Joystick
+                if actual_dist <= self.plotter.mouse_wheel_radius:                    
+                    r = self.plotter.mouse_wheel_radius
+                    screen_rect = ((0, 0), (self.plotter.width, self.plotter.height))
+                    sp_x, sp_y = self.plotter.constrain_point_to_rect_radial(new_cx, new_cy-r-1, new_cx, new_cy, screen_rect)
+                    sp_x, sp_y = int(round(sp_x)), int(round(sp_y))
                     
-                    # Revert Joystick Data
-                    self.plotter.shapes[self.entry_id]['cx'] = old_cx
-                    self.plotter.shapes[self.entry_id]['cy'] = old_cy
-                    
-                    # Revert Global State
-                    self.plotter.mouse_wheel_cx = old_cx
-                    self.plotter.mouse_wheel_cy = old_cy
+                    sprint_artist.shape_artist.set_center((sp_x, sp_y))
+                    sprint_shape['cx'] = sp_x
+                    sprint_shape['cy'] = sp_y
+
+                    sp_actual_dist = self.plotter.euclidean_distance(sp_x, sp_y, new_cx, new_cy)
+                    self.plotter.sprint_distance = sp_actual_dist
                 else:
                     self.plotter.sprint_distance = actual_dist
             
-        if self.plotter.saved_sprint_distance and self.plotter.shapes[self.entry_id]['key_name'] == SPRINT_DISTANCE_CODE:
+        if self.plotter.saved_sprint_distance and current_shape['key_name'] == SPRINT_DISTANCE_CODE:
             actual_dist = self.plotter.euclidean_distance(new_cx, new_cy, self.plotter.mouse_wheel_cx, self.plotter.mouse_wheel_cy)
             
             # STRICT CHECK: Ensure Sprint is actually outside the Joystick
             if actual_dist <= self.plotter.mouse_wheel_radius:                
                 self.shape_artist.set_center((old_cx, old_cy))
                 self.shape_artist.set_radius(old_r)
-                self.plotter.shapes[self.entry_id]['cx'] = old_cx
-                self.plotter.shapes[self.entry_id]['cy'] = old_cy
-                self.plotter.shapes[self.entry_id]['r'] = old_r             
+                current_shape['cx'] = old_cx
+                current_shape['cy'] = old_cy
+                current_shape['r'] = old_r             
             else:
                 self.plotter.sprint_distance = actual_dist
 
@@ -430,32 +439,34 @@ class DraggableShape(Draggable):
         return None
 
     def update_radius(self, xdata, ydata):
+        # Get the fixed center
         cx, cy = self.shape_artist.get_center()
+        # Calculate distance from center to mouse
         new_r = int(round(((xdata - cx)**2 + (ydata - cy)**2)**0.5))
+        current_shape = self.plotter.shapes[self.entry_id]
+        new_sp_r = None
         
-        # Screen Size Constraint
-        max_screen_r = int(round((self.spec_max_ratio * ((self.plotter.width + self.plotter.height) / 2))))
-        new_r = min(new_r, max_screen_r)
-
-        # Joystick vs Sprint Constraint (NEW)
-        if self.plotter.saved_mouse_wheel and self.plotter.shapes[self.entry_id]['key_name'] == MOUSE_WHEEL_CODE:
+        if self.plotter.saved_mouse_wheel and current_shape['key_name'] == MOUSE_WHEEL_CODE:
+            new_r = min(new_r, int(round((self.spec_max_ratio * ((self.plotter.width + self.plotter.height) / 2)))))
+            
             if self.plotter.saved_sprint_distance and self.plotter.sprint_artist_id is not None:
-                sprint_manager = self.plotter.shape_drag_managers[self.plotter.sprint_artist_id]
-                sp_cx, sp_cy = sprint_manager.shape_artist.get_center()
-                dist_to_sprint = self.plotter.euclidean_distance(cx, cy, sp_cx, sp_cy)
+                sprint_artist = self.plotter.shape_drag_managers[self.plotter.sprint_artist_id]
+                sp_r = sprint_artist.shape_artist.get_radius()
+                if new_r < sp_r:
+                    new_sp_r = new_r
                 
-                # Clamp radius so it stops 1 pixel before hitting the sprint point
-                if new_r >= dist_to_sprint:
-                    new_r = int(dist_to_sprint) - 1
+        if self.plotter.saved_sprint_distance and current_shape['key_name'] == SPRINT_DISTANCE_CODE:
+            new_r = min(new_r, self.plotter.mouse_wheel_radius)
 
-        # Apply changes
         if new_r >= self.min_circ_dist:
             self.shape_artist.set_radius(new_r)
-            self.plotter.shapes[self.entry_id]['r'] = new_r
+            current_shape['r'] = new_r
             
-            # Update global state
-            if self.plotter.saved_mouse_wheel and self.plotter.shapes[self.entry_id]['key_name'] == MOUSE_WHEEL_CODE:
-                 self.plotter.mouse_wheel_radius = new_r
+            if new_sp_r is not None:
+                sprint_artist = self.plotter.shape_drag_managers[self.plotter.sprint_artist_id]
+                sprint_shape = self.plotter.shapes[self.plotter.sprint_artist_id]
+                sprint_artist.shape_artist.set_radius(new_sp_r)
+                sprint_shape['r'] = new_sp_r
     
     def get_corner_under_mouse(self, event):
         x, y = self.shape_artist.get_xy()
@@ -745,7 +756,7 @@ class Plotter:
         self.ax.imshow(img)
         
         state_str = "VISIBLE" if self.show_overlays else "HIDDEN"
-        self.update_title(f"OVERLAYS: {state_str}. {DEF_STR}")
+        self.update_title(f"OVERLAYS: {state_str} | {DEF_STR}")
   
         self.init_crosshairs()
         self.bg_cache = None
@@ -846,7 +857,7 @@ class Plotter:
         self.points = []
         self.input_buffer = ""
         state_str = "VISIBLE" if self.show_overlays else "HIDDEN"
-        self.update_title(f"OVERLAYS: {state_str}. {DEF_STR}")
+        self.update_title(f"OVERLAYS: {state_str} | {DEF_STR}")
         self.bg_cache = self.fig.canvas.copy_from_bbox(self.ax.bbox)
         
     def start_mode(self, mode, num_points):
@@ -1010,7 +1021,7 @@ class Plotter:
             artist.set_visible(self.show_overlays)
         
         self.fig.canvas.draw()
-        self.update_title(f"OVERLAYS: {state_str}. {DEF_STR}")
+        self.update_title(f"OVERLAYS: {state_str} | {DEF_STR}")
 
 
     def label(self, center_x, center_y, label, fc):
@@ -1120,6 +1131,13 @@ class Plotter:
         if self.state == DELETING:
             self.handle_delete_input(event.key)
             return
+        
+        if self.state == CONFIRM_DELETE_ALL:
+            if event.key == 'enter':
+                self.delete_all_shapes()
+            else:
+                self.reset_state()
+            return
 
         if self.state == CONFIRM_EXIT:
             if event.key == 'enter':
@@ -1135,7 +1153,7 @@ class Plotter:
                 self.reset_state()
                 return
             
-            if event.key in ['f6', 'f7', 'delete', 'f10']:
+            if not event.key == 'f8':
                 print(f"[!] Blocked: Finish or Cancel (F8) current shape first.")
             return
 
@@ -1144,6 +1162,11 @@ class Plotter:
             return
             
         if self.state == IDLE:
+            if event.key == 'f1':
+                self.reset_state()
+            if event.key == 'f2':
+                self.state = CONFIRM_DELETE_ALL
+                self.update_title("[DELETE ALL?] Press ENTER to Confirm or Any other key to Cancel.")
             if event.key == 'f3':
                 self.load_json()
             if event.key == 'f4':
@@ -1168,14 +1191,25 @@ class Plotter:
     def enter_delete_mode(self):
         if not self.shapes:
             print("[!] No shapes to delete.")
-            self.update_title("List empty. Nothing to delete.")
+            self.update_title(f"List empty. Nothing to delete | {HELP_STR}")
             return
 
         self.print_data()
         self.state = DELETING
         self.input_buffer = ""
         self.update_title("DELETE MODE: Type ID... (Enter to Confirm | Esc to Cancel)")
-
+        
+    def delete_all_shapes(self):
+        if not self.shapes:
+            print("[!] No shapes to delete.")
+            self.update_title(f"List empty. Nothing to delete | {HELP_STR}")
+            return
+        
+        for uid in list(self.shapes.keys()):
+            self.delete_entry(uid)
+        self.reset_state()
+        print("[+] All shapes deleted.")
+        
     def handle_delete_input(self, key):
         if key == 'escape':
             self.reset_state()
@@ -1187,24 +1221,37 @@ class Plotter:
                     uid = int(self.input_buffer)
                     
                     if uid in self.shapes:
-                        del self.shapes[uid]
-                        if uid in self.shapes_artists:
-                            self.shapes_artists[uid].remove()
-                            del self.shapes_artists[uid]
-                        if uid in self.labels_artists:
-                            self.labels_artists[uid].remove()
-                            del self.labels_artists[uid]
-                        if uid in self.label_drag_managers:
-                            self.label_drag_managers[uid].disconnect()
-                            del self.label_drag_managers[uid]
-                        if uid in self.shape_drag_managers:
-                            self.shape_drag_managers[uid].disconnect()
-                            del self.shape_drag_managers[uid]
+                        # Cascade deletion check
+                        deleted_key_name = self.shapes[uid]['key_name']
+                        
+                        if deleted_key_name == MOUSE_WHEEL_CODE:
+                            # Search for the dependent Sprint point
+                            sprint_uid = None
+                            for k, v in self.shapes.items():
+                                if v['key_name'] == SPRINT_DISTANCE_CODE:
+                                    sprint_uid = k
+                                    break
                             
-                        if self.last_artist_id == "shape_" + str(uid) or self.last_artist_id == "label_" + str(uid):
-                            self.last_artist_id = None
-                            
-                        print(f"[+] Deleted ID {uid}")
+                            if sprint_uid is not None:
+                                print(f"[System] Auto-deleting Sprint Point (ID {sprint_uid}) because Joystick was deleted.")
+                                self.delete_entry(sprint_uid)
+                        
+                        self.delete_entry(uid)
+                        
+                        # Check if specific special keys still exist
+                        has_wheel = any(v['key_name'] == MOUSE_WHEEL_CODE for v in self.shapes.values())
+                        has_sprint = any(v['key_name'] == SPRINT_DISTANCE_CODE for v in self.shapes.values())
+
+                        if not has_wheel:
+                            self.saved_mouse_wheel = False
+                            self.mouse_wheel_radius = 0.0
+                            self.mouse_wheel_cx = 0.0
+                            self.mouse_wheel_cy = 0.0
+                        
+                        if not has_sprint:
+                            self.saved_sprint_distance = False
+                            self.sprint_artist_id = None
+                            self.sprint_distance = 0.0
                         
                         if self.saved_mouse_wheel and any(v['key_name'] == MOUSE_WHEEL_CODE for v in self.shapes.values()) == False:
                             self.saved_mouse_wheel = False
@@ -1216,11 +1263,11 @@ class Plotter:
                         self.reset_state()
                     else:
                         print(f"[!] ID {uid} not found.")
-                        self.update_title(f"Error: ID {uid} not found. Try again or Esc.")
+                        self.update_title(f"Error: ID {uid} not found. Try again or Press ESC to Cancel.")
                         self.input_buffer = ""
                         
                 except ValueError:
-                    self.update_title("Error: Invalid Number. Try again or Esc.")
+                    self.update_title("Error: Invalid Number. Try again or Press ESC to Cancel.")
                     self.input_buffer = ""
             return
         
@@ -1230,11 +1277,42 @@ class Plotter:
         elif key == 'backspace':
             self.input_buffer = self.input_buffer[:-1]
             self.update_title(f"DELETE MODE: ID [{self.input_buffer}] (Enter to delete)")
-        elif key in ['f6', 'f7', 'delete', 'f10']:
+        elif not key == 'escape':
             print("[!] Blocked: Exit Delete Mode (Esc) first.")
 
+    def delete_entry(self, uid):
+        """Removes a shape and all its associated resources (artists, labels, listeners)."""
+        if uid not in self.shapes:
+            return
+        
+        shape_type = self.shapes[uid]['type']
+        interception_key = self.shapes[uid]['key_name']
+        hex_code = self.shapes[uid]['m_code']
+        
+        del self.shapes[uid]
 
-    # Core Logic
+        if uid in self.shapes_artists:
+            self.shapes_artists[uid].remove()
+            del self.shapes_artists[uid]
+        
+        if uid in self.labels_artists:
+            self.labels_artists[uid].remove()
+            del self.labels_artists[uid]
+
+        if uid in self.label_drag_managers:
+            self.label_drag_managers[uid].disconnect()
+            del self.label_drag_managers[uid]
+            
+        if uid in self.shape_drag_managers:
+            self.shape_drag_managers[uid].disconnect()
+            del self.shape_drag_managers[uid]
+
+        if self.last_artist_id == f"shape_{uid}" or self.last_artist_id == f"label_{uid}":
+            self.last_artist_id = None
+            
+        print(f"[+] Deleted Shape of type: {shape_type} with ID: {uid} and key: '{interception_key}' (hex: {hex_code})")
+
+    # Shape Calculation & Finalization
     def calculate_shape(self, key_name):
         # 'key_name' might be a key string ('a', 'f1') OR a mouse string ('MOUSE_LEFT')
         hex_code, interception_key = self.get_interception_code(key_name)
@@ -1301,7 +1379,7 @@ class Plotter:
     # Naming / Saving Logic
     def enter_naming_mode(self):
         if not self.shapes:
-            self.update_title("Nothing to save!")
+            self.update_title(f"Nothing to save! | {HELP_STR}")
             return
 
         self.state = NAMING
@@ -1323,7 +1401,7 @@ class Plotter:
             self.input_buffer += key
         
         display_name = self.input_buffer if self.input_buffer else "[Default Timestamp]"
-        self.update_title(f"SAVE: {display_name} (Enter to Save, Default '')")
+        self.update_title(f"SAVE: {display_name} (Enter to Save, Esc to Cancel, Default '')")
 
     def export_data(self, user_name):
         if not user_name:
@@ -1376,7 +1454,7 @@ class Plotter:
         try:
             if (not self.saved_mouse_wheel) or (not self.saved_sprint_distance):
                 print("[!] ERROR: Mouse wheel or sprint distance not configured.")
-                self.update_title(f"Error saving: {file_path.name}")
+                self.update_title(f"Error saving: {file_path.name} | {HELP_STR}")
                 return
 
             with file_path.open('w', encoding='utf-8') as f:
@@ -1392,10 +1470,10 @@ class Plotter:
 
         except Exception as e:
             print(f"[!] Export Error: {e}")
-            self.update_title(f"Error saving: {file_path.name}")
+            self.update_title(f"Error saving: {file_path.name} | {HELP_STR}")
             return
             
-        self.update_title(f"SAVED: {file_path.name}")
+        self.update_title(f"SAVED: {file_path.name} | {HELP_STR}")
             
     # Helper Functions
     def get_interception_code(self, key):
@@ -1513,12 +1591,16 @@ class Plotter:
         return saved, uid
 
     def print_data(self):
-        print("\n" + "="*45)
-        print(f" {'ID':<5} | {'KEY':<10} | {'TYPE':<8} | {'INFO'}")
-        print("="*45)
+        if not self.shapes:
+            print("[!] No shapes to print.")
+            self.update_title(f"List empty. Nothing to print | {HELP_STR}")
+            return
+        
+        print("\n")
+        print("Current Shapes:")
         for k, v in self.shapes.items():
             print(k, v)
-        print("="*45 + "\n")
+        print("\n")
 
     # Math
     def calculate_circle(self): # 3 Points
@@ -1527,7 +1609,7 @@ class Plotter:
         x3, y3 = self.points[2]
         D = 2 * (x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2))
         if D == 0:
-            self.update_title("Error: Points are collinear. Try again.")
+            self.update_title("Error: Points are collinear.")
             return None, None, None, None
         h = ((x1**2 + y1**2) * (y2 - y3) + (x2**2 + y2**2) * (y3 - y1) + (x3**2 + y3**2) * (y1 - y2)) / D
         k = ((x1**2 + y1**2) * (x3 - x2) + (x2**2 + y2**2) * (x1 - x3) + (x3**2 + y3**2) * (x2 - x1)) / D
