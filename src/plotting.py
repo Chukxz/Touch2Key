@@ -10,7 +10,6 @@ from tkinter import filedialog
 import json
 import datetime
 from pathlib import Path
-import time
 from mapper_module.utils import (
     CIRCLE, RECT, SCANCODES, DEF_DPI, IMAGES_FOLDER, JSONS_FOLDER,
     TOML_PATH, MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, select_image_file,
@@ -48,6 +47,16 @@ SPECIAL_MAP = {
     "insert": "E0_INSERT", "delete": "E0_DELETE",
 }
 
+INDICATED_EDGE_COLOR = (0.85, 0.88, 0.92)
+ACTIVE_EDGE_COLOR = (0.7, 0.7, 0.7, 0.8)
+DEFAULT_EDGE_COLOR = (0.3, 0.3, 0.3, 0.8)
+DEFAULT_MOUSE_WHEEL_FACE_COLOR = (0.0, 0.8, 0.8, 0.4) # Bright Cyan/Teal
+DEFAULT_SPRINT_DISTANCE_FACE_COLOR = (1.0, 0.2, 0.2, 0.5) # Bright Red
+DEFAULT_FACE_COLOR_ALPHA = 0.4
+DEFAULT_SMALL_LINE_WIDTH = 1.5
+DEFAULT_MEDIUM_LINE_WIDTH = 2
+DEFAULT_LARGE_LINE_WIDTH = 3
+
 class Draggable:
     def __init__(self, entry_id:int, is_shape:bool, plotter_ref: Plotter):
         self.entry_id = entry_id
@@ -62,25 +71,26 @@ class Draggable:
             self.plotter.artists_ids.append(self.artist_id)
 
     def indicate_current_artist_id(self):
-        if self.plotter.current_artist_id is not None:
-            if self.plotter.current_artist_id.startswith('label_'):
-                for artist in self.plotter.label_drag_managers.values():
-                    if artist.artist_id == self.plotter.current_artist_id:
-                        label_bbox = artist.label_artist.get_bbox_patch()
-                        if label_bbox:
-                            label_bbox.set_edgecolor((0.85, 0.88, 0.92))
-                            label_bbox.set_linewidth(2)
-                        break
+        curr_id = self.plotter.current_artist_id
+        if curr_id is None:
+            return
+        
+        if curr_id.startswith('label_'):
+            artist = self.plotter.label_drag_managers.get(self.entry_id)
+            if artist and artist.artist_id == curr_id:
+                label_bbox = artist.label_artist.get_bbox_patch()
+                if label_bbox:
+                    label_bbox.set_edgecolor(INDICATED_EDGE_COLOR)
+                    label_bbox.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
+                self.plotter.update_title(f"Current Artist: {curr_id} (ID: {self.entry_id}) | {HELP_STR}")
             
-            elif self.plotter.current_artist_id.startswith('shape_'):
-                for artist in self.plotter.shape_drag_managers.values():
-                    if artist.artist_id == self.plotter.current_artist_id:
-                        artist.shape_artist.set_edgecolor((0.85, 0.88, 0.92))
-                        artist.shape_artist.set_linewidth(3)
-                        break
+        elif curr_id.startswith('shape_'):
+            artist = self.plotter.shape_drag_managers.get(self.entry_id)
+            if artist and artist.artist_id == curr_id:
+                artist.shape_artist.set_edgecolor(INDICATED_EDGE_COLOR)
+                artist.shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
+                self.plotter.update_title(f"Current Artist: {curr_id} (ID: {self.entry_id}) | {HELP_STR}")
             
-            self.plotter.update_title(f"Current Artist: {self.plotter.current_artist_id} (ID: {self.entry_id}) | {HELP_STR}")
-    
     def select_current_artist_id(self):
         current_artist_id = None        
         if not self.plotter.artists_ids:
@@ -172,12 +182,12 @@ class DraggableLabel(Draggable):
             # Prepare Background for Blitting
             label_bbox = self.label_artist.get_bbox_patch()
             if label_bbox:
-                label_bbox.set_edgecolor((0.7, 0.7, 0.7, 0.8))
-                label_bbox.set_linewidth(3)
+                label_bbox.set_edgecolor(ACTIVE_EDGE_COLOR)
+                label_bbox.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
             self.label_artist.set_visible(False)
             
-            self.shape_artist.set_edgecolor((0.7, 0.7, 0.7, 0.8))
-            self.shape_artist.set_linewidth(3)
+            self.shape_artist.set_edgecolor(ACTIVE_EDGE_COLOR)
+            self.shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
             
             self.canvas.draw()
             self.drag_bg = self.canvas.copy_from_bbox(self.label_artist.axes.bbox)
@@ -205,7 +215,7 @@ class DraggableLabel(Draggable):
         label_bbox = self.label_artist.get_bbox_patch()
         if label_bbox:
             label_bbox.set_edgecolor('black')
-            label_bbox.set_linewidth(1.5)
+            label_bbox.set_linewidth(DEFAULT_SMALL_LINE_WIDTH)
         
         if self.plotter.current_artist_id is None and self.plotter.artists_ids:
             self.plotter.current_artist_id = self.select_current_artist_id()
@@ -214,8 +224,8 @@ class DraggableLabel(Draggable):
         if self.artist_id == self.plotter.current_artist_id:
             if self.plotter.drawn:
                 # Reset blitted background                    
-                self.shape_artist.set_edgecolor((0.3, 0.3, 0.3, 0.8))
-                self.shape_artist.set_linewidth(2)
+                self.shape_artist.set_edgecolor(DEFAULT_EDGE_COLOR)
+                self.shape_artist.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
             
             self.clean_up_current_artist_id()
             self.label_artist.remove()
@@ -282,7 +292,7 @@ class DraggableShape(Draggable):
                 self.shape_mode = self.get_edge_under_mouse(event)
             self.press = x, y, event.xdata, event.ydata, event.x, event.y
         
-        self.shape_artist.set_edgecolor((0.3, 0.3, 0.3, 0.8))
+        self.shape_artist.set_edgecolor(DEFAULT_EDGE_COLOR)
         
         if self.shape_artist.get_visible():
             self.label_artist.set_visible(True)
@@ -303,14 +313,14 @@ class DraggableShape(Draggable):
                 
         if not self.plotter.drawn:
             # Prepare Background for Blitting
-            self.shape_artist.set_edgecolor((0.7, 0.7, 0.7, 0.8))
-            self.shape_artist.set_linewidth(3)
+            self.shape_artist.set_edgecolor(ACTIVE_EDGE_COLOR)
+            self.shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
             self.shape_artist.set_visible(False)
             
             label_bbox = self.label_artist.get_bbox_patch()
             if label_bbox:
-                label_bbox.set_edgecolor((0.7, 0.7, 0.7, 0.8))
-                label_bbox.set_linewidth(3)
+                label_bbox.set_edgecolor(ACTIVE_EDGE_COLOR)
+                label_bbox.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
                 
             self.canvas.draw() 
             self.drag_bg = self.canvas.copy_from_bbox(self.shape_artist.axes.bbox)
@@ -661,8 +671,8 @@ class DraggableShape(Draggable):
         self.drag_bg = None
         self.shape_mode = None
 
-        self.shape_artist.set_edgecolor((0.3, 0.3, 0.3, 0.8))
-        self.shape_artist.set_linewidth(2)
+        self.shape_artist.set_edgecolor(DEFAULT_EDGE_COLOR)
+        self.shape_artist.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
         
         if self.plotter.current_artist_id is None and self.plotter.artists_ids:
             self.plotter.current_artist_id = self.select_current_artist_id()
@@ -674,7 +684,7 @@ class DraggableShape(Draggable):
                 label_bbox = self.label_artist.get_bbox_patch()
                 if label_bbox:
                     label_bbox.set_edgecolor('black')
-                    label_bbox.set_linewidth(1.5)
+                    label_bbox.set_linewidth(DEFAULT_SMALL_LINE_WIDTH)
             
             self.clean_up_current_artist_id()
             self.shape_artist.remove()
@@ -767,6 +777,7 @@ class Plotter:
                 print(f"[System] Auto-loading last JSON: {json_path.as_posix()}")
                 self.load_json_from_path(json_path)
                 
+        self.fig.subplots_adjust(bottom=0)
         plt.show()
         
 
@@ -803,6 +814,9 @@ class Plotter:
         self.crosshair_v_fg = self.ax.axvline(0, color='white', linewidth=0.6, alpha=1.0, visible=False, zorder=11, animated=True)
 
     def init_params_helper(self):
+        self.json_path = None
+        self.input_buffer = ""
+        self.buffer_default = True
         self.shapes = {}
         self.count = 0
         self.artists_points = 0
@@ -852,6 +866,7 @@ class Plotter:
         self.mode = None
         self.points = []
         self.input_buffer = ""
+        self.buffer_default = True
         state_str = "VISIBLE" if self.show_overlays else "HIDDEN"
         self.update_title(f"OVERLAYS: {state_str} | {DEF_STR}")
         self.bg_cache = self.fig.canvas.copy_from_bbox(self.ax.bbox)
@@ -982,7 +997,8 @@ class Plotter:
                                 
                 self.finalize_shape(cx, cy, r, bb, key_name, interception_key, hex_code)
             self.reset_state()
-            print(f"Loaded JSON file: {Path(file_path).as_posix()}")
+            self.json_path = Path(file_path)
+            print(f"Loaded JSON file: {self.json_path.as_posix()}")
 
     def change_image(self):
         image_path = select_image_file(IMAGES_FOLDER)
@@ -1332,13 +1348,13 @@ class Plotter:
                 print(f"[+] Saved ID {self.count-1}: {self.mode} bound to key '{key_name}' with interception key: '{interception_key}'")
                 if self.mode == CIRCLE and cx and cy and r:
                     if interception_key == MOUSE_WHEEL_CODE:
-                        fc = (0.0, 0.8, 0.8, 0.4) # Bright Cyan/Teal
+                        fc = (DEFAULT_MOUSE_WHEEL_FACE_COLOR) # Bright Cyan/Teal
                     elif interception_key == SPRINT_DISTANCE_CODE:
-                        fc = (1.0, 0.2, 0.2, 0.5) # Bright Red
+                        fc = DEFAULT_SPRINT_DISTANCE_FACE_COLOR # Bright Red
                     else:
-                        fc = get_vibrant_random_color(0.4)
+                        fc = get_vibrant_random_color(DEFAULT_FACE_COLOR_ALPHA)
                     # Add shape artist
-                    shape_artist = plt.Circle((cx, cy), r, fill=True, lw=2, fc=fc, ec=(0.3, 0.3, 0.3, 0.8))
+                    shape_artist = plt.Circle((cx, cy), r, fill=True, lw=2, fc=fc, ec=DEFAULT_EDGE_COLOR)
                     shape_artist.set_visible(self.show_overlays)
                     self.ax.add_patch(shape_artist)
                     self.shapes_artists[entry_id] = shape_artist
@@ -1353,10 +1369,10 @@ class Plotter:
                     self.shape_drag_managers[entry_id] = DraggableShape(entry_id, self, CIRCLE)
                     
                 elif self.mode == RECT and cx and cy and bb:
-                    fc = get_vibrant_random_color(0.4)
+                    fc = get_vibrant_random_color(DEFAULT_FACE_COLOR_ALPHA)
                     (x1, y1), (x2, y2) = bb
                     # Add shape artist
-                    shape_artist = plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=True, lw=2, fc=fc, ec=(0.3, 0.3, 0.3, 0.8))
+                    shape_artist = plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=True, lw=2, fc=fc, ec=DEFAULT_EDGE_COLOR)
                     shape_artist.set_visible(self.show_overlays)
                     self.ax.add_patch(shape_artist)
                     self.shapes_artists[entry_id] = shape_artist
@@ -1378,37 +1394,76 @@ class Plotter:
 
         self.state = NAMING
         self.input_buffer = ""
-        self.update_title("SAVE: Type Name... (Enter for Default | Esc to Cancel)")
+        self.buffer_default = True
+        
+        if self.json_path and self.json_path.exists():
+            self.input_buffer = self.json_path.stem
+            self.update_title(f"SAVE: {self.input_buffer} (Type to Edit | Enter to Save | Esc to Cancel)")
+        else:
+            self.update_title("SAVE: Type Name... (Enter for Default | Esc to Cancel)")
 
     def handle_naming_input(self, key):
         if key == 'escape':
             self.reset_state()
             return
+        
         elif key == 'enter':
             final_name = self.input_buffer.strip()
-            self.export_data(final_name if final_name else None)
+            self.export_data(final_name if final_name else "")
             self.reset_state()
             return
+        
         elif key == 'backspace':
-            self.input_buffer = self.input_buffer[:-1]
-        elif len(key) == 1 and (key.isalnum() or key in ['_', '-']):
+            if not self.input_buffer and self.json_path and self.json_path.exists():
+                self.buffer_default = True
+                self.input_buffer = self.json_path.stem
+                    
+            else:    
+                if self.buffer_default:
+                    self.input_buffer = ""
+                    self.buffer_default = False
+                else:
+                    self.input_buffer = self.input_buffer[:-1]
+    
+        elif len(key) == 1 and (key.isalnum() or key in ['_']):
+            if self.buffer_default:
+                self.input_buffer = ""
+                self.buffer_default = False
             self.input_buffer += key
         
-        display_name = self.input_buffer if self.input_buffer else "[Default Timestamp]"
-        self.update_title(f"SAVE: {display_name} (Enter to Save, Esc to Cancel, Default '')")
+        if not self.input_buffer and self.json_path and self.json_path.exists():
+            display_name = "[Auto-Timestamp]"
+            instruction = "(Type Name | Backspace to Restore | Esc to Cancel)"
+        else:
+            display_name = self.input_buffer if self.input_buffer else "[Auto-Timestamp]"
+            instruction = "(Enter to Save | Esc to Cancel)"
+            
+        self.update_title(f"SAVE: {display_name} {instruction}")
 
     def export_data(self, user_name):
-        if not user_name:
-            user_name = datetime.datetime.now().strftime("map_%Y%m%d_%H%M%S")
-        else:
-            user_name += datetime.datetime.now().strftime("_map_%Y%m%d_%H%M%S")
+        if self.buffer_default and self.json_path and self.json_path.exists():
+            file_path = self.json_path
+            print(f"[System] Overwriting existing file: {file_path.as_posix()}")
             
-        relative_path_parent = self.image_path.relative_to(Path(IMAGES_FOLDER)).parent
-        target_dir = Path(JSONS_FOLDER) / relative_path_parent
-        file_path = target_dir / f"{user_name}.json"        
-        target_dir.mkdir(parents=True, exist_ok=True)       
-        output = []        
-
+        else:
+            if not user_name:
+                user_name = datetime.datetime.now().strftime("map_%Y%m%d_%H%M%S")
+                
+            try:
+                # Try to mirror the image folder structure
+                relative_path_parent = self.image_path.relative_to(Path(IMAGES_FOLDER)).parent
+                target_dir = Path(JSONS_FOLDER) / relative_path_parent
+            except ValueError:
+                # Fallback if image is outside the project folder
+                print("[!] Image is external. Saving JSON to root folder.")
+                target_dir = Path(JSONS_FOLDER)
+                
+            file_path = target_dir / f"{user_name}.json"
+            self.json_path = file_path     
+            target_dir.mkdir(parents=True, exist_ok=True)
+                  
+        output = []  
+        
         for _, data in self.shapes.items():
             entry = {
                 "name": data['key_name'], # Interception Key Name
