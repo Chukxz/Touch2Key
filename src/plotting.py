@@ -330,12 +330,6 @@ class DraggableShape(Draggable):
         self.shape_artist.axes.draw_artist(self.shape_artist)
         self.canvas.blit(self.shape_artist.axes.bbox)
                     
-    def get_display_point(self, xdata, ydata):
-        """
-        Convert data pints to pixel coordinates
-        """
-        return self.shape_artist.axes.transData.transform((xdata, ydata))
-    
     def circle_transform(self, event):
         if self.press is None:
             return
