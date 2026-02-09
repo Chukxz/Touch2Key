@@ -30,7 +30,7 @@ DEF_STR = \
     F3(Load JSON) | F4(Toggle Shapes Visibility) | F5(Change Image)\n\
     F6(Circle) | F7(Rect) | F8(Cancel) | F9(List) | F10(Save)\n\
     F11(Sprint Threshold) | F12(Mouse Wheel) | Delete(Delete) | Esc(Exit)\n\
-    Double click to iterate between artists under the mouse"
+    Double click to iterate between artists (shapes and labels) under the mouse"
 
 SPECIAL_MAP = {
     "escape": "ESC", "enter": "ENTER", "backspace": "BACKSPACE", "tab": "TAB",
