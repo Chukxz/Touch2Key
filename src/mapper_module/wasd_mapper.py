@@ -178,7 +178,7 @@ class WASDMapper():
         # Angle Calculation
         angle_rad = math.atan2(vy, vx)
         if angle_rad < 0: angle_rad += 2 * math.pi  
-        new_sector = int((angle_rad + self.PI_8) * self.INV_PI_4) % 8
+        new_sector = int((angle_rad + self.PI_8) * self.    _PI_4) % 8
 
         # Hysteresis Logic     
         if self.last_sector is not None:

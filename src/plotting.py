@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import matplotlib
+matplotlib.use("qt5agg")
 import matplotlib.pyplot as plt
+from PyQt5.QtCore import Qt
 from PIL import Image
 import tomlkit
 import math
@@ -10,13 +13,13 @@ from tkinter import filedialog
 import json
 import datetime
 from pathlib import Path
+import platform
 from mapper_module.utils import (
     CIRCLE, RECT, SCANCODES, DEF_DPI, IMAGES_FOLDER, JSONS_FOLDER,
     TOML_PATH, MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE, select_image_file,
     set_dpi_awareness, rotate_resolution, update_toml, get_vibrant_random_color
 )
 
-# Constants
 IDLE = "IDLE"
 COLLECTING = "COLLECTING"
 WAITING_FOR_KEY = "WAITING_FOR_KEY"
@@ -40,9 +43,11 @@ SPECIAL_MAP = {
     "[": "LEFT_BRACKET", "]": "RIGHT_BRACKET",
     ";": "SEMICOLON", "'": "APOSTROPHE", "`": "GRAVE", "\\": "BACKSLASH",
     ",": "COMMA", ".": "DOT", "/": "SLASH",
-    "shift": "LSHIFT", "alt": "LALT", "control": "LCTRL", " ": "SPACE",
+    "lshift": "LSHIFT", "rshift": "RSHIFT", "lalt": "LALT", "ralt": "RALT", 
+    "shift": "LSHIFT", "alt": "LALT", "control": "LCTRL",
+    "lctrl": "LCTRL", "rctrl": "RCTRL",
+    " ": "SPACE", "*": "NUM_MULTIPLY",
     "caps_lock": "CAPSLOCK", "num_lock": "NUMLOCK", "scroll_lock": "SCROLLLOCK",
-    "*": "NUM_MULTIPLY",
     "up": "E0_UP", "left": "E0_LEFT", "right": "E0_RIGHT", "down": "E0_DOWN",
     "insert": "E0_INSERT", "delete": "E0_DELETE",
 }
@@ -702,6 +707,7 @@ class Plotter:
     def __init__(self, image_path=None):
         # DPI Awareness MUST be first to ensure coordinates match the screen
         set_dpi_awareness()
+        self.mapping = self.set_specific_key_mapping()
 
         # SMART PATH DETECTION
         base_images_folder = Path(IMAGES_FOLDER)
@@ -1168,7 +1174,8 @@ class Plotter:
             return
 
         if self.state == WAITING_FOR_KEY:
-            self.calculate_shape(event.key)
+            precise_key = self.get_specific_key(event)
+            self.calculate_shape(precise_key)
             return
             
         if self.state == IDLE:
@@ -1323,6 +1330,69 @@ class Plotter:
         print(f"[+] Deleted Shape of type: {shape_type} with ID: {uid} and key: '{interception_key}' (hex: {hex_code})")
 
     # Shape Calculation & Finalization
+    def set_specific_key_mapping(self):
+        # --- WINDOWS & LINUX: Use Native Scan Codes ---
+        system = platform.system()
+        mapping = {}
+           
+        # Windows Standard Scan Codes
+        if system == "Windows":
+            mapping = {
+                56: "lalt",
+                312: "ralt",
+                29: "lctrl",
+                285: "rctrl",
+                42: "lshift",
+                54: "rshift"
+            }
+
+        # Linux (X11) Standard Scan Codes
+        elif system == "Linux":
+            mapping = {
+                64: "lalt",
+                108: "ralt",
+                37: "lctrl",
+                105: "rctrl",
+                50: "lshift",
+                62: "rshift"
+            }
+
+        return mapping
+    
+    def get_specific_key(self, event):
+        """
+        Returns a specific string like 'lshift' or 'rshift' 
+        by inspecting the low-level Qt event.
+        """
+        gui_event = event.guiEvent
+        if not gui_event:
+            return event.key # Fallback to standard Matplotlib key
+        
+        system = platform.system()
+
+        if system in ["Windows", "Linux"]:
+            scan_code = gui_event.nativeScanCode()
+            return self.mapping.get(scan_code, event.key) # Fallback to standard Matplotlib key if scan code not mapped
+
+        # --- MACOS: Use Native Modifiers ---
+        elif system == "Darwin":
+            # macOS uses bitmasks in nativeModifiers to indicate side
+            native_mod = gui_event.nativeModifiers()
+            
+            if gui_event.key() == Qt.Key_Shift:
+                # Check the specific bits for left/right shift
+                return "rshift" if (native_mod & 0x4) else "lshift"
+                
+            elif gui_event.key() == Qt.Key_Control:
+                # Check the specific bits for left/right control
+                return "rctrl" if (native_mod & 0x2000) else "lctrl"
+                
+            elif gui_event.key() == Qt.Key_Alt:
+                # Check the specific bits for left/right option/alt
+                return "ralt" if (native_mod & 0x40) else "lalt"
+                
+        return event.key # Fallback to standard Matplotlib key if no match found
+
     def calculate_shape(self, key_name):
         # 'key_name' might be a key string ('a', 'f1') OR a mouse string ('MOUSE_LEFT')
         hex_code, interception_key = self.get_interception_code(key_name)
