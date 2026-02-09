@@ -78,6 +78,8 @@ class Draggable:
                         artist.shape_artist.set_edgecolor((0.85, 0.88, 0.92))
                         artist.shape_artist.set_linewidth(3)
                         break
+            
+            self.plotter.update_title(f"Current Artist: {self.plotter.current_artist_id} (ID: {self.entry_id}) | {HELP_STR}")
     
     def select_current_artist_id(self):
         current_artist_id = None        
