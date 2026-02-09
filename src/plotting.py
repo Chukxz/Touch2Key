@@ -1265,10 +1265,10 @@ class Plotter:
         
         elif key.isdigit():
             self.input_buffer += key
-            self.update_title(f"DELETE MODE: ID [{self.input_buffer}] (Enter to delete)")
+            self.update_title(f"DELETE MODE: ID [{self.input_buffer}] (Enter to delete | Esc to Cancel)")
         elif key == 'backspace':
             self.input_buffer = self.input_buffer[:-1]
-            self.update_title(f"DELETE MODE: ID [{self.input_buffer}] (Enter to delete)")
+            self.update_title(f"DELETE MODE: ID [{self.input_buffer}] (Enter to delete | Esc to Cancel)")
         else:
             print("[!] Blocked: Exit Delete Mode (Esc) first.")
 
