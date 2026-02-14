@@ -67,7 +67,7 @@ DEFAULT_LARGE_LINE_WIDTH = 3
 
 
 class Draggable:
-    def __init__(self, entry_id:int, is_shape:bool, plotter_ref: Plotter):
+    def __init__(self, entry_id:int, is_shape:bool, plotter_ref:Plotter):
         self.entry_id = entry_id
         self.plotter = plotter_ref
         self.min_move_distance = 3
