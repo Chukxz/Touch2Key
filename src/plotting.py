@@ -29,11 +29,10 @@ CONFIRM_EXIT = "CONFIRM_EXIT"
 NAMING = "NAMING"
 HELP_STR = "F1(Help)"
 DEF_STR = \
-    "MODE: IDLE | F2(Delete All)\n\
-    F3(Load JSON) | F4(Toggle Shapes Visibility) | F5(Change Image)\n\
-    F6(Circle) | F7(Rect) | F8(Cancel) | F9(List) | F10(Save)\n\
-    F11(Sprint Threshold) | F12(Mouse Wheel) | Delete(Delete) | Esc(Exit)\n\
-    Double click to iterate between artists (shapes and labels) under the mouse"
+    "MODE: IDLE | F3(Load JSON) | F5(Load Image) | F10(Save) | Esc(Exit)\n\
+    F6(Circle) | F7(Rect) | F8(Cancel) | Del(Delete) | F2(Delete All) | F9(List Current Shapes in Terminal)\n\
+    F4(Toggle Artist Visibility) | F11(Sprint Threshold) | F12(Mouse Wheel)\n\
+    Arrows: Nudge | Shift+Arrows: Fast Nudge | Double Click: Change Selected Artist"
 
 SPECIAL_MAP = {
     "escape": "ESC", "enter": "ENTER", "backspace": "BACKSPACE", "tab": "TAB",
@@ -62,6 +61,7 @@ DEFAULT_SMALL_LINE_WIDTH = 1.5
 DEFAULT_MEDIUM_LINE_WIDTH = 2
 DEFAULT_LARGE_LINE_WIDTH = 3
 
+
 class Draggable:
     def __init__(self, entry_id:int, is_shape:bool, plotter_ref: Plotter):
         self.entry_id = entry_id
@@ -72,59 +72,60 @@ class Draggable:
         else:
             self.artist_id = "label_" + str(entry_id)
             
-    def populate_artist_list(self):
-            self.plotter.artists_ids.append(self.artist_id)
+    def populate_draggables_list(self):
+            self.plotter.draggables_ids.append(self.artist_id)
 
-    def indicate_current_artist_id(self):
-        curr_id = self.plotter.current_artist_id
-        if curr_id is None:
-            return
-        
-        if curr_id.startswith('label_'):
-            artist = self.plotter.label_drag_managers.get(self.entry_id)
-            if artist and artist.artist_id == curr_id:
-                label_bbox = artist.label_artist.get_bbox_patch()
-                if label_bbox:
-                    label_bbox.set_edgecolor(INDICATED_EDGE_COLOR)
-                    label_bbox.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
-                self.plotter.update_title(f"Current Artist: {curr_id} (ID: {self.entry_id}) | {HELP_STR}")
-            
-        elif curr_id.startswith('shape_'):
-            artist = self.plotter.shape_drag_managers.get(self.entry_id)
-            if artist and artist.artist_id == curr_id:
-                artist.shape_artist.set_edgecolor(INDICATED_EDGE_COLOR)
-                artist.shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
-                self.plotter.update_title(f"Current Artist: {curr_id} (ID: {self.entry_id}) | {HELP_STR}")
-            
-    def select_current_artist_id(self):
-        current_artist_id = None        
-        if not self.plotter.artists_ids:
+    def select_current_draggable_id(self):
+        current_draggable_id = None        
+        if not self.plotter.draggables_ids:
             self.plotter.iter_count = 0
             return None
                 
         if self.plotter.last_artist_id is None:
             self.plotter.iter_count = 0
-            return self.plotter.artists_ids[0]
+            return self.plotter.draggables_ids[0]
         
-        if self.plotter.last_artist_id in self.plotter.artists_ids:
+        if self.plotter.last_artist_id in self.plotter.draggables_ids:
             if self.plotter.iter_count >= 2:
-                l = len(self.plotter.artists_ids)
-                i = self.plotter.artists_ids.index(self.plotter.last_artist_id)
+                l = len(self.plotter.draggables_ids)
+                i = self.plotter.draggables_ids.index(self.plotter.last_artist_id)
                 n = (i + 1) % l
                 self.plotter.iter_count = 0
-                current_artist_id = self.plotter.artists_ids[n]
+                current_draggable_id = self.plotter.draggables_ids[n]
             else:
-                current_artist_id = self.plotter.last_artist_id
+                current_draggable_id = self.plotter.last_artist_id
                 
         else:
             self.plotter.iter_count = 0
-            current_artist_id = self.plotter.artists_ids[0]
+            current_draggable_id = self.plotter.draggables_ids[0]
         
-        return current_artist_id
-
+        return current_draggable_id
     
-    def clean_up_current_artist_id(self):        
-        self.indicate_current_artist_id()
+    def indicate_current_draggable_id(self):
+        curr_id = self.plotter.current_draggable_id
+        if curr_id is None:
+            return
+        
+        if curr_id.startswith('label_'):
+            draggable_artist = self.plotter.label_drag_managers.get(self.entry_id)
+            if draggable_artist and draggable_artist.artist_id == curr_id:
+                label_bbox = draggable_artist.label_artist.get_bbox_patch()
+                if label_bbox:
+                    label_bbox.set_edgecolor(INDICATED_EDGE_COLOR)
+                    label_bbox.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
+                self.plotter.update_title(f"Current Artist: {curr_id} (ID: {self.entry_id}) | Click to Drag | Arrows to Nudge | {HELP_STR}", True)
+            self.plotter.current_draggable = draggable_artist
+            
+        elif curr_id.startswith('shape_'):
+            draggable_artist = self.plotter.shape_drag_managers.get(self.entry_id)
+            if draggable_artist and draggable_artist.artist_id == curr_id:
+                draggable_artist.shape_artist.set_edgecolor(INDICATED_EDGE_COLOR)
+                draggable_artist.shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
+                self.plotter.update_title(f"Current Artist: {curr_id} (ID: {self.entry_id}) | Click to Drag or Resize | Arrows to Nudge | {HELP_STR}", True)
+            self.plotter.current_draggable = draggable_artist
+                
+    def clean_up_current_draggable_id(self):    
+        self.indicate_current_draggable_id()
 
         if self.plotter.current_move_distance <= self.min_move_distance:
             self.plotter.iter_count += 1
@@ -132,10 +133,10 @@ class Draggable:
             self.plotter.iter_count = 0
 
         self.plotter.drawn = False
-        self.plotter.last_artist_id = self.plotter.current_artist_id
-        self.plotter.current_artist_id = None
+        self.plotter.last_artist_id = self.plotter.current_draggable_id
+        self.plotter.current_draggable_id = None
         self.plotter.current_move_distance = 0.0
-        self.plotter.artists_ids = []
+        self.plotter.draggables_ids = []
 
 class DraggableLabel(Draggable):
     def __init__(self, entry_id:int, plotter_ref:Plotter):
@@ -143,24 +144,39 @@ class DraggableLabel(Draggable):
         self.label_artist = self.plotter.labels_artists[entry_id]
         self.shape_artist = self.plotter.shapes_artists[entry_id]
         self.canvas = self.label_artist.figure.canvas
+        
         self.press = None
         self.drag_bg = None
         
-        # Store IDs so we can kill them later
-        self.cids = [
-            self.canvas.mpl_connect('button_press_event', self.on_press),
-            self.canvas.mpl_connect('motion_notify_event', self.on_motion),
-            self.canvas.mpl_connect('button_release_event', self.on_release),
-        ]
+        if self.canvas.supports_blit:
+            # Store IDs so we can kill them later
+            self.cids = [
+                self.canvas.mpl_connect('button_press_event', self.on_press),
+                self.canvas.mpl_connect('motion_notify_event', self.on_motion),
+                self.canvas.mpl_connect('button_release_event', self.on_release),
+            ]
 
     def on_press(self, event):
-        if event.inaxes != self.shape_artist.axes: return
+        self.plotter.ignore_current_draggable_id_n += 1
+        self.on_press_helper(event)
+        self.plotter.fire_on_motion = True
+    
+    def on_press_helper(self, event):
+        self.plotter.fire_on_motion = False
+        self.press = None
+        self.drag_bg = None
+        
+        if event.inaxes != self.shape_artist.axes:
+            self.plotter.ignore_current_draggable_id_n -= 1
+            return
         
         contains, _ = self.label_artist.contains(event)
-        if not contains: return
+        if not contains:
+            self.plotter.ignore_current_draggable_id_n -= 1 
+            return
         
-        x0, y0 = self.label_artist.get_position()
-        self.press = x0, y0, event.xdata, event.ydata, event.x, event.y
+        x, y = self.label_artist.get_position()
+        self.press = x, y, event.xdata, event.ydata, event.x, event.y
 
         label_bbox = self.label_artist.get_bbox_patch()
         if label_bbox:
@@ -168,20 +184,25 @@ class DraggableLabel(Draggable):
         
         if self.label_artist.get_visible():
             self.shape_artist.set_visible(True)
-            self.populate_artist_list()
+            self.populate_draggables_list()
         
         self.canvas.draw_idle()
             
     def on_motion(self, event):
+        if not self.plotter.fire_on_motion:
+            return
+        
         if self.press is None or event.inaxes != self.label_artist.axes:
             return
         
-        if self.plotter.current_artist_id is None and self.plotter.iter_count == 0:
-            self.plotter.current_artist_id = self.select_current_artist_id()
-            self.indicate_current_artist_id()
+        if self.plotter.current_draggable_id is None and self.plotter.iter_count == 0:
+            self.plotter.current_draggable_id = self.select_current_draggable_id()
+            self.indicate_current_draggable_id()
             
-        if not self.plotter.current_artist_id == self.artist_id:
+        if not self.plotter.current_draggable_id == self.artist_id:
             return
+        
+        self.plotter.ignore_current_draggable_id_n = 1
         
         if not self.plotter.drawn:
             # Prepare Background for Blitting
@@ -199,7 +220,7 @@ class DraggableLabel(Draggable):
             self.label_artist.set_visible(True)
             self.plotter.drawn = True
         
-        x0, y0, xdata_press, ydata_press, xpx_press, ypx_press = self.press
+        _, _, xdata_press, ydata_press, xpx_press, ypx_press = self.press
         dx = event.xdata - xdata_press
         dy = event.ydata - ydata_press   
         dx_press = event.x - xpx_press
@@ -209,34 +230,54 @@ class DraggableLabel(Draggable):
 
         # Blitting Loop
         self.canvas.restore_region(self.drag_bg)
-        self.label_artist.set_position((x0 + dx, y0 + dy))
+        self.move_label(dx, dy)
         self.label_artist.axes.draw_artist(self.label_artist)
         self.canvas.blit(self.label_artist.axes.bbox)
+    
+    def move_label(self, dx, dy):
+        x0, y0, _, _, _, _ = self.press
+        self.label_artist.set_position((x0 + dx, y0 + dy))
+    
+    def move(self, dx, dy):
+        if not self.press:
+            return
+        
+        _, _, xdata_press, ydata_press, xpx_press, ypx_press = self.press
+        x, y = self.label_artist.get_position()
+        self.press = x, y, xdata_press, ydata_press, xpx_press, ypx_press
 
+        self.move_label(dx, dy)
+        self.canvas.draw()
+        self.plotter.drawn = False
+        
     def on_release(self, event):
-        self.press = None
-        self.drag_bg = None
-
-        label_bbox = self.label_artist.get_bbox_patch()
-        if label_bbox:
-            label_bbox.set_edgecolor('black')
-            label_bbox.set_linewidth(DEFAULT_SMALL_LINE_WIDTH)
+        self.partial_release()
         
-        if self.plotter.current_artist_id is None and self.plotter.artists_ids:
-            self.plotter.current_artist_id = self.select_current_artist_id()
-            self.indicate_current_artist_id()
+        if self.plotter.current_draggable_id is None and self.plotter.draggables_ids:
+            self.plotter.current_draggable_id = self.select_current_draggable_id()
+            self.indicate_current_draggable_id()
         
-        if self.artist_id == self.plotter.current_artist_id:
+        if self.artist_id == self.plotter.current_draggable_id:
             if self.plotter.drawn:
                 # Reset blitted background                    
                 self.shape_artist.set_edgecolor(DEFAULT_EDGE_COLOR)
                 self.shape_artist.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
             
-            self.clean_up_current_artist_id()
+            self.clean_up_current_draggable_id()
             self.label_artist.remove()
             self.plotter.ax.add_artist(self.label_artist)
             
         self.canvas.draw_idle()
+    
+    def partial_release(self):
+        if self.plotter.ignore_current_draggable_id_n <= 0:
+            state_str = "VISIBLE" if self.plotter.show_overlays else "HIDDEN"
+            self.plotter.update_title(f"OVERLAYS: {state_str} | {DEF_STR}", True)
+            
+        label_bbox = self.label_artist.get_bbox_patch()
+        if label_bbox:
+            label_bbox.set_edgecolor('black')
+            label_bbox.set_linewidth(DEFAULT_SMALL_LINE_WIDTH)
 
     def disconnect(self):
         for cid in self.cids:
@@ -251,14 +292,16 @@ class DraggableShape(Draggable):
         self.label_artist = self.plotter.labels_artists[entry_id]
         self.shape_artist = self.plotter.shapes_artists[entry_id]
         self.canvas = self.shape_artist.figure.canvas
+        
         self.press = None
         self.drag_bg = None
+        self.shape_mode = None
+        
         self.radial_tolerance = 5 # Pixel coordinates
         self.edge_tolerance = 5 # Pixel coordinates
         self.vertex_tolerance = 10 # Pixel coordinates
         self.min_rect_dist = 50 # Data coordinates
         self.min_circ_dist = 30 # Data coordinates
-        self.shape_mode = None
         self.spec_max_ratio = 0.3 # max ratio for joystick and sprint distance relative to image size
         
         if self.shape_type == CIRCLE:
@@ -273,49 +316,74 @@ class DraggableShape(Draggable):
             h = self.shape_artist.get_height()
             self.update_rect_safe(x, y, w, h)
         
-        # Store IDs so we can kill them later
-        self.cids = [
-            self.canvas.mpl_connect('button_press_event', self.on_press),
-            self.canvas.mpl_connect('motion_notify_event', self.on_motion),
-            self.canvas.mpl_connect('button_release_event', self.on_release),
-        ]
+        else:
+            return
+
+        if self.canvas.supports_blit:
+            # Store IDs so we can kill them later
+            self.cids = [
+                self.canvas.mpl_connect('button_press_event', self.on_press),
+                self.canvas.mpl_connect('motion_notify_event', self.on_motion),
+                self.canvas.mpl_connect('button_release_event', self.on_release),
+            ]
         
-    def on_press(self, event):        
-        if event.inaxes != self.shape_artist.axes: return
+    def on_press(self, event):
+        self.plotter.ignore_current_draggable_id_n += 1
+        self.on_press_helper(event)
+        self.plotter.fire_on_motion = True
+        
+    def on_press_helper(self, event):        
+        self.plotter.fire_on_motion = False
+        self.press = None
+        self.drag_bg = None
+        self.shape_mode = None
+        
+        if event.inaxes != self.shape_artist.axes:
+            self.plotter.ignore_current_draggable_id_n -= 1
+            return False
             
         contains, _ = self.shape_artist.contains(event,)
-        if not contains: return
+        if not contains:
+            self.plotter.ignore_current_draggable_id_n -= 1
+            return False
         
         if self.shape_type == CIRCLE:
             cx, cy = self.shape_artist.get_center()
             self.shape_mode = self.get_circumference(event, cx, cy)
             self.press = cx, cy, event.xdata, event.ydata, event.x, event.y
+        
         elif self.shape_type == RECT:
             x, y = self.shape_artist.get_xy()
             self.shape_mode = self.get_corner_under_mouse(event)
             if self.shape_mode is None:
                 self.shape_mode = self.get_edge_under_mouse(event)
             self.press = x, y, event.xdata, event.ydata, event.x, event.y
-        
+                
         self.shape_artist.set_edgecolor(DEFAULT_EDGE_COLOR)
         
         if self.shape_artist.get_visible():
             self.label_artist.set_visible(True)
-            self.populate_artist_list()
+            self.populate_draggables_list()
             
         self.canvas.draw_idle()
+        return True
         
     def on_motion(self, event):
+        if not self.plotter.fire_on_motion:
+            return
+              
         if self.press is None or event.inaxes != self.shape_artist.axes:
             return
 
-        if self.plotter.current_artist_id is None:
-            self.plotter.current_artist_id = self.select_current_artist_id()
-            self.indicate_current_artist_id()
+        if self.plotter.current_draggable_id is None:
+            self.plotter.current_draggable_id = self.select_current_draggable_id()
+            self.indicate_current_draggable_id()
             
-        if not self.plotter.current_artist_id == self.artist_id:
+        if not self.plotter.current_draggable_id == self.artist_id:
             return
-                
+        
+        self.plotter.ignore_current_draggable_id_n = 1
+
         if not self.plotter.drawn:
             # Prepare Background for Blitting
             self.shape_artist.set_edgecolor(ACTIVE_EDGE_COLOR)
@@ -331,7 +399,7 @@ class DraggableShape(Draggable):
             self.drag_bg = self.canvas.copy_from_bbox(self.shape_artist.axes.bbox)
             self.shape_artist.set_visible(True)
             self.plotter.drawn = True
-        
+                    
         _, _, _, _, xpx_press, ypx_press = self.press
         dx_press = event.x - xpx_press
         dy_press = event.y - ypx_press
@@ -343,10 +411,13 @@ class DraggableShape(Draggable):
         if self.shape_type == CIRCLE:
             self.circle_transform(event)
         elif self.shape_type == RECT:
-            self.rect_transform(event)        
+            self.rect_transform(event)
+        else:
+            return
+          
         self.shape_artist.axes.draw_artist(self.shape_artist)
         self.canvas.blit(self.shape_artist.axes.bbox)
-                    
+            
     def circle_transform(self, event):
         if self.press is None:
             return
@@ -356,21 +427,21 @@ class DraggableShape(Draggable):
         old_cx, old_cy = self.shape_artist.get_center()
         old_r = self.shape_artist.get_radius()
         new_cx, new_cy = old_cx, old_cy
-        current_shape = self.plotter.shapes[self.entry_id]
-
+        
         if self.shape_mode == 'resize':
             self.update_radius(xdata, ydata)
 
         elif self.shape_mode == 'drag':
-            x0, y0, xdata_press, ydata_press, _, _ = self.press
+            _, _, xdata_press, ydata_press, _, _ = self.press
             dx = xdata - xdata_press
             dy = ydata - ydata_press
-            new_cx = int(round(x0 + dx))
-            new_cy = int(round(y0 + dy))
-            self.shape_artist.set_center((new_cx, new_cy))
-            current_shape['cx'] = new_cx
-            current_shape['cy'] = new_cy
-                        
+            new_cx, new_cy = self.move_circle(dx, dy)
+        
+        self.circle_transform_helper(old_cx, old_cy, old_r, new_cx, new_cy)
+    
+    def circle_transform_helper(self, old_cx, old_cy, old_r, new_cx, new_cy):
+        current_shape = self.plotter.shapes[self.entry_id]
+        
         if self.plotter.saved_mouse_wheel and current_shape['key_name'] == MOUSE_WHEEL_CODE:
             self.plotter.mouse_wheel_cx = new_cx
             self.plotter.mouse_wheel_cy = new_cy
@@ -410,7 +481,7 @@ class DraggableShape(Draggable):
                 current_shape['r'] = old_r             
             else:
                 self.plotter.sprint_distance = actual_dist
-
+            
     def rect_transform(self, event):
         if self.press is None:
             return
@@ -422,14 +493,10 @@ class DraggableShape(Draggable):
         if self.update_edge(self.shape_mode, xdata, ydata):
             return
         if self.shape_mode == 'drag':
-            x0, y0, xdata_press, ydata_press, _, _ = self.press
+            _, _, xdata_press, ydata_press, _, _ = self.press
             dx = xdata - xdata_press
             dy = ydata - ydata_press
-            new_x = int(round(x0 + dx))
-            new_y = int(round(y0 + dy))
-            w = self.shape_artist.get_width()
-            h = self.shape_artist.get_height()
-            self.update_rect_safe(new_x, new_y, w, h)
+            self.move_rect(dx, dy)
 
     def get_circumference(self, event, cx, cy):
         # Get circle data
@@ -670,20 +737,59 @@ class DraggableShape(Draggable):
         self.plotter.shapes[self.entry_id]['cx'] = cx
         self.plotter.shapes[self.entry_id]['cy'] = cy
         self.plotter.shapes[self.entry_id]['bb'] = bb
-
-    def on_release(self, event):        
-        self.press = None
-        self.drag_bg = None
-        self.shape_mode = None
-
-        self.shape_artist.set_edgecolor(DEFAULT_EDGE_COLOR)
-        self.shape_artist.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
         
-        if self.plotter.current_artist_id is None and self.plotter.artists_ids:
-            self.plotter.current_artist_id = self.select_current_artist_id()
-            self.indicate_current_artist_id()
+    def move_circle(self, dx, dy):
+        x0, y0, _, _, _, _ = self.press
+        new_cx = int(round(x0 + dx))
+        new_cy = int(round(y0 + dy))
+        self.shape_artist.set_center((new_cx, new_cy))
+        self.plotter.shapes[self.entry_id]['cx'] = new_cx
+        self.plotter.shapes[self.entry_id]['cy'] = new_cy
+        return new_cx, new_cy
 
-        if self.artist_id == self.plotter.current_artist_id:
+    def move_rect(self, dx, dy):
+        x0, y0, _, _, _, _ = self.press
+        new_x = int(round(x0 + dx))
+        new_y = int(round(y0 + dy))
+        w = self.shape_artist.get_width()
+        h = self.shape_artist.get_height()
+        self.update_rect_safe(new_x, new_y, w, h)
+
+    def move(self, dx, dy):
+        if not self.press:
+            return
+        
+        if self.shape_type == CIRCLE:
+            _, _, xdata_press, ydata_press, xpx_press, ypx_press = self.press
+            cx, cy = self.shape_artist.get_center()
+            self.press = cx, cy, xdata_press, ydata_press, xpx_press, ypx_press
+                
+            old_cx, old_cy = self.shape_artist.get_center()
+            old_r = self.shape_artist.get_radius()
+            new_cx, new_cy = self.move_circle(dx, dy)
+            self.circle_transform_helper(old_cx, old_cy, old_r, new_cx, new_cy)
+
+        elif self.shape_type == RECT:
+            _, _, xdata_press, ydata_press, xpx_press, ypx_press = self.press
+            x, y = self.shape_artist.get_xy()
+            self.press = x, y, xdata_press, ydata_press, xpx_press, ypx_press
+                
+            self.move_rect(dx, dy)
+        
+        else:
+            return
+            
+        self.canvas.draw()
+        self.plotter.drawn = False
+
+    def on_release(self, event):      
+        self.partial_release()
+        
+        if self.plotter.current_draggable_id is None and self.plotter.draggables_ids:
+            self.plotter.current_draggable_id = self.select_current_draggable_id()
+            self.indicate_current_draggable_id()
+
+        if self.artist_id == self.plotter.current_draggable_id:
             if self.plotter.drawn:
                 # Reset blitted background
                 label_bbox = self.label_artist.get_bbox_patch()
@@ -691,11 +797,19 @@ class DraggableShape(Draggable):
                     label_bbox.set_edgecolor('black')
                     label_bbox.set_linewidth(DEFAULT_SMALL_LINE_WIDTH)
             
-            self.clean_up_current_artist_id()
+            self.clean_up_current_draggable_id()
             self.shape_artist.remove()
             self.plotter.ax.add_patch(self.shape_artist)
             
         self.canvas.draw_idle()
+    
+    def partial_release(self):
+        if self.plotter.ignore_current_draggable_id_n <= 0:
+            state_str = "VISIBLE" if self.plotter.show_overlays else "HIDDEN"
+            self.plotter.update_title(f"OVERLAYS: {state_str} | {DEF_STR}", True)
+            
+        self.shape_artist.set_edgecolor(DEFAULT_EDGE_COLOR)
+        self.shape_artist.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
                 
     def disconnect(self):
         for cid in self.cids:
@@ -752,7 +866,7 @@ class Plotter:
         
         # Initiate Parameters
         self.fig, self.ax = plt.subplots()
-        
+                
         self.points = []          
         self.point_artists = []
         self.mode = None          
@@ -850,15 +964,21 @@ class Plotter:
             self.shape_drag_managers[uid].disconnect()     
         self.shape_drag_managers = {}
         self.last_artist_id = None
-        self.current_artist_id = None
-        self.artists_ids = []
+        self.ignore_current_draggable_id_n = 0
+        self.current_draggable_id = None
+        self.current_draggable: DraggableLabel | DraggableShape | None = None
+        self.draggables_ids = []
         self.drawn = False
         self.current_move_distance = 0.0
         self.iter_count = 0
+        self.fire_on_motion = False
         
-    def update_title(self, text):
+    def update_title(self, text, idle_override=False):
         self.ax.set_title(text)
-        self.fig.canvas.draw()
+        if idle_override:
+            self.fig.canvas.draw_idle()
+        else:
+            self.fig.canvas.draw()
 
     def clear_visuals(self):
         for artist in self.point_artists:
@@ -1019,7 +1139,7 @@ class Plotter:
             
             self.init_params_helper()
             self.update_image_params(img)
-            self.clear_visuals()
+            self.clear_visuals() # Call it here so we don't get any errors with reset state trying to remove already removed artists by the ax.clear() in the next line
             self.ax.clear()
             self.ax.imshow(img)
 
@@ -1101,7 +1221,58 @@ class Plotter:
                     line.set_visible(False)
                 self.fig.canvas.draw_idle()
 
+        if self.state == IDLE and not self.drawn:
+            hovering_now = None
+                        
+            if self.ignore_current_draggable_id_n > 0:
+                return
+                     
+            if not hovering_now:
+                for uid, manager in self.label_drag_managers.items():
+                    contains, _ = manager.label_artist.contains(event)
+                    if contains:
+                        hovering_now = (uid, manager, "label")
+                        break # Found one, stop looking
+            
+            if not hovering_now:
+                for uid, manager in self.shape_drag_managers.items():
+                    contains, _ = manager.shape_artist.contains(event)
+                    if contains:
+                        hovering_now = (uid, manager, "shape")
+                        break         
+                    
+            if hovering_now:
+                uid, manager, m_type = hovering_now
+                target = manager.label_artist.get_bbox_patch() if m_type == "label" else manager.shape_artist
+                
+                if target:
+                    curr_id = m_type + "_" + str(uid)
+                                                         
+                    if self.current_draggable_id != curr_id:
+                        self.partial_release_all()
+                        manager.on_press_helper(event)
+                        self.current_draggable_id = curr_id
+                        manager.indicate_current_draggable_id()
+                        self.fire_on_motion = False
+                        
+            else:
+                self.partial_release_all()                            
+                state_str = "VISIBLE" if self.show_overlays else "HIDDEN"
+                self.update_title(f"OVERLAYS: {state_str} | {DEF_STR}", True)
+    
+    def partial_release_all(self):
+        for draggable in self.label_drag_managers.values():
+            draggable.partial_release()
+        for draggable in self.shape_drag_managers.values():
+            draggable.partial_release()
+        
+        self.current_draggable_id = None
+        self.fig.canvas.draw_idle()
+
     def on_click(self, event):
+        if self.state == IDLE:
+            self.ignore_current_draggable_id_n = 0
+            
         # Handle Binding via Mouse Click
         if self.state == WAITING_FOR_KEY:
             # Matplotlib button codes: 1=Left, 2=Middle, 3=Right
@@ -1204,6 +1375,21 @@ class Plotter:
                 self.state = CONFIRM_EXIT
                 self.update_title("[EXIT?] Press ENTER to Quit or Any other key to Cancel.")
 
+            step = 5 if event.key.startswith('shift+') else 1
+            clean_key = event.key.replace('shift+', '')
+            if clean_key == 'left':
+                if self.current_draggable:
+                    self.current_draggable.move(-step, 0) # x is decreasing leftward, y stays constant
+            elif clean_key == 'right':
+                if self.current_draggable:
+                    self.current_draggable.move(step, 0) # x is increasing rightward, y stays constants
+            elif clean_key == 'up':
+                if self.current_draggable:
+                    self.current_draggable.move(0, -step) # y is decreasing upward, x stays constant
+            elif clean_key == 'down':
+                if self.current_draggable:
+                    self.current_draggable.move(0, step) # y is increasing downward, x stays constant
+
     # Delete Logic
     def enter_delete_mode(self):
         if not self.shapes:
@@ -1211,7 +1397,6 @@ class Plotter:
             self.update_title(f"List empty. Nothing to delete | {HELP_STR}")
             return
 
-        self.print_data()
         self.state = DELETING
         self.input_buffer = ""
         self.update_title("DELETE MODE: Type ID... (Enter to Confirm | Esc to Cancel)")
@@ -1302,10 +1487,14 @@ class Plotter:
         if uid not in self.shapes:
             return
         
+        if self.current_draggable_id in [f"shape_{uid}", f"label_{uid}"]:
+            self.current_draggable_id = None
+            self.current_draggable = None
+        
         shape_type = self.shapes[uid]['type']
         interception_key = self.shapes[uid]['key_name']
         hex_code = self.shapes[uid]['m_code']
-        
+                
         del self.shapes[uid]
 
         if uid in self.shapes_artists:
@@ -1324,7 +1513,7 @@ class Plotter:
             self.shape_drag_managers[uid].disconnect()
             del self.shape_drag_managers[uid]
 
-        if self.last_artist_id == f"shape_{uid}" or self.last_artist_id == f"label_{uid}":
+        if self.last_artist_id in [f"shape_{uid}", f"label_{uid}"]:
             self.last_artist_id = None
             
         print(f"[+] Deleted Shape of type: {shape_type} with ID: {uid} and key: '{interception_key}' (hex: {hex_code})")
