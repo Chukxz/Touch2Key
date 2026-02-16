@@ -155,7 +155,7 @@ class WASDMapper():
         vx = touch_event.x - self.center_x
         vy = touch_event.y - self.center_y
         dist_sq = vx*vx + vy*vy
-
+        
         # Deadzone Check (Optimized)
         if dist_sq < self.deadzone_sq:
             # If we are inside deadzone, lift keys
@@ -174,12 +174,12 @@ class WASDMapper():
             self.center_y = touch_event.y - (vy * scale)
             vx = touch_event.x - self.center_x
             vy = touch_event.y - self.center_y
-
+            
         # Angle Calculation
         angle_rad = math.atan2(vy, vx)
         if angle_rad < 0: angle_rad += 2 * math.pi  
-        new_sector = int((angle_rad + self.PI_8) * self.    _PI_4) % 8
-
+        new_sector = int((angle_rad + self.PI_8) * self.INV_PI_4) % 8
+                
         # Hysteresis Logic     
         if self.last_sector is not None:
             current_sector_center = self.last_sector * (math.pi / 4)
