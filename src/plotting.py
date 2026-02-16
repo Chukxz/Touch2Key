@@ -33,7 +33,7 @@ CONFIRM_EXIT = "CONFIRM_EXIT"
 NAMING = "NAMING"
 HELP_STR = "F1(Help)"
 DEF_STR = \
-    "MODE: IDLE | F3(Load JSON) | F5(Load Image) | F10(Save) | Esc(Exit)\n\
+    "MODE: IDLE | F3(Load JSON) | F5(Load Image) | F12(Save) | Esc(Exit)\n\
     F6(Circle) | F7(Rect) | F8(Cancel) | Del(Delete) | F2(Delete All) | F9(List Current Shapes in Terminal)\n\
     F4(Toggle Artist Visibility) | F11(Sprint Threshold) | F12(Mouse Wheel)\n\
     Arrows: Nudge | Shift+Arrows: Fast Nudge | Double Click: Change Selected Artist"
@@ -1371,7 +1371,7 @@ class Plotter:
                 self.start_mode(RECT, 4)
             elif event.key == 'f9':
                 self.print_data()
-            elif event.key == 'f10':
+            elif event.key == 'f12':
                 self.enter_naming_mode()
             elif event.key == 'delete':
                 self.enter_delete_mode()
