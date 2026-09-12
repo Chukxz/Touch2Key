@@ -33,9 +33,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
-from mapper_module.gui.signal_bridge import EngineSignalBridge
-from mapper_module.gui.log_bridge import install_gui_logging
-from mapper_module.gui.pages import (
+from modules.gui.signal_bridge import EngineSignalBridge
+from modules.gui.log_bridge import install_gui_logging
+from modules.gui.pages import (
     DashboardPage,
     LayoutEditorPage,
     DevicesPage,
@@ -46,9 +46,9 @@ from mapper_module.gui.pages import (
 )
 
 if TYPE_CHECKING:
-    from mapper_module.engine import Engine
+    from modules.engine import Engine
 
-logger = logging.getLogger("mapper_module.gui")
+logger = logging.getLogger("modules.gui")
 
 
 class MainWindow(QMainWindow):
@@ -215,7 +215,7 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            from mapper_module.engine import Engine  # local import: heavy deps
+            from modules.engine import Engine  # local import: heavy deps
 
             self.engine = Engine()
 

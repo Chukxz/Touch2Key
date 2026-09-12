@@ -3,7 +3,7 @@
 """
 Single entry point the rest of the app should import:
 
-    from mapper_module.db import Store, default_db_path
+    from modules.db import Store, default_db_path
 
     store = Store(default_db_path())
     settings = store.settings.get()
@@ -42,13 +42,13 @@ class Store:
 
 
 def default_db_path() -> Path:
-    """Mirrors mapper_module.utils.TOML_PATH's convention: keep the
+    """Mirrors modules.utils.TOML_PATH's convention: keep the
     sqlite file alongside where the TOML config used to live, so
     existing install/uninstall scripts need only a filename change
     rather than a new directory-resolution rule. Adjust the filename
     here if PROJECT_ROOT already has a config subfolder convention
     your utils module follows that this doesn't yet know about."""
-    from mapper_module.utils import PROJECT_ROOT
+    from modules.utils import PROJECT_ROOT
 
     return Path(PROJECT_ROOT) / "touch2key.db"
 

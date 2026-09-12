@@ -4,7 +4,7 @@ import threading
 from datetime import datetime as _datetime
 from .workers import keyboard_worker, mouse_worker
 
-from mapper_module.utils import (
+from modules.utils import (
     LEFT_BUTTON_DOWN,
     LEFT_BUTTON_UP,
     RIGHT_BUTTON_DOWN,

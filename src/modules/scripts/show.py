@@ -1,4 +1,4 @@
-from mapper_module.utils import ADB
+from modules.utils import ADB
 
 
 def run():

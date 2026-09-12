@@ -2,7 +2,7 @@ import os
 import tkinter as tk
 from tkinter import filedialog
 import json
-from mapper_module.utils import JSONS_FOLDER, update_toml
+from modules.utils import JSONS_FOLDER, update_toml
 
 
 def run():

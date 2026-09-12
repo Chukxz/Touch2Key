@@ -11,8 +11,8 @@ kept out of db/__init__.py's imports (and out of Store itself) so
 pulling in tomlkit and doing file I/O isn't a cost every normal run
 pays; import this module explicitly where migration actually happens:
 
-    from mapper_module.db import Store, default_db_path
-    from mapper_module.db.legacy_migration import (
+    from modules.db import Store, default_db_path
+    from modules.db.legacy_migration import (
         import_legacy_config, import_legacy_layout,
     )
 
@@ -29,11 +29,11 @@ from pathlib import Path
 
 import tomlkit
 
-from mapper_module.utils import CIRCLE, RECT
+from modules.utils import CIRCLE, RECT
 from .repositories import Layout
 from . import Store
 
-logger = logging.getLogger("mapper_module.db")
+logger = logging.getLogger("modules.db")
 
 
 def import_legacy_config(store: Store, toml_path: str | Path) -> None:

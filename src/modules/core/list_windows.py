@@ -12,8 +12,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QFont
 
-from mapper_module.platforms import get_platform
-from mapper_module.utils import WINDOWS_HEADERS
+from modules.platforms import get_platform
+from modules.utils import WINDOWS_HEADERS
 
 
 class ListApp(QDialog):

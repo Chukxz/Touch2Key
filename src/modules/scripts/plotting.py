@@ -1,10 +1,10 @@
 from __future__ import annotations
-from mapper_module.platforms import get_platform, get_specific_mt_key
+from modules.platforms import get_platform, get_specific_mt_key
 
 get_platform().SystemConfig().set_dpi_awareness()
 
 import sys
-from mapper_module.utils import (
+from modules.utils import (
     CIRCLE,
     RECT,
     DEF_DPI,

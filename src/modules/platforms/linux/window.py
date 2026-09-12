@@ -1,6 +1,6 @@
 from typing import Any
 from ..base import AbstractWindowManager
-from mapper_module.utils import CURSOR_CHECK_DELAY_NS
+from modules.utils import CURSOR_CHECK_DELAY_NS
 from Xlib import display, X, error
 from Xlib.ext import xfixes
 import time

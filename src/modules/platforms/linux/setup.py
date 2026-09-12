@@ -4,7 +4,7 @@ import subprocess
 import shutil
 import requests
 import zipfile
-from mapper_module.utils import PROJECT_ROOT, UDEV_RULE_PATH
+from modules.utils import PROJECT_ROOT, UDEV_RULE_PATH
 
 # --- Configuration ---
 BIN_DIR = PROJECT_ROOT / "bin"

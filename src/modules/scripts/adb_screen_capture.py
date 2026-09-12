@@ -3,7 +3,7 @@ import datetime
 from pathlib import Path
 from PIL import Image
 
-from mapper_module.utils import (
+from modules.utils import (
     IMAGES_FOLDER,
     TOML_PATH,
     ADB,

@@ -1,17 +1,17 @@
 import sys
-from mapper_module.utils import SYSTEM
+from modules.utils import SYSTEM
 
 
 def run():
     print(f"--- Setting up for {SYSTEM} ---")
 
     if SYSTEM == "Windows":
-        from mapper_module.platforms.windows import setup_windows
+        from modules.platforms.windows import setup_windows
 
         setup_windows()
 
     elif SYSTEM == "Linux":
-        from mapper_module.platforms.linux import setup_linux
+        from modules.platforms.linux import setup_linux
 
         setup_linux()
 

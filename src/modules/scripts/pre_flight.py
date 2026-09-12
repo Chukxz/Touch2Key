@@ -1,6 +1,6 @@
 import shutil
 from pathlib import Path
-from mapper_module.utils import SYSTEM, ADB
+from modules.utils import SYSTEM, ADB
 
 
 def _check_adb():

@@ -1,6 +1,6 @@
 from typing import Any
 from ..base import AbstractWindowManager
-from mapper_module.utils import CURSOR_CHECK_DELAY_NS, MAX_CLASS_NAME
+from modules.utils import CURSOR_CHECK_DELAY_NS, MAX_CLASS_NAME
 import ctypes
 from ctypes import wintypes
 import win32gui

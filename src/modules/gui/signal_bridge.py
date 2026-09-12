@@ -1,5 +1,5 @@
 """
-Bridges mapper_module's threaded MapperEventDispatcher callbacks into
+Bridges modules' threaded MapperEventDispatcher callbacks into
 PySide6 Signals, so GUI widgets can react to engine state (window,
 touch reader, mapper) without touching Qt objects from a non-GUI thread.
 
@@ -15,13 +15,14 @@ long as this bridge object is constructed on the GUI thread and never
 moved with moveToThread(). That is the only property this class relies
 on for safety -- it does no locking of its own.
 """
+
 from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QObject, Signal
 
 if TYPE_CHECKING:
-    from mapper_module.utils import MapperEventDispatcher
+    from modules.tils import MapperEventDispatcher
 
 
 class EngineSignalBridge(QObject):
@@ -33,10 +34,10 @@ class EngineSignalBridge(QObject):
 
     config_reloaded = Signal()
     json_reloaded = Signal()
-    menu_mode_toggled = Signal(bool)                    # is_visible
+    menu_mode_toggled = Signal(bool)  # is_visible
     wasd_block_changed = Signal()
-    worker_respawned = Signal(str)                      # worker_type
-    aggregation = Signal(float, float, float, float)     # sum_dx, sum_dy, acc_x, acc_y
+    worker_respawned = Signal(str)  # worker_type
+    aggregation = Signal(float, float, float, float)  # sum_dx, sum_dy, acc_x, acc_y
 
     # Catch-all for any action not worth a dedicated typed signal yet.
     generic_event = Signal(str, dict)

@@ -1,7 +1,7 @@
 from ..base import AbstractSystemConfig
 import ctypes
 import psutil
-from mapper_module.utils import NT_TIMER_RES
+from modules.utils import NT_TIMER_RES
 
 
 class SystemConfig(AbstractSystemConfig):

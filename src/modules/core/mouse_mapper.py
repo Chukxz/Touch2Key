@@ -2,11 +2,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 import threading
 
-from mapper_module.utils import UP, DOWN, PRESSED
+from modules.utils import UP, DOWN, PRESSED
 
 if TYPE_CHECKING:
     from .mapper import Mapper
-    from mapper_module.utils import TouchEvent
+    from modules.utils import TouchEvent
 
 
 class MouseMapper:

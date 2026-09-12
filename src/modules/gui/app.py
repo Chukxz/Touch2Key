@@ -12,11 +12,12 @@ from modules.gui.main_window import MainWindow
 
 
 def run() -> None:
-    app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(True)
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec())
+    print("App")
+    # app = QApplication(sys.argv)
+    # app.setQuitOnLastWindowClosed(True)
+    # window = MainWindow()
+    # window.show()
+    # sys.exit(app.exec())
 
 
 if __name__ == "__main__":

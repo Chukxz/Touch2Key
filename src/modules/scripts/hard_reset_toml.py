@@ -1,4 +1,4 @@
-from mapper_module.utils import create_default_toml
+from modules.utils import create_default_toml
 
 
 def run():

@@ -5,11 +5,11 @@ import math
 from enum import IntFlag
 import threading
 
-from mapper_module.utils import SCANCODES, UP, DOWN, PRESSED
+from modules.utils import SCANCODES, UP, DOWN, PRESSED
 
 if TYPE_CHECKING:
     from .mapper import Mapper
-    from mapper_module.utils import TouchEvent
+    from modules.utils import TouchEvent
 
 
 class _State(IntFlag):

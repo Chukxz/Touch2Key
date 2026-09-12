@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, NamedTuple
 
-from mapper_module.utils import SYSTEM
+from modules.utils import SYSTEM
 
 if TYPE_CHECKING:
     from .windows.bridge import InterceptionBridge

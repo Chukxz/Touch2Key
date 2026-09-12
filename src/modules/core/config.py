@@ -6,10 +6,10 @@ from pathlib import Path
 import tomlkit
 from tomlkit.exceptions import ParseError
 import keyboard
-from mapper_module.utils import MapperEvent, TOML_PATH, create_default_toml
+from modules.utils import MapperEvent, TOML_PATH, create_default_toml
 
 if TYPE_CHECKING:
-    from mapper_module.utils import MapperEventDispatcher
+    from modules.utils import MapperEventDispatcher
 
 
 class AppConfig:

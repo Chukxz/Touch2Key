@@ -1,4 +1,4 @@
-from mapper_module.utils import wireless_connect
+from modules.utils import wireless_connect
 
 
 def run():

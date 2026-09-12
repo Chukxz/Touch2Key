@@ -1,7 +1,7 @@
 import sys
-from mapper_module.utils import SYSTEM
+from modules.utils import SYSTEM
 import argparse
-from mapper_module import engine
+from modules import engine
 
 parser = argparse.ArgumentParser(description="Touch2Key Main")
 
@@ -14,7 +14,7 @@ def run():
         engine.run(parser)
 
     elif SYSTEM == "Linux":
-        from mapper_module.platforms.linux import check_display_protocol
+        from modules.platforms.linux import check_display_protocol
 
         if check_display_protocol():
             engine.run(parser)

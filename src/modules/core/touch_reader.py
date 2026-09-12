@@ -6,7 +6,7 @@ import threading
 import subprocess
 import re
 
-from mapper_module.utils import (
+from modules.utils import (
     TouchEvent,
     ADB,
     DOWN,
@@ -24,7 +24,7 @@ from mapper_module.utils import (
 
 if TYPE_CHECKING:
     from .config import AppConfig
-    from mapper_module.utils import MapperEventDispatcher
+    from modules.utils import MapperEventDispatcher
 
 
 class TouchReader:

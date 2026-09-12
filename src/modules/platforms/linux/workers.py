@@ -6,7 +6,7 @@ import threading
 from time import sleep as _sleep, perf_counter_ns as _perf_counter_ns
 from random import uniform as _uniform
 
-from mapper_module.utils import KEY_PING, BUTTON_PING, CONSTANT_DWELL
+from modules.utils import KEY_PING, BUTTON_PING, CONSTANT_DWELL
 
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection
@@ -42,7 +42,7 @@ def keyboard_worker(k_pipe_read: Connection):
     """Dedicated process for Linux evdev virtual keyboard."""
 
     from evdev import UInput, ecodes
-    from mapper_module.utils import (
+    from modules.utils import (
         PACK_KEY,
         MIN_KEY_DWELL,
         MAX_KEY_DWELL,
@@ -291,7 +291,7 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection):
     behind `send_lock`, which wraps only write()/syn(), not sleeps."""
 
     from evdev import UInput, ecodes, AbsInfo
-    from mapper_module.utils import (
+    from modules.utils import (
         TASK_REL,
         TASK_ABS,
         PACK_BUTTON,

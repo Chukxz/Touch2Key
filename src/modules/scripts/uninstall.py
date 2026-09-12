@@ -8,7 +8,7 @@ import ctypes
 from tkinter import messagebox
 from pathlib import Path
 
-from mapper_module.utils import (
+from modules.utils import (
     PROJECT_ROOT,
     SYSTEM,
     IMAGES_FOLDER,

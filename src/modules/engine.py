@@ -8,15 +8,15 @@ import threading
 import time
 import sys
 from PySide6.QtWidgets import QApplication
-from mapper_module.platforms import check_single_instance, get_platform
+from modules.platforms import check_single_instance, get_platform
 
-from mapper_module.utils import (
+from modules.utils import (
     ADB,
     SHORT_DELAY,
     SYSTEM,
 )
 
-from mapper_module import (
+from modules import (
     MapperEventDispatcher,
     AppConfig,
     JSONLoader,
@@ -27,17 +27,17 @@ from mapper_module import (
     WASDMapper,
 )
 
-from mapper_module.scripts.pre_flight import run as pre_flight_run
-from mapper_module.core.list_windows import select_window
-from mapper_module.core.key_capture import capture_keys, capture_performance_settings
+from modules.scripts.pre_flight import run as pre_flight_run
+from modules.core.list_windows import select_window
+from modules.core.key_capture import capture_keys, capture_performance_settings
 
-from mapper_module.utils import PROJECT_ROOT
+from modules.utils import PROJECT_ROOT
 
 NAME = "Touch2Key_Engine"
 
 if TYPE_CHECKING:
     from cProfile import Profile
-    from mapper_module.utils import TouchEvent
+    from modules.utils import TouchEvent
     from argparse import ArgumentParser
 
 profiler: Profile | None = None
@@ -150,7 +150,7 @@ class Engine:
         m_device_handle: int | None = None
 
         if SYSTEM == "Windows":
-            from mapper_module.platforms.windows import select_keyboard_then_mouse
+            from modules.platforms.windows import select_keyboard_then_mouse
 
             s_result = select_keyboard_then_mouse()
             if s_result is None:

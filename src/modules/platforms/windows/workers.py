@@ -6,7 +6,7 @@ import threading
 from time import sleep as _sleep, perf_counter_ns as _perf_counter_ns
 from random import uniform as _uniform
 
-from mapper_module.utils import (
+from modules.utils import (
     MOUSE_MOVE_RELATIVE,
     MOUSE_MOVE_ABSOLUTE,
     MOUSE_VIRTUAL_DESKTOP,
@@ -73,7 +73,7 @@ def keyboard_worker(k_pipe_read: Connection, k_device_handle: int | None):
 
     from interception.interception import Interception
     from interception.strokes import KeyStroke
-    from mapper_module.utils import (
+    from modules.utils import (
         PACK_KEY,
         MIN_KEY_DWELL,
         MAX_KEY_DWELL,
@@ -230,7 +230,7 @@ def mouse_worker(
 
     from interception.interception import Interception
     from interception.strokes import MouseStroke
-    from mapper_module.utils import (
+    from modules.utils import (
         TASK_REL,
         TASK_ABS,
         PACK_BUTTON,

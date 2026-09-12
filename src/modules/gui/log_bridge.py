@@ -41,7 +41,7 @@ class QtLogHandler(logging.Handler):
 
 
 def install_gui_logging(
-    logger_name: str = "mapper_module", level: int = logging.INFO
+    logger_name: str = "modules", level: int = logging.INFO
 ) -> QtLogHandler:
     """Attaches a QtLogHandler to the given logger (default: the
     package root, so every module's logger.* calls are captured) and

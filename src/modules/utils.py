@@ -39,13 +39,13 @@ KEEPALIVE_INTERVAL = 5.0  # seconds; must stay well under the 15s worker poll ti
 if TYPE_CHECKING:
     from multiprocessing import Process
 
-# Get location of this file: .../mapper_project/src/mapper_module
+# Get location of this file: .../Touch2Key/src/modules
 CURRENT_DIR = Path(__file__).resolve().parent
 
 # Go up one level to 'src'
 SRC_DIR = CURRENT_DIR.parent
 
-# Go up another level to 'mapper_project' (Root)
+# Go up another level to 'Touch2Key' (Root)
 PROJECT_ROOT = SRC_DIR.parent
 
 # OS environment

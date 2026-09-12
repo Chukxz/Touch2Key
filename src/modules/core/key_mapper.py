@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import threading
-from mapper_module.utils import (
+from modules.utils import (
     RECT,
     CIRCLE,
     M_LEFT,
@@ -20,7 +20,7 @@ from mapper_module.utils import (
 
 if TYPE_CHECKING:
     from .mapper import Mapper
-    from mapper_module.utils import TouchEvent
+    from modules.utils import TouchEvent
 
 
 class KeyMapper:

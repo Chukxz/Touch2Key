@@ -6,9 +6,9 @@ import os
 import time
 import keyboard
 
-from mapper_module.platforms import get_platform
+from modules.platforms import get_platform
 
-from mapper_module.utils import (
+from modules.utils import (
     MapperEvent,
     CIRCLE,
     RECT,
