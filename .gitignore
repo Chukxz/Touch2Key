@@ -1,0 +1,49 @@
+# === Project Specifics ===
+# Ignore user-generated mappings, assets, and local config
+src/resources/images/*
+src/resources/jsons/*
+
+# Ignore Drivers, Binaries, and Platform Tools
+# These are OS-specific and large; they should be managed via setup scripts, not Git
+bin/
+
+# === Python Junk ===
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+ENV/
+.pytest_cache/
+.tox/
+.coverage
+htmlcov/
+*.prof
+*.toml
+
+# === Distribution / Build ===
+dist/
+build/
+*.egg-info/
+
+# === Editor Specifics ===
+.vscode/
+.idea/
+
+# === Operating System / Misc / Logs ===
+.DS_Store
+Thumbs.db
+*~
+*.bak
+*.log
+*.log.*
+.adbkey
+logs/
+
+#SQLite databases
+*.sqlite
+*.sqlite3
+*.db
+data/
