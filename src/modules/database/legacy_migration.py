@@ -1,163 +1,235 @@
-# LEGACY_MIGRATION.PY
-
 """
-One-time importer for existing users' TOML config and JSON layout
-files, so migrating to sqlite doesn't discard an already-tuned setup.
+One-time importer from the legacy TOML config + JSON layout files into
+the sqlite database. Intended to run once per install (e.g. behind an
+explicit "Import legacy config" GUI/CLI action, or a one-time flag file
+checked at startup) -- NOT called unconditionally on every launch,
+since re-running migrate_toml_config() would silently overwrite any
+settings changes already made through the new GUI.
 
-Intended to run once -- e.g. from a `touch2key-migrate` console script,
-or a first-run GUI prompt shown only when touch2key.db doesn't exist
-yet but a legacy TOML config does -- not on every startup. Deliberately
-kept out of db/__init__.py's imports (and out of Store itself) so
-pulling in tomlkit and doing file I/O isn't a cost every normal run
-pays; import this module explicitly where migration actually happens:
+ASSUMPTIONS ABOUT THE LEGACY TOML SHAPE -- please confirm these against
+the real create_default_toml()/hard_reset_toml.py before relying on
+this in production. They're inferred from config.py's AppConfig.get()
+calls and json_loader.py's usage, not from the TOML schema itself:
 
-    from modules.db import Store, default_db_path
-    from modules.db.legacy_migration import (
-        import_legacy_config, import_legacy_layout,
-    )
+    [system]
+    left_handed = false
+    "hud_image_path" = ""
+    json_path = "path/to/layout.json"
+    json_dev_res = [360, 800]
+    json_dev_dpi = 160
 
-    store = Store(default_db_path())
-    import_legacy_config(store, old_toml_path)
-    layout = import_legacy_layout(store, old_json_path, name="Imported")
-    store.layouts.set_active(layout.id)
+    [joystick]
+    mouse_wheel_radius = 50.0
+    sprint_distance = 10.0
+    deadzone = 0.1
+    hysteresis = 5.0
+
+    [mouse]
+    sensitivity = 1.0
+    
+    [keys]
+    toggle_key = ""
+    sprint_key = ""
 """
 
 from __future__ import annotations
+
 import json
 import logging
 from pathlib import Path
+from typing import Any, Optional
 
 import tomlkit
 
-from modules.utils import CIRCLE, RECT
-from .repositories import Layout
-from . import Store
+from modules.utils import TOML_PATH
+from . import store
 
-logger = logging.getLogger("modules.db")
+logger = logging.getLogger("modules.database.legacy_migration")
 
 
-def import_legacy_config(store: Store, toml_path: str | Path) -> None:
-    """Copies [system]/[joystick]/[mouse] values from an existing TOML
-    config into app_settings. Missing sections or keys are left at
-    their sqlite schema defaults rather than raising -- a partially
-    filled legacy TOML (or one from an older Touch2Key version with
-    fewer settings) shouldn't block migration for the fields it does
-    have."""
-    toml_path = Path(toml_path)
-    if not toml_path.exists():
-        logger.info("No legacy TOML config found at %s; skipping.", toml_path)
+def _read_keys(doc: dict) -> tuple[Optional[str], Optional[str]]:
+    keys = doc.get("keys", {})
+    toggle_key = keys.get("toggle_key")
+    sprint_key = keys.get("sprint_key")
+    return toggle_key, sprint_key
+
+
+def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> None:
+    """Imports [system]/[joystick]/[mouse] (+ best-guess key bindings)
+    into the single app_settings row. Safe to call on a missing file --
+    logs and returns rather than raising, since "no legacy file" just
+    means there's nothing to migrate, not an error."""
+    path = Path(toml_path)
+    if not path.exists():
+        logger.info("No legacy TOML config found at %s; skipping.", path)
         return
 
-    with toml_path.open("r", encoding="utf-8") as f:
-        data = tomlkit.load(f)
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            doc = tomlkit.load(f)
+    except Exception as e:
+        logger.error("Failed to parse legacy TOML at %s: %s", path, e)
+        return
 
-    system = data.get("system", {})
-    joystick = data.get("joystick", {})
-    mouse = data.get("mouse", {})
+    system = doc.get("system", {})
+    joystick = doc.get("joystick", {})
+    mouse = doc.get("mouse", {})
+    toggle_key, sprint_key = _read_keys(doc)
 
-    fields: dict = {}
-    if "left_handed" in system:
-        fields["left_handed"] = bool(system["left_handed"])
-    if "json_dev_res" in system:
-        width, height = system["json_dev_res"]
-        fields["json_dev_width"] = int(width)
-        fields["json_dev_height"] = int(height)
-    if "json_dev_dpi" in system:
-        fields["json_dev_dpi"] = int(system["json_dev_dpi"])
-    if "toggle_key" in system:
-        fields["toggle_key"] = system["toggle_key"] or None
-    if "sprint_key" in system:
-        fields["sprint_key"] = system["sprint_key"] or None
-    if "deadzone" in joystick:
-        fields["deadzone"] = float(joystick["deadzone"])
-    if "hysteresis" in joystick:
-        fields["hysteresis"] = float(joystick["hysteresis"])
-    if "sensitivity" in mouse:
-        fields["sensitivity"] = float(mouse["sensitivity"])
+    width, height = system.get("json_dev_res", [360, 800])
 
-    if fields:
-        store.settings.update(**fields)
-        logger.info("Imported %d setting(s) from %s.", len(fields), toml_path)
+    fields: dict[str, Any] = {
+        "left_handed": bool(system.get("left_handed", False)),
+        "json_dev_width": int(width),
+        "json_dev_height": int(height),
+        "json_dev_dpi": int(system.get("json_dev_dpi", 160)),
+        "deadzone": float(joystick.get("deadzone", 0.1)),
+        "hysteresis": float(joystick.get("hysteresis", 5.0)),
+        "sensitivity": float(mouse.get("sensitivity", 1.0)),
+        "toggle_key": toggle_key,
+        "sprint_key": sprint_key,
+    }
+
+    store.settings.update(**fields)
+    logger.info("Migrated legacy TOML config from %s into app_settings.", path)
 
 
-def import_legacy_layout(store: Store, json_path: str | Path, name: str) -> Layout:
-    """Imports one JSON layout file (the format json_loader.py used to
-    read directly) as a new named row in `layouts` plus its zones in
-    `layout_zones`.
+def migrate_json_layout(
+    json_path: Path | str, layout_name: str = "Legacy", set_active: bool = True
+) -> Optional[int]:
+    """Imports a single legacy JSON layout file's metadata + content
+    into a new `layouts` row plus its `layout_zones`. Mirrors
+    JSONLoader._process_json's parsing logic, but skips its
+    normalize-by-width/height step: values are stored raw here, same
+    as the original file, since normalization is the runtime loader's
+    job and should stay that way regardless of where the data lives.
 
-    Coordinates are stored exactly as they appear in the source JSON --
-    raw device-pixel values, unnormalized. json_loader.py used to
-    divide by device resolution at load time to get 0..1 floats for the
-    hot touch-processing path; that normalization is a runtime concern
-    for whatever replaces JSONLoader against this store, not a storage
-    concern here. Keeping raw pixel values in the DB also matches what
-    a zone-editing canvas drawn over a screenshot needs directly.
-    """
-    json_path = Path(json_path)
-    with json_path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
+    Returns the new (or already-existing) layout's id, or None if the
+    file was missing or invalid."""
+    path = Path(json_path)
+    if not path.exists():
+        logger.warning("Legacy JSON layout not found at %s; skipping.", path)
+        return None
 
-    metadata = data["metadata"]
-    content = data.get("content", [])
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        logger.error("Failed to read/parse legacy JSON layout %s: %s", path, e)
+        return None
 
-    layout = store.layouts.create(
-        name=name,
-        width=metadata["width"],
-        height=metadata["height"],
-        dpi=metadata["dpi"],
-        mouse_wheel_radius=metadata.get("mouse_wheel_radius", 50.0),
-        sprint_distance=metadata.get("sprint_distance", 10.0),
-    )
+    try:
+        metadata = data["metadata"]
+        content = data["content"]
+    except KeyError as e:
+        logger.error("Legacy JSON layout %s missing expected key: %s", path, e)
+        return None
 
-    zones: list[dict] = []
-    skipped = 0
+    existing = store.layouts.get_by_name(layout_name)
+    if existing is not None:
+        logger.info(
+            "Layout '%s' already exists (id=%s); skipping JSON import to avoid duplicates.",
+            layout_name,
+            existing.id,
+        )
+        layout_id = existing.id
+    else:
+        layout = store.layouts.create(
+            name=layout_name,
+            width=int(metadata["width"]),
+            height=int(metadata["height"]),
+            dpi=int(metadata["dpi"]),
+            mouse_wheel_radius=float(metadata.get("mouse_wheel_radius", 50.0)),
+            sprint_distance=float(metadata.get("sprint_distance", 10.0)),
+        )
+        layout_id = layout.id
+        imported = 0
 
-    for item in content:
-        scancode = item.get("scancode")
-        raw_type = item.get("type")
+        for item in content:
+            scancode = item.get("scancode")
+            if scancode is None:
+                continue
 
-        if raw_type == CIRCLE:
-            zone_type = "circle"
-        elif raw_type == RECT:
-            zone_type = "rect"
-        else:
-            zone_type = None
-
-        if scancode is None or zone_type is None:
-            skipped += 1
-            continue
-
-        zone = {
-            "scancode": scancode,
-            "name": item.get("name", ""),
-            "zone_type": zone_type,
-            "move_camera": bool(item.get("move_camera", False)),
-        }
-
-        try:
-            if zone_type == "circle":
-                zone["cx"] = float(item["cx"])
-                zone["cy"] = float(item["cy"])
-                zone["r"] = float(item["val1"])
+            # json_loader.py compares item["type"] against CIRCLE/RECT
+            # constants imported from utils; this migration only needs
+            # the underlying string values, since it doesn't run inside
+            # the hot touch loop where the int/enum form matters for speed.
+            zone_type_raw = item.get("type")
+            if zone_type_raw == "CIRCLE":
+                zone_type = "CIRCLE"
+            elif zone_type_raw == "RECT":
+                zone_type = "RECT"
             else:
-                zone["x1"] = float(item["val1"])
-                zone["y1"] = float(item["val2"])
-                zone["x2"] = float(item["val3"])
-                zone["y2"] = float(item["val4"])
-        except (KeyError, ValueError, TypeError):
-            skipped += 1
-            continue
+                logger.warning(
+                    "Skipping zone with unrecognized type %r for scancode %s.",
+                    zone_type_raw,
+                    scancode,
+                )
+                continue
 
-        zones.append(zone)
+            try:
+                if zone_type == "CIRCLE":
+                    store.zones.create(
+                        layout_id=layout_id,
+                        scancode=str(scancode),
+                        name=item.get("name", ""),
+                        zone_type="CIRCLE",
+                        cx=float(item["cx"]),
+                        cy=float(item["cy"]),
+                        r=float(item["val1"]),
+                        move_camera=bool(item.get("move_camera", False)),
+                    )
+                else:
+                    store.zones.create(
+                        layout_id=layout_id,
+                        scancode=str(scancode),
+                        name=item.get("name", ""),
+                        zone_type="RECT",
+                        x1=float(item["val1"]),
+                        y1=float(item["val2"]),
+                        x2=float(item["val3"]),
+                        y2=float(item["val4"]),
+                        move_camera=bool(item.get("move_camera", False)),
+                    )
+                imported += 1
+            except (KeyError, ValueError) as e:
+                logger.warning("Skipping invalid zone (scancode=%s): %s", scancode, e)
+                continue
 
-    store.zones.replace_all_for_layout(layout.id, zones)
-
-    if skipped:
-        logger.warning(
-            "Skipped %d malformed zone(s) while importing %s.", skipped, json_path
+        logger.info(
+            "Migrated legacy JSON layout %s into layouts.id=%s (%d/%d zones imported).",
+            path,
+            layout_id,
+            imported,
+            len(content),
         )
 
-    logger.info(
-        "Imported layout '%s' (%d zone(s)) from %s.", name, len(zones), json_path
-    )
-    return layout
+    if set_active:
+        store.set_active_layout(layout_id)
+
+    return layout_id
+
+
+def migrate_all(toml_path: Path | str = TOML_PATH) -> None:
+    """Runs both migrations in order. The JSON layout path is read
+    from the legacy TOML's [system].json_path, since that's the only
+    place the old config recorded which layout file was active."""
+    path = Path(toml_path)
+    json_path: Optional[str] = None
+
+    if path.exists():
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                doc = tomlkit.load(f)
+            json_path = doc.get("system", {}).get("json_path")
+        except Exception as e:
+            logger.error("Could not read json_path from legacy TOML: %s", e)
+
+    migrate_toml_config(path)
+
+    if json_path:
+        migrate_json_layout(json_path)
+    else:
+        logger.info(
+            "No json_path found in legacy TOML; skipping JSON layout migration."
+        )
