@@ -43,7 +43,7 @@ Thumbs.db
 logs/
 
 # === SQLite databases ===
-*.sqlite
-*.sqlite3
+*.sqlite*
+*.sqlite3*
 *.db*
 data/
