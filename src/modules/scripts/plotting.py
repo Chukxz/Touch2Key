@@ -14,7 +14,7 @@ get_platform().SystemConfig().set_dpi_awareness()
 
 from modules.utils import (
     CIRCLE,
-    RECT,
+    RECTANGLE,
     DEF_DPI,
     IMAGES_FOLDER,
     MOUSE_WHEEL_CODE,
@@ -59,7 +59,7 @@ CONFIRM_DELETE_ALL = "CONFIRM_DELETE_ALL"
 CONFIRM_EXIT = "CONFIRM_EXIT"
 HELP_STR = "F1 (Help)"
 DEF_STR = (
-    "MODE: IDLE | F12 (Save to DB) | Esc (Exit) | F6 (Circle) | F7 (Rect) | F8 (Cancel)\n"
+    "MODE: IDLE | F12 (Save to DB) | Esc (Exit) | F6 (Circle) | F7 (RECTANGLE) | F8 (Cancel)\n"
     "    Del (Delete) | F2 (Delete All) | F9 (List Shapes) | F4 (Toggle Overlays)\n"
     "    [ (Sprint Threshold) | ] (Mouse Wheel) | Space (Toggle Move Camera)\n"
     "    Arrows: Nudge | Shift+Arrows: Fast Nudge | Double Click: Change Artist"
@@ -394,7 +394,7 @@ class _DraggableShape(_Draggable):
             new_r = max(r, self.min_circ_dist)
             self.shape_artist.set_radius(new_r)
             self.plotter.shapes[self.entry_id]["r"] = new_r
-        elif self.shape_type == RECT:
+        elif self.shape_type == RECTANGLE:
             x, y = self.shape_artist.get_xy()
             w = self.shape_artist.get_width()
             h = self.shape_artist.get_height()
@@ -408,8 +408,6 @@ class _DraggableShape(_Draggable):
                 self.canvas.mpl_connect("motion_notify_event", self.on_motion),
                 self.canvas.mpl_connect("button_release_event", self.on_release),
             ]
-            
-    def _shape_instance_is_circle
 
     def on_press(self, event):
         self.plotter.ignore_current_draggable_id_n += 1
@@ -435,7 +433,7 @@ class _DraggableShape(_Draggable):
             cx, cy = self.shape_artist.get_center()
             self.shape_mode = self.get_circumference(event, cx, cy)
             self.press = cx, cy, event.xdata, event.ydata, event.x, event.y
-        elif self.shape_type == RECT:
+        elif self.shape_type == RECTANGLE:
             x, y = self.shape_artist.get_xy()
             self.shape_mode = self.get_corner_under_mouse(event)
             if self.shape_mode is None:
@@ -491,7 +489,7 @@ class _DraggableShape(_Draggable):
         self.canvas.restore_region(self.drag_bg)
         if self.shape_type == CIRCLE:
             self.circle_transform(event)
-        elif self.shape_type == RECT:
+        elif self.shape_type == RECTANGLE:
             self.rect_transform(event)
         else:
             return
@@ -783,7 +781,7 @@ class _DraggableShape(_Draggable):
             old_r = self.shape_artist.get_radius()
             new_cx, new_cy = self.move_circle(dx, dy)
             self.circle_transform_helper(old_cx, old_cy, old_r, new_cx, new_cy)
-        elif self.shape_type == RECT:
+        elif self.shape_type == RECTANGLE:
             _, _, xdata_press, ydata_press, xpx_press, ypx_press = self.press
             x, y = self.shape_artist.get_xy()
             self.press = x, y, xdata_press, ydata_press, xpx_press, ypx_press
@@ -1073,7 +1071,7 @@ class Plotter(QMainWindow):
             if zone.zone_type == CIRCLE:
                 scale_r = (scale_x + scale_y) / 2
                 r = int(round((zone.r or 0.0) * scale_r))
-            elif zone.zone_type == RECT:
+            elif zone.zone_type == RECTANGLE:
                 bb = (
                     (
                         int(round((zone.x1 or 0.0) * scale_x)),
@@ -1284,7 +1282,7 @@ class Plotter(QMainWindow):
             elif event.key == "f6":
                 self.start_mode(CIRCLE, 3)
             elif event.key == "f7":
-                self.start_mode(RECT, 4)
+                self.start_mode(RECTANGLE, 4)
             elif event.key == "f9":
                 self.print_data()
             elif event.key == "f12":
@@ -1477,7 +1475,7 @@ class Plotter(QMainWindow):
         cx, cy, r, bb = None, None, None, None
         if self.mode == CIRCLE:
             cx, cy, r, bb = self.calculate_circle()
-        elif self.mode == RECT:
+        elif self.mode == RECTANGLE:
             cx, cy, r, bb = self.calculate_rect()
 
         self.finalize_shape(cx, cy, r, bb, key_name, bridge_key, hex_code)
@@ -1530,7 +1528,7 @@ class Plotter(QMainWindow):
                 self.label_drag_managers[entry_id].dull_face_color()
                 self.shape_drag_managers[entry_id].dull_face_color()
 
-        elif self.mode == RECT and cx and cy and bb:
+        elif self.mode == RECTANGLE and cx and cy and bb:
             fc = get_vibrant_random_color(DEFAULT_FACE_COLOR_ALPHA)
             (x1, y1), (x2, y2) = bb
             shape_artist = Rectangle(
@@ -1552,7 +1550,9 @@ class Plotter(QMainWindow):
             self.labels_artists[entry_id] = label_artist
 
             self.label_drag_managers[entry_id] = _DraggableLabel(entry_id, self)
-            self.shape_drag_managers[entry_id] = _DraggableShape(entry_id, self, RECT)
+            self.shape_drag_managers[entry_id] = _DraggableShape(
+                entry_id, self, RECTANGLE
+            )
 
             if move_camera:
                 self.label_drag_managers[entry_id].dull_face_color()
@@ -1628,7 +1628,7 @@ class Plotter(QMainWindow):
             }
             if data["type"] == CIRCLE:
                 entry["val1"] = data["r"]
-            elif data["type"] == RECT:
+            elif data["type"] == RECTANGLE:
                 (x_min, y_min), (x_max, y_max) = data["bb"]
                 entry["val1"] = x_min
                 entry["val2"] = y_min
@@ -1644,9 +1644,9 @@ class Plotter(QMainWindow):
         existing_layout = self.layouts_repo.get_by_name(user_name)
         former_layout = self.active_layout
 
-        is_same_layout = former_layout and former_layout.name == user_name
-
-        if is_same_layout:
+        if (
+            former_layout is not None and former_layout.name == user_name
+        ):  # is_same_layout
             layout_id = former_layout.id
             self.layouts_repo.update(
                 layout_id,
@@ -1658,6 +1658,7 @@ class Plotter(QMainWindow):
                 image_path=rel_img_path,
             )
             self.zones_repo.delete_all_for_layout(layout_id)
+
         else:
             if existing_layout:
                 layout_id = existing_layout.id
@@ -1671,6 +1672,7 @@ class Plotter(QMainWindow):
                     image_path=rel_img_path,
                 )
                 self.zones_repo.delete_all_for_layout(layout_id)
+
             else:
                 new_layout = self.layouts_repo.create(
                     name=user_name,
@@ -1683,7 +1685,11 @@ class Plotter(QMainWindow):
                 )
                 layout_id = new_layout.id
 
-            if delete_former and former_layout and former_layout.id != layout_id:
+            if (
+                delete_former
+                and former_layout is not None
+                and former_layout.id != layout_id
+            ):
                 self.zones_repo.delete_all_for_layout(former_layout.id)
                 self.layouts_repo.delete(former_layout.id)
                 print(
@@ -1702,12 +1708,13 @@ class Plotter(QMainWindow):
                     r=float(item["val1"]),
                     move_camera=bool(item["move_camera"]),
                 )
+
             else:
                 self.zones_repo.create(
                     layout_id=layout_id,
                     scancode=str(item["scancode"]),
                     name=item["name"],
-                    zone_type="RECT",
+                    zone_type="RECTANGLE",
                     x1=float(item["val1"]),
                     y1=float(item["val2"]),
                     x2=float(item["val3"]),
@@ -1755,7 +1762,7 @@ class Plotter(QMainWindow):
                 self.mouse_wheel_cx = cx
                 self.mouse_wheel_cy = cy
                 self.saved_mouse_wheel = True
-            elif self.mode == RECT:
+            elif self.mode == RECTANGLE:
                 return saved, uid
 
         elif bridge_key == SPRINT_DISTANCE_CODE:
@@ -1792,7 +1799,7 @@ class Plotter(QMainWindow):
                 self.sprint_distance = actual_dist
                 self.saved_sprint_distance = True
                 self.sprint_artist_id = uid
-            elif self.mode == RECT:
+            elif self.mode == RECTANGLE:
                 return saved, uid
 
         entry = {
@@ -1938,5 +1945,7 @@ def run():
         sys.exit(1)
 
     sys.exit(app.exec())
+
+
 if __name__ == "__main__":
     run()

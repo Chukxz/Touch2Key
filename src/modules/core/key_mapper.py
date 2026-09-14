@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 
 import threading
 from modules.utils import (
-    RECT,
+    RECTANGLE,
     CIRCLE,
     M_LEFT,
     M_RIGHT,
@@ -11,7 +11,7 @@ from modules.utils import (
     MOUSE_WHEEL_CODE,
     SPRINT_DISTANCE_CODE,
     is_in_circle,
-    is_in_rect,
+    is_in_rectangle,
     MapperEvent,
     DOWN,
     UP,
@@ -138,8 +138,8 @@ class KeyMapper:
                 if v_type == CIRCLE:
                     if is_in_circle(nx, ny, value["cx"], value["cy"], value["r"]):
                         hit = True
-                elif v_type == RECT:
-                    if is_in_rect(
+                elif v_type == RECTANGLE:
+                    if is_in_rectangle(
                         nx, ny, value["x1"], value["x2"], value["y1"], value["y2"]
                     ):
                         hit = True

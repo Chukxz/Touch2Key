@@ -11,7 +11,7 @@ from modules.platforms import get_platform
 from modules.utils import (
     MapperEvent,
     CIRCLE,
-    RECT,
+    RECTANGLE,
     RELOAD_DELAY,
     create_default_toml,
     update_toml,
@@ -181,20 +181,20 @@ class JSONLoader:
                 continue
 
             zone_type = item.get("type")
-            is_circ = zone_type == CIRCLE
-            is_rect = zone_type == RECT
+            is_circle = zone_type == CIRCLE
+            is_rectangle = zone_type == RECTANGLE
 
             zone_data = {}
             zone_data["name"] = item.get("name", "")
             zone_data["type"] = zone_type
 
             try:
-                if is_circ:
+                if is_circle:
                     zone_data["cx"] = float(item["cx"]) / self.width
                     zone_data["cy"] = float(item["cy"]) / self.height
                     zone_data["r"] = float(item["val1"]) / self.width
 
-                elif is_rect:
+                elif is_rectangle:
                     zone_data["x1"] = float(item["val1"]) / self.width
                     zone_data["y1"] = float(item["val2"]) / self.height
                     zone_data["x2"] = float(item["val3"]) / self.width

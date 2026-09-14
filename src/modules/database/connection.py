@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS layout_zones (
     layout_id INTEGER NOT NULL REFERENCES layouts(id) ON DELETE CASCADE,
     scancode TEXT NOT NULL,
     name TEXT NOT NULL DEFAULT '',
-    zone_type TEXT NOT NULL CHECK (zone_type IN ('CIRCLE', 'RECT')),
+    zone_type TEXT NOT NULL CHECK (zone_type IN ('CIRCLE', 'RECTANGLE')),
     cx REAL, cy REAL, r REAL,
     x1 REAL, y1 REAL, x2 REAL, y2 REAL,
     move_camera INTEGER NOT NULL DEFAULT 0

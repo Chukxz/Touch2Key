@@ -69,7 +69,7 @@ PRESSED = "PRESSED"
 IDLE = "IDLE"
 
 CIRCLE = "CIRCLE"
-RECT = "RECT"
+RECTANGLE = "RECTANGLE"
 M_LEFT = 0x9901
 M_RIGHT = 0x9902
 M_MIDDLE = 0x9903
@@ -572,7 +572,7 @@ def is_in_circle(px: float, py: float, cx: float, cy: float, r: float):
     return (px - cx) ** 2 + (py - cy) ** 2 <= r * r
 
 
-def is_in_rect(
+def is_in_rectangle(
     px: float, py: float, left: float, right: float, top: float, bottom: float
 ):
     return (left <= px <= right) and (top <= py <= bottom)

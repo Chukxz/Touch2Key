@@ -72,7 +72,7 @@ class LayoutZone:
     layout_id: int
     scancode: str
     name: str
-    zone_type: str  # 'CIRCLE' | 'RECT'
+    zone_type: str  # 'CIRCLE' | 'RECTANGLE'
     cx: Optional[float]
     cy: Optional[float]
     r: Optional[float]
@@ -303,7 +303,7 @@ class LayoutZonesRepository:
         "y2",
         "move_camera",
     }
-    VALID_ZONE_TYPES = {"CIRCLE", "RECT"}
+    VALID_ZONE_TYPES = {"CIRCLE", "RECTANGLE"}
     _REQUIRED_ON_CREATE = {"layout_id", "scancode", "zone_type"}
 
     def list_for_layout(self, layout_id: int) -> list[LayoutZone]:
