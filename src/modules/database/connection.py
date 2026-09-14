@@ -21,8 +21,10 @@ import threading
 from pathlib import Path
 
 from modules.utils import PROJECT_ROOT
+from modules.database.migrations import run_migrations, set_fresh_install_version
 
 logger = logging.getLogger("modules.database.connection")
+
 
 DB_PATH = Path(PROJECT_ROOT) / "touch2key.db"
 
@@ -38,6 +40,7 @@ CREATE TABLE IF NOT EXISTS layouts (
     dpi INTEGER NOT NULL,
     mouse_wheel_radius REAL NOT NULL DEFAULT 50.0,
     sprint_distance REAL NOT NULL DEFAULT 10.0,
+    image_path TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -64,7 +67,7 @@ CREATE TABLE IF NOT EXISTS layout_zones (
     layout_id INTEGER NOT NULL REFERENCES layouts(id) ON DELETE CASCADE,
     scancode TEXT NOT NULL,
     name TEXT NOT NULL DEFAULT '',
-    zone_type TEXT NOT NULL CHECK (zone_type IN ('circle', 'rect')),
+    zone_type TEXT NOT NULL CHECK (zone_type IN ('CIRCLE', 'RECT')),
     cx REAL, cy REAL, r REAL,
     x1 REAL, y1 REAL, x2 REAL, y2 REAL,
     move_camera INTEGER NOT NULL DEFAULT 0
@@ -87,12 +90,15 @@ class ConnectionManager:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
+        
+        run_migrations(self.db_path)
 
     def get_connection(self) -> sqlite3.Connection:
         conn = getattr(self._local, "connection", None)
         if conn is not None:
             return conn
 
+        # Run migrations ONLY ONCE globally before threads start connecting
         conn = sqlite3.connect(self.db_path)
         # Default isolation_level ("" = deferred) is kept deliberately --
         # NOT set to None. Repositories rely on `with conn:` to wrap
@@ -128,8 +134,12 @@ class ConnectionManager:
         conn.execute("PRAGMA synchronous = NORMAL;")  # safe with WAL, faster than FULL
         conn.executescript(_SCHEMA)
         conn.execute(_SEED_DEFAULT_SETTINGS_ROW)
+        
+        # If this was a completely fresh database, stamp it with the latest version
+        # so it doesn't try to run migrations from version 0 on the next launch.
+        set_fresh_install_version(conn)
+        
         conn.commit()
-
         self._local.connection = conn
         return conn
 

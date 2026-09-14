@@ -13,7 +13,7 @@ calls and json_loader.py's usage, not from the TOML schema itself:
 
     [system]
     left_handed = false
-    "hud_image_path" = ""
+    "image_path" = ""
     json_path = "path/to/layout.json"
     json_dev_res = [360, 800]
     json_dev_dpi = 160
@@ -26,7 +26,7 @@ calls and json_loader.py's usage, not from the TOML schema itself:
 
     [mouse]
     sensitivity = 1.0
-    
+
     [keys]
     toggle_key = ""
     sprint_key = ""
@@ -88,6 +88,8 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> None:
         "sensitivity": float(mouse.get("sensitivity", 1.0)),
         "toggle_key": toggle_key,
         "sprint_key": sprint_key,
+        "adb_rate_cap": 250.0,
+        "pps_alert_threshold": 60.0,
     }
 
     store.settings.update(**fields)
@@ -95,7 +97,10 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> None:
 
 
 def migrate_json_layout(
-    json_path: Path | str, layout_name: str = "Legacy", set_active: bool = True
+    json_path: Path | str,
+    image_path: str = "",
+    layout_name: str = "Legacy",
+    set_active: bool = True,
 ) -> Optional[int]:
     """Imports a single legacy JSON layout file's metadata + content
     into a new `layouts` row plus its `layout_zones`. Mirrors
@@ -141,6 +146,7 @@ def migrate_json_layout(
             dpi=int(metadata["dpi"]),
             mouse_wheel_radius=float(metadata.get("mouse_wheel_radius", 50.0)),
             sprint_distance=float(metadata.get("sprint_distance", 10.0)),
+            image_path=image_path,
         )
         layout_id = layout.id
         imported = 0
@@ -216,19 +222,23 @@ def migrate_all(toml_path: Path | str = TOML_PATH) -> None:
     place the old config recorded which layout file was active."""
     path = Path(toml_path)
     json_path: Optional[str] = None
+    hud_image_path: str = ""
 
     if path.exists():
         try:
             with path.open("r", encoding="utf-8") as f:
                 doc = tomlkit.load(f)
-            json_path = doc.get("system", {}).get("json_path")
+            
+            system_table = doc.get("system", {})
+            json_path = system_table.get("json_path")
+            hud_image_path = system_table.get("hud_image_path")
         except Exception as e:
             logger.error("Could not read json_path from legacy TOML: %s", e)
 
     migrate_toml_config(path)
 
     if json_path:
-        migrate_json_layout(json_path)
+        migrate_json_layout(json_path, hud_image_path)
     else:
         logger.info(
             "No json_path found in legacy TOML; skipping JSON layout migration."

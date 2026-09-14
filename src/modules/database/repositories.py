@@ -24,7 +24,7 @@ class InvalidFieldError(ValueError):
     repository's ALLOWED_FIELDS."""
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class AppSettings:
     id: int
     left_handed: bool
@@ -48,7 +48,7 @@ class AppSettings:
         return cls(**data)
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class Layout:
     id: int
     name: str
@@ -57,6 +57,7 @@ class Layout:
     dpi: int
     mouse_wheel_radius: float
     sprint_distance: float
+    image_path: Optional[str]
     created_at: str
     updated_at: str
 
@@ -65,7 +66,7 @@ class Layout:
         return cls(**{f.name: row[f.name] for f in dataclass_fields(cls)})
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class LayoutZone:
     id: int
     layout_id: int
@@ -160,6 +161,7 @@ class LayoutsRepository:
         "dpi",
         "mouse_wheel_radius",
         "sprint_distance",
+        "image_path"
     }
     _REQUIRED_ON_CREATE = {"name", "width", "height", "dpi"}
 
@@ -168,7 +170,10 @@ class LayoutsRepository:
         rows = conn.execute("SELECT * FROM layouts ORDER BY name;").fetchall()
         return [Layout.from_row(row) for row in rows]
 
-    def get(self, layout_id: int) -> Optional[Layout]:
+    def get(self, layout_id: int | None) -> Optional[Layout]:
+        if layout_id is None:
+            return None
+        
         conn = connection_manager.get_connection()
         row = conn.execute(
             "SELECT * FROM layouts WHERE id = ?;", (layout_id,)
@@ -241,6 +246,15 @@ class LayoutsRepository:
         with conn:
             conn.execute("DELETE FROM layouts WHERE id = ?;", (layout_id,))
 
+    def delete_all(self) -> None:
+        """Deletes all layouts from the database. 
+        Because of the foreign key constraints in the schema, this automatically 
+        deletes every single zone in layout_zones and safely sets 
+        app_settings.active_layout_id to NULL."""
+        conn = connection_manager.get_connection()
+        with conn:
+            conn.execute("DELETE FROM layouts;")
+
     def duplicate(self, layout_id: int, new_name: str) -> Layout:
         source = self.get(layout_id)
         if source is None:
@@ -289,7 +303,7 @@ class LayoutZonesRepository:
         "y2",
         "move_camera",
     }
-    VALID_ZONE_TYPES = {"circle", "rect"}
+    VALID_ZONE_TYPES = {"CIRCLE", "RECT"}
     _REQUIRED_ON_CREATE = {"layout_id", "scancode", "zone_type"}
 
     def list_for_layout(self, layout_id: int) -> list[LayoutZone]:
@@ -299,7 +313,10 @@ class LayoutZonesRepository:
         ).fetchall()
         return [LayoutZone.from_row(row) for row in rows]
 
-    def get(self, zone_id: int) -> Optional[LayoutZone]:
+    def get(self, zone_id: int | None) -> Optional[LayoutZone]:
+        if zone_id is None:
+            return None
+        
         conn = connection_manager.get_connection()
         row = conn.execute(
             "SELECT * FROM layout_zones WHERE id = ?;", (zone_id,)
