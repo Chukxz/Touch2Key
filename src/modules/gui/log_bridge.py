@@ -3,6 +3,7 @@ Routes stdlib logging records into the GUI's log console dock without
 crossing thread boundaries unsafely. Call install_gui_logging() once,
 early in gui/app.py's startup, before any engine threads start logging.
 """
+
 from __future__ import annotations
 import logging
 

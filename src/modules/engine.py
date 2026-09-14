@@ -34,13 +34,13 @@ from modules.core.key_capture import capture_keys, capture_performance_settings
 from modules.utils import PROJECT_ROOT
 
 NAME = "Touch2Key_Engine"
+profiler: Profile | None = None
+
 
 if TYPE_CHECKING:
     from cProfile import Profile
     from modules.utils import TouchEvent
     from argparse import ArgumentParser
-
-profiler: Profile | None = None
 
 
 class Engine:
@@ -104,9 +104,11 @@ class Engine:
             print("\n[ENGINE] - No window selected.")
 
             return
-        
+
         selected_window_id, selected_window_title = w_result
-        print(f"\n[ENGINE] - Selected window ID: {selected_window_id}, Selected window title: {selected_window_title}.")
+        print(
+            f"\n[ENGINE] - Selected window ID: {selected_window_id}, Selected window title: {selected_window_title}."
+        )
 
         c_result = capture_keys()
         if c_result is None:
@@ -121,7 +123,7 @@ class Engine:
             )
         else:
             print(f"\n[ENGINE] - Selected toggle key: {toggle_key}.")
-        
+
         if not sprint_key:
             print("\n[ENGINE] - No sprint key set.")
         else:

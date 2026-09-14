@@ -228,7 +228,7 @@ def migrate_all(toml_path: Path | str = TOML_PATH) -> None:
         try:
             with path.open("r", encoding="utf-8") as f:
                 doc = tomlkit.load(f)
-            
+
             system_table = doc.get("system", {})
             json_path = system_table.get("json_path")
             hud_image_path = system_table.get("hud_image_path")

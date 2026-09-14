@@ -37,7 +37,7 @@ build/
 Thumbs.db
 *~
 *.bak
-*.log
+*.log*
 *.log.*
 .adbkey
 logs/
@@ -45,5 +45,5 @@ logs/
 # === SQLite databases ===
 *.sqlite
 *.sqlite3
-*.db
+*.db*
 data/

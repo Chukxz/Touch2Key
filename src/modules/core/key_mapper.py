@@ -176,7 +176,6 @@ class KeyMapper:
                             MapperEvent(action="ON_WASD_BLOCK")
                         )
 
-
     def _touch_pressed(self, touch_event: TouchEvent):
         """O(1) Dictionary lookup to process deltas if any of the key(s) tied to a finger are mouse move enabled."""
         if touch_event.slot in self.touch_events_prevs:
@@ -209,7 +208,6 @@ class KeyMapper:
 
         elif action == UP:
             self._touch_up(touch_event)
-
 
     def _on_worker_respawn(self, worker_type: str):
         """touch_events_dict reflects ground truth — fingers never moved,

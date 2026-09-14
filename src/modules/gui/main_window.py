@@ -12,6 +12,7 @@ widgets and this window dumb about mapper internals, so `touch2key`
 (CLI) and `touch2key-gui` stay thin callers over the same core/ logic
 rather than two divergent implementations.
 """
+
 from __future__ import annotations
 from typing import TYPE_CHECKING
 
@@ -235,7 +236,9 @@ class MainWindow(QMainWindow):
             #       serves that "keep running" role).
             # This call is left in as the intended call site; wire it
             # up once one of the above is done.
-            self.signal_bridge.bind(getattr(self.engine, "mapper_event_dispatcher", None))
+            self.signal_bridge.bind(
+                getattr(self.engine, "mapper_event_dispatcher", None)
+            )
 
         except Exception as exc:
             logger.exception("Failed to start engine")

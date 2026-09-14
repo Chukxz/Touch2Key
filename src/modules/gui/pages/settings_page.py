@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFormLayout, QCheckBox, QDoubleSpinBox, QWidget, QPushButton
+from PySide6.QtWidgets import (
+    QFormLayout,
+    QCheckBox,
+    QDoubleSpinBox,
+    QWidget,
+    QPushButton,
+)
 
 from .base_page import BasePage
 

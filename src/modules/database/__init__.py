@@ -6,6 +6,7 @@ JSONLoader's eventual sqlite-backed rewrite thin (same compatibility-
 shim approach already used for AppConfig.get()), and it's what
 legacy_migration.py writes into.
 """
+
 from __future__ import annotations
 
 from typing import Optional

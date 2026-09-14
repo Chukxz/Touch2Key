@@ -5,10 +5,9 @@ from modules import engine
 
 parser = argparse.ArgumentParser(description="Touch2Key Main")
 
-parser.add_argument(
-    "--profile", action="store_true", help="Generate profiling data."
-)
-    
+parser.add_argument("--profile", action="store_true", help="Generate profiling data.")
+
+
 def run():
     if SYSTEM == "Windows":
         engine.run(parser)

@@ -90,7 +90,7 @@ class ConnectionManager:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
-        
+
         run_migrations(self.db_path)
 
     def get_connection(self) -> sqlite3.Connection:
@@ -134,11 +134,11 @@ class ConnectionManager:
         conn.execute("PRAGMA synchronous = NORMAL;")  # safe with WAL, faster than FULL
         conn.executescript(_SCHEMA)
         conn.execute(_SEED_DEFAULT_SETTINGS_ROW)
-        
+
         # If this was a completely fresh database, stamp it with the latest version
         # so it doesn't try to run migrations from version 0 on the next launch.
         set_fresh_install_version(conn)
-        
+
         conn.commit()
         self._local.connection = conn
         return conn

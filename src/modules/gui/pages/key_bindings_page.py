@@ -21,11 +21,15 @@ class KeyBindingsPage(BasePage):
 
         self.toggle_key_label = QLabel("Not set")
         self.toggle_key_btn = QPushButton("Capture")
-        form.addRow("Toggle key:", self._paired_row(self.toggle_key_label, self.toggle_key_btn))
+        form.addRow(
+            "Toggle key:", self._paired_row(self.toggle_key_label, self.toggle_key_btn)
+        )
 
         self.sprint_key_label = QLabel("Not set")
         self.sprint_key_btn = QPushButton("Capture")
-        form.addRow("Sprint key:", self._paired_row(self.sprint_key_label, self.sprint_key_btn))
+        form.addRow(
+            "Sprint key:", self._paired_row(self.sprint_key_label, self.sprint_key_btn)
+        )
 
         self.content_layout().addWidget(form_widget)
         self.content_layout().addStretch()

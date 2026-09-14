@@ -5,19 +5,16 @@ from PIL import Image
 
 from modules.utils import (
     IMAGES_FOLDER,
-    TOML_PATH,
     ADB,
     get_adb_device,
     get_screen_size,
     get_dpi,
     get_rotation,
-    update_toml,
 )
+from modules.database.repositories import AppSettingsRepository, LayoutsRepository
 
 
-def _capture_android_screen(
-    nickname=None, custom_img_folder_name=None, custom_img_name=None
-):
+def _capture_android_screen(custom_img_name=None):
     device_id = get_adb_device()
     res = get_screen_size(device_id)
     if res is None:
@@ -25,22 +22,16 @@ def _capture_android_screen(
 
     dpi = get_dpi(device_id)
     timestamp = datetime.datetime.now().strftime("hud_%Y%m%d_%H%M%S")
-
-    nick_clean = nickname.replace(" ", "_") if nickname else "Device"
-    img_folder_clean = (
-        custom_img_folder_name.replace(" ", "_") if custom_img_folder_name else "Image"
-    )
-    img_clean = custom_img_name.replace(" ", "_") + "_" if custom_img_name else ""
-
     img_rotation = get_rotation(device_id)
+
     base_dir = Path(IMAGES_FOLDER)
 
-    relative_filename = (
-        Path(nick_clean)
-        / img_folder_clean
-        / f"{img_clean}{timestamp}_r{img_rotation}.png"
-    )
+    # Flattened path: resources/images/[prefix_]hud_YYYYMMDD_HHMMSS_rX.png
+    prefix = custom_img_name.replace(" ", "_") + "_" if custom_img_name else ""
+    relative_filename = f"{prefix}{timestamp}_r{img_rotation}.png"
     full_save_path = base_dir / relative_filename
+
+    # Ensure the root images directory exists
     full_save_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -63,9 +54,7 @@ def _capture_android_screen(
         return
 
     finally:
-        # Wrap the cleanup in its own try/except so a disconnected device doesn't crash the script here
         try:
-            # We don't strictly need check=True here since failure just means the file isn't deleted
             subprocess.run(
                 [ADB, "-s", device_id, "shell", "rm", android_tmp],
                 timeout=10,
@@ -83,29 +72,37 @@ def _capture_android_screen(
     except Exception as e:
         print(f"[WARNING] DPI metadata failed: {e}")
 
+    # Database Update
     try:
-        update_toml(image_path=str(relative_filename), strict=True)
+        settings_repo = AppSettingsRepository()
+        layouts_repo = LayoutsRepository()
+
+        settings = settings_repo.get()
+
+        if settings.active_layout_id is not None:
+            layouts_repo.update(
+                settings.active_layout_id, image_path=str(relative_filename)
+            )
+            print(
+                f"[INFO] Database updated: Image assigned to Layout ID {settings.active_layout_id}."
+            )
+        else:
+            print(
+                "[WARNING] Image captured, but no active layout is currently set to assign it to."
+            )
 
         print(f"\n[SUCCESS]")
         print(f"File:   {full_save_path}")
-        print(f"Config: {TOML_PATH} updated.")
 
     except Exception as e:
-        print(f"[ERROR] Toml update failed: {e}")
+        print(f"[ERROR] Database update failed: {e}")
 
 
 def run():
-    nickname = input(
-        "Enter device nickname [Default 'Device', Blank for Default]: "
-    ).strip()
-    custom_img_folder_name = input(
-        "Enter image folder name [Default 'Image', Blank for Default]: "
-    ).strip()
-    custom_img_name = input(
-        "Enter image name prefix [Default '', Blank for Default]: "
-    ).strip()
-
-    _capture_android_screen(nickname, custom_img_folder_name, custom_img_name)
+    # Prompts for folder structure removed to align with the flattened architecture.
+    # The capture can now be fired cleanly via CLI or triggered seamlessly from a GUI.
+    print("[PROCESS] Initializing screen capture...")
+    _capture_android_screen()
 
 
 if __name__ == "__main__":

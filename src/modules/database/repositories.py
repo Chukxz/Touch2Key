@@ -161,7 +161,7 @@ class LayoutsRepository:
         "dpi",
         "mouse_wheel_radius",
         "sprint_distance",
-        "image_path"
+        "image_path",
     }
     _REQUIRED_ON_CREATE = {"name", "width", "height", "dpi"}
 
@@ -173,7 +173,7 @@ class LayoutsRepository:
     def get(self, layout_id: int | None) -> Optional[Layout]:
         if layout_id is None:
             return None
-        
+
         conn = connection_manager.get_connection()
         row = conn.execute(
             "SELECT * FROM layouts WHERE id = ?;", (layout_id,)
@@ -247,9 +247,9 @@ class LayoutsRepository:
             conn.execute("DELETE FROM layouts WHERE id = ?;", (layout_id,))
 
     def delete_all(self) -> None:
-        """Deletes all layouts from the database. 
-        Because of the foreign key constraints in the schema, this automatically 
-        deletes every single zone in layout_zones and safely sets 
+        """Deletes all layouts from the database.
+        Because of the foreign key constraints in the schema, this automatically
+        deletes every single zone in layout_zones and safely sets
         app_settings.active_layout_id to NULL."""
         conn = connection_manager.get_connection()
         with conn:
@@ -316,7 +316,7 @@ class LayoutZonesRepository:
     def get(self, zone_id: int | None) -> Optional[LayoutZone]:
         if zone_id is None:
             return None
-        
+
         conn = connection_manager.get_connection()
         row = conn.execute(
             "SELECT * FROM layout_zones WHERE id = ?;", (zone_id,)
