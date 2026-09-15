@@ -1,18 +1,18 @@
+# src/modules/gui/pages/base_page.py
 from __future__ import annotations
-
+from typing import TYPE_CHECKING
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PySide6.QtGui import QFont
 
+if TYPE_CHECKING:
+    from modules.utils import MapperEventDispatcher
 
 class BasePage(QWidget):
-    """Common chrome for every sidebar page: a title heading plus a
-    vertical content layout subclasses append their widgets to. Keeps
-    page styling consistent without depending on a shared stylesheet."""
-
     title = "Page"
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, dispatcher: MapperEventDispatcher | None = None, parent: QWidget | None = None):
         super().__init__(parent)
+        self.dispatcher = dispatcher
         self._root_layout = QVBoxLayout(self)
         self._root_layout.setContentsMargins(16, 16, 16, 16)
         self._root_layout.setSpacing(12)
@@ -22,5 +22,8 @@ class BasePage(QWidget):
         self._root_layout.addWidget(heading)
 
     def content_layout(self) -> QVBoxLayout:
-        """Subclasses add their widgets via this layout, below the heading."""
         return self._root_layout
+
+    def on_page_shown(self) -> None:
+        """Override in subclasses to reload data when the user switches tabs."""
+        pass
