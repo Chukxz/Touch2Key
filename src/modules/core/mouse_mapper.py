@@ -40,7 +40,7 @@ class MouseMapper:
         self._build_pipeline()
 
         self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self._build_pipeline)
-        self.mapper_event_dispatcher.register_callback("ON_JSON_RELOAD", self._build_pipeline)
+        self.mapper_event_dispatcher.register_callback("ON_LAYOUT_RELOAD", self._build_pipeline)
         self.mapper_event_dispatcher.register_callback("ON_AGGREGATION", self._aggregate)
 
     def _build_pipeline(self) -> None:
