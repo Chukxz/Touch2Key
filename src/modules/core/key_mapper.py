@@ -46,7 +46,7 @@ class KeyMapper:
 
         self._build_pipelines()
 
-        self.mapper_event_dispatcher.register_callback("ON_JSON_RELOAD", self._build_pipelines)
+        self.mapper_event_dispatcher.register_callback("ON_LAYOUT_RELOAD", self._build_pipelines)
         self.mapper_event_dispatcher.register_callback("ON_WORKER_RESPAWN", self._on_worker_respawn)
 
     def _build_pipelines(self) -> None:
