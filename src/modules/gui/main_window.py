@@ -170,6 +170,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.stack, stretch=1)
         self.setCentralWidget(central)
 
+        self.layout_editor_page = LayoutEditorPage(dispatcher=self.signal_bridge.dispatcher)
+        self.profiles_page = ProfilesPage(dispatcher=self.signal_bridge.dispatcher)
+
     # ---- Right-hand status dock --------------------------------------------
     def _build_status_dock(self) -> None:
         dock = QDockWidget("Status", self)
