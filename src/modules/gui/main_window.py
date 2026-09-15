@@ -94,7 +94,7 @@ class MainWindow(QMainWindow):
         self._build_status_bar()
         self._wire_dashboard_buttons()
 
-    # ---- Menu / toolbar ---------------------------------------------------
+    # ---- Menu / Toolbar ---------------------------------------------------
     def _build_menu_and_toolbar(self) -> None:
         menu_bar = self.menuBar()
 
@@ -129,7 +129,7 @@ class MainWindow(QMainWindow):
             self, "About Touch2Key", "Touch2Key -- touch-to-keyboard/mouse mapper."
         )
 
-    # ---- Sidebar + stacked pages -------------------------------------------
+    # ---- Sidebar + Stacked Pages -------------------------------------------
     def _build_sidebar_and_pages(self) -> None:
         central = QWidget()
         layout = QHBoxLayout(central)
@@ -140,16 +140,18 @@ class MainWindow(QMainWindow):
         self.sidebar.setFixedWidth(160)
         self.stack = QStackedWidget()
 
-        self.dashboard_page = DashboardPage()
-        self.layout_editor_page = LayoutEditorPage()
-        self.pipelines_page = PipelinesPage()
-        self.devices_page = DevicesPage()
-        self.key_bindings_page = KeyBindingsPage()
-        self.performance_page = PerformancePage()
-        self.profiles_page = ProfilesPage()
-        self.settings_page = SettingsPage()
+        dispatcher = self.signal_bridge.dispatcher
 
-        pages = [
+        self.dashboard_page = DashboardPage(dispatcher=dispatcher)
+        self.layout_editor_page = LayoutEditorPage(dispatcher=dispatcher)
+        self.pipelines_page = PipelinesPage(dispatcher=dispatcher)
+        self.devices_page = DevicesPage(dispatcher=dispatcher)
+        self.key_bindings_page = KeyBindingsPage(dispatcher=dispatcher)
+        self.performance_page = PerformancePage(dispatcher=dispatcher)
+        self.profiles_page = ProfilesPage(dispatcher=dispatcher)
+        self.settings_page = SettingsPage(dispatcher=dispatcher)
+
+        self.pages = [
             self.dashboard_page,
             self.layout_editor_page,
             self.pipelines_page,
@@ -159,21 +161,25 @@ class MainWindow(QMainWindow):
             self.profiles_page,
             self.settings_page,
         ]
-        for page in pages:
+
+        for page in self.pages:
             self.sidebar.addItem(QListWidgetItem(page.title))
             self.stack.addWidget(page)
 
-        self.sidebar.currentRowChanged.connect(self.stack.setCurrentIndex)
+        self.sidebar.currentRowChanged.connect(self._on_sidebar_row_changed)
         self.sidebar.setCurrentRow(0)
 
         layout.addWidget(self.sidebar)
         layout.addWidget(self.stack, stretch=1)
         self.setCentralWidget(central)
 
-        self.layout_editor_page = LayoutEditorPage(dispatcher=self.signal_bridge.dispatcher)
-        self.profiles_page = ProfilesPage(dispatcher=self.signal_bridge.dispatcher)
+    def _on_sidebar_row_changed(self, row: int) -> None:
+        self.stack.setCurrentIndex(row)
+        current_page = self.stack.widget(row)
+        if hasattr(current_page, "on_page_shown"):
+            current_page.on_page_shown()
 
-    # ---- Right-hand status dock --------------------------------------------
+    # ---- Right-Hand Status Dock --------------------------------------------
     def _build_status_dock(self) -> None:
         dock = QDockWidget("Status", self)
         dock.setFeatures(
@@ -183,9 +189,9 @@ class MainWindow(QMainWindow):
 
         panel = QWidget()
         panel_layout = QHBoxLayout(panel)
-        self.connection_label = QLabel("Device: disconnected")
+        self.connection_label = QLabel("Device: Disconnected")
         self.rate_label = QLabel("Rate: --")
-        self.cursor_label = QLabel("Cursor: shown")
+        self.cursor_label = QLabel("Cursor: Shown")
         for lbl in (self.connection_label, self.rate_label, self.cursor_label):
             panel_layout.addWidget(lbl)
         panel_layout.addStretch()
@@ -197,11 +203,11 @@ class MainWindow(QMainWindow):
 
         self.signal_bridge.menu_mode_toggled.connect(
             lambda visible: self.cursor_label.setText(
-                f"Cursor: {'shown' if visible else 'hidden'}"
+                f"Cursor: {'Shown' if visible else 'Hidden'}"
             )
         )
 
-    # ---- Bottom log dock ----------------------------------------------------
+    # ---- Bottom Log Dock ----------------------------------------------------
     def _build_log_dock(self) -> None:
         dock = QDockWidget("Log", self)
         dock.setFeatures(
@@ -224,11 +230,11 @@ class MainWindow(QMainWindow):
     def _append_log_line(self, line: str, levelno: int) -> None:
         self.log_console.appendPlainText(line)
 
-    # ---- Status bar ---------------------------------------------------------
+    # ---- Status Bar ---------------------------------------------------------
     def _build_status_bar(self) -> None:
         self.statusBar().showMessage("Ready.")
 
-    # ---- Dashboard / engine lifecycle wiring --------------------------------
+    # ---- Dashboard / Engine Lifecycle Wiring --------------------------------
     def _wire_dashboard_buttons(self) -> None:
         self.dashboard_page.start_btn.clicked.connect(self._start_engine)
         self.dashboard_page.stop_btn.clicked.connect(self._stop_engine)
@@ -239,23 +245,28 @@ class MainWindow(QMainWindow):
         if self.engine is not None:
             return
 
+        target_window_id = self.devices_page.selected_window_id
+        if target_window_id is None:
+            QMessageBox.warning(
+                self,
+                "No Window Selected",
+                "Please select and bind a target window from the 'Devices' page before starting.",
+            )
+            self.sidebar.setCurrentRow(3)  # Switch to Devices tab
+            return
+
         try:
-            from modules.core.list_windows import select_window
             from modules.engine import Engine
 
-            # 1. Target Window Selection
-            selected = select_window()
-            if not selected:
-                return
-            window_id, _ = selected
-
-            # 2. Instantiate Engine
             self.engine = Engine(headless=True)
             self.signal_bridge.bind(self.engine.mapper_event_dispatcher)
 
-            # 3. Launch Engine in QThread
+            # Update all pages with the active dispatcher instance
+            for page in self.pages:
+                page.dispatcher = self.engine.mapper_event_dispatcher
+
             self.engine_thread = QThread()
-            self.engine_worker = EngineWorker(self.engine, window_id)
+            self.engine_worker = EngineWorker(self.engine, target_window_id)
             self.engine_worker.moveToThread(self.engine_thread)
 
             self.engine_thread.started.connect(self.engine_worker.run)
@@ -270,10 +281,11 @@ class MainWindow(QMainWindow):
             self._cleanup_engine()
 
     def _on_engine_started(self) -> None:
-        self.dashboard_page.set_running(True)
+        title = self.devices_page.selected_window_title
+        self.dashboard_page.set_running(True, window_title=title)
         self.start_action.setEnabled(False)
         self.stop_action.setEnabled(True)
-        self.statusBar().showMessage("Engine running.")
+        self.statusBar().showMessage(f"Engine running (Target: {title}).")
 
     def _on_engine_failed(self, error_msg: str) -> None:
         QMessageBox.critical(self, "Engine Error", f"Engine failed to start:\n{error_msg}")
