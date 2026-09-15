@@ -169,8 +169,11 @@ class MapperEvent:
 
 
 class MapperEventDispatcher:
+    """Thread-safe event dispatcher for cross-thread engine and GUI notifications."""
+
     def __init__(self):
-        self.callback_registry = {
+        self._lock = threading.Lock()
+        self.callback_registry: dict[str, list] = {
             "ON_CONFIG_RELOAD": [],
             "ON_LAYOUT_RELOAD": [],
             "ON_WASD_BLOCK": [],
@@ -179,19 +182,25 @@ class MapperEventDispatcher:
             "ON_WORKER_RESPAWN": [],
         }
 
-    def register_callback(self, event_type: EVENT_TYPE, func):
-        if event_type in self.callback_registry:
-            self.callback_registry[event_type].append(func)
+    def register_callback(self, event_type: EVENT_TYPE, func) -> None:
+        with self._lock:
+            if event_type in self.callback_registry:
+                if func not in self.callback_registry[event_type]:
+                    self.callback_registry[event_type].append(func)
 
-    def unregister_callback(self, event_type: EVENT_TYPE, func):
-        if event_type in self.callback_registry and func in self.callback_registry[event_type]:
-            self.callback_registry[event_type].remove(func)
+    def unregister_callback(self, event_type: EVENT_TYPE, func) -> None:
+        with self._lock:
+            if event_type in self.callback_registry and func in self.callback_registry[event_type]:
+                self.callback_registry[event_type].remove(func)
 
-    def dispatch(self, event_object: MapperEvent):
+    def dispatch(self, event_object: MapperEvent) -> None:
         key = event_object.action
-        if key in self.callback_registry:
-            for func in self.callback_registry.get(key, []):
-                if key in ["ON_CONFIG_RELOAD", "ON_LAYOUT_RELOAD", "ON_WASD_BLOCK"]:
+        with self._lock:
+            callbacks = list(self.callback_registry.get(key, []))
+
+        for func in callbacks:
+            try:
+                if key in ("ON_CONFIG_RELOAD", "ON_LAYOUT_RELOAD", "ON_WASD_BLOCK"):
                     func()
                 elif key == "ON_MENU_MODE_TOGGLE":
                     func(event_object.is_visible)
@@ -204,6 +213,8 @@ class MapperEventDispatcher:
                     )
                 elif key == "ON_WORKER_RESPAWN":
                     func(event_object.worker_type)
+            except Exception:
+                pass
 
 
 SCANCODES = {
