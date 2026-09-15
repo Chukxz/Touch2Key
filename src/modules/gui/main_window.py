@@ -292,9 +292,13 @@ class MainWindow(QMainWindow):
         self._stop_engine()
 
     def _cleanup_engine(self) -> None:
+        # Unbind signals cleanly before clearing references
+        self.signal_bridge.unbind()
+
         if self.engine_thread and self.engine_thread.isRunning():
             self.engine_thread.quit()
             self.engine_thread.wait(1000)
+
         self.engine_thread = None
         self.engine_worker = None
         self.engine = None
