@@ -1,14 +1,32 @@
-# src/modules/gui/pages/settings_page.py
 from __future__ import annotations
-from PySide6.QtWidgets import QCheckBox, QDoubleSpinBox, QFormLayout, QPushButton, QWidget
+
+from typing import TYPE_CHECKING
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QPushButton,
+    QWidget,
+)
+
 from modules.database import store
 from modules.utils import MapperEvent
 from .base_page import BasePage
 
+if TYPE_CHECKING:
+    from modules.utils import MapperEventDispatcher
+
+
 class SettingsPage(BasePage):
+    """General settings page for handedness, sensitivity, deadzones, and joystick modes."""
+
     title = "Settings"
 
-    def __init__(self, dispatcher=None, parent=None):
+    def __init__(
+        self,
+        dispatcher: MapperEventDispatcher | None = None,
+        parent=None,
+    ):
         super().__init__(dispatcher, parent)
 
         form_widget = QWidget()
@@ -18,11 +36,19 @@ class SettingsPage(BasePage):
         form.addRow(self.left_handed_check)
 
         self.anchored_floating_check = QCheckBox("Anchored Floating Joystick")
+        self.anchored_floating_check.setToolTip(
+            "When enabled with a plotted HUD joystick circle, touches near the center lock "
+            "to the fixed anchor, while touches elsewhere float dynamically."
+        )
         form.addRow(self.anchored_floating_check)
 
         self.snap_radius_spin = QDoubleSpinBox()
         self.snap_radius_spin.setRange(10.0, 500.0)
+        self.snap_radius_spin.setSingleStep(5.0)
         self.snap_radius_spin.setSuffix(" px")
+        self.snap_radius_spin.setToolTip(
+            "Touch proximity radius around the fixed HUD icon to snap the center."
+        )
         form.addRow("Joystick Snap Radius:", self.snap_radius_spin)
 
         self.sensitivity_spin = QDoubleSpinBox()
@@ -50,24 +76,28 @@ class SettingsPage(BasePage):
 
         self.load_settings()
 
+    def on_page_shown(self) -> None:
+        self.load_settings()
+
     def _notify_reload(self) -> None:
         if self.dispatcher:
             self.dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
 
     def load_settings(self) -> None:
-        s = store.settings.get()
+        settings = store.settings.get()
+
         self.left_handed_check.blockSignals(True)
         self.anchored_floating_check.blockSignals(True)
         self.snap_radius_spin.blockSignals(True)
         self.sensitivity_spin.blockSignals(True)
         self.deadzone_spin.blockSignals(True)
 
-        self.left_handed_check.setChecked(s.left_handed)
-        self.anchored_floating_check.setChecked(s.anchored_floating_joystick)
-        self.snap_radius_spin.setValue(s.joystick_snap_radius)
-        self.snap_radius_spin.setEnabled(s.anchored_floating_joystick)
-        self.sensitivity_spin.setValue(s.sensitivity)
-        self.deadzone_spin.setValue(s.deadzone)
+        self.left_handed_check.setChecked(settings.left_handed)
+        self.anchored_floating_check.setChecked(settings.anchored_floating_joystick)
+        self.snap_radius_spin.setValue(settings.joystick_snap_radius)
+        self.snap_radius_spin.setEnabled(settings.anchored_floating_joystick)
+        self.sensitivity_spin.setValue(settings.sensitivity)
+        self.deadzone_spin.setValue(settings.deadzone)
 
         self.left_handed_check.blockSignals(False)
         self.anchored_floating_check.blockSignals(False)
@@ -84,16 +114,16 @@ class SettingsPage(BasePage):
         store.settings.update(anchored_floating_joystick=int(checked))
         self._notify_reload()
 
-    def _on_snap_radius_changed(self, val: float) -> None:
-        store.settings.update(joystick_snap_radius=val)
+    def _on_snap_radius_changed(self, value: float) -> None:
+        store.settings.update(joystick_snap_radius=value)
         self._notify_reload()
 
-    def _on_sensitivity_changed(self, val: float) -> None:
-        store.settings.update(sensitivity=val)
+    def _on_sensitivity_changed(self, value: float) -> None:
+        store.settings.update(sensitivity=value)
         self._notify_reload()
 
-    def _on_deadzone_changed(self, val: float) -> None:
-        store.settings.update(deadzone=val)
+    def _on_deadzone_changed(self, value: float) -> None:
+        store.settings.update(deadzone=value)
         self._notify_reload()
 
     def _on_reset_defaults(self) -> None:
