@@ -84,5 +84,5 @@ class LayoutLoader:
         """Hot-reloads active layout and notifies engine workers."""
         self._load_layout()
         self.config.reload_config()
-        self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_JSON_RELOAD"))
+        self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
         logger.info("Layout hot-reloaded from database.")
