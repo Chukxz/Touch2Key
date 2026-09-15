@@ -70,7 +70,8 @@ CREATE TABLE IF NOT EXISTS layout_zones (
     zone_type TEXT NOT NULL CHECK (zone_type IN ('CIRCLE', 'RECTANGLE')),
     cx REAL, cy REAL, r REAL,
     x1 REAL, y1 REAL, x2 REAL, y2 REAL,
-    move_camera INTEGER NOT NULL DEFAULT 0
+    move_camera INTEGER NOT NULL DEFAULT 0,
+    priority INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_layout_zones_layout_id ON layout_zones(layout_id);
 """

@@ -1,181 +1,103 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING
-import threading
 
-from modules.utils import UP, DOWN, PRESSED
+import logging
+import threading
+from typing import TYPE_CHECKING
+
+from modules.core.input_semantics import (
+    AlwaysRegion,
+    DeltaTransform,
+    DynamicOrigin,
+    NoConstraint,
+    Pipeline,
+    PointerMoveSemantic,
+    Point,
+    RectangularRegion,
+    TouchPhase,
+    Vector,
+)
+from modules.core.pipeline_output import BridgeOutputSink
+from modules.utils import TouchEvent
 
 if TYPE_CHECKING:
     from .mapper import Mapper
-    from modules.utils import TouchEvent
+
+logger = logging.getLogger("modules.core.mouse_mapper")
 
 
 class MouseMapper:
+    """Manages camera movement. When WASD is fixed, look controls span the entire screen."""
+
     def __init__(self, mapper: Mapper):
         self.mapper = mapper
-        self.mapper_event_dispatcher = self.mapper.mapper_event_dispatcher
-        self.bridge = mapper.bridge
         self.config = mapper.config
+        self.bridge = mapper.bridge
+        self.output_sink = BridgeOutputSink(self.bridge)
+        self.mapper_event_dispatcher = mapper.mapper_event_dispatcher
 
-        self.prev_x = None
-        self.prev_y = None
-        self.acc_x = 0.0
-        self.acc_y = 0.0
-        self.left_down = False
-        self.scaling_factor = 1.0
-        self.timestamp = 0.0
-        self.click_lock = threading.Lock()
+        self.lock = threading.Lock()
+        self.pipeline: Pipeline[Vector] | None = None
+        self._build_pipeline()
 
-        self.tap_in_progress = False
-        self._update_config()
+        self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self._build_pipeline)
+        self.mapper_event_dispatcher.register_callback("ON_JSON_RELOAD", self._build_pipeline)
+        self.mapper_event_dispatcher.register_callback("ON_AGGREGATION", self._aggregate)
 
-        # Register callbacks
-        self.mapper_event_dispatcher.register_callback(
-            "ON_CONFIG_RELOAD", self._update_config
-        )
-        self.mapper_event_dispatcher.register_callback(
-            "ON_AGGREGATION", self._aggregate
-        )
-        self.mapper_event_dispatcher.register_callback(
-            "ON_WORKER_RESPAWN", self._on_worker_respawn
-        )
+    def _build_pipeline(self) -> None:
+        s = self.config.settings
+        sens = s.sensitivity
+        dev_w = float(self.mapper.json_loader.width)
+        dev_h = float(self.mapper.json_loader.height)
+        pc_w = float(self.mapper.screen_w)
+        ratio = (pc_w / dev_w) if dev_w > 0 else 1.0
+        final_sens = sens * ratio
 
-    def _update_config(self):
-        """Pre-calculates sensitivity to keep the _touch_pressed loop lean."""
-        print(f"\n[MOUSEMAPPER] - Syncing sensitivity...")
-        try:
-            with self.config.config_lock:
-                mouse_cfg = self.config.config_data.get("mouse", {})
-                base_sens = mouse_cfg.get("sensitivity", 1.0)
-                base_sens = max(0.1, min(base_sens, 10.0))  # Sensitivity guardrail
+        # Determine if WASD is floating or fixed
+        wasd_is_floating = True
+        if hasattr(self.mapper, "wasd_mapper") and self.mapper.wasd_mapper:
+            wasd_is_floating = self.mapper.wasd_mapper.is_floating_joystick
 
-            with self.mapper.lock:
-                pc_w = self.mapper.screen_w
-                dev_w = self.mapper.device_width
-
-            if dev_w > 0:
-                resolution_ratio = pc_w / dev_w
-            else:
-                print(
-                    "\n[MOUSEMAPPER] - Device width is not a positive integer. Defaulting ratio to 1.0."
-                )
-                resolution_ratio = 1.0
-
-            self.scaling_factor = base_sens * resolution_ratio
-
-            print(
-                f"\n[MOUSEMAPPER] - Sync: PC width ({pc_w}px) / Phone width ({dev_w}px) = Ratio ({resolution_ratio:.2f}).\
-                    \n[MOUSEMAPPER] - Final Scaling Factor: {self.scaling_factor:.4f} (User Sensitivity: {base_sens}x)."
-            )
-
-        except Exception as e:
-            print(f"\n[MOUSEMAPPER] - Mouse config update failed: {e}.")
-            self.scaling_factor = 1.0
-
-    def _touch_down(self, touch_event: TouchEvent, is_visible: bool):
-        """
-        Anchor the start position and reset precision accumulators
-        """
-        self.prev_x = touch_event.x
-        self.prev_y = touch_event.y
-        self.acc_x = 0.0
-        self.acc_y = 0.0
-
-        if is_visible:  # Only execute in MENU MODE
-            _x, _y = self.mapper.device_to_game_abs(self.prev_x, self.prev_y)
-            self.bridge.mouse_move_abs(_x, _y)
-            with self.click_lock:
-                self.bridge.left_click_down()
-                self.left_down = True
-
+        # If WASD is fixed, the mouse mapper can claim touches anywhere across the full screen
+        if not wasd_is_floating:
+            look_region = AlwaysRegion()
+            logger.info("MouseMapper assigned Full-Screen Region (Fixed Joystick active).")
         else:
-            self.timestamp = touch_event.timestamp
+            # Floating joystick active: restrict look control to opposite half
+            if s.left_handed:
+                look_region = RectangularRegion(Point(0.0, 0.0), Point(dev_w / 2.0, dev_h))
+            else:
+                look_region = RectangularRegion(Point(dev_w / 2.0, 0.0), Point(dev_w, dev_h))
+            logger.info("MouseMapper restricted to %s half-screen (Floating Joystick active).", "Left" if s.left_handed else "Right")
 
-    def _touch_pressed(self, touch_event: TouchEvent, is_visible: bool):
-        """
-        The 'Hot Path'. This code runs hundreds of times per second.
-        Optimized to minimize branching and float operations.
-        """
-        # prev_x or prev_y can be none if the ADB connection was lost and the touch points were reset. In that case, we need to re-anchor before calculating deltas.
-        # Treat it as a fresh touch down, which will also reset the accumulators and prevent a large jump in the first movement packet after reconnection.
-        if self.prev_x is None or self.prev_y is None:
-            self._touch_down(touch_event, is_visible)
-            return
-
-        # Calculate Raw Delta
-        raw_dx = touch_event.x - self.prev_x
-        raw_dy = touch_event.y - self.prev_y
-
-        # Update anchors immediately
-        self.prev_x = touch_event.x
-        self.prev_y = touch_event.y
-
-        self.acc_x, self.acc_y = self._process_deltas(
-            raw_dx, raw_dy, self.acc_x, self.acc_y
+        pipeline = Pipeline(
+            region=look_region,
+            origin=DynamicOrigin(),
+            constraint=NoConstraint(),
+            transformation=DeltaTransform(sensitivity_x=final_sens, sensitivity_y=final_sens),
+            semantics=[PointerMoveSemantic()],
         )
+        with self.lock:
+            self.pipeline = pipeline
 
-    def touch_up(self):
-        self.prev_x = None
-        self.prev_y = None
-        self.acc_x = 0.0
-        self.acc_y = 0.0
-
-        with self.click_lock:
-            if self.left_down:
-                self.bridge.left_click_up()
-                self.left_down = False
-
-    def _aggregate(self, raw_dx: float, raw_dy: float, acc_x: float, acc_y: float):
-        self.mapper.acc_x, self.mapper.acc_y = self._process_deltas(
-            raw_dx, raw_dy, acc_x, acc_y
-        )
-
-    def _process_deltas(self, raw_dx: float, raw_dy: float, acc_x: float, acc_y: float):
-        # Apply Multiplier and add previous remainders (Sub-pixel precision)
-        # Using float math here is necessary for 1:1 feel
-        calc_dx = (raw_dx * self.scaling_factor) + acc_x
-        calc_dy = (raw_dy * self.scaling_factor) + acc_y
-
-        # Truncate to integer (actual pixels to move)
-        final_dx = int(calc_dx)
-        final_dy = int(calc_dy)
-
-        # Fast-Exit for Noise
-        # If the delta is less than 1 physical pixel, just keep the remainder and exit.
-        if final_dx == 0 and final_dy == 0:
-            acc_x = calc_dx
-            acc_y = calc_dy
-            return acc_x, acc_y
-
-        # Save remainders for next packet
-        acc_x = calc_dx - final_dx
-        acc_y = calc_dy - final_dy
-
-        # Clamp values
-        final_dx = max(-32000, min(32000, final_dx))
-        final_dy = max(-32000, min(32000, final_dy))
-
-        # Physical movement execution
-        self.bridge.mouse_move_rel(final_dx, final_dy)
-        return acc_x, acc_y
-
-    def process_touch(
-        self,
-        action,
-        touch_event: TouchEvent,
-        is_visible: bool,
-    ):
-        if action == PRESSED:
-            self._touch_pressed(touch_event, is_visible)
-
-        elif action == DOWN:
-            self._touch_down(touch_event, is_visible)
-
-        elif action == UP:
-            self.touch_up()
-
-    def _on_worker_respawn(self, worker_type: str):
-        if worker_type != "mouse":
-            return
-        with self.click_lock:
-            if self.left_down:
+    def process_touch(self, touch_event: TouchEvent, is_visible: bool) -> None:
+        if is_visible:
+            if touch_event.phase is TouchPhase.DOWN:
+                gx, gy = self.mapper.device_to_game_abs(touch_event.position.x, touch_event.position.y)
+                self.bridge.mouse_move_abs(gx, gy)
                 self.bridge.left_click_down()
+            elif touch_event.phase is TouchPhase.UP:
+                self.bridge.left_click_up()
+            return
+
+        with self.lock:
+            if self.pipeline:
+                self.pipeline.process(touch_event, self.output_sink)
+
+    def touch_up(self) -> None:
+        with self.lock:
+            if self.pipeline:
+                self.pipeline.reset(self.output_sink)
+
+    def _aggregate(self, sum_dx: float, sum_dy: float, acc_x: float, acc_y: float) -> None:
+        sens = self.config.settings.sensitivity
+        self.output_sink.mouse_move(sum_dx * sens, sum_dy * sens)

@@ -5,6 +5,7 @@ from .key_bindings_page import KeyBindingsPage
 from .performance_page import PerformancePage
 from .profiles_page import ProfilesPage
 from .settings_page import SettingsPage
+from .pipelines_page import PipelinesPage
 
 __all__ = [
     "DashboardPage",
@@ -14,4 +15,5 @@ __all__ = [
     "PerformancePage",
     "ProfilesPage",
     "SettingsPage",
+    "PipelinesPage",
 ]

@@ -39,6 +39,7 @@ from modules.gui.log_bridge import install_gui_logging
 from modules.gui.pages import (
     DashboardPage,
     LayoutEditorPage,
+    PipelinesPage,
     DevicesPage,
     KeyBindingsPage,
     PerformancePage,
@@ -117,6 +118,7 @@ class MainWindow(QMainWindow):
 
         self.dashboard_page = DashboardPage()
         self.layout_editor_page = LayoutEditorPage()
+        self.pipelines_page = PipelinesPage()
         self.devices_page = DevicesPage()
         self.key_bindings_page = KeyBindingsPage()
         self.performance_page = PerformancePage()
@@ -126,6 +128,7 @@ class MainWindow(QMainWindow):
         pages = [
             self.dashboard_page,
             self.layout_editor_page,
+            self.pipelines_page,
             self.devices_page,
             self.key_bindings_page,
             self.performance_page,

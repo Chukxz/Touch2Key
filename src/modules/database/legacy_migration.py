@@ -156,15 +156,15 @@ def migrate_json_layout(
             if scancode is None:
                 continue
 
-            # json_loader.py compares item["type"] against CIRCLE/RECT
+            # json_loader.py compares item["type"] against CIRCLE/RECTANGLE
             # constants imported from utils; this migration only needs
             # the underlying string values, since it doesn't run inside
             # the hot touch loop where the int/enum form matters for speed.
             zone_type_raw = item.get("type")
             if zone_type_raw == "CIRCLE":
                 zone_type = "CIRCLE"
-            elif zone_type_raw == "RECT":
-                zone_type = "RECT"
+            elif zone_type_raw == "RECTANGLE":
+                zone_type = "RECTANGLE"
             else:
                 logger.warning(
                     "Skipping zone with unrecognized type %r for scancode %s.",
@@ -190,7 +190,7 @@ def migrate_json_layout(
                         layout_id=layout_id,
                         scancode=str(scancode),
                         name=item.get("name", ""),
-                        zone_type="RECT",
+                        zone_type="RECTANGLE",
                         x1=float(item["val1"]),
                         y1=float(item["val2"]),
                         x2=float(item["val3"]),

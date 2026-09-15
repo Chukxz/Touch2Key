@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import subprocess
 import datetime
 from pathlib import Path
@@ -11,11 +13,14 @@ from modules.utils import (
     get_dpi,
     get_rotation,
 )
-from modules.database.repositories import AppSettingsRepository, LayoutsRepository
+from modules.database import store
 
 
-def _capture_android_screen(custom_img_name=None):
+def _capture_android_screen(custom_img_name: str | None = None) -> Path:
     device_id = get_adb_device()
+    if not device_id:
+        raise RuntimeError("No ADB device detected.")
+
     res = get_screen_size(device_id)
     if res is None:
         raise RuntimeError("Invalid screen resolution.")
@@ -25,19 +30,15 @@ def _capture_android_screen(custom_img_name=None):
     img_rotation = get_rotation(device_id)
 
     base_dir = Path(IMAGES_FOLDER)
-
-    # Flattened path: resources/images/[prefix_]hud_YYYYMMDD_HHMMSS_rX.png
     prefix = custom_img_name.replace(" ", "_") + "_" if custom_img_name else ""
     relative_filename = f"{prefix}{timestamp}_r{img_rotation}.png"
     full_save_path = base_dir / relative_filename
 
-    # Ensure the root images directory exists
     full_save_path.parent.mkdir(parents=True, exist_ok=True)
+    android_tmp = "/data/local/tmp/temp_cap.png"
 
     try:
         print(f"[PROCESS] Capturing {res[0]}x{res[1]} screen...")
-        android_tmp = "/data/local/tmp/temp_cap.png"
-
         subprocess.run(
             [ADB, "-s", device_id, "shell", "screencap", "-p", android_tmp],
             check=True,
@@ -48,11 +49,8 @@ def _capture_android_screen(custom_img_name=None):
             check=True,
             timeout=20,
         )
-
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-        print(f"[ERROR] ADB failure: {e}")
-        return
-
+        raise RuntimeError(f"ADB screen capture failed: {e}") from e
     finally:
         try:
             subprocess.run(
@@ -60,49 +58,38 @@ def _capture_android_screen(custom_img_name=None):
                 timeout=10,
                 stderr=subprocess.DEVNULL,
             )
-        except subprocess.TimeoutExpired:
-            print("[WARNING] Cleanup timed out. Device likely disconnected.")
-        except Exception as e:
-            print(f"[WARNING] Cleanup failed: {e}")
+        except Exception:
+            pass
 
+    # Process DPI metadata
     try:
         with Image.open(full_save_path) as img:
             img.save(full_save_path, dpi=(dpi, dpi))
             print(f"[INFO] DPI ({dpi}) embedded.")
     except Exception as e:
-        print(f"[WARNING] DPI metadata failed: {e}")
+        print(f"[WARNING] DPI metadata write failed: {e}")
 
-    # Database Update
-    try:
-        settings_repo = AppSettingsRepository()
-        layouts_repo = LayoutsRepository()
+    # Database Update via store facade
+    active_layout = store.get_active_layout()
+    if active_layout is not None:
+        store.layouts.update(
+            active_layout.id,
+            image_path=str(relative_filename),
+        )
+        print(f"[INFO] Image linked to Layout ID {active_layout.id} ('{active_layout.name}').")
+    else:
+        print("[WARNING] Image captured, but no active layout is set in database.")
 
-        settings = settings_repo.get()
-
-        if settings.active_layout_id is not None:
-            layouts_repo.update(
-                settings.active_layout_id, image_path=str(relative_filename)
-            )
-            print(
-                f"[INFO] Database updated: Image assigned to Layout ID {settings.active_layout_id}."
-            )
-        else:
-            print(
-                "[WARNING] Image captured, but no active layout is currently set to assign it to."
-            )
-
-        print(f"\n[SUCCESS]")
-        print(f"File:   {full_save_path}")
-
-    except Exception as e:
-        print(f"[ERROR] Database update failed: {e}")
+    print(f"\n[SUCCESS]\nFile: {full_save_path}")
+    return full_save_path
 
 
-def run():
-    # Prompts for folder structure removed to align with the flattened architecture.
-    # The capture can now be fired cleanly via CLI or triggered seamlessly from a GUI.
+def run() -> None:
     print("[PROCESS] Initializing screen capture...")
-    _capture_android_screen()
+    try:
+        _capture_android_screen()
+    except Exception as e:
+        print(f"[ERROR] {e}")
 
 
 if __name__ == "__main__":

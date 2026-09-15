@@ -1,0 +1,48 @@
+Touch Event
+     ↓
+Region / activation
+     ↓
+Origin
+     ↓
+Constraint
+     ↓
+Transformation
+     ↓
+Semantic
+     ↓
+Output
+
+
+
+Examples:
+
+
+Touch Event
+     ↓
+Region / activation
+     ↓
+Origin
+     ↓
+Constraint
+     ↓
+Transformation
+     ↓
+Semantic
+     ↓
+Output
+
+
+FixedOrigin
+      +
+RadialConstraint
+      +
+RelativePointer
+      ↓
+Fixed camera control
+
+
+Button
+      +
+RelativePointer
+      ↓
+Track fire

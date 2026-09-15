@@ -81,15 +81,17 @@ class LayoutZone:
     x2: Optional[float]
     y2: Optional[float]
     move_camera: bool
+    priority: int
 
     @classmethod
     def from_row(cls, row) -> "LayoutZone":
         data = {
             f.name: row[f.name]
             for f in dataclass_fields(cls)
-            if f.name != "move_camera"
+            if f.name not in ("move_camera", "priority")
         }
         data["move_camera"] = bool(row["move_camera"])
+        data["priority"] = int(row["priority"]) if "priority" in row.keys() else 0
         return cls(**data)
 
 
@@ -302,7 +304,9 @@ class LayoutZonesRepository:
         "x2",
         "y2",
         "move_camera",
+        "priority",
     }
+
     VALID_ZONE_TYPES = {"CIRCLE", "RECTANGLE"}
     _REQUIRED_ON_CREATE = {"layout_id", "scancode", "zone_type"}
 

@@ -25,9 +25,14 @@ from .repositories import (
 __all__ = [
     "Store",
     "store",
+    "connection_manager",
+    "ConnectionManager",
     "AppSettings",
     "Layout",
     "LayoutZone",
+    "AppSettingsRepository",
+    "LayoutsRepository",
+    "LayoutZonesRepository",
     "InvalidFieldError",
 ]
 
@@ -60,8 +65,8 @@ class Store:
             return []
         return self.zones.list_for_layout(layout.id)
 
-    def set_active_layout(self, layout_id: int) -> AppSettings:
-        if self.layouts.get(layout_id) is None:
+    def set_active_layout(self, layout_id: Optional[int]) -> AppSettings:
+        if layout_id is not None and self.layouts.get(layout_id) is None:
             raise KeyError(f"No layout with id={layout_id}")
         return self.settings.update(active_layout_id=layout_id)
 

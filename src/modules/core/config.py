@@ -1,142 +1,75 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING
 
+import logging
 import threading
-from pathlib import Path
-import tomlkit
-from tomlkit.exceptions import ParseError
-import keyboard
-from modules.utils import MapperEvent, TOML_PATH, create_default_toml
+from typing import TYPE_CHECKING, Any
+
+from modules.database import store, AppSettings
+from modules.utils import MapperEvent
 
 if TYPE_CHECKING:
     from modules.utils import MapperEventDispatcher
 
+logger = logging.getLogger("modules.core.config")
+
 
 class AppConfig:
+    """Database-backed application configuration adapter.
+    Preserves backward-compatible .get() and .reload_config() interfaces.
+    """
+
     def __init__(self, mapper_event_dispatcher: MapperEventDispatcher):
         self.mapper_event_dispatcher = mapper_event_dispatcher
-
-        # Initialize the lock to protect config_data
         self.config_lock = threading.Lock()
+        self.settings: AppSettings = store.settings.get()
 
-        self.config_data = {}
-
-        # Load immediately
-        self._load_config()
-        print(f"\n[CONFIG] - Configuration loaded from {TOML_PATH}.")
-        print(
-            f"\n[CONFIG] - Current Handedness: {self._display_handedness(self.get('system').get('left_handed', False))}"
-        )
-
-        # REGISTER HOTKEY
-        print("\n[CONFIG] - Press F7 to switch handedness or F9 to only reload config.")
-        keyboard.add_hotkey("f7", self._switch_handedness)
-        keyboard.add_hotkey("f9", self.reload_config)
-
-    def _load_config(self):
-        """Loads TOML data safely. Creates default if missing or unreadable."""
-        toml_path = Path(TOML_PATH)
-        try:
-            if not toml_path.exists():
-                print(
-                    f"\n[CONFIG] - Config file {TOML_PATH} not found! Creating default..."
-                )
-                create_default_toml()
-
-            with toml_path.open("rb") as f:
-                new_data = tomlkit.load(f)
-
-            with self.config_lock:
-                self.config_data = new_data
-            return
-
-        except ParseError as e:
-            print(f"\n[CONFIG] - Failed to parse TOML: {e}")
-            if self._attempt_line_ending_repair(toml_path):
-                return
-            if self.config_data:
-                print("[CONFIG] - Keeping previous in-memory config.")
-                return
-            print("[CONFIG] - No usable previous config. Resetting to defaults.")
-            self._backup_and_reset(toml_path)
-
-        except Exception as e:
-            print(f"[CONFIG] - Error loading config: {e}")
-            if not self.config_data:
-                self._backup_and_reset(toml_path)
-
-    def _attempt_line_ending_repair(self, toml_path: Path) -> bool:
-        """Most 'control characters in comments' errors come from stray \\r
-        bytes (CRLF resave, or a partial write). Normalize to LF and retry
-        once before giving up on the file."""
-        try:
-            raw = toml_path.read_bytes()
-            normalized = raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-            if normalized == raw:
-                return False  # nothing to fix — different root cause
-
-            new_data = tomlkit.loads(normalized.decode("utf-8"))
-            with self.config_lock:
-                self.config_data = new_data
-            toml_path.write_bytes(normalized)  # persist the fix
-            print("[CONFIG] - Repaired stray line-ending characters and reloaded.")
-            return True
-        except Exception as e:
-            print(f"[CONFIG] - Auto-repair failed: {e}")
-            return False
-
-    def _backup_and_reset(self, toml_path: Path):
-        try:
-            if toml_path.exists():
-                backup_path = toml_path.with_suffix(toml_path.suffix + ".bak")
-                toml_path.replace(backup_path)
-                print(f"[CONFIG] - Corrupt config backed up to {backup_path}.")
-        except Exception as e:
-            print(f"[CONFIG] - Could not back up corrupt config: {e}")
-
-        create_default_toml()
-        try:
-            with toml_path.open("rb") as f:
-                new_data = tomlkit.load(f)
-            with self.config_lock:
-                self.config_data = new_data
-        except Exception as e:
-            print(f"[CONFIG] - Failed to load freshly created default config: {e}")
-
-    def reload_config(self):
-        """Reloads from disk and notifies listeners."""
-        print(f"\n[CONFIG] - Reloading TOML configuration from {TOML_PATH}...")
-        self._load_config()
-
-        # Dispatch event so other modules know config changed
-        self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
-
-    def _display_handedness(self, handedness):
-        return "Left-Handed" if handedness else "Right-Handed"
-
-    def _switch_handedness(self):
-        """Toggles left-handed mode in config and saves."""
-
+    def reload_config(self) -> None:
+        """Reloads settings from the SQLite database and dispatches reload events."""
         with self.config_lock:
-            config_system = self.get("system")
-            current_value = config_system.get("left_handed", False)
-            new_value = not current_value
-            config_system["left_handed"] = new_value
-
-            self.config_data["system"] = config_system
-
-        # Save back to disk
-        try:
-            with open(TOML_PATH, "w", encoding="utf-8", newline="") as f:
-                tomlkit.dump(self.config_data, f)
-            print(
-                f"\n[CONFIG] - Handedness switched to {self._display_handedness(new_value)}. Config saved."
-            )
-        except Exception as e:
-            print(f"\n[CONFIG] - Failed to save config: {e}")
-
-        # Notify listeners of config change
+            self.settings = store.settings.get()
+        logger.info("Configuration reloaded from SQLite database.")
         self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
 
-    def get(self, key, default=None):
-        return self.config_data.get(key, default if default is not None else {})
+    def switch_handedness(self) -> bool:
+        """Toggles left-handed mode directly in the database."""
+        with self.config_lock:
+            new_val = not self.settings.left_handed
+            self.settings = store.settings.update(left_handed=new_val)
+        self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+        return self.settings.left_handed
+
+    def get(self, section: str, default: Any = None) -> dict[str, Any]:
+        """Backward-compatible mapping accessor over AppSettings properties."""
+        with self.config_lock:
+            s = self.settings
+
+        if section == "system":
+            active_layout = store.get_active_layout()
+            return {
+                "left_handed": s.left_handed,
+                "json_dev_res": [
+                    active_layout.width if active_layout else s.json_dev_width,
+                    active_layout.height if active_layout else s.json_dev_height,
+                ],
+                "json_dev_dpi": active_layout.dpi if active_layout else s.json_dev_dpi,
+                "image_path": active_layout.image_path if active_layout else "",
+            }
+        elif section == "joystick":
+            active_layout = store.get_active_layout()
+            return {
+                "deadzone": s.deadzone,
+                "hysteresis": s.hysteresis,
+                "mouse_wheel_radius": active_layout.mouse_wheel_radius if active_layout else 50.0,
+                "sprint_distance": active_layout.sprint_distance if active_layout else 10.0,
+            }
+        elif section == "mouse":
+            return {
+                "sensitivity": s.sensitivity,
+            }
+        elif section == "keys":
+            return {
+                "toggle_key": s.toggle_key or "",
+                "sprint_key": s.sprint_key or "",
+            }
+
+        return default if default is not None else {}
