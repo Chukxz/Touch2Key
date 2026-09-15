@@ -13,7 +13,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, QThread, Qt, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QDockWidget,
     QHBoxLayout,
@@ -99,7 +99,8 @@ class MainWindow(QMainWindow):
         menu_bar = self.menuBar()
 
         file_menu = menu_bar.addMenu("&File")
-        quit_action = QAction("Quit", self)
+        quit_action = QAction("&Quit", self)
+        quit_action.setShortcut(QKeySequence.StandardKey.Quit)
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
 
@@ -118,9 +119,15 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
-        self.start_action = QAction("Start", self)
-        self.stop_action = QAction("Stop", self)
+        self.start_action = QAction("&Start Engine", self)
+        self.start_action.setShortcut(QKeySequence("Ctrl+R"))
+        self.start_action.triggered.connect(self._start_engine)
+
+        self.stop_action = QAction("S&top Engine", self)
+        self.stop_action.setShortcut(QKeySequence("Ctrl+T"))
         self.stop_action.setEnabled(False)
+        self.stop_action.triggered.connect(self._stop_engine)
+
         toolbar.addAction(self.start_action)
         toolbar.addAction(self.stop_action)
 
