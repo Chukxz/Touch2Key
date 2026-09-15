@@ -43,8 +43,11 @@ class PipelinesPage(BasePage):
                 "Toggle",
                 "Fixed Joystick (HUD)",
                 "Floating Joystick",
+                "Anchored Floating Joystick",
                 "Relative Pointer (Look)",
                 "Track Fire (Look + Shoot)",
+                "Bezel Return Toggle",
+                "Double-Tap Toggle",
             ]
         )
         self.add_preset_btn = QPushButton("Add Preset")
@@ -69,17 +72,22 @@ class PipelinesPage(BasePage):
         # Right Column: 5-Stage Pipeline Inspector
         inspector = QVBoxLayout()
 
-        # General Name
-        name_form = QFormLayout()
+        # General Name & Priority
+        meta_form = QFormLayout()
         self.name_edit = QLineEdit()
-        name_form.addRow("Pipeline Name:", self.name_edit)
-        inspector.addLayout(name_form)
+        self.priority_spin = QDoubleSpinBox()
+        self.priority_spin.setRange(-100, 200)
+        self.priority_spin.setDecimals(0)
+        self.priority_spin.setValue(0)
+        meta_form.addRow("Pipeline Name:", self.name_edit)
+        meta_form.addRow("Priority Tier:", self.priority_spin)
+        inspector.addLayout(meta_form)
 
         # Stage 1: Region
         region_box = QGroupBox("1. Region (Activation)")
         region_layout = QVBoxLayout(region_box)
         self.region_type_combo = QComboBox()
-        self.region_type_combo.addItems(["Always", "Circular", "Rectangular"])
+        self.region_type_combo.addItems(["Always", "Circular", "Rectangular", "Top Bezel Notch"])
         region_layout.addWidget(self.region_type_combo)
 
         self.region_stack = QStackedWidget()
@@ -99,8 +107,7 @@ class PipelinesPage(BasePage):
         self.reg_radius = QDoubleSpinBox()
         self.reg_radius.setRange(1, 2000)
         self.reg_radius.setValue(100)
-        circle_form.addRow("Center X:", self.reg_center_x)
-        circle_form.addRow("Center Y:", self.reg_center_y)
+        circle_form.addRow("Center (X, Y):", self._pair_spins(self.reg_center_x, self.reg_center_y))
         circle_form.addRow("Radius (px):", self.reg_radius)
         self.region_stack.addWidget(self.region_circle_page)
 
@@ -116,13 +123,20 @@ class PipelinesPage(BasePage):
         self.reg_x2.setRange(0, 10000)
         self.reg_y2 = QDoubleSpinBox()
         self.reg_y2.setRange(0, 10000)
-        rect_form.addRow(
-            "Top-Left (X1, Y1):", self._pair_spins(self.reg_x1, self.reg_y1)
-        )
-        rect_form.addRow(
-            "Bottom-Right (X2, Y2):", self._pair_spins(self.reg_x2, self.reg_y2)
-        )
+        rect_form.addRow("Top-Left (X1, Y1):", self._pair_spins(self.reg_x1, self.reg_y1))
+        rect_form.addRow("Bottom-Right (X2, Y2):", self._pair_spins(self.reg_x2, self.reg_y2))
         self.region_stack.addWidget(self.region_rect_page)
+
+        # Region: Top Bezel Notch
+        self.region_bezel_page = QWidget()
+        bezel_form = QFormLayout(self.region_bezel_page)
+        bezel_form.setContentsMargins(0, 0, 0, 0)
+        self.reg_bezel_height = QDoubleSpinBox()
+        self.reg_bezel_height.setRange(2, 100)
+        self.reg_bezel_height.setValue(14)
+        self.reg_bezel_height.setSuffix(" px")
+        bezel_form.addRow("Bezel Height:", self.reg_bezel_height)
+        self.region_stack.addWidget(self.region_bezel_page)
 
         region_layout.addWidget(self.region_stack)
         inspector.addWidget(region_box)
@@ -132,17 +146,29 @@ class PipelinesPage(BasePage):
         origin_layout = QFormLayout(origin_box)
         self.origin_type_combo = QComboBox()
         self.origin_type_combo.addItems(
-            ["Dynamic (Touch Point)", "Fixed (HUD Coordinate)"]
+            [
+                "Dynamic (Touch Point)",
+                "Fixed (HUD Coordinate)",
+                "Anchored-Dynamic (Snap to HUD)",
+            ]
         )
         origin_layout.addRow("Origin Type:", self.origin_type_combo)
 
-        self.orig_fixed_x = QDoubleSpinBox()
-        self.orig_fixed_x.setRange(0, 10000)
-        self.orig_fixed_y = QDoubleSpinBox()
-        self.orig_fixed_y.setRange(0, 10000)
-        self.orig_pos_widget = self._pair_spins(self.orig_fixed_x, self.orig_fixed_y)
+        self.orig_x = QDoubleSpinBox()
+        self.orig_x.setRange(0, 10000)
+        self.orig_y = QDoubleSpinBox()
+        self.orig_y.setRange(0, 10000)
+        self.orig_pos_widget = self._pair_spins(self.orig_x, self.orig_y)
         self.orig_pos_widget.setEnabled(False)
-        origin_layout.addRow("Fixed Point:", self.orig_pos_widget)
+        origin_layout.addRow("Anchor Point:", self.orig_pos_widget)
+
+        self.orig_snap_radius = QDoubleSpinBox()
+        self.orig_snap_radius.setRange(5, 1000)
+        self.orig_snap_radius.setValue(80)
+        self.orig_snap_radius.setSuffix(" px")
+        self.orig_snap_radius.setEnabled(False)
+        origin_layout.addRow("Snap Radius:", self.orig_snap_radius)
+
         inspector.addWidget(origin_box)
 
         # Stage 3: Constraint
@@ -207,6 +233,7 @@ class PipelinesPage(BasePage):
                 "Delta (Mouse Movement)",
                 "Directional (Threshold)",
                 "8-Sector Joystick (WASD)",
+                "Double-Tap (Temporal)",
             ]
         )
         transform_layout.addWidget(self.transform_type_combo)
@@ -271,6 +298,26 @@ class PipelinesPage(BasePage):
         joy_form.addRow("Hysteresis:", self.trans_joy_hysteresis)
         self.transform_stack.addWidget(self.trans_joy_page)
 
+        # Transform: Double-Tap
+        self.trans_dt_page = QWidget()
+        dt_form = QFormLayout(self.trans_dt_page)
+        dt_form.setContentsMargins(0, 0, 0, 0)
+        self.trans_dt_interval = QDoubleSpinBox()
+        self.trans_dt_interval.setRange(0.05, 1.0)
+        self.trans_dt_interval.setSingleStep(0.05)
+        self.trans_dt_interval.setValue(0.30)
+        self.trans_dt_interval.setSuffix(" s")
+
+        self.trans_dt_dist = QDoubleSpinBox()
+        self.trans_dt_dist.setRange(5.0, 200.0)
+        self.trans_dt_dist.setSingleStep(5.0)
+        self.trans_dt_dist.setValue(35.0)
+        self.trans_dt_dist.setSuffix(" px")
+
+        dt_form.addRow("Max Tap Interval:", self.trans_dt_interval)
+        dt_form.addRow("Max Tap Drift:", self.trans_dt_dist)
+        self.transform_stack.addWidget(self.trans_dt_page)
+
         transform_layout.addWidget(self.transform_stack)
         inspector.addWidget(transform_box)
 
@@ -282,6 +329,7 @@ class PipelinesPage(BasePage):
             [
                 "Button Press",
                 "Toggle Key",
+                "Toggle Mode (Game <-> Menu)",
                 "WASD Directional Keys",
                 "Pointer Move",
                 "Track Fire (Button + Move)",
@@ -308,19 +356,23 @@ class PipelinesPage(BasePage):
         self._wire_internal_signals()
 
     def _wire_internal_signals(self) -> None:
-        self.region_type_combo.currentIndexChanged.connect(
-            self.region_stack.setCurrentIndex
-        )
-        self.origin_type_combo.currentIndexChanged.connect(
-            lambda idx: self.orig_pos_widget.setEnabled(idx == 1)
-        )
-        self.constraint_type_combo.currentIndexChanged.connect(
-            self.constraint_stack.setCurrentIndex
-        )
-        self.transform_type_combo.currentIndexChanged.connect(
-            self.transform_stack.setCurrentIndex
-        )
+        self.region_type_combo.currentIndexChanged.connect(self.region_stack.setCurrentIndex)
+        self.origin_type_combo.currentIndexChanged.connect(self._on_origin_type_changed)
+        self.constraint_type_combo.currentIndexChanged.connect(self.constraint_stack.setCurrentIndex)
+        self.transform_type_combo.currentIndexChanged.connect(self.transform_stack.setCurrentIndex)
+        self.semantic_type_combo.currentIndexChanged.connect(self._on_semantic_type_changed)
         self.preset_combo.currentIndexChanged.connect(self._apply_preset_fields)
+
+    def _on_origin_type_changed(self, idx: int) -> None:
+        is_fixed = idx == 1
+        is_anchored = idx == 2
+        self.orig_pos_widget.setEnabled(is_fixed or is_anchored)
+        self.orig_snap_radius.setEnabled(is_anchored)
+
+    def _on_semantic_type_changed(self, idx: int) -> None:
+        is_mode_toggle = idx == 2
+        self.output_key_edit.setEnabled(not is_mode_toggle)
+        self.is_mouse_btn_check.setEnabled(not is_mode_toggle)
 
     def _apply_preset_fields(self, index: int) -> None:
         if index == 1:  # Button (Tap/Hold)
@@ -329,36 +381,71 @@ class PipelinesPage(BasePage):
             self.constraint_type_combo.setCurrentIndex(0)  # None
             self.transform_type_combo.setCurrentIndex(0)  # Identity
             self.semantic_type_combo.setCurrentIndex(0)  # Button
+            self.priority_spin.setValue(0)
+
         elif index == 2:  # Toggle
             self.region_type_combo.setCurrentIndex(1)
             self.origin_type_combo.setCurrentIndex(1)
             self.constraint_type_combo.setCurrentIndex(0)
             self.transform_type_combo.setCurrentIndex(0)
-            self.semantic_type_combo.setCurrentIndex(1)
+            self.semantic_type_combo.setCurrentIndex(1)  # Toggle Key
+            self.priority_spin.setValue(0)
+
         elif index == 3:  # Fixed Joystick
             self.region_type_combo.setCurrentIndex(1)
             self.origin_type_combo.setCurrentIndex(1)
             self.constraint_type_combo.setCurrentIndex(1)  # Radial clamp
             self.transform_type_combo.setCurrentIndex(3)  # 8-Sector
-            self.semantic_type_combo.setCurrentIndex(2)  # WASD
+            self.semantic_type_combo.setCurrentIndex(3)  # WASD
+            self.priority_spin.setValue(0)
+
         elif index == 4:  # Floating Joystick
             self.region_type_combo.setCurrentIndex(2)  # Rectangular zone
             self.origin_type_combo.setCurrentIndex(0)  # Dynamic
             self.constraint_type_combo.setCurrentIndex(3)  # Leash
             self.transform_type_combo.setCurrentIndex(3)
-            self.semantic_type_combo.setCurrentIndex(2)
-        elif index == 5:  # Relative Pointer
+            self.semantic_type_combo.setCurrentIndex(3)
+            self.priority_spin.setValue(0)
+
+        elif index == 5:  # Anchored Floating Joystick
+            self.region_type_combo.setCurrentIndex(2)  # Rectangular zone
+            self.origin_type_combo.setCurrentIndex(2)  # Anchored-Dynamic
+            self.constraint_type_combo.setCurrentIndex(3)  # Leash
+            self.transform_type_combo.setCurrentIndex(3)
+            self.semantic_type_combo.setCurrentIndex(3)
+            self.priority_spin.setValue(0)
+
+        elif index == 6:  # Relative Pointer
             self.region_type_combo.setCurrentIndex(0)  # Always
             self.origin_type_combo.setCurrentIndex(0)  # Dynamic
             self.constraint_type_combo.setCurrentIndex(0)  # None
             self.transform_type_combo.setCurrentIndex(1)  # Delta
-            self.semantic_type_combo.setCurrentIndex(3)  # Pointer Move
-        elif index == 6:  # Track Fire
+            self.semantic_type_combo.setCurrentIndex(4)  # Pointer Move
+            self.priority_spin.setValue(-100)
+
+        elif index == 7:  # Track Fire
             self.region_type_combo.setCurrentIndex(1)  # Circular
             self.origin_type_combo.setCurrentIndex(0)  # Dynamic
             self.constraint_type_combo.setCurrentIndex(0)
             self.transform_type_combo.setCurrentIndex(1)  # Delta
-            self.semantic_type_combo.setCurrentIndex(4)  # Track Fire
+            self.semantic_type_combo.setCurrentIndex(5)  # Track Fire
+            self.priority_spin.setValue(0)
+
+        elif index == 8:  # Bezel Return Toggle
+            self.region_type_combo.setCurrentIndex(3)  # Top Bezel Notch
+            self.origin_type_combo.setCurrentIndex(0)  # Dynamic
+            self.constraint_type_combo.setCurrentIndex(0)  # None
+            self.transform_type_combo.setCurrentIndex(0)  # Identity
+            self.semantic_type_combo.setCurrentIndex(2)  # Toggle Mode
+            self.priority_spin.setValue(150)
+
+        elif index == 9:  # Double-Tap Toggle
+            self.region_type_combo.setCurrentIndex(0)  # Always
+            self.origin_type_combo.setCurrentIndex(0)  # Dynamic
+            self.constraint_type_combo.setCurrentIndex(0)  # None
+            self.transform_type_combo.setCurrentIndex(4)  # Double-Tap (Temporal)
+            self.semantic_type_combo.setCurrentIndex(2)  # Toggle Mode
+            self.priority_spin.setValue(-50)
 
     @staticmethod
     def _pair_spins(spin_a: QDoubleSpinBox, spin_b: QDoubleSpinBox) -> QWidget:
