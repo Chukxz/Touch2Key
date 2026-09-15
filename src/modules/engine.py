@@ -1,5 +1,3 @@
-# src/modules/engine.py
-
 from __future__ import annotations
 
 import argparse
@@ -59,6 +57,7 @@ class Engine:
         self.bridge_class = platform_mod.Bridge(self.window_manager, self.system_config)
 
         self.touch_reader: TouchReader | None = None
+        self.layout_loader: LayoutLoader | None = None
         self.mapper: Mapper | None = None
         self.mouse_mapper: MouseMapper | None = None
         self.key_mapper: KeyMapper | None = None
@@ -71,7 +70,8 @@ class Engine:
         self.mapper_event_dispatcher = MapperEventDispatcher()
         self.two_finger_tap_tracker = TwoFingerTapTracker()
 
-        keyboard.add_hotkey("esc", self._shutdown)
+        if not self.headless:
+            keyboard.add_hotkey("esc", self._shutdown)
 
     def toggle_mode(self) -> None:
         """Toggles between Game Mode and Menu/Cursor Mode."""
@@ -79,7 +79,7 @@ class Engine:
             self.is_visible = not self.is_visible
             new_state = self.is_visible
 
-        # Reset any held hardware keys on transition
+        # Reset hardware keys & trackers on transition
         self.bridge_class.health_check()
         if self.mouse_mapper:
             self.mouse_mapper.touch_up()
@@ -87,13 +87,14 @@ class Engine:
             self.key_mapper.release_all()
         if self.wasd_mapper:
             self.wasd_mapper.touch_up()
+        self.two_finger_tap_tracker.reset()
 
-        # Notify mappers of visibility toggle
+        # Dispatch state change across engine and Qt Signal Bridge
         self.mapper_event_dispatcher.dispatch(
             MapperEvent(action="ON_MENU_MODE_TOGGLE", is_visible=new_state)
         )
 
-    def _set_is_visible(self, is_visible: bool) -> None:
+    def _set_is_visible(self, is_visible: bool = True) -> None:
         with self.lock:
             self.is_visible = is_visible
             if self.mouse_mapper:
@@ -104,13 +105,17 @@ class Engine:
                 self.wasd_mapper.touch_up()
             self.two_finger_tap_tracker.reset()
 
+    def _on_layout_reload(self) -> None:
+        """Rebuilds resolution-dependent boundaries such as the top bezel gate."""
+        if self.layout_loader is not None:
+            dev_w = float(self.layout_loader.width)
+            self.bezel_pipeline = BezelReturnToggle(screen_width=dev_w, bezel_height=14.0)
+
     def _build_pipeline_tiers(self) -> list[list[Pipeline]]:
         all_pipelines: list[Pipeline] = []
 
-        # Always include the top bezel notch return gate
         if self.bezel_pipeline:
             all_pipelines.append(self.bezel_pipeline)
-
         if self.key_mapper:
             all_pipelines.extend(self.key_mapper.pipelines)
         if self.wasd_mapper and self.wasd_mapper.pipeline:
@@ -118,7 +123,7 @@ class Engine:
         if self.mouse_mapper and self.mouse_mapper.pipeline:
             all_pipelines.append(self.mouse_mapper.pipeline)
 
-        # 4-Key Sort
+        # 4-Key Sort: (-priority, -type_precedence, area, creation_id)
         all_pipelines.sort(
             key=lambda p: (
                 -p.priority,
@@ -128,7 +133,7 @@ class Engine:
             )
         )
 
-        # Group by (priority, type_precedence)
+        # Group into strict dispatch tiers
         tiers: list[list[Pipeline]] = []
         for p in all_pipelines:
             if not tiers:
@@ -150,22 +155,21 @@ class Engine:
             return
 
         # -------------------------------------------------------------------
-        # MENU MODE (Cursor Visible) NAVIGATION & RETURN GATES
+        # 1. MENU MODE (Cursor Visible) NAVIGATION & RETURN GATES
         # -------------------------------------------------------------------
         if self.is_visible:
-            # 1. Evaluate strict stationary two-finger tap
+            # Evaluate strict stationary two-finger tap
             if self.two_finger_tap_tracker.process(touch_event):
                 self.toggle_mode()
                 return
 
-            # 2. Bezel notch fallback
+            # Bezel notch fallback
             if self.bezel_pipeline and self.bezel_pipeline.claims(touch_event):
                 self.two_finger_tap_tracker.reset()
                 self.toggle_mode()
                 return
 
-            # 3. Single-Touch Pass-Through for Menu / Lobby Navigation
-            # (Only forwards if no secondary finger gesture is being evaluated)
+            # Pass-through relative mapping to OS cursor for UI navigation
             if touch_event.contact_id == 0 and not self.two_finger_tap_tracker._contacts:
                 gx, gy = self.mapper.device_to_game_abs(
                     touch_event.position.x, touch_event.position.y
@@ -180,13 +184,13 @@ class Engine:
             return
 
         # -------------------------------------------------------------------
-        # GAME MODE (Cursor Hidden) PIPELINE DISPATCH
+        # 2. GAME MODE (Cursor Hidden) PIPELINE DISPATCH
         # -------------------------------------------------------------------
         self.mapper.event_count += 1
         tiers = self._build_pipeline_tiers()
         sink = self.key_mapper.output_sink
 
-        # 1. Existing Active Touch Routing
+        # Routing for already active touches
         claimed_existing = False
         for tier in tiers:
             for p in tier:
@@ -197,14 +201,12 @@ class Engine:
         if claimed_existing:
             return
 
-        # 2. Fresh Touch Evaluation (DOWN)
+        # Evaluation for new touches (DOWN)
         if touch_event.phase is TouchPhase.DOWN:
             for tier in tiers:
                 tier_claimed = False
-
                 for p in tier:
                     if p.claims(touch_event):
-                        # Special case: Bezel toggle activated
                         if p == self.bezel_pipeline:
                             self.toggle_mode()
                             return
@@ -237,12 +239,12 @@ class Engine:
                 k_device_handle, m_device_handle = res
 
         config = AppConfig(self.mapper_event_dispatcher)
-        layout_loader = LayoutLoader(config, self.foreground_window)
+        self.layout_loader = LayoutLoader(config, self.foreground_window)
         self.touch_reader = TouchReader(config, self.mapper_event_dispatcher, rate_cap)
 
         emulator_map = {"toggle_key": toggle_key, "sprint_key": sprint_key}
         self.mapper = Mapper(
-            layout_loader,
+            self.layout_loader,
             self.touch_reader,
             self.bridge_class,
             pps,
@@ -251,8 +253,7 @@ class Engine:
             self,
         )
 
-        # Initialize Top Bezel Notch Return Gate
-        dev_w = float(layout_loader.width)
+        dev_w = float(self.layout_loader.width)
         self.bezel_pipeline = BezelReturnToggle(screen_width=dev_w, bezel_height=14.0)
 
         self.mouse_mapper = MouseMapper(self.mapper)
@@ -263,6 +264,10 @@ class Engine:
         self.mapper_event_dispatcher.register_callback(
             "ON_MENU_MODE_TOGGLE", self._set_is_visible
         )
+        self.mapper_event_dispatcher.register_callback(
+            "ON_LAYOUT_RELOAD", self._on_layout_reload
+        )
+
         self.bridge_class.start_worker_processes(k_device_handle, m_device_handle)
 
     def _start(self) -> None:
@@ -280,7 +285,7 @@ class Engine:
         if perf_result is None:
             return
         rate_cap, pps = perf_result
-        
+
         if rate_cap is None or pps is None:
             return
 
@@ -297,6 +302,12 @@ class Engine:
         if self.is_shutting_down:
             return
         self.is_shutting_down = True
+
+        try:
+            if not self.headless:
+                keyboard.unhook_all_hotkeys()
+        except Exception:
+            pass
 
         try:
             if self.touch_reader is not None:
@@ -369,3 +380,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         engine._start()
     except KeyboardInterrupt:
         engine._shutdown()
+
+
+if __name__ == "__main__":
+    run()
