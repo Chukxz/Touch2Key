@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -10,24 +11,33 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from modules.database import store
+from modules.utils import MapperEvent
 from .base_page import BasePage
+
+if TYPE_CHECKING:
+    from modules.utils import MapperEventDispatcher
 
 
 class PipelinesPage(BasePage):
-    """Configuration GUI for the 5-stage touch mapping pipeline:
-    Region -> Origin -> Constraint -> Transformation -> Semantics
-    """
+    """Configuration GUI for 5-stage touch mapping pipelines backed by SQLite zones."""
 
     title = "Pipelines"
 
-    def __init__(self, parent: QWidget | None = None):
-        super().__init__(parent)
+    def __init__(
+        self,
+        dispatcher: MapperEventDispatcher | None = None,
+        parent: QWidget | None = None,
+    ):
+        super().__init__(dispatcher, parent)
 
         body_layout = QHBoxLayout()
 
@@ -40,7 +50,7 @@ class PipelinesPage(BasePage):
             [
                 "Custom",
                 "Button (Tap/Hold)",
-                "Toggle",
+                "Toggle Key",
                 "Fixed Joystick (HUD)",
                 "Floating Joystick",
                 "Anchored Floating Joystick",
@@ -72,7 +82,6 @@ class PipelinesPage(BasePage):
         # Right Column: 5-Stage Pipeline Inspector
         inspector = QVBoxLayout()
 
-        # General Name & Priority
         meta_form = QFormLayout()
         self.name_edit = QLineEdit()
         self.priority_spin = QDoubleSpinBox()
@@ -92,11 +101,9 @@ class PipelinesPage(BasePage):
 
         self.region_stack = QStackedWidget()
 
-        # Region: Always
         self.region_always_page = QWidget()
         self.region_stack.addWidget(self.region_always_page)
 
-        # Region: Circular
         self.region_circle_page = QWidget()
         circle_form = QFormLayout(self.region_circle_page)
         circle_form.setContentsMargins(0, 0, 0, 0)
@@ -111,7 +118,6 @@ class PipelinesPage(BasePage):
         circle_form.addRow("Radius (px):", self.reg_radius)
         self.region_stack.addWidget(self.region_circle_page)
 
-        # Region: Rectangular
         self.region_rect_page = QWidget()
         rect_form = QFormLayout(self.region_rect_page)
         rect_form.setContentsMargins(0, 0, 0, 0)
@@ -127,7 +133,6 @@ class PipelinesPage(BasePage):
         rect_form.addRow("Bottom-Right (X2, Y2):", self._pair_spins(self.reg_x2, self.reg_y2))
         self.region_stack.addWidget(self.region_rect_page)
 
-        # Region: Top Bezel Notch
         self.region_bezel_page = QWidget()
         bezel_form = QFormLayout(self.region_bezel_page)
         bezel_form.setContentsMargins(0, 0, 0, 0)
@@ -182,11 +187,9 @@ class PipelinesPage(BasePage):
 
         self.constraint_stack = QStackedWidget()
 
-        # Constraint: None
         self.constraint_none_page = QWidget()
         self.constraint_stack.addWidget(self.constraint_none_page)
 
-        # Constraint: Radial
         self.constraint_radial_page = QWidget()
         rad_form = QFormLayout(self.constraint_radial_page)
         rad_form.setContentsMargins(0, 0, 0, 0)
@@ -196,7 +199,6 @@ class PipelinesPage(BasePage):
         rad_form.addRow("Clamp Radius:", self.const_radius_spin)
         self.constraint_stack.addWidget(self.constraint_radial_page)
 
-        # Constraint: Rectangular
         self.constraint_rect_page = QWidget()
         rect_const_form = QFormLayout(self.constraint_rect_page)
         rect_const_form.setContentsMargins(0, 0, 0, 0)
@@ -210,7 +212,6 @@ class PipelinesPage(BasePage):
         )
         self.constraint_stack.addWidget(self.constraint_rect_page)
 
-        # Constraint: Leash
         self.constraint_leash_page = QWidget()
         leash_form = QFormLayout(self.constraint_leash_page)
         leash_form.setContentsMargins(0, 0, 0, 0)
@@ -240,11 +241,9 @@ class PipelinesPage(BasePage):
 
         self.transform_stack = QStackedWidget()
 
-        # Transform: Identity
         self.trans_identity_page = QWidget()
         self.transform_stack.addWidget(self.trans_identity_page)
 
-        # Transform: Delta
         self.trans_delta_page = QWidget()
         delta_form = QFormLayout(self.trans_delta_page)
         delta_form.setContentsMargins(0, 0, 0, 0)
@@ -260,7 +259,6 @@ class PipelinesPage(BasePage):
         )
         self.transform_stack.addWidget(self.trans_delta_page)
 
-        # Transform: Directional
         self.trans_dir_page = QWidget()
         dir_form = QFormLayout(self.trans_dir_page)
         dir_form.setContentsMargins(0, 0, 0, 0)
@@ -274,7 +272,6 @@ class PipelinesPage(BasePage):
         )
         self.transform_stack.addWidget(self.trans_dir_page)
 
-        # Transform: Joystick Sector
         self.trans_joy_page = QWidget()
         joy_form = QFormLayout(self.trans_joy_page)
         joy_form.setContentsMargins(0, 0, 0, 0)
@@ -298,7 +295,6 @@ class PipelinesPage(BasePage):
         joy_form.addRow("Hysteresis:", self.trans_joy_hysteresis)
         self.transform_stack.addWidget(self.trans_joy_page)
 
-        # Transform: Double-Tap
         self.trans_dt_page = QWidget()
         dt_form = QFormLayout(self.trans_dt_page)
         dt_form.setContentsMargins(0, 0, 0, 0)
@@ -345,8 +341,7 @@ class PipelinesPage(BasePage):
 
         inspector.addWidget(semantic_box)
 
-        # Save Button
-        self.save_pipeline_btn = QPushButton("Save Pipeline")
+        self.save_pipeline_btn = QPushButton("Save Pipeline to Active Layout")
         inspector.addWidget(self.save_pipeline_btn)
         inspector.addStretch()
 
@@ -354,6 +349,10 @@ class PipelinesPage(BasePage):
         self.content_layout().addLayout(body_layout)
 
         self._wire_internal_signals()
+        self.load_active_layout_zones()
+
+    def on_page_shown(self) -> None:
+        self.load_active_layout_zones()
 
     def _wire_internal_signals(self) -> None:
         self.region_type_combo.currentIndexChanged.connect(self.region_stack.setCurrentIndex)
@@ -362,6 +361,91 @@ class PipelinesPage(BasePage):
         self.transform_type_combo.currentIndexChanged.connect(self.transform_stack.setCurrentIndex)
         self.semantic_type_combo.currentIndexChanged.connect(self._on_semantic_type_changed)
         self.preset_combo.currentIndexChanged.connect(self._apply_preset_fields)
+
+        self.add_preset_btn.clicked.connect(self._apply_preset_fields_button)
+        self.save_pipeline_btn.clicked.connect(self._on_save_pipeline)
+        self.delete_btn.clicked.connect(self._on_delete_zone)
+        self.pipeline_list.itemSelectionChanged.connect(self._on_zone_selected)
+
+    def load_active_layout_zones(self) -> None:
+        self.pipeline_list.clear()
+        zones = store.get_active_layout_zones()
+        for zone in zones:
+            item = QListWidgetItem(f"{zone.name or 'Zone'} [{zone.scancode}] (Prio: {zone.priority})")
+            item.setData(Qt.ItemDataRole.UserRole, zone.id)
+            self.pipeline_list.addItem(item)
+
+    def _on_zone_selected(self) -> None:
+        items = self.pipeline_list.selectedItems()
+        if not items:
+            return
+        zone_id = items[0].data(Qt.ItemDataRole.UserRole)
+        zone = store.zones.get(zone_id)
+        if not zone:
+            return
+
+        self.name_edit.setText(zone.name)
+        self.priority_spin.setValue(zone.priority)
+        self.output_key_edit.setText(zone.scancode)
+
+        if zone.zone_type == "CIRCLE":
+            self.region_type_combo.setCurrentIndex(1)
+            self.reg_center_x.setValue(zone.cx or 0.0)
+            self.reg_center_y.setValue(zone.cy or 0.0)
+            self.reg_radius.setValue(zone.r or 50.0)
+        else:
+            self.region_type_combo.setCurrentIndex(2)
+            self.reg_x1.setValue(zone.x1 or 0.0)
+            self.reg_y1.setValue(zone.y1 or 0.0)
+            self.reg_x2.setValue(zone.x2 or 0.0)
+            self.reg_y2.setValue(zone.y2 or 0.0)
+
+    def _on_save_pipeline(self) -> None:
+        active_layout = store.get_active_layout()
+        if not active_layout:
+            QMessageBox.warning(self, "No Active Layout", "Please set an active layout before saving pipelines.")
+            return
+
+        reg_idx = self.region_type_combo.currentIndex()
+        z_type = "CIRCLE" if reg_idx == 1 else "RECTANGLE"
+
+        zone_fields = {
+            "layout_id": active_layout.id,
+            "name": self.name_edit.text().strip(),
+            "scancode": self.output_key_edit.text().strip() or "space",
+            "zone_type": z_type,
+            "priority": int(self.priority_spin.value()),
+            "move_camera": int(self.semantic_type_combo.currentIndex() == 5),
+            "cx": self.reg_center_x.value() if z_type == "CIRCLE" else None,
+            "cy": self.reg_center_y.value() if z_type == "CIRCLE" else None,
+            "r": self.reg_radius.value() if z_type == "CIRCLE" else None,
+            "x1": self.reg_x1.value() if z_type == "RECTANGLE" else None,
+            "y1": self.reg_y1.value() if z_type == "RECTANGLE" else None,
+            "x2": self.reg_x2.value() if z_type == "RECTANGLE" else None,
+            "y2": self.reg_y2.value() if z_type == "RECTANGLE" else None,
+        }
+
+        selected = self.pipeline_list.selectedItems()
+        if selected:
+            zone_id = selected[0].data(Qt.ItemDataRole.UserRole)
+            store.zones.update(zone_id, **zone_fields)
+        else:
+            store.zones.create(**zone_fields)
+
+        self.load_active_layout_zones()
+        if self.dispatcher:
+            self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+        QMessageBox.information(self, "Saved", "Pipeline saved and synced to engine.")
+
+    def _on_delete_zone(self) -> None:
+        selected = self.pipeline_list.selectedItems()
+        if not selected:
+            return
+        zone_id = selected[0].data(Qt.ItemDataRole.UserRole)
+        store.zones.delete(zone_id)
+        self.load_active_layout_zones()
+        if self.dispatcher:
+            self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
 
     def _on_origin_type_changed(self, idx: int) -> None:
         is_fixed = idx == 1
@@ -374,77 +458,80 @@ class PipelinesPage(BasePage):
         self.output_key_edit.setEnabled(not is_mode_toggle)
         self.is_mouse_btn_check.setEnabled(not is_mode_toggle)
 
+    def _apply_preset_fields_button(self) -> None:
+        self._apply_preset_fields(self.preset_combo.currentIndex())
+
     def _apply_preset_fields(self, index: int) -> None:
         if index == 1:  # Button (Tap/Hold)
-            self.region_type_combo.setCurrentIndex(1)  # Circular
-            self.origin_type_combo.setCurrentIndex(1)  # Fixed
-            self.constraint_type_combo.setCurrentIndex(0)  # None
-            self.transform_type_combo.setCurrentIndex(0)  # Identity
-            self.semantic_type_combo.setCurrentIndex(0)  # Button
-            self.priority_spin.setValue(0)
-
-        elif index == 2:  # Toggle
             self.region_type_combo.setCurrentIndex(1)
             self.origin_type_combo.setCurrentIndex(1)
             self.constraint_type_combo.setCurrentIndex(0)
             self.transform_type_combo.setCurrentIndex(0)
-            self.semantic_type_combo.setCurrentIndex(1)  # Toggle Key
+            self.semantic_type_combo.setCurrentIndex(0)
+            self.priority_spin.setValue(0)
+
+        elif index == 2:  # Toggle Key
+            self.region_type_combo.setCurrentIndex(1)
+            self.origin_type_combo.setCurrentIndex(1)
+            self.constraint_type_combo.setCurrentIndex(0)
+            self.transform_type_combo.setCurrentIndex(0)
+            self.semantic_type_combo.setCurrentIndex(1)
             self.priority_spin.setValue(0)
 
         elif index == 3:  # Fixed Joystick
             self.region_type_combo.setCurrentIndex(1)
             self.origin_type_combo.setCurrentIndex(1)
-            self.constraint_type_combo.setCurrentIndex(1)  # Radial clamp
-            self.transform_type_combo.setCurrentIndex(3)  # 8-Sector
-            self.semantic_type_combo.setCurrentIndex(3)  # WASD
+            self.constraint_type_combo.setCurrentIndex(1)
+            self.transform_type_combo.setCurrentIndex(3)
+            self.semantic_type_combo.setCurrentIndex(3)
             self.priority_spin.setValue(0)
 
         elif index == 4:  # Floating Joystick
-            self.region_type_combo.setCurrentIndex(2)  # Rectangular zone
-            self.origin_type_combo.setCurrentIndex(0)  # Dynamic
-            self.constraint_type_combo.setCurrentIndex(3)  # Leash
+            self.region_type_combo.setCurrentIndex(2)
+            self.origin_type_combo.setCurrentIndex(0)
+            self.constraint_type_combo.setCurrentIndex(3)
             self.transform_type_combo.setCurrentIndex(3)
             self.semantic_type_combo.setCurrentIndex(3)
             self.priority_spin.setValue(0)
 
         elif index == 5:  # Anchored Floating Joystick
-            self.region_type_combo.setCurrentIndex(2)  # Rectangular zone
-            self.origin_type_combo.setCurrentIndex(2)  # Anchored-Dynamic
-            self.constraint_type_combo.setCurrentIndex(3)  # Leash
+            self.region_type_combo.setCurrentIndex(2)
+            self.origin_type_combo.setCurrentIndex(2)
+            self.constraint_type_combo.setCurrentIndex(3)
             self.transform_type_combo.setCurrentIndex(3)
             self.semantic_type_combo.setCurrentIndex(3)
             self.priority_spin.setValue(0)
 
         elif index == 6:  # Relative Pointer
-            self.region_type_combo.setCurrentIndex(0)  # Always
-            self.origin_type_combo.setCurrentIndex(0)  # Dynamic
-            self.constraint_type_combo.setCurrentIndex(0)  # None
-            self.transform_type_combo.setCurrentIndex(1)  # Delta
-            self.semantic_type_combo.setCurrentIndex(4)  # Pointer Move
+            self.region_type_combo.setCurrentIndex(0)
+            self.origin_type_combo.setCurrentIndex(0)
+            self.constraint_type_combo.setCurrentIndex(0)
+            self.transform_type_combo.setCurrentIndex(1)
+            self.semantic_type_combo.setCurrentIndex(4)
             self.priority_spin.setValue(-100)
 
         elif index == 7:  # Track Fire
-            self.region_type_combo.setCurrentIndex(1)  # Circular
-            self.origin_type_combo.setCurrentIndex(0)  # Dynamic
+            self.region_type_combo.setCurrentIndex(1)
+            self.origin_type_combo.setCurrentIndex(0)
             self.constraint_type_combo.setCurrentIndex(0)
-            self.transform_type_combo.setCurrentIndex(1)  # Delta
-            self.semantic_type_combo.setCurrentIndex(5)  # Track Fire
+            self.transform_type_combo.setCurrentIndex(1)
+            self.semantic_type_combo.setCurrentIndex(5)
             self.priority_spin.setValue(0)
 
         elif index == 8:  # Bezel Return Toggle
-            self.region_type_combo.setCurrentIndex(3)  # Top Bezel Notch
-            self.origin_type_combo.setCurrentIndex(0)  # Dynamic
-            self.constraint_type_combo.setCurrentIndex(0)  # None
-            self.transform_type_combo.setCurrentIndex(0)  # Identity
-            self.semantic_type_combo.setCurrentIndex(2)  # Toggle Mode
+            self.region_type_combo.setCurrentIndex(3)
+            self.origin_type_combo.setCurrentIndex(0)
+            self.constraint_type_combo.setCurrentIndex(0)
+            self.transform_type_combo.setCurrentIndex(0)
+            self.semantic_type_combo.setCurrentIndex(2)
             self.priority_spin.setValue(150)
 
         elif index == 9:  # Double-Tap Toggle
-            self.region_type_combo.setCurrentIndex(0)  # Always
-            self.origin_type_combo.setCurrentIndex(0)  # Dynamic
-            self.constraint_type_combo.setCurrentIndex(0)  # None
-            self.transform_type_combo.setCurrentIndex(4)  # Double-Tap (Temporal)
-            self.semantic_type_combo.setCurrentIndex(2)  # Toggle Mode
+            self.region_type_combo.setCurrentIndex(0)
+            self.origin_type_combo.setCurrentIndex(0)
+            self.constraint_type_combo.setCurrentIndex(0)
+            self.transform_type_combo.setCurrentIndex(4)
+            self.semantic_type_combo.setCurrentIndex(2)
             self.priority_spin.setValue(-50)
 
     @staticmethod
