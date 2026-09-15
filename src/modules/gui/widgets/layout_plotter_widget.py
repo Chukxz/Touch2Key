@@ -40,6 +40,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout
+from PySide6.QtGui import QKeySequence, QShortcut
 
 COLLECTING = "COLLECTING"
 WAITING_FOR_KEY = "WAITING_FOR_KEY"
@@ -784,13 +785,13 @@ class _DraggableShape(_Draggable):
             self.canvas.mpl_disconnect(cid)
 
 
-class LayoutPlotterWidget(QWidget):
-    """Matplotlib HUD Layout Canvas embedded cleanly inside a QWidget."""
 
+class LayoutPlotterWidget(QWidget):
     layout_saved = Signal(str, int)
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, parent: QWidget | None = None, standalone: bool = False):
         super().__init__(parent)
+        self.standalone = standalone
 
         self.root_layout = QVBoxLayout(self)
         self.root_layout.setContentsMargins(0, 0, 0, 0)
@@ -827,7 +828,46 @@ class LayoutPlotterWidget(QWidget):
         self.fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
         self.canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
+        self._setup_shortcuts()
         self.reload_active_layout()
+
+    def _setup_shortcuts(self) -> None:
+        """Installs shortcuts with the appropriate Qt context.
+        
+        - Standalone CLI: WindowShortcut (active anywhere inside the standalone window).
+        - Embedded GUI: WidgetWithChildrenShortcut (only active when the plotter area has focus).
+        """
+        context = (
+            Qt.ShortcutContext.WindowShortcut
+            if self.standalone
+            else Qt.ShortcutContext.WidgetWithChildrenShortcut
+        )
+
+        shortcuts = [
+            ("F4", self.toggle_visibility),
+            ("F6", lambda: self.start_mode(CIRCLE, 3)),
+            ("F7", lambda: self.start_mode(RECTANGLE, 4)),
+            ("F8", self.reset_state),
+            ("F9", self.print_data),
+            ("F12", self.enter_naming_mode),
+            ("Delete", self.enter_deleting_mode),
+            ("Space", self.enter_marking_mode),
+            ("Esc", self._on_escape_pressed),
+        ]
+        
+        self._shortcuts_registry = []
+        for key_seq, callback in shortcuts:
+            sc = QShortcut(QKeySequence(key_seq), self, callback)
+            sc.setContext(context)
+            self._shortcuts_registry.append(sc)
+
+    def _on_escape_pressed(self) -> None:
+        if self.state == IDLE and self.standalone:
+            parent_window = self.window()
+            if parent_window:
+                parent_window.close()
+        else:
+            self.reset_state()
 
     def reload_active_layout(self) -> bool:
         """Reloads the active layout image and shapes from the database."""
