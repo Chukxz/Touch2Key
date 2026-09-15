@@ -7,6 +7,7 @@ import re
 import struct
 import subprocess
 import time
+import threading
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
