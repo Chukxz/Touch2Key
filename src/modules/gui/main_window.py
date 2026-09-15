@@ -5,52 +5,75 @@ Layout: menu bar + toolbar at top, sidebar navigation driving a
 central QStackedWidget, a right-hand status dock fed by
 EngineSignalBridge, a bottom log console dock fed by QtLogHandler, and
 a persistent status bar.
-
-This window owns no engine/ADB/touch logic itself -- it only starts
-and stops an Engine instance and reacts to its signals. Keep page
-widgets and this window dumb about mapper internals, so `touch2key`
-(CLI) and `touch2key-gui` stay thin callers over the same core/ logic
-rather than two divergent implementations.
 """
 
 from __future__ import annotations
-from typing import TYPE_CHECKING
 
 import logging
+from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, QThread, Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QMainWindow,
-    QWidget,
-    QListWidget,
-    QListWidgetItem,
-    QStackedWidget,
     QDockWidget,
-    QPlainTextEdit,
     QHBoxLayout,
     QLabel,
-    QToolBar,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
+    QStackedWidget,
+    QToolBar,
+    QWidget,
 )
 
-from modules.gui.signal_bridge import EngineSignalBridge
+from modules.database import store
 from modules.gui.log_bridge import install_gui_logging
 from modules.gui.pages import (
     DashboardPage,
-    LayoutEditorPage,
-    PipelinesPage,
     DevicesPage,
     KeyBindingsPage,
+    LayoutEditorPage,
     PerformancePage,
+    PipelinesPage,
     ProfilesPage,
     SettingsPage,
 )
+from modules.gui.signal_bridge import EngineSignalBridge
 
 if TYPE_CHECKING:
     from modules.engine import Engine
 
 logger = logging.getLogger("modules.gui")
+
+
+class EngineWorker(QObject):
+    """Worker object to run Engine.start_headless inside a separate QThread."""
+
+    started = Signal()
+    finished = Signal()
+    failed = Signal(str)
+
+    def __init__(self, engine: "Engine", window_id: int):
+        super().__init__()
+        self.engine = engine
+        self.window_id = window_id
+
+    def run(self) -> None:
+        try:
+            s = store.settings.get()
+            self.engine.start_headless(
+                window_id=self.window_id,
+                rate_cap=s.adb_rate_cap,
+                pps=s.pps_alert_threshold,
+                toggle_key=s.toggle_key,
+                sprint_key=s.sprint_key,
+            )
+            self.started.emit()
+        except Exception as exc:
+            logger.exception("Engine failed to launch in worker thread")
+            self.failed.emit(str(exc))
 
 
 class MainWindow(QMainWindow):
@@ -60,6 +83,8 @@ class MainWindow(QMainWindow):
         self.resize(1000, 640)
 
         self.engine: "Engine | None" = None
+        self.engine_thread: QThread | None = None
+        self.engine_worker: EngineWorker | None = None
         self.signal_bridge = EngineSignalBridge(self)
 
         self._build_menu_and_toolbar()
@@ -82,7 +107,6 @@ class MainWindow(QMainWindow):
         connect_wireless_action = QAction("Connect wirelessly", self)
         device_menu.addAction(connect_wireless_action)
 
-        # populated with dock toggle actions once the docks exist below
         self._view_menu = menu_bar.addMenu("&View")
 
         help_menu = menu_bar.addMenu("&Help")
@@ -173,12 +197,6 @@ class MainWindow(QMainWindow):
                 f"Cursor: {'shown' if visible else 'hidden'}"
             )
         )
-        # rate_label / connection_label currently have no source signal --
-        # Mapper._pulse_status() and TouchReader's connect/disconnect
-        # paths only print() today. Wiring those live would mean adding
-        # a couple of dispatcher.dispatch(MapperEvent(...)) calls at
-        # those points and a matching signal + register_callback here,
-        # the same pattern used for ON_MENU_MODE_TOGGLE above.
 
     # ---- Bottom log dock ----------------------------------------------------
     def _build_log_dock(self) -> None:
@@ -190,7 +208,7 @@ class MainWindow(QMainWindow):
 
         self.log_console = QPlainTextEdit()
         self.log_console.setReadOnly(True)
-        self.log_console.setMaximumBlockCount(2000)  # caps memory growth
+        self.log_console.setMaximumBlockCount(2000)
         dock.setWidget(self.log_console)
 
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
@@ -219,50 +237,61 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            from modules.engine import Engine  # local import: heavy deps
+            from modules.core.list_windows import select_window
+            from modules.engine import Engine
 
-            self.engine = Engine()
+            # 1. Target Window Selection
+            selected = select_window()
+            if not selected:
+                return
+            window_id, _ = selected
 
-            # IMPORTANT: Engine._start() currently runs its setup
-            # sequence (select_window -> capture_keys ->
-            # capture_performance_settings -> keyboard.wait()) as
-            # blocking calls on whatever thread calls it. Calling it
-            # directly here would freeze the GUI event loop at
-            # keyboard.wait(). Before this button is safe to use,
-            # _start() needs to either:
-            #   (a) run on a QThread/worker thread, with its dialogs
-            #       replaced by the Devices/KeyBindings/Performance
-            #       pages already collecting that state, or
-            #   (b) be split into discrete non-blocking steps this
-            #       window calls explicitly, with keyboard.wait()
-            #       replaced entirely (the GUI event loop already
-            #       serves that "keep running" role).
-            # This call is left in as the intended call site; wire it
-            # up once one of the above is done.
-            self.signal_bridge.bind(
-                getattr(self.engine, "mapper_event_dispatcher", None)
-            )
+            # 2. Instantiate Engine
+            self.engine = Engine(headless=True)
+            self.signal_bridge.bind(self.engine.mapper_event_dispatcher)
+
+            # 3. Launch Engine in QThread
+            self.engine_thread = QThread()
+            self.engine_worker = EngineWorker(self.engine, window_id)
+            self.engine_worker.moveToThread(self.engine_thread)
+
+            self.engine_thread.started.connect(self.engine_worker.run)
+            self.engine_worker.started.connect(self._on_engine_started)
+            self.engine_worker.failed.connect(self._on_engine_failed)
+
+            self.engine_thread.start()
 
         except Exception as exc:
-            logger.exception("Failed to start engine")
+            logger.exception("Failed to initialize engine")
             QMessageBox.critical(self, "Start failed", str(exc))
-            self.engine = None
-            return
+            self._cleanup_engine()
 
+    def _on_engine_started(self) -> None:
         self.dashboard_page.set_running(True)
         self.start_action.setEnabled(False)
         self.stop_action.setEnabled(True)
         self.statusBar().showMessage("Engine running.")
 
-    def _stop_engine(self) -> None:
-        if self.engine is None:
-            return
+    def _on_engine_failed(self, error_msg: str) -> None:
+        QMessageBox.critical(self, "Engine Error", f"Engine failed to start:\n{error_msg}")
+        self._stop_engine()
 
-        try:
-            self.engine._shutdown()
-        except Exception:
-            logger.exception("Error during engine shutdown")
+    def _cleanup_engine(self) -> None:
+        if self.engine_thread and self.engine_thread.isRunning():
+            self.engine_thread.quit()
+            self.engine_thread.wait(1000)
+        self.engine_thread = None
+        self.engine_worker = None
         self.engine = None
+
+    def _stop_engine(self) -> None:
+        if self.engine is not None:
+            try:
+                self.engine._shutdown()
+            except Exception:
+                logger.exception("Error during engine shutdown")
+
+        self._cleanup_engine()
 
         self.dashboard_page.set_running(False)
         self.start_action.setEnabled(True)
