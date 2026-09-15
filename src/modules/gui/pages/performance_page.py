@@ -12,13 +12,16 @@ if TYPE_CHECKING:
 
 
 class PerformancePage(BasePage):
-    """Dynamic, database-backed performance and rate-limit manager."""
+    """Dynamic performance and rate-limiting manager backed by SQLite."""
 
     title = "Performance"
 
-    def __init__(self, dispatcher: MapperEventDispatcher | None = None, parent=None):
-        super().__init__(parent)
-        self.dispatcher = dispatcher
+    def __init__(
+        self,
+        dispatcher: MapperEventDispatcher | None = None,
+        parent=None,
+    ):
+        super().__init__(dispatcher, parent)
 
         form_widget = QWidget()
         form = QFormLayout(form_widget)
@@ -41,6 +44,9 @@ class PerformancePage(BasePage):
         self.rate_cap_spin.valueChanged.connect(self._on_rate_cap_changed)
         self.pps_spin.valueChanged.connect(self._on_pps_changed)
 
+        self.load_performance_settings()
+
+    def on_page_shown(self) -> None:
         self.load_performance_settings()
 
     def load_performance_settings(self) -> None:
