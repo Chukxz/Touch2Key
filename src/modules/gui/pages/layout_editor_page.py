@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import tomlkit
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -13,30 +13,34 @@ from PySide6.QtWidgets import (
     QListWidget,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
-    QSpinBox,
 )
 
 from modules.database import store
 from modules.database.legacy_migration import migrate_json_layout
 from modules.gui.widgets.layout_plotter_widget import LayoutPlotterWidget
-from modules.utils import CIRCLE, RECTANGLE, JSONS_FOLDER, TOML_PATH, MapperEvent
+from modules.utils import CIRCLE, JSONS_FOLDER, RECTANGLE, MapperEvent
 from .base_page import BasePage
+
+if TYPE_CHECKING:
+    from modules.utils import MapperEventDispatcher
 
 logger = logging.getLogger("modules.gui.layout_editor")
 
 
 class LayoutEditorPage(BasePage):
-    """Integrated HUD Layout Editor hosting the interactive Plotter canvas,
-    profile switcher, zone drawing controls, and import/export flows.
-    """
+    """HUD Layout Editor hosting the visual Plotter canvas and SQLite layout synchronization."""
 
     title = "Layout editor"
 
-    def __init__(self, dispatcher=None, parent: QWidget | None = None):
-        super().__init__(parent)
-        self.dispatcher = dispatcher
+    def __init__(
+        self,
+        dispatcher: MapperEventDispatcher | None = None,
+        parent: QWidget | None = None,
+    ):
+        super().__init__(dispatcher, parent)
 
         # Toolbar Row 1: Profile & File Operations
         top_toolbar = QHBoxLayout()
@@ -60,7 +64,7 @@ class LayoutEditorPage(BasePage):
 
         self.content_layout().addLayout(top_toolbar)
 
-        # Toolbar Row 2: Zone Drawing & Editing Controls
+        # Toolbar Row 2: Zone Drawing & Priority Controls
         tools_row = QHBoxLayout()
         tools_row.setContentsMargins(0, 0, 0, 0)
 
@@ -74,7 +78,6 @@ class LayoutEditorPage(BasePage):
         self.priority_spin.setRange(-100, 100)
         self.priority_spin.setValue(0)
         self.priority_spin.setPrefix("Priority: ")
-
         self.priority_spin.valueChanged.connect(self.on_priority_changed)
         tools_row.addWidget(self.priority_spin)
 
@@ -87,12 +90,16 @@ class LayoutEditorPage(BasePage):
 
         self.content_layout().addLayout(tools_row)
 
-        # Embedded Interactive Canvas Widget
+        # Interactive Canvas
         self.plotter_widget = LayoutPlotterWidget(self)
         self.content_layout().addWidget(self.plotter_widget, stretch=1)
 
         self._wire_signals()
         self.refresh_active_layout_display()
+
+    def on_page_shown(self) -> None:
+        self.refresh_active_layout_display()
+        self.plotter_widget.reload_active_layout()
 
     def on_priority_changed(self, val: int):
         if self.plotter_widget.current_draggable:
@@ -114,17 +121,17 @@ class LayoutEditorPage(BasePage):
 
         self.plotter_widget.layout_saved.connect(self._on_layout_saved)
 
+    def _notify_engine_reload(self) -> None:
+        if self.dispatcher is not None:
+            self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+            self.dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+
     def refresh_active_layout_display(self) -> None:
         active_layout = store.get_active_layout()
         if active_layout is not None:
             self.active_layout_label.setText(f"Active Layout: {active_layout.name} (ID: {active_layout.id})")
         else:
             self.active_layout_label.setText("Active Layout: None")
-
-    def _notify_engine_reload(self) -> None:
-        if self.dispatcher is not None:
-            self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
-            self.dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
 
     def _on_layout_saved(self, name: str, layout_id: int) -> None:
         self.refresh_active_layout_display()
@@ -162,8 +169,7 @@ class LayoutEditorPage(BasePage):
                 return
             target_name = selected_items[0].text()
             target_layout = next(l for l in all_layouts if l.name == target_name)
-            
-            # Use repository update rather than bare queries
+
             store.settings.update(active_layout_id=target_layout.id)
             self.refresh_active_layout_display()
             self.plotter_widget.reload_active_layout()
@@ -190,11 +196,7 @@ class LayoutEditorPage(BasePage):
             QMessageBox.critical(self, "Error", f"File '{file_path.name}' not found.")
             return
 
-        layout_id = migrate_json_layout(
-            json_path=file_path,
-            image_path="",
-            set_active=True,
-        )
+        layout_id = migrate_json_layout(json_path=file_path, image_path="", set_active=True)
 
         if layout_id is not None:
             self.refresh_active_layout_display()
