@@ -1,16 +1,25 @@
-# src/modules/gui/pages/base_page.py
 from __future__ import annotations
+
 from typing import TYPE_CHECKING
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 if TYPE_CHECKING:
     from modules.utils import MapperEventDispatcher
 
+
 class BasePage(QWidget):
+    """Common foundation for sidebar pages: title header, standard margins,
+    and a lifecycle hook when switched to.
+    """
+
     title = "Page"
 
-    def __init__(self, dispatcher: MapperEventDispatcher | None = None, parent: QWidget | None = None):
+    def __init__(
+        self,
+        dispatcher: MapperEventDispatcher | None = None,
+        parent: QWidget | None = None,
+    ):
         super().__init__(parent)
         self.dispatcher = dispatcher
         self._root_layout = QVBoxLayout(self)
@@ -25,5 +34,5 @@ class BasePage(QWidget):
         return self._root_layout
 
     def on_page_shown(self) -> None:
-        """Override in subclasses to reload data when the user switches tabs."""
+        """Invoked when the user navigates to this page."""
         pass
