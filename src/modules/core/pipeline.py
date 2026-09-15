@@ -5,18 +5,29 @@ import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Generic, Protocol, TypeVar
+from typing import Generic, Protocol, TypeVar, Any
 
 from modules.utils import Point, Vector, TouchEvent, TouchPhase
 
 
-class OutputSink(Protocol):
+class OutputSink(ABC):
+    @abstractmethod
     def key_down(self, key: str) -> None: ...
-    def key_up(self, key: str) -> None: ...
-    def mouse_down(self, button: str) -> None: ...
-    def mouse_up(self, button: str) -> None: ...
-    def mouse_move(self, dx: float, dy: float) -> None: ...
 
+    @abstractmethod
+    def key_up(self, key: str) -> None: ...
+
+    @abstractmethod
+    def mouse_move(self, dx: float, dy: float) -> None: ...
+    
+    @abstractmethod
+    def mouse_up(self, button: str) -> None: ...
+    
+    @abstractmethod
+    def mouse_down(self, button: str) -> None: ...
+
+    @abstractmethod
+    def toggle_menu_mode(self) -> None: ...
 
 class Region(ABC):
     @abstractmethod
@@ -131,6 +142,102 @@ class DynamicOrigin(Origin):
                 self._position = Point(position.x - (delta.x * scale), position.y - (delta.y * scale))
     def end(self) -> None: self._position = None
 
+@dataclass(slots=True)
+class AnchoredDynamicOrigin(Origin):
+    """
+    Starts anchored to a default fixed HUD position (default_anchor).
+    If touch-down occurs within snap_radius of the anchor, it locks to default_anchor.
+    If touched outside snap_radius, it re-anchors to the touch position (floating).
+    In both cases, LeashConstraint can pull the origin once dragged far enough.
+    """
+    default_anchor: Point
+    snap_radius: float = 80.0
+    _position: Point | None = field(init=False, default=None)
+
+    def begin(self, position: Point) -> None:
+        delta = position - self.default_anchor
+        if delta.magnitude_squared <= (self.snap_radius * self.snap_radius):
+            # Touch landed near the HUD graphic: lock to fixed center
+            self._position = self.default_anchor
+        else:
+            # Touch landed elsewhere on the movement side: float to finger
+            self._position = position
+
+    def get(self) -> Point:
+        if self._position is None:
+            return self.default_anchor
+        return self._position
+
+    def update(self, position: Point, constraint: Constraint) -> None:
+        if isinstance(constraint, LeashConstraint) and self._position is not None:
+            delta = position - self._position
+            dist = delta.magnitude
+            if dist > constraint.leash_radius and dist > 0:
+                scale = constraint.leash_radius / dist
+                self._position = Point(
+                    position.x - (delta.x * scale),
+                    position.y - (delta.y * scale),
+                )
+
+    def end(self) -> None:
+        self._position = None
+
+@dataclass(slots=True)
+class ModeAwareRegion(Region):
+    """
+    Wraps any standard region (Circular/Rectangular) so that it only activates
+    when the engine is in Game Mode (cursor hidden). In Menu Mode, it rejects
+    activations to allow clean single-touch UI clicks underneath.
+    """
+    base_region: Region
+    engine_ref: Any
+
+    def activates(self, event: TouchEvent) -> bool:
+        if getattr(self.engine_ref, "is_visible", False):
+            return False
+        return self.base_region.activates(event)
+
+    @property
+    def area(self) -> float:
+        return self.base_region.area
+
+
+@dataclass(slots=True)
+class TopBezelRegion(Region):
+    """
+    An ultra-thin horizontal dead-band along the extreme top edge of the display.
+    Always active in both Game and Menu modes to provide a reliable return gate.
+    """
+    screen_width: float
+    bezel_height: float = 14.0  # 14px notch strip
+
+    def activates(self, event: TouchEvent) -> bool:
+        return 0.0 <= event.position.y <= self.bezel_height and 0.0 <= event.position.x <= self.screen_width
+
+    @property
+    def area(self) -> float:
+        return self.screen_width * self.bezel_height
+
+
+def BezelReturnToggle(
+    screen_width: float,
+    bezel_height: float = 14.0,
+    priority: int = 150,  # Higher than standard buttons
+    creation_id: int = 0,
+) -> Pipeline[Unit]:
+    """Top bezel notch pipeline that emits a mode toggle when tapped."""
+    return Pipeline(
+        region=TopBezelRegion(screen_width=screen_width, bezel_height=bezel_height),
+        origin=FixedOrigin(Point(0.0, 0.0)),
+        constraint=NoConstraint(),
+        transformation=IdentityTransform(),
+        semantics=[ToggleSemantic(output="toggle_mode")],
+        priority=priority,
+        type_precedence=2,
+        creation_id=creation_id,
+        allow_multi_claim=False,
+    )
+
 @dataclass(slots=True, frozen=True)
 class PipelineContext:
     event: TouchEvent
@@ -232,7 +339,32 @@ class PointerMoveSemantic(Semantic[Vector]):
     def process(self, context: PipelineContext, value: Vector, output: OutputSink) -> None:
         if context.event.phase is TouchPhase.MOVE and (value.x or value.y):
             output.mouse_move(value.x, value.y)
+            
+@dataclass(slots=True)
+class ToggleSemantic(Semantic[Unit]):
+    """
+    Stage 5: Semantic.
+    Executes a toggle command on touch DOWN.
+    
+    - If output is 'toggle_mode', it notifies the engine/dispatcher to flip
+      between Game Mode and Menu/Cursor Mode.
+    - If output is a key scancode/name, it pulses the hardware key
+      (key_down -> key_up) to trigger the game's in-engine menu toggle.
+    """
+    output: str
+    is_mode_switch: bool = False
 
+    def process(self, context: PipelineContext, value: Unit, output: OutputSink) -> None:
+        if context.event.phase is not TouchPhase.DOWN:
+            return
+
+        if self.output == "toggle_mode" or self.is_mode_switch:
+            # Delegate to the OutputSink / Dispatcher to flip cursor visibility
+            output.toggle_menu_mode()
+        else:
+            # Hardware pulse: down then up
+            output.key_down(self.output)
+            output.key_up(self.output)
 
 # ---------------------------------------------------------------------------
 # Pipeline with Touch Ownership & Priority Contract
@@ -432,6 +564,46 @@ def FloatingJoystick(
         creation_id=creation_id,
     )
 
+
+def AnchoredFloatingJoystick(
+    default_anchor: Point,
+    region: Region,
+    dead_zone: float,
+    walk_radius: float,
+    sprint_radius: float = 0.0,
+    leash_radius: float = 0.0,
+    snap_radius: float = 80.0,
+    hysteresis_deg: float = 5.0,
+    up: str = "w",
+    down: str = "s",
+    left: str = "a",
+    right: str = "d",
+    sprint_key: str = "shift",
+    priority: int = 0,
+    creation_id: int = 0,
+) -> Pipeline[frozenset[str]]:
+    constraint = LeashConstraint(leash_radius=leash_radius or sprint_radius)
+    return Pipeline(
+        region=region,
+        origin=AnchoredDynamicOrigin(default_anchor=default_anchor, snap_radius=snap_radius),
+        constraint=constraint,
+        transformation=JoystickSectorTransform(
+            dead_zone=dead_zone,
+            walk_radius=walk_radius,
+            sprint_radius=sprint_radius,
+            hysteresis_rad=math.radians(hysteresis_deg),
+            up=up,
+            down=down,
+            left=left,
+            right=right,
+            sprint_key=sprint_key,
+        ),
+        semantics=[DirectionalKeySemantic()],
+        priority=priority,
+        type_precedence=1,
+        creation_id=creation_id,
+        allow_multi_claim=False,
+    )
 
 def RelativePointer(
     region: Region | None = None,

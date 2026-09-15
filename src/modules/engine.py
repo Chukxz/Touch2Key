@@ -1,3 +1,5 @@
+# src/modules/engine.py
+
 from __future__ import annotations
 
 import argparse
@@ -12,7 +14,16 @@ from PySide6.QtWidgets import QApplication
 
 from modules.database import store
 from modules.platforms import check_single_instance, get_platform
-from modules.utils import ADB, SHORT_DELAY, SYSTEM, PROJECT_ROOT, MapperEventDispatcher
+from modules.utils import (
+    ADB,
+    SHORT_DELAY,
+    SYSTEM,
+    PROJECT_ROOT,
+    MapperEvent,
+    MapperEventDispatcher,
+    TouchEvent,
+    TouchPhase,
+)
 from modules.core.config import AppConfig
 from modules.core.layout_loader import LayoutLoader
 from modules.core.touch_reader import TouchReader
@@ -20,17 +31,17 @@ from modules.core.mapper import Mapper
 from modules.core.mouse_mapper import MouseMapper
 from modules.core.key_mapper import KeyMapper
 from modules.core.wasd_mapper import WASDMapper
+from modules.core.pipeline import BezelReturnToggle, Pipeline
 from modules.scripts.pre_flight import run as pre_flight_run
 from modules.core.list_windows import select_window
 from modules.core.key_capture import capture_keys, capture_performance_settings
+from modules.core.gestures import TwoFingerTapTracker
 
 NAME = "Touch2Key_Engine"
 profiler: Profile | None = None
 
 if TYPE_CHECKING:
     from cProfile import Profile
-    from modules.utils import TouchEvent, TouchPhase
-    from modules.core.input_semantics import Pipeline
 
 
 class Engine:
@@ -52,34 +63,53 @@ class Engine:
         self.mouse_mapper: MouseMapper | None = None
         self.key_mapper: KeyMapper | None = None
         self.wasd_mapper: WASDMapper | None = None
+        self.bezel_pipeline: Pipeline | None = None
 
-        self.is_visible = True
+        self.is_visible = False  # Start in Game Mode (cursor hidden)
         self.lock = threading.Lock()
         self.is_shutting_down = False
         self.mapper_event_dispatcher = MapperEventDispatcher()
+        self.two_finger_tap_tracker = TwoFingerTapTracker()
 
         keyboard.add_hotkey("esc", self._shutdown)
+
+    def toggle_mode(self) -> None:
+        """Toggles between Game Mode and Menu/Cursor Mode."""
+        with self.lock:
+            self.is_visible = not self.is_visible
+            new_state = self.is_visible
+
+        # Reset any held hardware keys on transition
+        self.bridge_class.health_check()
+        if self.mouse_mapper:
+            self.mouse_mapper.touch_up()
+        if self.key_mapper:
+            self.key_mapper.release_all()
+        if self.wasd_mapper:
+            self.wasd_mapper.touch_up()
+
+        # Notify mappers of visibility toggle
+        self.mapper_event_dispatcher.dispatch(
+            MapperEvent(action="ON_MENU_MODE_TOGGLE", is_visible=new_state)
+        )
 
     def _set_is_visible(self, is_visible: bool) -> None:
         with self.lock:
             self.is_visible = is_visible
-            self.bridge_class.health_check()
             if self.mouse_mapper:
                 self.mouse_mapper.touch_up()
             if self.key_mapper:
                 self.key_mapper.release_all()
             if self.wasd_mapper:
                 self.wasd_mapper.touch_up()
+            self.two_finger_tap_tracker.reset()
 
     def _build_pipeline_tiers(self) -> list[list[Pipeline]]:
-        """Gathers all active pipelines, sorts them across all 4 keys,
-        and groups them into tiers using ONLY (priority, type_precedence).
-
-        Within each tier, pipelines are ordered deterministically by
-        (region.area, creation_id) so overlapping buttons in the same tier
-        can claim and fire concurrently.
-        """
         all_pipelines: list[Pipeline] = []
+
+        # Always include the top bezel notch return gate
+        if self.bezel_pipeline:
+            all_pipelines.append(self.bezel_pipeline)
 
         if self.key_mapper:
             all_pipelines.extend(self.key_mapper.pipelines)
@@ -88,24 +118,23 @@ class Engine:
         if self.mouse_mapper and self.mouse_mapper.pipeline:
             all_pipelines.append(self.mouse_mapper.pipeline)
 
-        # Full 4-key deterministic sort
+        # 4-Key Sort
         all_pipelines.sort(
             key=lambda p: (
-                -p.priority,  # Key 1: Explicit priority (descending)
-                -p.type_precedence,  # Key 2: Button (2) > Joystick (1) > Mouse (0)
-                p.region.area,  # Key 3: Specificity/Hitbox area (ascending)
-                p.creation_id,  # Key 4: Creation order (ascending)
+                -p.priority,
+                -p.type_precedence,
+                p.region.area,
+                p.creation_id,
             )
         )
 
-        # Group into tiers matching on the first 2 keys ONLY
+        # Group by (priority, type_precedence)
         tiers: list[list[Pipeline]] = []
         for p in all_pipelines:
             if not tiers:
                 tiers.append([p])
             else:
                 last_tier = tiers[-1]
-                # Compare ONLY priority and type_precedence for grouping
                 if (
                     p.priority == last_tier[0].priority
                     and p.type_precedence == last_tier[0].type_precedence
@@ -117,22 +146,47 @@ class Engine:
         return tiers
 
     def _process_touch_event(self, touch_event: TouchEvent) -> None:
-        if not (
-            self.mouse_mapper and self.key_mapper and self.wasd_mapper and self.mapper
-        ):
+        if not (self.mouse_mapper and self.key_mapper and self.wasd_mapper and self.mapper):
             return
 
+        # -------------------------------------------------------------------
+        # MENU MODE (Cursor Visible) NAVIGATION & RETURN GATES
+        # -------------------------------------------------------------------
         if self.is_visible:
-            self.mouse_mapper.process_touch(touch_event, is_visible=True)
+            # 1. Evaluate strict stationary two-finger tap
+            if self.two_finger_tap_tracker.process(touch_event):
+                self.toggle_mode()
+                return
+
+            # 2. Bezel notch fallback
+            if self.bezel_pipeline and self.bezel_pipeline.claims(touch_event):
+                self.two_finger_tap_tracker.reset()
+                self.toggle_mode()
+                return
+
+            # 3. Single-Touch Pass-Through for Menu / Lobby Navigation
+            # (Only forwards if no secondary finger gesture is being evaluated)
+            if touch_event.contact_id == 0 and not self.two_finger_tap_tracker._contacts:
+                gx, gy = self.mapper.device_to_game_abs(
+                    touch_event.position.x, touch_event.position.y
+                )
+                if touch_event.phase is TouchPhase.DOWN:
+                    self.bridge_class.mouse_move_abs(int(round(gx)), int(round(gy)))
+                    self.bridge_class.left_click_down()
+                elif touch_event.phase is TouchPhase.MOVE:
+                    self.bridge_class.mouse_move_abs(int(round(gx)), int(round(gy)))
+                elif touch_event.phase is TouchPhase.UP:
+                    self.bridge_class.left_click_up()
             return
 
+        # -------------------------------------------------------------------
+        # GAME MODE (Cursor Hidden) PIPELINE DISPATCH
+        # -------------------------------------------------------------------
         self.mapper.event_count += 1
         tiers = self._build_pipeline_tiers()
         sink = self.key_mapper.output_sink
 
-        # -------------------------------------------------------------------
-        # 1. Existing Active Touch Routing (MOVE / UP)
-        # -------------------------------------------------------------------
+        # 1. Existing Active Touch Routing
         claimed_existing = False
         for tier in tiers:
             for p in tier:
@@ -143,31 +197,24 @@ class Engine:
         if claimed_existing:
             return
 
-        # -------------------------------------------------------------------
-        # 2. Fresh Touch Claiming (DOWN) with Defensive Category Guards
-        # -------------------------------------------------------------------
+        # 2. Fresh Touch Evaluation (DOWN)
         if touch_event.phase is TouchPhase.DOWN:
             for tier in tiers:
                 tier_claimed = False
 
                 for p in tier:
                     if p.claims(touch_event):
-                        # Defensive Check: If a Joystick or Mouse is ALREADY active with another finger,
-                        # ignore duplicate instances to prevent hardware buffer contention.
-                        if not p.allow_multi_claim and any(
-                            other._owned_contact is not None for other in tier
-                        ):
-                            continue
+                        # Special case: Bezel toggle activated
+                        if p == self.bezel_pipeline:
+                            self.toggle_mode()
+                            return
 
                         p.process(touch_event, sink)
                         tier_claimed = True
 
-                        # If this pipeline does not allow multi-claim (Joystick/Mouse),
-                        # the winning candidate (via 4-key sort) exclusively consumes the tier.
                         if not p.allow_multi_claim:
                             return
 
-                # If any button in this tier claimed the touch, consume and halt fallthrough
                 if tier_claimed:
                     return
 
@@ -201,10 +248,15 @@ class Engine:
             pps,
             emulator_map,
             window_id,
+            self,
         )
 
+        # Initialize Top Bezel Notch Return Gate
+        dev_w = float(layout_loader.width)
+        self.bezel_pipeline = BezelReturnToggle(screen_width=dev_w, bezel_height=14.0)
+
         self.mouse_mapper = MouseMapper(self.mapper)
-        self.key_mapper = KeyMapper(self.mapper)
+        self.key_mapper = KeyMapper(self.mapper, on_toggle_mode=self.toggle_mode)
         self.wasd_mapper = WASDMapper(self.mapper)
 
         self.touch_reader.bind_touch_event(self._process_touch_event)
@@ -228,7 +280,7 @@ class Engine:
         if perf_result is None:
             return
         rate_cap, pps = perf_result
-
+        
         if rate_cap is None or pps is None:
             return
 

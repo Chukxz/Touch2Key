@@ -16,9 +16,10 @@ from modules.utils import (
 )
 
 if TYPE_CHECKING:
-    from .json_loader import JSONLoader
+    from .layout_loader import LayoutLoader
     from .touch_reader import TouchReader
     from modules.platforms.base import AbstractBridge
+    from modules.engine import Engine
 
 logger = logging.getLogger("modules.core.mapper")
 
@@ -26,22 +27,25 @@ logger = logging.getLogger("modules.core.mapper")
 class Mapper:
     def __init__(
         self,
-        json_loader: JSONLoader,
+        layout_loader: LayoutLoader,
         touch_reader: TouchReader,
         bridge: AbstractBridge,
         pps: float,
         emulator: dict[str, str | None],
         window_id: int,
+        ref: Engine, 
     ):
-        self.json_loader = json_loader
-        self.config = self.json_loader.config
-        self.mapper_event_dispatcher = self.json_loader.mapper_event_dispatcher
+        self.layout_loader = layout_loader
+        self.config = self.layout_loader.config
+        self.mapper_event_dispatcher = self.layout_loader.mapper_event_dispatcher
         self.touch_reader = touch_reader
         self.bridge = bridge
         self.emulator = emulator
         self.pps = pps
         self.event_count = 0
         self.last_pulse_time = time.perf_counter()
+        self.engine_ref = ref
+        self.is_floating_joystick: bool = True
 
         toggle_key = emulator.get("toggle_key")
         self.toggle_key_scancode: int | None = (
@@ -97,9 +101,9 @@ class Mapper:
 
     def _update_config(self) -> None:
         with self.lock:
-            self.device_width = self.json_loader.width
-            self.device_height = self.json_loader.height
-            self.dpi = self.json_loader.dpi
+            self.device_width = self.layout_loader.width
+            self.device_height = self.layout_loader.height
+            self.dpi = self.layout_loader.dpi
 
     def _get_window_info(self, window_id: int) -> dict:
         width, height = self.window_manager.get_window_dimensions(window_id)

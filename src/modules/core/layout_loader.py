@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from modules.database import store, Layout, LayoutZone
 from modules.utils import MapperEvent, CIRCLE, RECTANGLE

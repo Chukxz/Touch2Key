@@ -7,60 +7,87 @@
 
 **Touch2Key** is a high-performance, cross-platform input mapper designed to seamlessly translate touch interactions (via Android/ADB) into zero-latency keyboard and mouse inputs on your PC.
 
-It is recommended to enable `Developer Options` on Android and `Wireless Debugging` (especially if you want to use WIFI - 5GHz recommended) and if there's a popup window grant permissions.
+Enable **Developer Options** and **Wireless Debugging** (5 GHz Wi-Fi recommended) on your Android device and accept the authorization prompt when connecting.
 
-This input mapper can be used with `Sunshine/Moonlight` or `Apollo/Artemis` for full visual and auditory integration at which point we recommend disabling all inputs in `Sunshine` or `Apollo` to avoid conflicts with our mapper.
+Touch2Key can be paired with game streamers like **Sunshine/Moonlight** or **Apollo/Artemis** for full visual and audio streaming. Disable all virtual controller/mouse inputs within your streaming host to prevent mapping conflicts.
 
-## Key Features
-* **Platform Native Injection:** Windows (Interception driver) and Linux (evdev/uinput).
-If you're on Linux ensure that your windowing system is using X11.
+---
 
-* **Zero-Latency:** Dedicated isolated background worker processes and background helper threads with heartbeat timers and real-time status logs.
+## Architecture & Core Features
 
-* **Event Coalescing:** Dynamically aggregates high-frequency touch-drags.
+* **5-Stage Input Pipeline:** Every touch contact is processed through an isolated, modular 5-stage pipeline:
+  $$\text{Region} \longrightarrow \text{Origin} \longrightarrow \text{Constraint} \longrightarrow \text{Transformation} \longrightarrow \text{Semantic}$$
+  Decoupling spatial detection, reference baselines, mechanical bounds, mathematical transforms, and driver emissions eliminates state drift and input fighting.
 
-* **Sophisticated and Responsive Plotting GUI**: Plotting supports advanced functions via clearly described and intuitive methods.
+* **Prioritized Deterministic Dispatching:** Touch contacts are routed using a strict 4-key precedence sort:
+  1. **Explicit Priority** (Custom user tier: `+100` to `-100`)
+  2. **Type Precedence** (`Button: 2` > `Joystick: 1` > `Mouse: 0`)
+  3. **Hitbox Specificity** (Smaller bounding areas evaluate before broad/full-screen zones)
+  4. **Creation Order** (Deterministic tie-breaker)
 
-* **Camera Movement Support for Touchzones:** The user can decide to give selected touch zones a camera movement ability.
+* **Defensive Input Ownership & Multi-Claim:**
+  * **Simultaneous Firing:** Overlapping buttons sharing the same priority tier claim contacts concurrently, enabling multi-key combos from a single touch.
+  * **Single-Owner Isolation:** Joysticks and camera look enforce strict single-contact ownership, preventing jitter, delta duplication, or direction fluttering.
 
-* **Handedness and Hot-Reloading:** Configuration or mapping sources (JSON files) can be reloaded at runtime and handedness (Mouse/WASD finger side) can be swapped at runtime with hot-reloading.
+* **Hybrid Mode Switching (In-Game vs. Menu/Lobby):**
+  * **In-Game Mode (Cursor Hidden):** Custom HUD zones capture taps/drags to drive game controls.
+  * **Menu Mode (Cursor Visible):** Game buttons deactivate automatically, passing single-touch events through as absolute desktop clicks (`device_to_game_abs`) for clean lobby, map, and inventory navigation.
+  * **Hardware-Free Return Gates:** Return to Game Mode without touching the physical keyboard using a **synchronized two-finger stationary tap** or by tapping the **top bezel notch strip**.
 
-* **Anti-Cheat Safe:** Humanized dwell times and randomized click durations for strictly user-initiated actions. No custom bot scripts or cheating. A basic toggler is provided to ensure seamless normal or menu mode in-gaming by inspecting cursor visibility and using the game's/emulator's toggle button if any.
+* **Dynamic Camera & Joystick Integration:**
+  * **Track-Fire Buttons:** Configurable `move_camera` zones emit simultaneous keypresses and camera deltas (aim while shooting).
+  * **Fixed vs. Floating Joysticks:** Fixed HUD joysticks free the rest of the display for full-screen camera look. Floating joysticks partition screen halves dynamically based on user handedness.
+  * **Anchored-Floating Joysticks:** Snap to fixed HUD artwork on touch while leashing dynamic origins during extended thumb drift.
 
-* **Automated Setup:** Interception download (Windows with admin) / Udev rules configuration (Linux with sudo) automated. ADB cross-platform download automated.
+* **Platform-Native Injection:** Low-level Windows NT kernel injection via the Interception driver and Linux `evdev`/`uinput` subsystem (X11 supported).
 
-* **Targeted Audience:** Optimized for FPS and RPG style games.
+* **Zero-Latency Processing:** Dedicated multiprocessing workers and helper threads with sub-millisecond heartbeat monitors and real-time status logging.
 
-* **Shareable Resources:** HUD Image files and mapping JSON files can be shared by simple copying and pasting and then using the plotter to validate and/or set the current HUD and/or JSON. 
+* **Interactive Plotting GUI & Layout Editor:** Comprehensive PySide6/Matplotlib interface supporting direct visual placement, live priority adjustments (`P`/`O` keys or toolbar spinboxes), dynamic zone sizing, and SQLite database storage.
+
+* **Anti-Cheat Safe:** Humanized dwell times and randomized click durations for strictly user-initiated actions. No macros, automated scripts, or game-state tampering.
+
+---
 
 ## Window Selection & Persistence
-On startup, the engine launches an interactive Window Selector dialog that lists all active processes with their titles and class names. 
 
-*   **Initial Binding:** Users must manually select their target emulator or game from the provided list. The engine then binds to this specific window ID.
+On startup, the engine launches an interactive Window Selector dialog that lists all active desktop windows with their process titles and window classes.
 
-*   **Persistent Tracking:** Once the initial selection is made, the engine maintains a robust link to that application. If the target window is lost—due to a crash or an application restart—the system uses the captured window class name to automatically re-acquire the most relevant (largest) visible window of the same type. This ensures that sessions are maintained seamlessly without requiring manual re-selection of the target window.
+* **Initial Binding:** Select your target emulator or native PC game window. The engine binds directly to its process and window ID.
+* **Self-Healing Window Tracking:** If the target window is lost due to a crash or restart, the engine uses the captured window class name to automatically re-acquire the largest active visible instance, maintaining your mapping session without manual intervention.
 
+---
 
-## Key Customization & Configuration
-After selecting your target window, the engine will prompt you to configure your control keys to ensure the mapping matches your preferred layout.
+## Key Customization & Storage
 
-*   **Custom Key Binding:** A dedicated capture dialog allows you to bind specific keys for core functions, such as the **Toggle** (for Camera/Menu mode) and **Sprint**.
-*   **Automatic Persistence:** Once captured, these preferences are saved to your `settings.toml` file. 
-*   **Default Handling:** The system will attempt to load existing configurations from your settings file automatically, but you are always given the option to re-bind keys or reset to defaults during the startup sequence.
+* **Startup Capture Dialog:** Binds core control keys (such as **Toggle** and **Sprint**) and configures performance limits (Rate Cap and Polls Per Second).
+* **SQLite & TOML Storage:** Layout zones, priorities, and hitbox coordinates are stored persistently in SQLite tables with foreign-key cascade protection, while runtime defaults are managed via `settings.toml`.
 
-## Connectivity & Resilience
-* **Auto-Adaptive Input:** The engine automatically detects your Android device's specific touchscreen hardware and multi-touch capabilities upon startup, requiring no manual configuration of input drivers.
-* **Wired & Wireless Support:** The connection is managed by a background daemon that supports both direct USB and wireless ADB. **Note:** Wireless mode typically requires an initial wired connection to toggle your device into TCP/IP mode (`adb tcpip 5555`) before it can be used wirelessly, unless your device is already configured in wireless mode. 
-* **Self-Healing Stream:** If your connection drops—due to cable removal or wireless instability—the engine automatically detects the loss, pauses input mapping, and transparently resumes as soon as the device is available again, with no restart required.
+---
+
+## Connectivity & Device Management
+
+* **Auto-Adaptive Multi-Touch:** Automatically queries Android touchscreen driver configurations (`ABS_MT_*` event capabilities and slot counts) over ADB upon connection.
+* **Wired & Wireless ADB:** Supports high-speed direct USB and wireless TCP/IP debugging (`adb tcpip 5555`).
+* **Resilient Event Stream:** Cable disconnects or Wi-Fi drops automatically pause the input pump and resume processing once ADB reconnects, avoiding application crashes or hung keys.
+
+---
 
 ## Installation
-1. **Prerequisites:** Python 3.10+.
-2. **Install: Remember to create a virtual environment on your machine by using the appropiate `venv` command and activating it (depending on your OS), after navigating to the `Touch2Key` directory on your machine before running the `pip install .` command as it is the standard python practice to avoid package conflicts and ensure isolation.**
+
+### Prerequisites
+* Python 3.10+
+* Android device with USB/Wireless Debugging enabled
+* Linux users: X11 session with `sudo` access for `uinput`/`udev` rules
+
+### Setup
+* **Install: Remember to create a virtual environment on your machine by using the appropiate `venv` command and activating it (depending on your OS), after navigating to the `Touch2Key` directory on your machine before running the `pip install .` command as it is the standard python practice to avoid package conflicts and ensure isolation.**
+
    ```bash
    git clone https://github.com/Chukxz/Touch2Key.git
    cd Touch2Key
    pip install .
-3. **Setup:** Run setup (Usually requires an internet connection).
+* **Setup:** Run setup (Usually requires an internet connection).
 
 *(Note: Windows requires a system reboot after installation to fully load the driver).*
 

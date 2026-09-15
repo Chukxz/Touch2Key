@@ -1,18 +1,29 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-from modules.core.input_semantics import OutputSink
+from typing import TYPE_CHECKING, Callable
+from modules.core.pipeline import OutputSink
 from modules.utils import M_LEFT, M_RIGHT, M_MIDDLE, SCANCODES
 
 if TYPE_CHECKING:
     from modules.platforms.base import AbstractBridge
+    from modules.utils import MapperEventDispatcher
 
 
 class BridgeOutputSink(OutputSink):
     """Bridges Semantic stage outputs to the hardware driver Interception Bridge."""
 
-    def __init__(self, bridge: AbstractBridge):
+    def __init__(
+        self,
+        bridge: AbstractBridge,
+        on_toggle_mode: Callable[[], None] | None = None,
+    ) -> None:
         self.bridge = bridge
+        self.on_toggle_mode = on_toggle_mode
+
+    def toggle_menu_mode(self) -> None:
+        """Invokes Engine.toggle_mode directly."""
+        if self.on_toggle_mode is not None:
+            self.on_toggle_mode()
 
     def key_down(self, key: str) -> None:
         scancode = self._resolve_scancode(key)
@@ -46,7 +57,7 @@ class BridgeOutputSink(OutputSink):
         idx = int(round(dx))
         idy = int(round(dy))
         if idx != 0 or idy != 0:
-            self.bridge.mouse_move_rel(idx, idy)
+            self.bridge.mouse_move_rel(idx, idy)        
 
     @staticmethod
     def _resolve_scancode(key: str) -> int | None:

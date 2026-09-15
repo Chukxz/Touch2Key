@@ -28,6 +28,8 @@ class InvalidFieldError(ValueError):
 class AppSettings:
     id: int
     left_handed: bool
+    anchored_floating_joystick: bool
+    joystick_snap_radius: float
     json_dev_width: int
     json_dev_height: int
     json_dev_dpi: int
@@ -45,6 +47,8 @@ class AppSettings:
     def from_row(cls, row) -> "AppSettings":
         data = {f.name: row[f.name] for f in dataclass_fields(cls)}
         data["left_handed"] = bool(data["left_handed"])
+        data["anchored_floating_joystick"] = bool(data["anchored_floating_joystick"])
+        data["joystick_snap_radius"] = float(data.get("joystick_snap_radius", 80.0))
         return cls(**data)
 
 
@@ -102,6 +106,8 @@ class AppSettingsRepository:
 
     ALLOWED_FIELDS = {
         "left_handed",
+        "anchored_floating_joystick",
+        "joystick_snap_radius",
         "json_dev_width",
         "json_dev_height",
         "json_dev_dpi",

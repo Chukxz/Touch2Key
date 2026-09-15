@@ -34,9 +34,23 @@ class AppConfig:
         """Toggles left-handed mode directly in the database."""
         with self.config_lock:
             new_val = not self.settings.left_handed
-            self.settings = store.settings.update(left_handed=new_val)
+            self.settings = store.settings.update(left_handed=int(new_val))
         self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
         return self.settings.left_handed
+
+    def set_anchored_floating(self, enabled: bool) -> bool:
+        """Toggles anchored floating mode and dispatches reload."""
+        with self.config_lock:
+            self.settings = store.settings.update(anchored_floating_joystick=int(enabled))
+        self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+        return self.settings.anchored_floating_joystick
+
+    def set_snap_radius(self, radius: float) -> float:
+        """Updates the joystick snap radius and dispatches reload."""
+        with self.config_lock:
+            self.settings = store.settings.update(joystick_snap_radius=float(radius))
+        self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+        return self.settings.joystick_snap_radius
 
     def get(self, section: str, default: Any = None) -> dict[str, Any]:
         """Backward-compatible mapping accessor over AppSettings properties."""
@@ -59,6 +73,8 @@ class AppConfig:
             return {
                 "deadzone": s.deadzone,
                 "hysteresis": s.hysteresis,
+                "anchored_floating_joystick": s.anchored_floating_joystick,
+                "joystick_snap_radius": s.joystick_snap_radius,
                 "mouse_wheel_radius": active_layout.mouse_wheel_radius if active_layout else 50.0,
                 "sprint_distance": active_layout.sprint_distance if active_layout else 10.0,
             }

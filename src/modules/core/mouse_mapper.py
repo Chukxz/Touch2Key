@@ -4,7 +4,7 @@ import logging
 import threading
 from typing import TYPE_CHECKING
 
-from modules.core.input_semantics import (
+from modules.core.pipeline import (
     AlwaysRegion,
     DeltaTransform,
     DynamicOrigin,
@@ -46,16 +46,14 @@ class MouseMapper:
     def _build_pipeline(self) -> None:
         s = self.config.settings
         sens = s.sensitivity
-        dev_w = float(self.mapper.json_loader.width)
-        dev_h = float(self.mapper.json_loader.height)
+        dev_w = float(self.mapper.layout_loader.width)
+        dev_h = float(self.mapper.layout_loader.height)
         pc_w = float(self.mapper.screen_w)
         ratio = (pc_w / dev_w) if dev_w > 0 else 1.0
         final_sens = sens * ratio
 
         # Determine if WASD is floating or fixed
-        wasd_is_floating = True
-        if hasattr(self.mapper, "wasd_mapper") and self.mapper.wasd_mapper:
-            wasd_is_floating = self.mapper.wasd_mapper.is_floating_joystick
+        wasd_is_floating = self.mapper.is_floating_joystick
 
         # If WASD is fixed, the mouse mapper can claim touches anywhere across the full screen
         if not wasd_is_floating:
@@ -83,7 +81,7 @@ class MouseMapper:
         if is_visible:
             if touch_event.phase is TouchPhase.DOWN:
                 gx, gy = self.mapper.device_to_game_abs(touch_event.position.x, touch_event.position.y)
-                self.bridge.mouse_move_abs(gx, gy)
+                self.bridge.mouse_move_abs(int(gx), int(gy))
                 self.bridge.left_click_down()
             elif touch_event.phase is TouchPhase.UP:
                 self.bridge.left_click_up()
