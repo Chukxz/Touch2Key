@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
-
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
@@ -10,7 +9,6 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
-    QVBoxLayout,
 )
 
 from modules.database import store
@@ -30,9 +28,12 @@ class ProfilesPage(BasePage):
 
     title = "Profiles"
 
-    def __init__(self, dispatcher: MapperEventDispatcher | None = None, parent=None):
-        super().__init__(parent)
-        self.dispatcher = dispatcher
+    def __init__(
+        self,
+        dispatcher: MapperEventDispatcher | None = None,
+        parent=None,
+    ):
+        super().__init__(dispatcher, parent)
 
         self.profile_list = QListWidget()
         self.content_layout().addWidget(self.profile_list)
@@ -52,6 +53,9 @@ class ProfilesPage(BasePage):
         self._wire_signals()
         self.load_profiles()
 
+    def on_page_shown(self) -> None:
+        self.load_profiles()
+
     def _wire_signals(self) -> None:
         self.activate_btn.clicked.connect(self._on_set_active)
         self.duplicate_btn.clicked.connect(self._on_duplicate)
@@ -59,7 +63,6 @@ class ProfilesPage(BasePage):
         self.refresh_btn.clicked.connect(self.load_profiles)
 
     def load_profiles(self) -> None:
-        """Reloads the profile list from SQLite and marks the active profile."""
         self.profile_list.clear()
         layouts = store.layouts.list_all()
         active_layout = store.get_active_layout()
