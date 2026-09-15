@@ -93,7 +93,7 @@ PORT = "5555"
 
 EVENT_TYPE = Literal[
     "ON_CONFIG_RELOAD",
-    "ON_JSON_RELOAD",
+    "ON_LAYOUT_RELOAD",
     "ON_WASD_BLOCK",
     "ON_MENU_MODE_TOGGLE",
     "ON_AGGREGATION",
@@ -172,7 +172,7 @@ class MapperEventDispatcher:
     def __init__(self):
         self.callback_registry = {
             "ON_CONFIG_RELOAD": [],
-            "ON_JSON_RELOAD": [],
+            "ON_LAYOUT_RELOAD": [],
             "ON_WASD_BLOCK": [],
             "ON_MENU_MODE_TOGGLE": [],
             "ON_AGGREGATION": [],
@@ -191,7 +191,7 @@ class MapperEventDispatcher:
         key = event_object.action
         if key in self.callback_registry:
             for func in self.callback_registry.get(key, []):
-                if key in ["ON_CONFIG_RELOAD", "ON_JSON_RELOAD", "ON_WASD_BLOCK"]:
+                if key in ["ON_CONFIG_RELOAD", "ON_LAYOUT_RELOAD", "ON_WASD_BLOCK"]:
                     func()
                 elif key == "ON_MENU_MODE_TOGGLE":
                     func(event_object.is_visible)
