@@ -58,13 +58,14 @@ class LayoutLoader:
             self.mouse_wheel_radius = layout.mouse_wheel_radius
             self.sprint_distance = layout.sprint_distance
 
-            # Build normalized zones list for legacy components and pipeline builders
+            # Build normalized zones list for pipeline builders
             normalized: list[tuple[str, dict]] = []
             for z in zones:
                 z_dict = {
                     "name": z.name,
                     "type": z.zone_type,
                     "move_camera": z.move_camera,
+                    "priority": getattr(z, "priority", 0),
                 }
                 if z.zone_type == CIRCLE:
                     z_dict["cx"] = (z.cx or 0.0) / self.width
