@@ -1,8 +1,9 @@
 import os
-import tomlkit
 from pathlib import Path
+import tomlkit
 
 from modules.utils import TOML_PATH
+
 
 def create_default_toml():
     print(f"\n[UTILITY] - Resetting '{TOML_PATH}' to default.")
@@ -25,6 +26,8 @@ def create_default_toml():
     joystick.add("hysteresis", 5.0)
     joystick.add("mouse_wheel_radius", 50.0)
     joystick.add("sprint_distance", 10.0)
+    joystick.add("anchored_floating_joystick", False)
+    joystick.add("joystick_snap_radius", 80.0)
     doc.add("joystick", joystick)
 
     keys = tomlkit.table()
@@ -78,6 +81,8 @@ def update_toml(
     json_path=None,
     mouse_wheel_radius=None,
     sprint_distance=None,
+    anchored_floating_joystick=None,
+    joystick_snap_radius=None,
     strict=False,
 ):
     try:
@@ -97,11 +102,17 @@ def update_toml(
             doc.append("system", tomlkit.table())
         system = doc["system"]
 
+        # Joystick Section Updates
         if mouse_wheel_radius is not None:
             joystick.update({"mouse_wheel_radius": mouse_wheel_radius})
         if sprint_distance is not None:
             joystick.update({"sprint_distance": sprint_distance})
+        if anchored_floating_joystick is not None:
+            joystick.update({"anchored_floating_joystick": bool(anchored_floating_joystick)})
+        if joystick_snap_radius is not None:
+            joystick.update({"joystick_snap_radius": float(joystick_snap_radius)})
 
+        # System Section Updates
         if w and h:
             system.update({"json_dev_res": [w, h]})
         if dpi:
