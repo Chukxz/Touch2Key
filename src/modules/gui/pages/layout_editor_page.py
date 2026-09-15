@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 from modules.database import store
 from modules.database.legacy_migration import migrate_json_layout
 from modules.gui.widgets.layout_plotter_widget import LayoutPlotterWidget
-from modules.utils import CIRCLE, RECTANGLE, JSONS_FOLDER, TOML_PATH
+from modules.utils import CIRCLE, RECTANGLE, JSONS_FOLDER, TOML_PATH, MapperEvent
 from .base_page import BasePage
 
 logger = logging.getLogger("modules.gui.layout_editor")
@@ -34,8 +34,9 @@ class LayoutEditorPage(BasePage):
 
     title = "Layout editor"
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, dispatcher=None, parent: QWidget | None = None):
         super().__init__(parent)
+        self.dispatcher = dispatcher
 
         # Toolbar Row 1: Profile & File Operations
         top_toolbar = QHBoxLayout()
@@ -68,7 +69,7 @@ class LayoutEditorPage(BasePage):
         self.toggle_overlays_btn = QPushButton("Toggle Overlays (F4)")
         self.cancel_action_btn = QPushButton("Cancel (F8)")
         self.save_btn = QPushButton("Save to DB (F12)")
-        
+
         self.priority_spin = QSpinBox()
         self.priority_spin.setRange(-100, 100)
         self.priority_spin.setValue(0)
@@ -120,8 +121,14 @@ class LayoutEditorPage(BasePage):
         else:
             self.active_layout_label.setText("Active Layout: None")
 
+    def _notify_engine_reload(self) -> None:
+        if self.dispatcher is not None:
+            self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+            self.dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+
     def _on_layout_saved(self, name: str, layout_id: int) -> None:
         self.refresh_active_layout_display()
+        self._notify_engine_reload()
         QMessageBox.information(self, "Layout Saved", f"Layout '{name}' saved successfully (ID: {layout_id}).")
 
     def open_switch_layout_dialog(self) -> None:
@@ -155,9 +162,12 @@ class LayoutEditorPage(BasePage):
                 return
             target_name = selected_items[0].text()
             target_layout = next(l for l in all_layouts if l.name == target_name)
-            store.set_active_layout(target_layout.id)
+            
+            # Use repository update rather than bare queries
+            store.settings.update(active_layout_id=target_layout.id)
             self.refresh_active_layout_display()
             self.plotter_widget.reload_active_layout()
+            self._notify_engine_reload()
             dialog.accept()
 
         select_btn.clicked.connect(on_select)
@@ -180,30 +190,16 @@ class LayoutEditorPage(BasePage):
             QMessageBox.critical(self, "Error", f"File '{file_path.name}' not found.")
             return
 
-        image_to_assign = ""
-        if TOML_PATH.exists():
-            try:
-                with open(TOML_PATH, "r", encoding="utf-8") as f:
-                    doc = tomlkit.load(f)
-                legacy_json_str = doc.get("system", {}).get("json_path")
-                if legacy_json_str and Path(legacy_json_str).resolve() == file_path.resolve():
-                    image_to_assign = doc.get("system", {}).get("image_path", "")
-            except Exception as e:
-                logger.warning("Could not parse legacy TOML for image path: %s", e)
-
         layout_id = migrate_json_layout(
             json_path=file_path,
-            image_path=image_to_assign,
+            image_path="",
             set_active=True,
         )
 
         if layout_id is not None:
-            try:
-                file_path.unlink()
-            except OSError:
-                pass
             self.refresh_active_layout_display()
             self.plotter_widget.reload_active_layout()
+            self._notify_engine_reload()
             QMessageBox.information(
                 self,
                 "Success",
@@ -282,6 +278,7 @@ class LayoutEditorPage(BasePage):
                 "val3": zone.x2 or 0.0,
                 "val4": zone.y2 or 0.0,
                 "move_camera": bool(zone.move_camera),
+                "priority": zone.priority,
             }
             output_content.append(entry)
 
@@ -313,6 +310,7 @@ class LayoutEditorPage(BasePage):
             _capture_android_screen()
             self.refresh_active_layout_display()
             self.plotter_widget.reload_active_layout()
+            self._notify_engine_reload()
             QMessageBox.information(self, "Screenshot", "Reference screenshot captured and linked.")
         except Exception as exc:
             logger.exception("Screenshot capture failed")
