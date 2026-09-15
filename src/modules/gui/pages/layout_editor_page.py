@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from modules.database import store
-from modules.database.legacy_migration import migrate_json_layout
+from modules.database.legacy_migration import migrate_json_to_layout
 from modules.gui.widgets.layout_plotter_widget import LayoutPlotterWidget
 from modules.utils import CIRCLE, RECTANGLE, JSONS_FOLDER, TOML_PATH
 from .base_page import BasePage
