@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 
 class BridgeOutputSink(OutputSink):
-    """Bridges Semantic stage outputs to the hardware driver Interception Bridge."""
+    """Bridges Semantic stage outputs to the hardware driver Bridge."""
 
     def __init__(
         self,
