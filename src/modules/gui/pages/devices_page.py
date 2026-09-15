@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -9,21 +10,27 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
-    QVBoxLayout,
 )
 
 from modules.platforms import get_platform
 from modules.utils import WINDOWS_HEADERS
 from .base_page import BasePage
 
+if TYPE_CHECKING:
+    from modules.utils import MapperEventDispatcher
+
 
 class DevicesPage(BasePage):
-    """Dynamic, non-blocking target window and device selector."""
+    """Dynamic, non-blocking visible window monitor and ADB target selector."""
 
     title = "Devices"
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    def __init__(
+        self,
+        dispatcher: MapperEventDispatcher | None = None,
+        parent=None,
+    ):
+        super().__init__(dispatcher, parent)
         self.selected_window_id: int | None = None
         self.selected_window_title: str = ""
 
@@ -33,7 +40,6 @@ class DevicesPage(BasePage):
         self.tmp_store: set[int] = set()
         self.windows_data: dict[int, list] = {}
 
-        # UI Layout
         self.status_label = QLabel("Selected Target: None")
         self.status_label.setStyleSheet("font-weight: bold; color: palette(highlight);")
         self.content_layout().addWidget(self.status_label)
@@ -59,7 +65,7 @@ class DevicesPage(BasePage):
 
         btn_row = QHBoxLayout()
         self.refresh_btn = QPushButton("Refresh Windows")
-        self.select_btn = QPushButton("Bind Selected Window")
+        self.select_btn = QPushButton("Bind Target Window")
         self.connect_wireless_btn = QPushButton("Connect Wirelessly (ADB)")
 
         btn_row.addWidget(self.refresh_btn)
@@ -68,12 +74,15 @@ class DevicesPage(BasePage):
         self.content_layout().addLayout(btn_row)
 
         self.table.itemSelectionChanged.connect(self._on_row_selected)
-        self.select_btn.clicked.connect(self._confirm_selection)
+        self.select_btn.clicked.connect(self._on_row_selected)
         self.refresh_btn.clicked.connect(self._update_list)
 
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self._update_list)
         self.poll_timer.start(1500)
+
+    def on_page_shown(self) -> None:
+        self._update_list()
 
     def _on_row_selected(self) -> None:
         row = self.table.currentRow()
@@ -86,9 +95,6 @@ class DevicesPage(BasePage):
                 self.status_label.setText(
                     f"Selected Target: {self.selected_window_title} (HWND: {self.selected_window_id})"
                 )
-
-    def _confirm_selection(self) -> None:
-        self._on_row_selected()
 
     def _update_list(self) -> None:
         visible = self.window_manager.find_visible_windows()
