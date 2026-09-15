@@ -5,8 +5,8 @@ early in gui/app.py's startup, before any engine threads start logging.
 """
 
 from __future__ import annotations
-import logging
 
+import logging
 from PySide6.QtCore import QObject, Signal
 
 
@@ -15,14 +15,7 @@ class _LogEmitter(QObject):
 
 
 class QtLogHandler(logging.Handler):
-    """A logging.Handler whose emit() just forwards to a Qt Signal.
-    Signal.emit() queues safely across threads (see signal_bridge.py's
-    docstring for the mechanism), so no manual locking or queue is
-    needed here. If log volume ever becomes extreme enough to matter,
-    swap this for logging.handlers.QueueHandler + QueueListener feeding
-    the same _LogEmitter from one dedicated consumer thread instead --
-    this class's interface (the .emitter.message signal) wouldn't need
-    to change for callers."""
+    """Safe cross-thread logging handler directing log records to a Qt Signal."""
 
     def __init__(self, level: int = logging.NOTSET):
         super().__init__(level)
@@ -32,23 +25,37 @@ class QtLogHandler(logging.Handler):
                 "%(asctime)s [%(levelname)s] %(name)s: %(message)s", "%H:%M:%S"
             )
         )
+        self._in_emit = False
 
     def emit(self, record: logging.LogRecord) -> None:
+        # Re-entrancy guard
+        if self._in_emit:
+            return
+        self._in_emit = True
         try:
-            line = self.format(record)
-        except Exception:
-            line = record.getMessage()
-        self.emitter.message.emit(line, record.levelno)
+            try:
+                line = self.format(record)
+            except Exception:
+                line = record.getMessage()
+            self.emitter.message.emit(line, record.levelno)
+        finally:
+            self._in_emit = False
+
+
+_installed_handler: QtLogHandler | None = None
 
 
 def install_gui_logging(
     logger_name: str = "modules", level: int = logging.INFO
 ) -> QtLogHandler:
-    """Attaches a QtLogHandler to the given logger (default: the
-    package root, so every module's logger.* calls are captured) and
-    returns the handler so the caller can connect its signal."""
+    """Attaches a single singleton QtLogHandler to prevent duplicate output."""
+    global _installed_handler
+    if _installed_handler is not None:
+        return _installed_handler
+
     handler = QtLogHandler(level)
-    logger = logging.getLogger(logger_name)
-    logger.setLevel(level)
-    logger.addHandler(handler)
+    target_logger = logging.getLogger(logger_name)
+    target_logger.setLevel(level)
+    target_logger.addHandler(handler)
+    _installed_handler = handler
     return handler
