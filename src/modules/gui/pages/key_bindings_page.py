@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 
 class KeyCaptureFilter(QObject):
-    """Event filter that intercepts a single keypress without opening modal dialogs."""
+    """Intercepts the next raw keypress without opening blocking modal dialogs."""
 
     def __init__(self, callback, parent=None):
         super().__init__(parent)
@@ -40,13 +40,16 @@ class KeyCaptureFilter(QObject):
 
 
 class KeyBindingsPage(BasePage):
-    """Non-blocking inline Key Binding manager backed by SQLite."""
+    """Dynamic, non-blocking Key Bindings configuration page backed by SQLite."""
 
     title = "Key bindings"
 
-    def __init__(self, dispatcher: MapperEventDispatcher | None = None, parent=None):
-        super().__init__(parent)
-        self.dispatcher = dispatcher
+    def __init__(
+        self,
+        dispatcher: MapperEventDispatcher | None = None,
+        parent=None,
+    ):
+        super().__init__(dispatcher, parent)
         self._active_filter: KeyCaptureFilter | None = None
 
         form_widget = QWidget()
@@ -72,6 +75,9 @@ class KeyBindingsPage(BasePage):
         self.toggle_key_btn.clicked.connect(lambda: self._begin_capture("toggle_key"))
         self.sprint_key_btn.clicked.connect(lambda: self._begin_capture("sprint_key"))
 
+        self.load_bindings()
+
+    def on_page_shown(self) -> None:
         self.load_bindings()
 
     def load_bindings(self) -> None:
