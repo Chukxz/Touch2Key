@@ -6,8 +6,6 @@ import os
 import sys
 import threading
 from typing import TYPE_CHECKING
-
-import keyboard
 from PySide6.QtWidgets import QApplication
 
 from modules.database import store
@@ -70,7 +68,9 @@ class Engine:
         self.mapper_event_dispatcher = MapperEventDispatcher()
         self.two_finger_tap_tracker = TwoFingerTapTracker()
 
+        # ONLY register global keyboard hotkeys when running pure CLI mode
         if not self.headless:
+            import keyboard
             keyboard.add_hotkey("esc", self._shutdown)
 
     def toggle_mode(self) -> None:
@@ -296,18 +296,57 @@ class Engine:
             toggle_key=toggle_key,
             sprint_key=sprint_key,
         )
-        keyboard.wait()
+
+        if not self.headless:
+           import keyboard
+           keyboard.wait()
+
+
+class Engine:
+    def __init__(self, headless: bool = False):
+        platform_mod = get_platform()
+        self.headless = headless
+
+        self.system_config = platform_mod.SystemConfig()
+        self.system_config.set_high_priority(os.getpid(), "Main")
+        self.system_config.set_dpi_awareness()
+        self.system_config.set_timer_resolution()
+
+        self.window_manager = platform_mod.WindowManager()
+        self.foreground_window = self.window_manager.get_foreground_window()
+        self.bridge_class = platform_mod.Bridge(self.window_manager, self.system_config)
+
+        self.touch_reader: TouchReader | None = None
+        self.layout_loader: LayoutLoader | None = None
+        self.mapper: Mapper | None = None
+        self.mouse_mapper: MouseMapper | None = None
+        self.key_mapper: KeyMapper | None = None
+        self.wasd_mapper: WASDMapper | None = None
+        self.bezel_pipeline: Pipeline | None = None
+
+        self.is_visible = False  # Start in Game Mode (cursor hidden)
+        self.lock = threading.Lock()
+        self.is_shutting_down = False
+        self.mapper_event_dispatcher = MapperEventDispatcher()
+        self.two_finger_tap_tracker = TwoFingerTapTracker()
+
+        # ONLY register global keyboard hotkeys when running pure CLI mode
+        if not self.headless:
+            import keyboard
+            keyboard.add_hotkey("esc", self._shutdown)
 
     def _shutdown(self) -> None:
         if self.is_shutting_down:
             return
         self.is_shutting_down = True
 
-        try:
-            if not self.headless:
+        # Unhook global keyboard hotkeys strictly in CLI mode
+        if not self.headless:
+            try:
+                import keyboard
                 keyboard.unhook_all_hotkeys()
-        except Exception:
-            pass
+            except Exception:
+                pass
 
         try:
             if self.touch_reader is not None:
@@ -338,6 +377,8 @@ class Engine:
 
         profiler_cleanup(profiler)
         store.close()
+        
+        # Hard terminate only if CLI mode; keep host process alive in GUI mode
         if not self.headless:
             os._exit(0)
 
