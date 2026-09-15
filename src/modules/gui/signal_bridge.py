@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 from PySide6.QtCore import QObject, Signal
 
 if TYPE_CHECKING:
-    from modules.tils import MapperEventDispatcher
+    from modules.utils import MapperEventDispatcher
 
 
 class EngineSignalBridge(QObject):
@@ -33,7 +33,7 @@ class EngineSignalBridge(QObject):
     or callbacks will accumulate across start/stop cycles."""
 
     config_reloaded = Signal()
-    json_reloaded = Signal()
+    layout_reloaded = Signal()
     menu_mode_toggled = Signal(bool)  # is_visible
     wasd_block_changed = Signal()
     worker_respawned = Signal(str)  # worker_type
@@ -50,7 +50,7 @@ class EngineSignalBridge(QObject):
             "ON_CONFIG_RELOAD", lambda **kw: self.config_reloaded.emit()
         )
         dispatcher.register_callback(
-            "ON_JSON_RELOAD", lambda **kw: self.json_reloaded.emit()
+            "ON_LAYOUT_RELOAD", lambda **kw: self.layout_reloaded.emit()
         )
         dispatcher.register_callback(
             "ON_MENU_MODE_TOGGLE",
