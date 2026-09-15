@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import os
-import math
 import datetime
+import math
+import os
 from pathlib import Path
 from PIL import Image
 
@@ -53,8 +53,7 @@ DEF_STR = (
     "MODE: IDLE | F12 (Save to DB) | Esc (Exit) | F6 (Circle) | F7 (RECTANGLE) | F8 (Cancel)\n"
     "    Del (Delete) | F2 (Delete All) | F9 (List Shapes) | F4 (Toggle Overlays)\n"
     "    [ (Sprint Threshold) | ] (Mouse Wheel) | Space (Toggle Move Camera)\n"
-    "    Arrows: Nudge | Shift+Arrows: Fast Nudge | Double Click: Change Artist"
-    "    P (Increase selected artist priority) | O (Decrease selected artist priority)"
+    "    Arrows: Nudge | Shift+Arrows: Fast Nudge | P / O: Change Priority"
 )
 
 INDICATED_EDGE_COLOR = (0.85, 0.88, 0.92)
@@ -139,6 +138,13 @@ class _Draggable:
         if curr_id is None:
             return
 
+        priority = self.plotter.shapes[self.entry_id].get("priority", 0)
+        move_camera_info = (
+            "Move Camera Enabled"
+            if self.plotter.shapes[self.entry_id]["move_camera"]
+            else "Move Camera Disabled"
+        )
+
         if curr_id.startswith("label_"):
             draggable_artist = self.plotter.label_drag_managers.get(self.entry_id)
             if draggable_artist and draggable_artist.artist_id == curr_id:
@@ -146,13 +152,8 @@ class _Draggable:
                 if label_bbox:
                     label_bbox.set_edgecolor(INDICATED_EDGE_COLOR)
                     label_bbox.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
-                move_camera_info = (
-                    "Move Camera Enabled"
-                    if self.plotter.shapes[self.entry_id]["move_camera"]
-                    else "Move Camera Disabled"
-                )
                 self.plotter.update_title(
-                    f"Current Artist: {curr_id} (ID: {self.entry_id}) | Click to Drag | Arrows to Nudge | {move_camera_info} | {HELP_STR}",
+                    f"Current Artist: {curr_id} (ID: {self.entry_id}, Prio: {priority}) | Drag/Nudge | {move_camera_info} | {HELP_STR}",
                     True,
                 )
             self.plotter.current_draggable = draggable_artist
@@ -162,13 +163,8 @@ class _Draggable:
             if draggable_artist and draggable_artist.artist_id == curr_id:
                 draggable_artist.shape_artist.set_edgecolor(INDICATED_EDGE_COLOR)
                 draggable_artist.shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
-                move_camera_info = (
-                    "Move Camera Enabled"
-                    if self.plotter.shapes[self.entry_id]["move_camera"]
-                    else "Move Camera Disabled"
-                )
                 self.plotter.update_title(
-                    f"Current Artist: {curr_id} (ID: {self.entry_id}) | Click to Drag or Resize | Arrows to Nudge | {move_camera_info} | {HELP_STR}",
+                    f"Current Artist: {curr_id} (ID: {self.entry_id}, Prio: {priority}) | Drag/Resize/Nudge | {move_camera_info} | {HELP_STR}",
                     True,
                 )
             self.plotter.current_draggable = draggable_artist
@@ -291,7 +287,8 @@ class _DraggableLabel(_Draggable):
             self.shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
 
             self.canvas.draw()
-            self.drag_bg = self.canvas.copy_from_bbox(self.label_artist.axes.bbox)
+            if self.label_artist.axes.bbox.width > 0 and self.label_artist.axes.bbox.height > 0:
+                self.drag_bg = self.canvas.copy_from_bbox(self.label_artist.axes.bbox)
             self.label_artist.set_visible(True)
             self.plotter.drawn = True
 
@@ -303,7 +300,8 @@ class _DraggableLabel(_Draggable):
         dist_px = ((dx_press**2) + (dy_press**2)) ** 0.5
         self.plotter.current_move_distance = dist_px
 
-        self.canvas.restore_region(self.drag_bg)
+        if self.drag_bg is not None:
+            self.canvas.restore_region(self.drag_bg)
         self.move_label(dx, dy)
         self.label_artist.axes.draw_artist(self.label_artist)
         self.canvas.blit(self.label_artist.axes.bbox)
@@ -462,7 +460,8 @@ class _DraggableShape(_Draggable):
                 label_bbox.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
 
             self.canvas.draw()
-            self.drag_bg = self.canvas.copy_from_bbox(self.shape_artist.axes.bbox)
+            if self.shape_artist.axes.bbox.width > 0 and self.shape_artist.axes.bbox.height > 0:
+                self.drag_bg = self.canvas.copy_from_bbox(self.shape_artist.axes.bbox)
             self.shape_artist.set_visible(True)
             self.plotter.drawn = True
 
@@ -472,7 +471,8 @@ class _DraggableShape(_Draggable):
         dist_px = ((dx_press**2) + (dy_press**2)) ** 0.5
         self.plotter.current_move_distance = dist_px
 
-        self.canvas.restore_region(self.drag_bg)
+        if self.drag_bg is not None:
+            self.canvas.restore_region(self.drag_bg)
         if self.shape_type == CIRCLE:
             self.circle_transform(event)
         elif self.shape_type == RECTANGLE:
@@ -787,7 +787,7 @@ class _DraggableShape(_Draggable):
 class LayoutPlotterWidget(QWidget):
     """Matplotlib HUD Layout Canvas embedded cleanly inside a QWidget."""
 
-    layout_saved = Signal(str, int)  # layout_name, layout_id
+    layout_saved = Signal(str, int)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -795,12 +795,10 @@ class LayoutPlotterWidget(QWidget):
         self.root_layout = QVBoxLayout(self)
         self.root_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Matplotlib embedded canvas
         self.fig = Figure()
         self.canvas = FigureCanvas(self.fig)
         self.ax = self.fig.add_subplot(111)
 
-        # Disable Matplotlib default keybindings on canvas
         for key in list(self.canvas.callbacks.callbacks.keys()):
             if "key_press_event" in key:
                 self.canvas.callbacks.callbacks[key].clear()
@@ -1024,7 +1022,15 @@ class LayoutPlotterWidget(QWidget):
                 )
 
             self.finalize_shape(
-                cx, cy, r, bb, key_name, bridge_key or zone.name, zone.scancode, zone.move_camera
+                cx=cx,
+                cy=cy,
+                r=r,
+                bb=bb,
+                key_name=key_name,
+                bridge_key=bridge_key or zone.name,
+                hex_code=zone.scancode,
+                move_camera=zone.move_camera,
+                priority=zone.priority,
             )
 
         self.mouse_wheel_radius = self.active_layout.mouse_wheel_radius
@@ -1059,21 +1065,22 @@ class LayoutPlotterWidget(QWidget):
     def on_mouse_move(self, event):
         if self.state == COLLECTING and event.inaxes == self.ax:
             x, y = int(round(event.xdata)), int(round(event.ydata))
-            if self.bg_cache is None:
+            if self.bg_cache is None and self.ax.bbox.width > 0 and self.ax.bbox.height > 0:
                 self.bg_cache = self.canvas.copy_from_bbox(self.ax.bbox)
 
-            self.canvas.restore_region(self.bg_cache)
-            for line in [self.crosshair_h_bg, self.crosshair_h_fg]:
-                line.set_visible(True)
-                line.set_ydata([y, y])
-                self.ax.draw_artist(line)
+            if self.bg_cache is not None:
+                self.canvas.restore_region(self.bg_cache)
+                for line in [self.crosshair_h_bg, self.crosshair_h_fg]:
+                    line.set_visible(True)
+                    line.set_ydata([y, y])
+                    self.ax.draw_artist(line)
 
-            for line in [self.crosshair_v_bg, self.crosshair_v_fg]:
-                line.set_visible(True)
-                line.set_xdata([x, x])
-                self.ax.draw_artist(line)
+                for line in [self.crosshair_v_bg, self.crosshair_v_fg]:
+                    line.set_visible(True)
+                    line.set_xdata([x, x])
+                    self.ax.draw_artist(line)
 
-            self.fig.canvas.blit(self.ax.bbox)
+                self.fig.canvas.blit(self.ax.bbox)
         else:
             if hasattr(self, "crosshair_h_bg") and self.crosshair_h_bg.get_visible():
                 for line in [self.crosshair_h_bg, self.crosshair_h_fg, self.crosshair_v_bg, self.crosshair_v_fg]:
@@ -1203,7 +1210,6 @@ class LayoutPlotterWidget(QWidget):
             elif event.key == "escape":
                 self.reset_state()
 
-            # Press 'p' to increase priority of selected artist, 'o' to decrease
             elif event.key == "p" and self.current_draggable:
                 entry_id = self.current_draggable.entry_id
                 self.shapes[entry_id]["priority"] = self.shapes[entry_id].get("priority", 0) + 1
@@ -1212,8 +1218,7 @@ class LayoutPlotterWidget(QWidget):
                 entry_id = self.current_draggable.entry_id
                 self.shapes[entry_id]["priority"] = self.shapes[entry_id].get("priority", 0) - 1
                 self.update_title(f"Priority decreased: {self.shapes[entry_id]['priority']} (ID: {entry_id})", True)
-            
-            # Press arrow keys to move selected artist by 1 unit or shift+arrow keys to move it by 5 units
+
             else:
                 step = 5 if event.key.startswith("shift+") else 1
                 clean_key = event.key.replace("shift+", "")
@@ -1372,14 +1377,35 @@ class LayoutPlotterWidget(QWidget):
         elif self.mode == RECTANGLE:
             cx, cy, r, bb = self.calculate_rect()
 
-        self.finalize_shape(cx, cy, r, bb, key_name, bridge_key, hex_code)
+        self.finalize_shape(
+            cx=cx,
+            cy=cy,
+            r=r,
+            bb=bb,
+            key_name=key_name,
+            bridge_key=bridge_key,
+            hex_code=hex_code,
+            move_camera=False,
+            priority=0,
+        )
         self.reset_state()
 
-    def finalize_shape(self, cx, cy, r, bb, key_name, bridge_key, hex_code, move_camera=False):
+    def finalize_shape(
+        self,
+        cx: int | None,
+        cy: int | None,
+        r: int | None,
+        bb: tuple | None,
+        key_name: str,
+        bridge_key: str,
+        hex_code: str,
+        move_camera: bool = False,
+        priority: int = 0,
+    ):
         if cx is None:
             return
 
-        saved, entry_id = self.save_entry(bridge_key, hex_code, cx, cy, r, bb, move_camera)
+        saved, entry_id = self.save_entry(bridge_key, hex_code, cx, cy, r, bb, move_camera, priority)
         if not saved:
             return
 
@@ -1587,14 +1613,14 @@ class LayoutPlotterWidget(QWidget):
                     move_camera=bool(item["move_camera"]),
                     priority=int(item["priority"]),
                 )
-            
+
         store.set_active_layout(layout_id)
         self.active_layout = store.layouts.get(layout_id)
 
         self.layout_saved.emit(user_name, layout_id)
         self.update_title(f"SAVED: {user_name} | {HELP_STR}")
 
-    def save_entry(self, bridge_key, hex_code, cx, cy, r, bb, move_camera):
+    def save_entry(self, bridge_key, hex_code, cx, cy, r, bb, move_camera, priority=0):
         uid = self.count
         inc_count = True
         saved = False
@@ -1674,6 +1700,7 @@ class LayoutPlotterWidget(QWidget):
             "r": r,
             "bb": bb,
             "move_camera": move_camera,
+            "priority": priority,
         }
 
         self.shapes[uid] = entry
