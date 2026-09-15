@@ -2,23 +2,11 @@
 Bridges modules' threaded MapperEventDispatcher callbacks into
 PySide6 Signals, so GUI widgets can react to engine state (window,
 touch reader, mapper) without touching Qt objects from a non-GUI thread.
-
-MapperEventDispatcher.dispatch() invokes registered callbacks directly,
-on whatever thread called dispatch() (main-loop thread, touch-reader
-thread, aggregation thread, etc.). Qt widgets are NOT thread-safe, so
-callbacks must never touch a QWidget directly.
-
-Signal.emit() is safe to call from any thread: PySide6 automatically
-queues the delivery to the receiving QObject's own thread affinity
-(Qt.AutoConnection resolves to a queued connection cross-thread), as
-long as this bridge object is constructed on the GUI thread and never
-moved with moveToThread(). That is the only property this class relies
-on for safety -- it does no locking of its own.
 """
 
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any
 
+from typing import TYPE_CHECKING, Any
 from PySide6.QtCore import QObject, Signal
 
 if TYPE_CHECKING:
@@ -26,11 +14,7 @@ if TYPE_CHECKING:
 
 
 class EngineSignalBridge(QObject):
-    """One instance lives on the MainWindow for the lifetime of the app.
-    Call bind() each time a new Engine (and therefore a new dispatcher)
-    is created in _start_engine(); there is currently no unbind(), so
-    _stop_engine() must drop the Engine reference rather than reuse it,
-    or callbacks will accumulate across start/stop cycles."""
+    """Bridges threaded MapperEventDispatcher events to Qt main thread signals."""
 
     config_reloaded = Signal()
     layout_reloaded = Signal()
@@ -38,11 +22,14 @@ class EngineSignalBridge(QObject):
     wasd_block_changed = Signal()
     worker_respawned = Signal(str)  # worker_type
     aggregation = Signal(float, float, float, float)  # sum_dx, sum_dy, acc_x, acc_y
-
-    # Catch-all for any action not worth a dedicated typed signal yet.
     generic_event = Signal(str, dict)
 
-    def bind(self, dispatcher: "MapperEventDispatcher | None") -> None:
+    def __init__(self, parent: QObject | None = None):
+        super().__init__(parent)
+        self.dispatcher: MapperEventDispatcher | None = None
+
+    def bind(self, dispatcher: MapperEventDispatcher | None) -> None:
+        self.dispatcher = dispatcher
         if dispatcher is None:
             return
 
