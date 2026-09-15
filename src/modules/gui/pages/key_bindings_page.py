@@ -1,20 +1,53 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFormLayout, QPushButton, QLabel, QWidget, QHBoxLayout
+from typing import TYPE_CHECKING
+from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtWidgets import (
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QWidget,
+)
 
+from modules.database import store
+from modules.platforms import get_specific_qt_key
+from modules.utils import MapperEvent, get_scancode_and_bridge_key_from_key
 from .base_page import BasePage
+
+if TYPE_CHECKING:
+    from modules.utils import MapperEventDispatcher
+
+
+class KeyCaptureFilter(QObject):
+    """Event filter that intercepts a single keypress without opening modal dialogs."""
+
+    def __init__(self, callback, parent=None):
+        super().__init__(parent)
+        self.callback = callback
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Escape:
+                self.callback(None)
+                return True
+            precise_key = get_specific_qt_key(event)
+            _, key_name = get_scancode_and_bridge_key_from_key(precise_key)
+            if key_name:
+                self.callback(key_name)
+                return True
+        return False
 
 
 class KeyBindingsPage(BasePage):
-    """Replaces the modal KeyCaptureDialog flow (core/key_capture.py):
-    toggle/sprint key capture become inline 'Capture' rows instead of
-    blocking startup dialogs, so bindings can be changed anytime while
-    the app is running, not just before the engine starts."""
+    """Non-blocking inline Key Binding manager backed by SQLite."""
 
     title = "Key bindings"
 
-    def __init__(self, parent=None):
+    def __init__(self, dispatcher: MapperEventDispatcher | None = None, parent=None):
         super().__init__(parent)
+        self.dispatcher = dispatcher
+        self._active_filter: KeyCaptureFilter | None = None
 
         form_widget = QWidget()
         form = QFormLayout(form_widget)
@@ -22,22 +55,51 @@ class KeyBindingsPage(BasePage):
         self.toggle_key_label = QLabel("Not set")
         self.toggle_key_btn = QPushButton("Capture")
         form.addRow(
-            "Toggle key:", self._paired_row(self.toggle_key_label, self.toggle_key_btn)
+            "Toggle Key (Menu Mode):",
+            self._paired_row(self.toggle_key_label, self.toggle_key_btn),
         )
 
         self.sprint_key_label = QLabel("Not set")
         self.sprint_key_btn = QPushButton("Capture")
         form.addRow(
-            "Sprint key:", self._paired_row(self.sprint_key_label, self.sprint_key_btn)
+            "Sprint Key:",
+            self._paired_row(self.sprint_key_label, self.sprint_key_btn),
         )
 
         self.content_layout().addWidget(form_widget)
         self.content_layout().addStretch()
 
-        # main_window.py should connect *_btn.clicked to a short-lived
-        # keyPressEvent grab (similar in spirit to KeyCaptureDialog's
-        # keyPressEvent override) that updates the paired label and
-        # persists to app_settings, rather than reopening a QDialog.
+        self.toggle_key_btn.clicked.connect(lambda: self._begin_capture("toggle_key"))
+        self.sprint_key_btn.clicked.connect(lambda: self._begin_capture("sprint_key"))
+
+        self.load_bindings()
+
+    def load_bindings(self) -> None:
+        settings = store.settings.get()
+        self.toggle_key_label.setText(settings.toggle_key or "Not set")
+        self.sprint_key_label.setText(settings.sprint_key or "Not set")
+
+    def _begin_capture(self, target_field: str) -> None:
+        btn = self.toggle_key_btn if target_field == "toggle_key" else self.sprint_key_btn
+        lbl = self.toggle_key_label if target_field == "toggle_key" else self.sprint_key_label
+
+        lbl.setText("Press any key (Esc to cancel)...")
+        btn.setEnabled(False)
+
+        def on_captured(key_name: str | None):
+            self.removeEventFilter(self._active_filter)
+            self._active_filter = None
+            btn.setEnabled(True)
+
+            if key_name:
+                store.settings.update(**{target_field: key_name})
+                if self.dispatcher:
+                    self.dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+            self.load_bindings()
+
+        self._active_filter = KeyCaptureFilter(on_captured, self)
+        self.installEventFilter(self._active_filter)
+        self.setFocus()
 
     @staticmethod
     def _paired_row(label: QLabel, button: QPushButton) -> QWidget:
