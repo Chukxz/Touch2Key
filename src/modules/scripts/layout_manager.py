@@ -1,201 +1,168 @@
-import os
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+#!/usr/bin/env python3
+"""
+CLI Layout & Profile Manager.
+
+Provides quick terminal-based profile switching, JSON import/export,
+and active layout configuration without opening the PySide6 GUI.
+"""
+
+from __future__ import annotations
+
+import argparse
 import json
+import sys
 from pathlib import Path
-import tomlkit
 
-# Added TOML_PATH to the imports
-from modules.utils import JSONS_FOLDER, TOML_PATH
-from modules.database.repositories import (
-    LayoutsRepository,
-    LayoutZonesRepository,
-)
+from modules.database import store
 from modules.database.legacy_migration import migrate_json_layout
-
-class LayoutManagerApp(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.title("Layout Manager")
-        self.geometry("300x150")
-        self.eval("tk::PlaceWindow . center")
-        self.attributes("-topmost", True)
-
-        os.makedirs(JSONS_FOLDER, exist_ok=True)
-
-        # UI Setup
-        ttk.Label(self, text="Touch2Key Profiles", font=("Helvetica", 12, "bold")).pack(
-            pady=10
-        )
-
-        ttk.Button(self, text="Import Layout (.json)", command=self.import_layout).pack(
-            fill=tk.X, padx=40, pady=5
-        )
-        ttk.Button(
-            self, text="Export Layout (.json)", command=self.open_export_dialog
-        ).pack(fill=tk.X, padx=40, pady=5)
-
-    def select_layout(self): ...
-
-    def import_layout(self):
-        file_path_str = filedialog.askopenfilename(
-            initialdir=JSONS_FOLDER,
-            title="Select JSON Mapping Profile to Import",
-            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
-        )
-
-        if not file_path_str:
-            return
-
-        file_path = Path(file_path_str)
-        if not file_path.exists():
-            messagebox.showerror("Error", f"File '{file_path.name}' not found.")
-            return
-
-        image_to_assign = ""
-
-        # ==========================================
-        # LEGACY TOML CHECK
-        # If they are importing the active layout, save its image!
-        # ==========================================
-        if TOML_PATH.exists():
-            try:
-                with open(TOML_PATH, "r", encoding="utf-8") as f:
-                    doc = tomlkit.load(f)
-
-                legacy_json_str = doc.get("system", {}).get("json_path")
-
-                # Check if the file they picked matches the active one in the TOML
-                if (
-                    legacy_json_str
-                    and Path(legacy_json_str).resolve() == file_path.resolve()
-                ):
-                    image_to_assign = doc.get("system", {}).get("image_path", "")
-                    print(
-                        f"[INFO] Legacy active layout detected. Recovering image: {image_to_assign}"
-                    )
-            except Exception as e:
-                print(f"[WARNING] Could not parse legacy TOML for image path: {e}")
-        # ==========================================
-
-        # Inject into SQLite
-        layout_id = migrate_json_layout(
-            json_path=file_path,
-            image_path=image_to_assign,  # Pass the recovered image (or empty string if none)
-            set_active=True,
-        )
-
-        if layout_id is not None:
-            try:
-                file_path.unlink()  # Clean up the source file
-                messagebox.showinfo(
-                    "Success",
-                    f"Imported '{file_path.stem}' successfully!\nIt is now your active layout.",
-                )
-            except OSError:
-                messagebox.showwarning(
-                    "Warning",
-                    f"Imported successfully, but could not delete source file: {file_path.name}",
-                )
-        else:
-            messagebox.showerror(
-                "Error", f"Failed to import {file_path.name}. Check terminal logs."
-            )
-
-    def open_export_dialog(self):
-        layouts_repo = LayoutsRepository()
-        all_layouts = layouts_repo.list_all()
-
-        if not all_layouts:
-            messagebox.showinfo("Empty", "No layouts found in the database to export.")
-            return
-
-        export_win = tk.Toplevel(self)
-        export_win.title("Export Layout")
-        export_win.geometry("250x200")
-        export_win.eval(f"tk::PlaceWindow {str(export_win)} center")
-        export_win.attributes("-topmost", True)
-        export_win.grab_set()
-
-        ttk.Label(export_win, text="Select Layout to Export:").pack(pady=5)
-
-        listbox = tk.Listbox(export_win, selectmode=tk.SINGLE)
-        listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-
-        for layout in all_layouts:
-            listbox.insert(tk.END, layout.name)
-
-        def on_export_confirm():
-            selection = listbox.curselection()
-            if not selection:
-                return
-
-            selected_name = listbox.get(selection[0])
-            selected_layout = next(l for l in all_layouts if l.name == selected_name)
-
-            self.execute_export(selected_layout)
-            export_win.destroy()
-
-        ttk.Button(export_win, text="Save As...", command=on_export_confirm).pack(
-            pady=10
-        )
-
-    def execute_export(self, layout):
-        save_path_str = filedialog.asksaveasfilename(
-            initialdir=JSONS_FOLDER,
-            initialfile=f"{layout.name}.json",
-            title="Save Layout As",
-            defaultextension=".json",
-            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
-        )
-
-        if not save_path_str:
-            return
-
-        zones_repo = LayoutZonesRepository()
-        zones = zones_repo.list_for_layout(layout.id)
-
-        output_content = []
-        for zone in zones:
-            entry = {
-                "name": zone.name,
-                "scancode": zone.scancode,
-                "type": zone.zone_type,
-                "cx": zone.cx or 0.0,
-                "cy": zone.cy or 0.0,
-                "val1": zone.r if zone.zone_type == "CIRCLE" else (zone.x1 or 0.0),
-                "val2": zone.y1 or 0.0,
-                "val3": zone.x2 or 0.0,
-                "val4": zone.y2 or 0.0,
-                "move_camera": bool(zone.move_camera),
-            }
-            output_content.append(entry)
-
-        json_data = {
-            "metadata": {
-                "width": layout.width,
-                "height": layout.height,
-                "dpi": layout.dpi,
-                "mouse_wheel_radius": layout.mouse_wheel_radius,
-                "sprint_distance": layout.sprint_distance,
-            },
-            "content": output_content,
-        }
-
-        try:
-            with open(save_path_str, "w", encoding="utf-8") as f:
-                json.dump(json_data, f, indent=4)
-            messagebox.showinfo(
-                "Success", f"Layout exported to:\n{Path(save_path_str).name}"
-            )
-        except Exception as e:
-            messagebox.showerror("Export Failed", str(e))
+from modules.utils import CIRCLE, JSONS_FOLDER
 
 
-def run():
-    app = LayoutManagerApp()
-    app.mainloop()
+def list_profiles() -> None:
+    layouts = store.layouts.list_all()
+    active_layout = store.get_active_layout()
+    active_id = active_layout.id if active_layout else None
+
+    if not layouts:
+        print("No layouts found in the database.")
+        return
+
+    print("\n--- Available Profiles ---")
+    for l in layouts:
+        active_flag = " [* ACTIVE]" if l.id == active_id else ""
+        print(f"  [{l.id}] {l.name} ({l.width}x{l.height} @ {l.dpi} DPI){active_flag}")
+    print()
+
+
+def set_active_profile(layout_id: int) -> None:
+    target = store.layouts.get(layout_id)
+    if not target:
+        print(f"Error: Layout ID {layout_id} does not exist.")
+        return
+
+    store.settings.update(active_layout_id=layout_id)
+    print(f"Active profile updated to: '{target.name}' (ID: {target.id})")
+
+
+def import_profile(file_path: Path) -> None:
+    if not file_path.exists():
+        print(f"Error: File '{file_path}' not found.")
+        return
+
+    layout_id = migrate_json_layout(
+        json_path=file_path,
+        image_path="",
+        set_active=True,
+    )
+    if layout_id:
+        print(f"Imported '{file_path.name}' successfully as Active Layout (ID: {layout_id}).")
+    else:
+        print(f"Failed to import '{file_path.name}'.")
+
+
+def export_profile(layout_id: int, output_path: Path | None = None) -> None:
+    layout = store.layouts.get(layout_id)
+    if not layout:
+        print(f"Error: Layout ID {layout_id} does not exist.")
+        return
+
+    JSONS_FOLDER.mkdir(parents=True, exist_ok=True)
+    out_file = output_path or (JSONS_FOLDER / f"{layout.name}.json")
+
+    zones = store.zones.list_for_layout(layout.id)
+    output_content = []
+    for zone in zones:
+        output_content.append({
+            "name": zone.name,
+            "scancode": zone.scancode,
+            "type": zone.zone_type,
+            "cx": zone.cx or 0.0,
+            "cy": zone.cy or 0.0,
+            "val1": zone.r if zone.zone_type == CIRCLE else (zone.x1 or 0.0),
+            "val2": zone.y1 or 0.0,
+            "val3": zone.x2 or 0.0,
+            "val4": zone.y2 or 0.0,
+            "move_camera": bool(zone.move_camera),
+            "priority": zone.priority,
+        })
+
+    json_data = {
+        "metadata": {
+            "width": layout.width,
+            "height": layout.height,
+            "dpi": layout.dpi,
+            "mouse_wheel_radius": layout.mouse_wheel_radius,
+            "sprint_distance": layout.sprint_distance,
+        },
+        "content": output_content,
+    }
+
+    with open(out_file, "w", encoding="utf-8") as f:
+        json.dump(json_data, f, indent=4)
+
+    print(f"Layout exported successfully to: {out_file}")
+
+
+def interactive_menu() -> None:
+    while True:
+        list_profiles()
+        print("Commands:")
+        print("  [s] Select / Switch Active Profile")
+        print("  [i] Import JSON Profile")
+        print("  [e] Export Profile to JSON")
+        print("  [d] Delete Profile")
+        print("  [q] Quit")
+
+        choice = input("\nEnter command: ").strip().lower()
+
+        if choice == "q":
+            break
+        elif choice == "s":
+            raw_id = input("Enter Layout ID to activate: ").strip()
+            if raw_id.isdigit():
+                set_active_profile(int(raw_id))
+        elif choice == "i":
+            raw_path = input("Enter path to JSON file: ").strip().strip('"')
+            if raw_path:
+                import_profile(Path(raw_path))
+        elif choice == "e":
+            raw_id = input("Enter Layout ID to export: ").strip()
+            if raw_id.isdigit():
+                export_profile(int(raw_id))
+        elif choice == "d":
+            raw_id = input("Enter Layout ID to delete: ").strip()
+            if raw_id.isdigit():
+                target_id = int(raw_id)
+                confirm = input(f"Confirm delete Layout ID {target_id}? (y/N): ").strip().lower()
+                if confirm == "y":
+                    store.layouts.delete(target_id)
+                    print(f"Layout ID {target_id} deleted.")
+        print("-" * 40)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Touch2Key CLI Layout Manager")
+    parser.add_argument("-l", "--list", action="store_true", help="List all saved profiles")
+    parser.add_argument("-s", "--set-active", type=int, metavar="ID", help="Set active layout by ID")
+    parser.add_argument("-i", "--import-json", type=Path, metavar="PATH", help="Import a layout from JSON")
+    parser.add_argument("-e", "--export-json", type=int, metavar="ID", help="Export a layout to JSON by ID")
+    parser.add_argument("-o", "--output", type=Path, metavar="OUT_PATH", help="Custom output path for export")
+
+    args = parser.parse_args()
+
+    if args.list:
+        list_profiles()
+    elif args.set_active is not None:
+        set_active_profile(args.set_active)
+    elif args.import_json is not None:
+        import_profile(args.import_json)
+    elif args.export_json is not None:
+        export_profile(args.export_json, args.output)
+    else:
+        interactive_menu()
+
+    store.close()
 
 
 if __name__ == "__main__":
-    run()
+    main()
