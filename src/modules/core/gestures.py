@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from modules.utils import Point, TouchEvent, TouchPhase
 
 
-@dataclass
+@dataclass(slots=True)
 class TwoFingerTapTracker:
     """Tracks touch contacts in Menu Mode to detect strict, stationary two-finger taps."""
 
@@ -12,9 +12,11 @@ class TwoFingerTapTracker:
     max_drift_px: float = 25.0
     sync_window_s: float = 0.12
 
-    _contacts: dict[int, tuple[Point, float]] = field(default_factory=dict)
-    _invalidated: bool = False
-    _released_contacts: set[int] = field(default_factory=set)
+    _contacts: dict[int, tuple[Point, float]] = field(
+        default_factory=dict, init=False
+    )
+    _invalidated: bool = field(default=False, init=False)
+    _released_contacts: set[int] = field(default_factory=set, init=False)
 
     def reset(self) -> None:
         self._contacts.clear()
