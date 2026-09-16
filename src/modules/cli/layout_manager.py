@@ -26,7 +26,7 @@ from modules.database.legacy_migration import (
     migrate_json_layout,
     migrate_toml_config,
 )
-from modules.utils import JSONS_FOLDER, TOML_PATH
+from modules.utils import JSONS_FOLDER, PROFILES_FOLDER, TOML_PATH
 
 
 # ---------------------------------------------------------------------------
@@ -224,8 +224,8 @@ def interactive_menu() -> None:
         print("  [e]   Export Profile to JSON")
         print("  [st]  Export App Settings to settings.toml")
         print("  [lt]  Import App Settings from settings.toml")
-        print("  [eb]  Export Full Bundle (settings.toml + layout.json)")
-        print("  [ib]  Import Any Config (.toml, .json, or Bundle)")
+        print("  [eb]  Export Full Bundle to data/profiles/")
+        print("  [ib]  Import Any Config (.toml, .json, or Bundle Directory)")
         print("  [r]   Reset App Settings to Defaults")
         print("  [q]   Quit")
 
@@ -279,7 +279,7 @@ def interactive_menu() -> None:
                     delete_profile(target_id)
 
         elif choice == "i":
-            raw_path = input("Enter path to JSON file: ").strip().strip('"')
+            raw_path = input(f"Enter path to JSON file [Default: {JSONS_FOLDER}]: ").strip().strip('"')
             if raw_path:
                 import_profile_json(Path(raw_path))
 
@@ -301,11 +301,10 @@ def interactive_menu() -> None:
         elif choice == "eb":
             raw_id = input("Enter Layout ID to bundle (Leave blank for active): ").strip()
             target_id = int(raw_id) if raw_id.isdigit() else None
-            out_folder = Path("exports")
             try:
                 active = store.layouts.get(target_id) if target_id else store.get_active_layout()
                 if active:
-                    t_path, j_path = export_bundle(out_folder / active.name, active.name)
+                    t_path, j_path = export_bundle(profile_name=active.name)
                     print(f"Bundle exported:\n  - TOML: {t_path}\n  - JSON: {j_path}")
                 else:
                     print("No active layout available to bundle.")
@@ -313,11 +312,11 @@ def interactive_menu() -> None:
                 print(f"Export bundle failed: {exc}")
 
         elif choice == "ib":
-            raw_path = input("Enter path to file (.toml or .json): ").strip().strip('"')
+            raw_path = input(f"Enter path to file or bundle folder [Default: {PROFILES_FOLDER}]: ").strip().strip('"')
             if raw_path and import_any(Path(raw_path)):
                 print("Configuration imported and synced to SQLite.")
             else:
-                print("Import failed. Check that file exists and syntax is valid.")
+                print("Import failed. Check that file/folder exists and syntax is valid.")
 
         elif choice == "r":
             confirm = input("Reset all app settings to defaults? (y/N): ").strip().lower()
@@ -349,8 +348,9 @@ def run() -> None:
     parser.add_argument("--export-toml", type=Path, nargs="?", const=TOML_PATH, metavar="OUT_PATH", help="Export app_settings to TOML")
     parser.add_argument("--import-toml", type=Path, nargs="?", const=TOML_PATH, metavar="IN_PATH", help="Import app_settings from TOML")
 
-    parser.add_argument("--export-bundle", type=Path, metavar="OUT_DIR", help="Export profile bundle (.toml + .json)")
-    parser.add_argument("--import-bundle", type=Path, metavar="TOML_PATH", help="Import profile bundle via settings.toml")
+    parser.add_argument("--export-bundle", type=Path, nargs="?", const=PROFILES_FOLDER, metavar="OUT_DIR", help="Export profile bundle (.toml + .json) into data/profiles/")
+    parser.add_argument("--import-bundle", type=Path, metavar="PATH", help="Import profile bundle via settings.toml or folder")
+    parser.add_argument("--import-any", type=Path, metavar="PATH", help="Import any config file (.json, .toml, or directory)")
     parser.add_argument("--reset-settings", action="store_true", help="Reset app settings to defaults")
 
     args = parser.parse_args()
@@ -386,8 +386,15 @@ def run() -> None:
             t_path, j_path = export_bundle(args.export_bundle)
             print(f"Bundle exported:\n  - TOML: {t_path}\n  - JSON: {j_path}")
         elif args.import_bundle is not None:
-            migrate_all(args.import_bundle)
-            print(f"Bundle imported from: {args.import_bundle}")
+            if import_any(args.import_bundle):
+                print(f"Bundle imported from: {args.import_bundle}")
+            else:
+                print(f"Failed to import bundle from: {args.import_bundle}")
+        elif args.import_any is not None:
+            if import_any(args.import_any):
+                print(f"Configuration imported from: {args.import_any}")
+            else:
+                print(f"Failed to import configuration from: {args.import_any}")
         elif args.reset_settings:
             store.settings.reset_to_defaults()
             print("Application settings reset to defaults.")
