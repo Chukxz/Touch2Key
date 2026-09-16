@@ -32,7 +32,7 @@ class Mapper:
         bridge: AbstractBridge,
         pps: float,
         emulator: dict[str, str | None],
-        window_id: int,
+        window_id: int | None,
         ref: Engine, 
     ):
         self.layout_loader = layout_loader
@@ -47,11 +47,6 @@ class Mapper:
         self.engine_ref = ref
         self.is_floating_joystick: bool = True
 
-        toggle_key = emulator.get("toggle_key")
-        self.toggle_key_scancode: int | None = (
-            SCANCODES.get(toggle_key) if toggle_key else None
-        )
-
         self.window_manager = get_platform().WindowManager()
         self.screen_w, self.screen_h = self.window_manager.get_screen_dimensions()
         self.lock = threading.Lock()
@@ -60,19 +55,27 @@ class Mapper:
         self.last_cursor_check_time = 0
         self.window_update_interval = WINDOW_UPDATE_INTERVAL
 
-        self.window_id: int = window_id
+        # Safe Target Window Resolution (Fallback to active foreground window)
+        if window_id and self.window_manager.is_window_valid(window_id):
+            self.window_id = window_id
+        else:
+            self.window_id = self.window_manager.get_foreground_window()
+            logger.info("Defaulting to foreground target window: HWND %s", self.window_id)
+
         self.game_window_class_name: str | None = (
-            self.window_manager.get_window_class_name(self.window_id)
+            self.window_manager.get_window_class_name(self.window_id) if self.window_id else None
         )
         self.game_window_info: dict | None = {
             "window_id": self.window_id,
             "left": 0,
             "top": 0,
-            "width": 0,
-            "height": 0,
-        }
-        self.window_lost = False
+            "width": self.screen_w,
+            "height": self.screen_h,
+        } if self.window_id else None
+
+        self.window_lost = self.window_id is None
         self.wasd_block = 0
+        self.toggle_key_scancode: int | None = None
 
         self._update_config()
 
@@ -104,6 +107,16 @@ class Mapper:
             self.device_width = self.layout_loader.width
             self.device_height = self.layout_loader.height
             self.dpi = self.layout_loader.dpi
+
+            # Hot-reload PPS warning threshold
+            s = self.config.settings
+            if hasattr(s, "pps_alert_threshold") and s.pps_alert_threshold > 0:
+                self.pps = float(s.pps_alert_threshold)
+
+            # Hot-reload Menu Toggle Key
+            if hasattr(s, "toggle_key") and s.toggle_key:
+                self.emulator["toggle_key"] = s.toggle_key
+                self.toggle_key_scancode = SCANCODES.get(s.toggle_key)
 
     def _get_window_info(self, window_id: int) -> dict:
         width, height = self.window_manager.get_window_dimensions(window_id)
