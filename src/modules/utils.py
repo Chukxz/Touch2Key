@@ -121,6 +121,7 @@ EVENT_TYPE = Literal[
     "ON_MENU_MODE_TOGGLE",
     "ON_AGGREGATION",
     "ON_WORKER_RESPAWN",
+    "ON_TARGET_WINDOW_CHANGE",
 ]
 
 # ---------------------------------------------------------------------------
@@ -170,25 +171,16 @@ class TouchEvent:
     position: Point
     timestamp: float
 
-
+@dataclass(slots=True)
 class MapperEvent:
-    def __init__(
-        self,
-        action: EVENT_TYPE,
-        is_visible: bool = True,
-        sum_dx: float | None = None,
-        sum_dy: float | None = None,
-        acc_x: float | None = None,
-        acc_y: float | None = None,
-        worker_type: str | None = None,
-    ):
-        self.action: EVENT_TYPE = action
-        self.is_visible = is_visible
-        self.sum_dx = sum_dx
-        self.sum_dy = sum_dy
-        self.acc_x = acc_x
-        self.acc_y = acc_y
-        self.worker_type = worker_type
+    action: EVENT_TYPE,
+    is_visible: bool = True,
+    sum_dx: float | None = None,
+    sum_dy: float | None = None,
+    acc_x: float | None = None,
+    acc_y: float | None = None,
+    worker_type: str | None = None,
+    target_window_id: int | None = None,
 
 
 class MapperEventDispatcher:
@@ -203,6 +195,7 @@ class MapperEventDispatcher:
             "ON_MENU_MODE_TOGGLE": [],
             "ON_AGGREGATION": [],
             "ON_WORKER_RESPAWN": [],
+            "ON_TARGET_WINDOW_CHANGE": [],
         }
 
     def register_callback(self, event_type: EVENT_TYPE, func) -> None:
@@ -225,6 +218,8 @@ class MapperEventDispatcher:
             try:
                 if key in ("ON_CONFIG_RELOAD", "ON_LAYOUT_RELOAD", "ON_WASD_BLOCK"):
                     func()
+                elif key == "ON_TARGET_WINDOW_CHANGE":
+                    func(event_object.target_window_id)
                 elif key == "ON_MENU_MODE_TOGGLE":
                     func(event_object.is_visible)
                 elif key == "ON_AGGREGATION":
