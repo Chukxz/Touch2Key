@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -19,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from modules.database import store
+from modules.database.config_io import export_layout_json
 from modules.database.legacy_migration import migrate_json_layout
 from modules.gui.widgets.layout_plotter_widget import LayoutPlotterWidget
 from modules.utils import CIRCLE, JSONS_FOLDER, RECTANGLE, MapperEvent
@@ -68,18 +68,17 @@ class LayoutEditorPage(BasePage):
         tools_row = QHBoxLayout()
         tools_row.setContentsMargins(0, 0, 0, 0)
 
+        self.priority_spin = QSpinBox()
+        self.priority_spin.setRange(-100, 100)
+        self.priority_spin.setValue(0)
+        self.priority_spin.setPrefix("Priority: ")
+        tools_row.addWidget(self.priority_spin)
+
         self.add_circle_btn = QPushButton("Add Circle (F6)")
         self.add_rect_btn = QPushButton("Add Rectangle (F7)")
         self.toggle_overlays_btn = QPushButton("Toggle Overlays (F4)")
         self.cancel_action_btn = QPushButton("Cancel (F8)")
         self.save_btn = QPushButton("Save to DB (F12)")
-
-        self.priority_spin = QSpinBox()
-        self.priority_spin.setRange(-100, 100)
-        self.priority_spin.setValue(0)
-        self.priority_spin.setPrefix("Priority: ")
-        self.priority_spin.valueChanged.connect(self.on_priority_changed)
-        tools_row.addWidget(self.priority_spin)
 
         tools_row.addWidget(self.add_circle_btn)
         tools_row.addWidget(self.add_rect_btn)
@@ -91,7 +90,7 @@ class LayoutEditorPage(BasePage):
         self.content_layout().addLayout(tools_row)
 
         # Interactive Canvas
-        self.plotter_widget = LayoutPlotterWidget(self)
+        self.plotter_widget = LayoutPlotterWidget(self, standalone=False)
         self.content_layout().addWidget(self.plotter_widget, stretch=1)
 
         self._wire_signals()
@@ -101,17 +100,13 @@ class LayoutEditorPage(BasePage):
         self.refresh_active_layout_display()
         self.plotter_widget.reload_active_layout()
 
-    def on_priority_changed(self, val: int):
-        if self.plotter_widget.current_draggable:
-            entry_id = self.plotter_widget.current_draggable.entry_id
-            self.plotter_widget.shapes[entry_id]["priority"] = val
-            self.plotter_widget.update_title(f"Zone ID {entry_id} Priority set to {val}", True)
-
     def _wire_signals(self) -> None:
         self.switch_layout_btn.clicked.connect(self.open_switch_layout_dialog)
         self.import_btn.clicked.connect(self.import_layout)
         self.export_btn.clicked.connect(self.open_export_dialog)
         self.capture_btn.clicked.connect(self._trigger_screenshot_capture)
+
+        self.priority_spin.valueChanged.connect(self.on_priority_changed)
 
         self.add_circle_btn.clicked.connect(lambda: self.plotter_widget.start_mode(CIRCLE, 3))
         self.add_rect_btn.clicked.connect(lambda: self.plotter_widget.start_mode(RECTANGLE, 4))
@@ -121,6 +116,12 @@ class LayoutEditorPage(BasePage):
 
         self.plotter_widget.layout_saved.connect(self._on_layout_saved)
 
+    def on_priority_changed(self, val: int) -> None:
+        if self.plotter_widget.current_draggable:
+            entry_id = self.plotter_widget.current_draggable.entry_id
+            self.plotter_widget.shapes[entry_id]["priority"] = val
+            self.plotter_widget.update_title(f"Zone ID {entry_id} Priority set to {val}", True)
+
     def _notify_engine_reload(self) -> None:
         if self.dispatcher is not None:
             self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
@@ -129,14 +130,18 @@ class LayoutEditorPage(BasePage):
     def refresh_active_layout_display(self) -> None:
         active_layout = store.get_active_layout()
         if active_layout is not None:
-            self.active_layout_label.setText(f"Active Layout: {active_layout.name} (ID: {active_layout.id})")
+            self.active_layout_label.setText(
+                f"Active Layout: {active_layout.name} (ID: {active_layout.id})"
+            )
         else:
             self.active_layout_label.setText("Active Layout: None")
 
     def _on_layout_saved(self, name: str, layout_id: int) -> None:
         self.refresh_active_layout_display()
         self._notify_engine_reload()
-        QMessageBox.information(self, "Layout Saved", f"Layout '{name}' saved successfully (ID: {layout_id}).")
+        QMessageBox.information(
+            self, "Layout Saved", f"Layout '{name}' saved successfully (ID: {layout_id})."
+        )
 
     def open_switch_layout_dialog(self) -> None:
         all_layouts = store.layouts.list_all()
@@ -163,7 +168,7 @@ class LayoutEditorPage(BasePage):
         btn_row.addWidget(cancel_btn)
         dialog_layout.addLayout(btn_row)
 
-        def on_select():
+        def on_select() -> None:
             selected_items = layout_list.selectedItems()
             if not selected_items:
                 return
@@ -239,7 +244,7 @@ class LayoutEditorPage(BasePage):
         btn_row.addWidget(cancel_btn)
         dialog_layout.addLayout(btn_row)
 
-        def on_export_confirm():
+        def on_export_confirm() -> None:
             selected_items = layout_list.selectedItems()
             if not selected_items:
                 return
@@ -265,43 +270,12 @@ class LayoutEditorPage(BasePage):
         if not save_path_str:
             return
 
-        zones = store.zones.list_for_layout(layout.id)
-        output_content = []
-
-        for zone in zones:
-            entry = {
-                "name": zone.name,
-                "scancode": zone.scancode,
-                "type": zone.zone_type,
-                "cx": zone.cx or 0.0,
-                "cy": zone.cy or 0.0,
-                "val1": zone.r if zone.zone_type == CIRCLE else (zone.x1 or 0.0),
-                "val2": zone.y1 or 0.0,
-                "val3": zone.x2 or 0.0,
-                "val4": zone.y2 or 0.0,
-                "move_camera": bool(zone.move_camera),
-                "priority": zone.priority,
-            }
-            output_content.append(entry)
-
-        json_data = {
-            "metadata": {
-                "width": layout.width,
-                "height": layout.height,
-                "dpi": layout.dpi,
-                "mouse_wheel_radius": layout.mouse_wheel_radius,
-                "sprint_distance": layout.sprint_distance,
-            },
-            "content": output_content,
-        }
-
         try:
-            with open(save_path_str, "w", encoding="utf-8") as f:
-                json.dump(json_data, f, indent=4)
+            out_file = export_layout_json(layout.id, Path(save_path_str))
             QMessageBox.information(
                 self,
                 "Success",
-                f"Layout exported successfully to:\n{Path(save_path_str).name}",
+                f"Layout exported successfully to:\n{out_file.name}",
             )
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", str(e))
@@ -309,7 +283,12 @@ class LayoutEditorPage(BasePage):
     def _trigger_screenshot_capture(self) -> None:
         try:
             from modules.scripts.adb_screen_capture import _capture_android_screen
-            _capture_android_screen()
+            captured_path = _capture_android_screen()
+            
+            active = store.get_active_layout()
+            if active and captured_path:
+                store.layouts.update(active.id, image_path=str(captured_path))
+
             self.refresh_active_layout_display()
             self.plotter_widget.reload_active_layout()
             self._notify_engine_reload()
