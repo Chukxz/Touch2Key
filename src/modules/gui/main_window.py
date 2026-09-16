@@ -41,6 +41,7 @@ from modules.gui.pages import (
     SettingsPage,
 )
 from modules.gui.signal_bridge import EngineSignalBridge
+from modules.gui.dialogs.wireless_connect_dialog import connect_wireless_gui
 
 if TYPE_CHECKING:
     from modules.engine import Engine
@@ -105,8 +106,9 @@ class MainWindow(QMainWindow):
         file_menu.addAction(quit_action)
 
         device_menu = menu_bar.addMenu("&Device")
-        connect_wireless_action = QAction("Connect wirelessly", self)
-        device_menu.addAction(connect_wireless_action)
+        wireless_action = QAction("Connect &Wireless ADB...", self)
+        wireless_action.triggered.connect(lambda: connect_wireless_gui(self))
+        device_menu.addAction(wireless_action)
 
         self._view_menu = menu_bar.addMenu("&View")
 
