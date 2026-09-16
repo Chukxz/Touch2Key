@@ -20,13 +20,11 @@ import sqlite3
 import threading
 from pathlib import Path
 
-from modules.utils import PROJECT_ROOT
+from modules.utils import DB_PATH
 from modules.database.migrations import run_migrations, set_fresh_install_version
 
 logger = logging.getLogger("modules.database.connection")
 
-
-DB_PATH = Path(PROJECT_ROOT) / "touch2key.db"
 
 # layouts before app_settings/layout_zones so both FOREIGN KEY targets
 # already exist textually in the script, even though sqlite doesn't
