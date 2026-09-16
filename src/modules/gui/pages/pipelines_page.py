@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -365,6 +367,8 @@ class PipelinesPage(BasePage):
         self.semantic_type_combo.currentIndexChanged.connect(self._on_semantic_type_changed)
         self.preset_combo.currentIndexChanged.connect(self._apply_preset_fields)
 
+        self.new_btn.clicked.connect(self._clear_inspector_for_new)
+        self.duplicate_btn.clicked.connect(self._on_duplicate_zone)
         self.add_preset_btn.clicked.connect(self._apply_preset_fields_button)
         self.save_pipeline_btn.clicked.connect(self._on_save_pipeline)
         self.delete_btn.clicked.connect(self._on_delete_zone)
@@ -378,8 +382,102 @@ class PipelinesPage(BasePage):
                 item = QListWidgetItem(f"{zone.name or 'Zone'} [{zone.scancode}] (Prio: {zone.priority})")
                 item.setData(Qt.ItemDataRole.UserRole, zone.id)
                 self.pipeline_list.addItem(item)
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to load active layout zones from database")
+
+    def _get_pipeline_dict(self) -> dict:
+        reg_idx = self.region_type_combo.currentIndex()
+        origin_idx = self.origin_type_combo.currentIndex()
+        const_idx = self.constraint_type_combo.currentIndex()
+        trans_idx = self.transform_type_combo.currentIndex()
+        sem_idx = self.semantic_type_combo.currentIndex()
+
+        return {
+            "region": {
+                "type_idx": reg_idx,
+                "type": ["ALWAYS", "CIRCLE", "RECTANGLE", "BEZEL"][reg_idx],
+                "bezel_height": self.reg_bezel_height.value(),
+            },
+            "origin": {
+                "type_idx": origin_idx,
+                "type": ["DYNAMIC", "FIXED", "ANCHORED"][origin_idx],
+                "anchor_x": self.orig_x.value(),
+                "anchor_y": self.orig_y.value(),
+                "snap_radius": self.orig_snap_radius.value(),
+            },
+            "constraint": {
+                "type_idx": const_idx,
+                "type": ["NONE", "RADIAL", "RECTANGULAR", "LEASH"][const_idx],
+                "radius": self.const_radius_spin.value(),
+                "half_w": self.const_half_w.value(),
+                "half_h": self.const_half_h.value(),
+                "leash_radius": self.const_leash_spin.value(),
+            },
+            "transform": {
+                "type_idx": trans_idx,
+                "type": ["IDENTITY", "DELTA", "DIRECTIONAL", "JOYSTICK", "DOUBLE_TAP"][trans_idx],
+                "sens_x": self.trans_sens_x.value(),
+                "sens_y": self.trans_sens_y.value(),
+                "deadzone": self.trans_dir_deadzone.value(),
+                "threshold": self.trans_dir_threshold.value(),
+                "joy_dz": self.trans_joy_dz.value(),
+                "joy_walk": self.trans_joy_walk.value(),
+                "joy_sprint": self.trans_joy_sprint.value(),
+                "joy_hysteresis": self.trans_joy_hysteresis.value(),
+                "dt_interval": self.trans_dt_interval.value(),
+                "dt_dist": self.trans_dt_dist.value(),
+            },
+            "semantics": {
+                "type_idx": sem_idx,
+                "mode": ["BUTTON", "TOGGLE_KEY", "TOGGLE_MODE", "WASD", "POINTER", "TRACK_FIRE"][sem_idx],
+                "is_mouse_button": self.is_mouse_btn_check.isChecked(),
+            },
+        }
+
+    def _clear_inspector_for_new(self) -> None:
+        self.pipeline_list.clearSelection()
+        self.name_edit.setText("New Pipeline")
+        self.priority_spin.setValue(0)
+        self.output_key_edit.setText("space")
+        self.region_type_combo.setCurrentIndex(1)
+        self.origin_type_combo.setCurrentIndex(1)
+        self.constraint_type_combo.setCurrentIndex(0)
+        self.transform_type_combo.setCurrentIndex(0)
+        self.semantic_type_combo.setCurrentIndex(0)
+
+    def _on_duplicate_zone(self) -> None:
+        selected = self.pipeline_list.selectedItems()
+        if not selected:
+            return
+        zone_id = selected[0].data(Qt.ItemDataRole.UserRole)
+        zone = store.zones.get(zone_id)
+        if not zone:
+            return
+
+        active_layout = store.get_active_layout()
+        if not active_layout:
+            return
+
+        new_name = f"{zone.name or 'Zone'} (Copy)"
+        store.zones.create(
+            layout_id=active_layout.id,
+            name=new_name,
+            scancode=zone.scancode,
+            zone_type=zone.zone_type,
+            priority=zone.priority,
+            move_camera=zone.move_camera,
+            cx=zone.cx,
+            cy=zone.cy,
+            r=zone.r,
+            x1=zone.x1,
+            y1=zone.y1,
+            x2=zone.x2,
+            y2=zone.y2,
+            pipeline_config=getattr(zone, "pipeline_config", "{}") or "{}",
+        )
+        self.load_active_layout_zones()
+        if self.dispatcher:
+            self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
 
     def _on_zone_selected(self) -> None:
         items = self.pipeline_list.selectedItems()
@@ -391,22 +489,63 @@ class PipelinesPage(BasePage):
             if not zone:
                 return
 
-            self.name_edit.setText(zone.name)
-            self.priority_spin.setValue(zone.priority)
-            self.output_key_edit.setText(zone.scancode)
+            self.name_edit.setText(zone.name or "")
+            self.priority_spin.setValue(zone.priority or 0)
+            self.output_key_edit.setText(zone.scancode or "")
 
-            if zone.zone_type == "CIRCLE":
-                self.region_type_combo.setCurrentIndex(1)
-                self.reg_center_x.setValue(zone.cx or 0.0)
-                self.reg_center_y.setValue(zone.cy or 0.0)
-                self.reg_radius.setValue(zone.r or 50.0)
-            else:
-                self.region_type_combo.setCurrentIndex(2)
-                self.reg_x1.setValue(zone.x1 or 0.0)
-                self.reg_y1.setValue(zone.y1 or 0.0)
-                self.reg_x2.setValue(zone.x2 or 0.0)
-                self.reg_y2.setValue(zone.y2 or 0.0)
-        except Exception as exc:
+            # Geometry defaults
+            self.reg_center_x.setValue(zone.cx or 0.0)
+            self.reg_center_y.setValue(zone.cy or 0.0)
+            self.reg_radius.setValue(zone.r or 50.0)
+            self.reg_x1.setValue(zone.x1 or 0.0)
+            self.reg_y1.setValue(zone.y1 or 0.0)
+            self.reg_x2.setValue(zone.x2 or 0.0)
+            self.reg_y2.setValue(zone.y2 or 0.0)
+
+            # Unpack JSON pipeline config with backward compatible fallbacks
+            cfg_raw = getattr(zone, "pipeline_config", "{}") or "{}"
+            try:
+                cfg = json.loads(cfg_raw)
+            except Exception:
+                cfg = {}
+
+            reg = cfg.get("region", {})
+            default_reg_idx = 1 if zone.zone_type == "CIRCLE" else 2
+            self.region_type_combo.setCurrentIndex(reg.get("type_idx", default_reg_idx))
+            self.reg_bezel_height.setValue(reg.get("bezel_height", 14.0))
+
+            orig = cfg.get("origin", {})
+            self.origin_type_combo.setCurrentIndex(orig.get("type_idx", 1))
+            self.orig_x.setValue(orig.get("anchor_x", zone.cx or 0.0))
+            self.orig_y.setValue(orig.get("anchor_y", zone.cy or 0.0))
+            self.orig_snap_radius.setValue(orig.get("snap_radius", 80.0))
+
+            const = cfg.get("constraint", {})
+            self.constraint_type_combo.setCurrentIndex(const.get("type_idx", 0))
+            self.const_radius_spin.setValue(const.get("radius", 100.0))
+            self.const_half_w.setValue(const.get("half_w", 50.0))
+            self.const_half_h.setValue(const.get("half_h", 50.0))
+            self.const_leash_spin.setValue(const.get("leash_radius", 150.0))
+
+            trans = cfg.get("transform", {})
+            self.transform_type_combo.setCurrentIndex(trans.get("type_idx", 0))
+            self.trans_sens_x.setValue(trans.get("sens_x", 1.0))
+            self.trans_sens_y.setValue(trans.get("sens_y", 1.0))
+            self.trans_dir_deadzone.setValue(trans.get("deadzone", 0.0))
+            self.trans_dir_threshold.setValue(trans.get("threshold", 50.0))
+            self.trans_joy_dz.setValue(trans.get("joy_dz", 10.0))
+            self.trans_joy_walk.setValue(trans.get("joy_walk", 80.0))
+            self.trans_joy_sprint.setValue(trans.get("joy_sprint", 120.0))
+            self.trans_joy_hysteresis.setValue(trans.get("joy_hysteresis", 5.0))
+            self.trans_dt_interval.setValue(trans.get("dt_interval", 0.30))
+            self.trans_dt_dist.setValue(trans.get("dt_dist", 35.0))
+
+            sem = cfg.get("semantics", {})
+            default_sem_idx = 5 if zone.move_camera else 0
+            self.semantic_type_combo.setCurrentIndex(sem.get("type_idx", default_sem_idx))
+            self.is_mouse_btn_check.setChecked(sem.get("is_mouse_button", False))
+
+        except Exception:
             logger.exception("Failed to retrieve zone ID %s metadata", zone_id)
 
     def _on_save_pipeline(self) -> None:
@@ -417,11 +556,18 @@ class PipelinesPage(BasePage):
                 return
 
             reg_idx = self.region_type_combo.currentIndex()
-            z_type = "CIRCLE" if reg_idx == 1 else "RECTANGLE"
+            if reg_idx == 1:
+                z_type = "CIRCLE"
+            elif reg_idx == 3:
+                z_type = "BEZEL"
+            else:
+                z_type = "RECTANGLE"
+
+            serialized_config = json.dumps(self._get_pipeline_dict())
 
             zone_fields = {
                 "layout_id": active_layout.id,
-                "name": self.name_edit.text().strip(),
+                "name": self.name_edit.text().strip() or "Custom Pipeline",
                 "scancode": self.output_key_edit.text().strip() or "space",
                 "zone_type": z_type,
                 "priority": int(self.priority_spin.value()),
@@ -433,6 +579,7 @@ class PipelinesPage(BasePage):
                 "y1": self.reg_y1.value() if z_type == "RECTANGLE" else None,
                 "x2": self.reg_x2.value() if z_type == "RECTANGLE" else None,
                 "y2": self.reg_y2.value() if z_type == "RECTANGLE" else None,
+                "pipeline_config": serialized_config,
             }
 
             selected = self.pipeline_list.selectedItems()
@@ -447,7 +594,7 @@ class PipelinesPage(BasePage):
             self.load_active_layout_zones()
             if self.dispatcher:
                 self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
-            QMessageBox.information(self, "Saved", "Pipeline saved and synced to engine.")
+            QMessageBox.information(self, "Saved", "Pipeline saved and synced to active layout.")
         except Exception as exc:
             logger.exception("Failed to save pipeline zone")
             QMessageBox.critical(self, "Error", f"Could not save pipeline:\n{exc}")
@@ -483,6 +630,7 @@ class PipelinesPage(BasePage):
 
     def _apply_preset_fields(self, index: int) -> None:
         if index == 1:  # Button (Tap/Hold)
+            self.name_edit.setText("Button Zone")
             self.region_type_combo.setCurrentIndex(1)
             self.origin_type_combo.setCurrentIndex(1)
             self.constraint_type_combo.setCurrentIndex(0)
@@ -491,6 +639,7 @@ class PipelinesPage(BasePage):
             self.priority_spin.setValue(0)
 
         elif index == 2:  # Toggle Key
+            self.name_edit.setText("Toggle Key Zone")
             self.region_type_combo.setCurrentIndex(1)
             self.origin_type_combo.setCurrentIndex(1)
             self.constraint_type_combo.setCurrentIndex(0)
@@ -499,6 +648,7 @@ class PipelinesPage(BasePage):
             self.priority_spin.setValue(0)
 
         elif index == 3:  # Fixed Joystick
+            self.name_edit.setText("Fixed Joystick")
             self.region_type_combo.setCurrentIndex(1)
             self.origin_type_combo.setCurrentIndex(1)
             self.constraint_type_combo.setCurrentIndex(1)
@@ -507,6 +657,7 @@ class PipelinesPage(BasePage):
             self.priority_spin.setValue(0)
 
         elif index == 4:  # Floating Joystick
+            self.name_edit.setText("Floating Joystick")
             self.region_type_combo.setCurrentIndex(2)
             self.origin_type_combo.setCurrentIndex(0)
             self.constraint_type_combo.setCurrentIndex(3)
@@ -515,6 +666,7 @@ class PipelinesPage(BasePage):
             self.priority_spin.setValue(0)
 
         elif index == 5:  # Anchored Floating Joystick
+            self.name_edit.setText("Anchored Floating Joystick")
             self.region_type_combo.setCurrentIndex(2)
             self.origin_type_combo.setCurrentIndex(2)
             self.constraint_type_combo.setCurrentIndex(3)
@@ -523,6 +675,7 @@ class PipelinesPage(BasePage):
             self.priority_spin.setValue(0)
 
         elif index == 6:  # Relative Pointer
+            self.name_edit.setText("Look Area")
             self.region_type_combo.setCurrentIndex(0)
             self.origin_type_combo.setCurrentIndex(0)
             self.constraint_type_combo.setCurrentIndex(0)
@@ -531,6 +684,7 @@ class PipelinesPage(BasePage):
             self.priority_spin.setValue(-100)
 
         elif index == 7:  # Track Fire
+            self.name_edit.setText("Track Fire Button")
             self.region_type_combo.setCurrentIndex(1)
             self.origin_type_combo.setCurrentIndex(0)
             self.constraint_type_combo.setCurrentIndex(0)
@@ -539,6 +693,7 @@ class PipelinesPage(BasePage):
             self.priority_spin.setValue(0)
 
         elif index == 8:  # Bezel Return Toggle
+            self.name_edit.setText("Top Bezel Notch")
             self.region_type_combo.setCurrentIndex(3)
             self.origin_type_combo.setCurrentIndex(0)
             self.constraint_type_combo.setCurrentIndex(0)
@@ -547,6 +702,7 @@ class PipelinesPage(BasePage):
             self.priority_spin.setValue(150)
 
         elif index == 9:  # Double-Tap Toggle
+            self.name_edit.setText("Double-Tap Toggle")
             self.region_type_combo.setCurrentIndex(0)
             self.origin_type_combo.setCurrentIndex(0)
             self.constraint_type_combo.setCurrentIndex(0)
