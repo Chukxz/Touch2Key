@@ -1,340 +1,320 @@
 from __future__ import annotations
 
+import sys
 from typing import Optional
 
-from PySide6.QtWidgets import (
-    QDialog,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
-    QTableWidget,
-    QTableWidgetItem,
-    QPushButton,
-    QHeaderView,
-    QAbstractItemView,
-)
-from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QFont
-
-from interception.interception import Interception
 from interception.constants import FilterKeyFlag, FilterMouseButtonFlag, KeyFlag
+from interception.interception import Interception
 
 DEVICE_HEADERS = ["Device #", "Hardware ID"]
-
-# Interception numbers keyboards 0-9 and mice 10-19 (both ranges exclusive of
-# the upper bound), matching the numbering used by auto_capture_devices.
 KEYBOARD_RANGE = range(0, 10)
 MOUSE_RANGE = range(10, 20)
-
-# Standard PS/2 set-1 scan codes for ctrl/shift/alt (left + right variants
-# share the base code; the E0 prefix bit is stripped by the caller before
-# this comparison).
 _MODIFIER_SCANCODES = {0x1D, 0x2A, 0x36, 0x38}
 
 
-class DeviceListenerThread(QThread):
-    """Listens on the interception context for input from devices in
-    `device_range` and emits `device_detected(device_num, hwid)` the moment
-    it sees a qualifying stroke from one of them - a KEY_DOWN (non-modifier)
-    for keyboards, a left-button-down for mice.
-
-    Every stroke it reads is forwarded back with `context.send()` so input
-    is never eaten from the user's session, regardless of whether it came
-    from an in-range device or not.
-
-    `Interception.await_input(timeout_milliseconds=-1)` genuinely accepts a
-    timeout - `-1` just happens to reinterpret as `INFINITE` when passed to
-    `WaitForMultipleObjects` as an unsigned DWORD. We poll on
-    `poll_timeout_ms` (default 200ms) instead of relying on the infinite
-    default, so `stop()` is checked regularly even with no input arriving,
-    and `DeviceListDialog._shutdown_listener` can rely on `wait()` returning
-    promptly rather than needing a long grace period.
-    """
-
-    device_detected = Signal(int, str)  # device_num, hwid
-    error = Signal(str)
-
-    def __init__(
-        self,
-        context: Interception,
-        device_range: range,
-        *,
-        is_keyboard: bool,
-        poll_timeout_ms: int = 200,
-        parent=None,
-    ):
-        super().__init__(parent)
-        self.context = context
-        self.device_range = device_range
-        self.is_keyboard = is_keyboard
-        self.poll_timeout_ms = poll_timeout_ms
-        self._stop = False
-
-    def stop(self) -> None:
-        self._stop = True
-
-    def run(self) -> None:
-        target_filter_fn = (
-            self.context.is_keyboard if self.is_keyboard else self.context.is_mouse
-        )
-        other_filter_fn = (
-            self.context.is_mouse if self.is_keyboard else self.context.is_keyboard
-        )
-        active_flag = (
-            FilterKeyFlag.FILTER_KEY_DOWN
-            if self.is_keyboard
-            else FilterMouseButtonFlag.FILTER_MOUSE_LEFT_BUTTON_DOWN
-        )
-
-        try:
-            self.context.set_filter(target_filter_fn, active_flag)
-            self.context.set_filter(other_filter_fn, 0)
-        except Exception as exc:
-            self.error.emit(f"Failed to set filters: {exc}")
-            return
-
-        try:
-            while not self._stop:
-                device = self._await_input()
-                if device is None:
-                    continue  # poll timeout expired, nothing arrived - re-check _stop
-
-                stroke = self.context.devices[device].receive()
-                if stroke is None:
-                    continue
-
-                # Forward immediately regardless of range so nothing is lost.
-                self.context.send(device, stroke)
-
-                if device not in self.device_range:
-                    continue
-
-                if self._qualifies(stroke):
-                    raw_hwid = self.context.devices[device].get_HWID() or ""
-                    # Sanitize the C-buffer string to remove trailing junk/null bytes
-                    clean_hwid = raw_hwid.split("\x00")[0].strip()
-                    self.device_detected.emit(device, clean_hwid)
-        except Exception as exc:
-            self.error.emit(str(exc))
-        finally:
-            self._clear_filters(target_filter_fn, other_filter_fn)
-
-    def _await_input(self):
-        # Returns None on timeout as well as on genuine failure - both cases
-        # just mean "loop again and re-check _stop", so no need to tell them
-        # apart here.
-        return self.context.await_input(self.poll_timeout_ms)
-
-    def _qualifies(self, stroke) -> bool:
-        if not self.is_keyboard:
-            return True  # left-click filter already narrowed this to a click
-
-        if getattr(stroke, "flags", None) != KeyFlag.KEY_DOWN:
-            return False
-
-        scan_code = stroke.code & 0xFF  # strip E0 prefix bit if present
-        return scan_code not in _MODIFIER_SCANCODES
-
-    def _clear_filters(self, *filter_fns) -> None:
-        for fn in filter_fns:
-            try:
-                self.context.set_filter(fn, 0)
-            except Exception:
-                pass  # best-effort cleanup - dialog may already be closing
+def _qualifies_stroke(stroke, is_keyboard: bool) -> bool:
+    if not is_keyboard:
+        return True
+    if getattr(stroke, "flags", None) != KeyFlag.KEY_DOWN:
+        return False
+    scan_code = stroke.code & 0xFF
+    return scan_code not in _MODIFIER_SCANCODES
 
 
-class DeviceListDialog(QDialog):
-    """Lists interception devices in `device_range` and lets the user pick
-    one, either by clicking a row directly or by pressing/clicking the
-    physical device - a `DeviceListenerThread` runs for the lifetime of the
-    dialog and auto-selects (but does not auto-confirm) the matching row as
-    soon as it sees qualifying input from an in-range device.
-    """
+# ==========================================
+# CLI Headless Query Engine
+# ==========================================
 
-    def __init__(
-        self,
-        context: Interception,
-        device_range: range,
-        *,
-        is_keyboard: bool,
-        title: str = "Select Device",
-        prompt: str = "",
-    ):
-        super().__init__()
-        self.setWindowTitle(title)
-        self.context = context
-        self.device_range = device_range
-        self.is_keyboard = is_keyboard
-        self.selected_device: Optional[int] = None
-        self.selected_hwid: str = ""
+def _select_device_cli(
+    context: Interception,
+    device_range: range,
+    is_keyboard: bool,
+    prompt: str,
+) -> int | None:
+    print(f"\n[?] {prompt}")
+    print("Available devices detected in registry:")
 
-        self.v_layout = QVBoxLayout()
+    found_any = False
+    for dev in device_range:
+        raw_hwid = context.devices[dev].get_HWID()
+        if raw_hwid:
+            clean = raw_hwid.split("\x00")[0].strip()
+            print(f"    [{dev}] {clean}")
+            found_any = True
 
-        if prompt:
-            self.v_layout.addWidget(QLabel(prompt))
+    if not found_any:
+        print("    [!] No devices actively registered in this category.")
 
-        self.status_label = QLabel("Waiting for input from the target device...")
-        self.v_layout.addWidget(self.status_label)
+    print("\n>> Press a physical key/button on the target device (or enter device # manually, 'q' to abort): ")
 
-        self.table = QTableWidget()
-        self.table.setColumnCount(len(DEVICE_HEADERS))
-        self.table.setHorizontalHeaderLabels(DEVICE_HEADERS)
-        self.table.setFont(QFont("Courier", 10))
+    target_filter_fn = context.is_keyboard if is_keyboard else context.is_mouse
+    other_filter_fn = context.is_mouse if is_keyboard else context.is_keyboard
+    active_flag = (
+        FilterKeyFlag.FILTER_KEY_DOWN
+        if is_keyboard
+        else FilterMouseButtonFlag.FILTER_MOUSE_LEFT_BUTTON_DOWN
+    )
 
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.verticalHeader().setVisible(False)
-        self.table.cellActivated.connect(lambda row, col: self._handle_enter())
-
-        self.v_layout.addWidget(self.table)
-
-        btn_row = QHBoxLayout()
-        self.refresh_btn = QPushButton("Refresh List")
-        self.refresh_btn.clicked.connect(self._populate)
-        self.enter_btn = QPushButton("Confirm Selection")
-        self.enter_btn.clicked.connect(self._handle_enter)
-        btn_row.addWidget(self.refresh_btn)
-        btn_row.addWidget(self.enter_btn)
-        self.v_layout.addLayout(btn_row)
-
-        self.setLayout(self.v_layout)
-        self.resize(520, 420)
-
-        self._device_row: dict[int, int] = {}
-        self._populate()
-
-        self.listener = DeviceListenerThread(
-            context, device_range, is_keyboard=is_keyboard
-        )
-        self.listener.device_detected.connect(self._on_device_detected)
-        self.listener.error.connect(self._on_listener_error)
-        self.listener.start()
-
-    def _populate(self) -> None:
-        self.table.setRowCount(0)
-        self._device_row.clear()
-        for device_num in self.device_range:
-            raw_hwid = self.context.devices[device_num].get_HWID()
-            if raw_hwid is None:
-                continue
-            # Sanitize the C-buffer string
-            clean_hwid = raw_hwid.split("\x00")[0].strip()
-            self._add_row(device_num, clean_hwid)
-
-    def _add_row(self, device_num: int, hwid: str) -> int:
-        row = self.table.rowCount()
-        self.table.insertRow(row)
-
-        num_item = QTableWidgetItem(str(device_num))
-        num_item.setData(Qt.ItemDataRole.UserRole, device_num)
-        self.table.setItem(row, 0, num_item)
-        self.table.setItem(row, 1, QTableWidgetItem(hwid))
-
-        self._device_row[device_num] = row
-        return row
-
-    def _on_device_detected(self, device_num: int, hwid: str) -> None:
-        row = self._device_row.get(device_num)
-        if row is None:
-            row = self._add_row(device_num, hwid)
-
-        self.table.selectRow(row)
-        kind = "keyboard" if self.is_keyboard else "mouse"
-        self.status_label.setText(
-            f"Detected input from device {device_num} ({hwid[:40]}). "
-            f"Press Confirm, or use the other {kind} to pick a different one."
-        )
-
-    def _on_listener_error(self, message: str) -> None:
-        self.status_label.setText(f"Listener error: {message}")
-
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Escape:
-            self.reject()
-            return
-        super().keyPressEvent(event)
-
-    def _handle_enter(self) -> None:
-        row = self.table.currentRow()
-        if row < 0:  # No row selected
-            return
-
-        num_item = self.table.item(row, 0)
-        hwid_item = self.table.item(row, 1)
-        if num_item is None:
-            return
-
-        self.selected_device = num_item.data(Qt.ItemDataRole.UserRole)
-        self.selected_hwid = hwid_item.text() if hwid_item else ""
-        self.done(QDialog.DialogCode.Accepted)
-
-    def _shutdown_listener(self, wait_ms: int = 600) -> None:
-        """Stops the listener thread. `await_input` is polled at
-        `poll_timeout_ms` (default 200ms), so `stop()` should be picked up
-        and the thread should exit within roughly one poll interval; 600ms
-        leaves headroom for stroke processing and filter cleanup. If it
-        still hasn't stopped by then something is genuinely wrong (e.g.
-        `set_filter` hanging), and the thread is left running detached
-        rather than blocking the dialog close indefinitely.
-        """
-        if not self.listener.isRunning():
-            return
-        self.listener.stop()
-        if not self.listener.wait(wait_ms):
-            self.status_label.setText(
-                "Listener did not stop cleanly and was left running in the "
-                "background."
-            )
-
-    def done(self, result: int) -> None:
-        self._shutdown_listener()
-        super().done(result)
-
-    def reject(self) -> None:
-        self._shutdown_listener()
-        super().reject()
-
-
-def select_keyboard_then_mouse() -> Optional[tuple[int, int]]:
-    """Shows a keyboard selection dialog, then - only if confirmed - a mouse
-    selection dialog. Each dialog runs its own listener scoped to its device
-    category, so a keystroke during the mouse phase (or vice versa) is
-    forwarded but ignored for correlation purposes.
-
-    Returns `(keyboard_device, mouse_device)`, or `None` if either dialog was
-    cancelled (Escape / window close).
-    """
-    context = Interception()
     try:
-        kb_dialog = DeviceListDialog(
-            context,
+        context.set_filter(target_filter_fn, active_flag)
+        context.set_filter(other_filter_fn, 0)
+    except Exception as exc:
+        print(f"[!] Failed to bind interception filters: {exc}")
+        return None
+
+    try:
+        while True:
+            dev = context.await_input(150)
+            if dev is not None:
+                stroke = context.devices[dev].receive()
+                if stroke is not None:
+                    context.send(dev, stroke)
+                    if dev in device_range and _qualifies_stroke(stroke, is_keyboard):
+                        raw_hwid = context.devices[dev].get_HWID() or ""
+                        clean = raw_hwid.split("\x00")[0].strip()
+                        print(f"[+] Hardware detected: Device {dev} ({clean})")
+                        return dev
+    except KeyboardInterrupt:
+        print("\n[!] Input capture cancelled.")
+        return None
+    finally:
+        try:
+            context.set_filter(target_filter_fn, 0)
+            context.set_filter(other_filter_fn, 0)
+        except Exception:
+            pass
+
+
+def _select_devices_cli() -> Optional[tuple[int, int]]:
+    ctx = Interception()
+    try:
+        k_id = _select_device_cli(
+            ctx,
             KEYBOARD_RANGE,
             is_keyboard=True,
-            title="Select Keyboard Device",
-            prompt="Press any key on the keyboard you want to bind.",
+            prompt="Tap any non-modifier key on the KEYBOARD to bind:",
         )
-        if kb_dialog.exec_() != QDialog.DialogCode.Accepted:
+        if k_id is None:
             return None
-        keyboard_device = kb_dialog.selected_device
 
-        mouse_dialog = DeviceListDialog(
-            context,
+        m_id = _select_device_cli(
+            ctx,
             MOUSE_RANGE,
             is_keyboard=False,
-            title="Select Mouse Device",
-            prompt="Left-click with the mouse you want to bind.",
+            prompt="Left-click on the MOUSE to bind:",
         )
-        if mouse_dialog.exec_() != QDialog.DialogCode.Accepted:
+        if m_id is None:
             return None
-        mouse_device = mouse_dialog.selected_device
-    finally:
-        context.destroy()
 
-    if keyboard_device is None or mouse_device is None:
+        return k_id, m_id
+    finally:
+        ctx.destroy()
+
+
+# ==========================================
+# GUI Dialog Implementation
+# ==========================================
+
+def _create_gui_dialogs(context: Interception):
+    from PySide6.QtCore import QAbstractItemModel, Qt, QThread, Signal
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import (
+        QAbstractItemView,
+        QDialog,
+        QHBoxLayout,
+        QHeaderView,
+        QLabel,
+        QPushButton,
+        QTableWidget,
+        QTableWidgetItem,
+        QVBoxLayout,
+    )
+
+    class DeviceListenerThread(QThread):
+        device_detected = Signal(int, str)
+        error = Signal(str)
+
+        def __init__(self, ctx: Interception, dev_range: range, is_kb: bool, parent=None):
+            super().__init__(parent)
+            self.ctx = ctx
+            self.dev_range = dev_range
+            self.is_kb = is_kb
+            self._stop = False
+
+        def stop(self) -> None:
+            self._stop = True
+
+        def run(self) -> None:
+            target_filter = self.ctx.is_keyboard if self.is_kb else self.ctx.is_mouse
+            other_filter = self.ctx.is_mouse if self.is_kb else self.ctx.is_keyboard
+            active_flag = (
+                FilterKeyFlag.FILTER_KEY_DOWN
+                if self.is_kb
+                else FilterMouseButtonFlag.FILTER_MOUSE_LEFT_BUTTON_DOWN
+            )
+
+            try:
+                self.ctx.set_filter(target_filter, active_flag)
+                self.ctx.set_filter(other_filter, 0)
+            except Exception as exc:
+                self.error.emit(str(exc))
+                return
+
+            try:
+                while not self._stop:
+                    dev = self.ctx.await_input(200)
+                    if dev is None:
+                        continue
+                    stroke = self.ctx.devices[dev].receive()
+                    if stroke is None:
+                        continue
+                    self.ctx.send(dev, stroke)
+                    if dev in self.dev_range and _qualifies_stroke(stroke, self.is_kb):
+                        raw = self.ctx.devices[dev].get_HWID() or ""
+                        clean = raw.split("\x00")[0].strip()
+                        self.device_detected.emit(dev, clean)
+            except Exception as exc:
+                self.error.emit(str(exc))
+            finally:
+                try:
+                    self.ctx.set_filter(target_filter, 0)
+                    self.ctx.set_filter(other_filter, 0)
+                except Exception:
+                    pass
+
+    class DeviceListDialog(QDialog):
+        def __init__(
+            self,
+            ctx: Interception,
+            dev_range: range,
+            is_kb: bool,
+            title: str = "Select Device",
+            prompt: str = "",
+            parent=None,
+        ):
+            super().__init__(parent)
+            self.setWindowTitle(title)
+            self.ctx = ctx
+            self.dev_range = dev_range
+            self.is_kb = is_kb
+            self.selected_device: Optional[int] = None
+            self.selected_hwid: str = ""
+
+            layout = QVBoxLayout(self)
+            if prompt:
+                layout.addWidget(QLabel(prompt))
+
+            self.status_label = QLabel("Listening for input...")
+            layout.addWidget(self.status_label)
+
+            self.table = QTableWidget(self)
+            self.table.setColumnCount(len(DEVICE_HEADERS))
+            self.table.setHorizontalHeaderLabels(DEVICE_HEADERS)
+            self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+            self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+            self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+            self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+            self.table.verticalHeader().setVisible(False)
+            layout.addWidget(self.table)
+
+            btn_row = QHBoxLayout()
+            refresh_btn = QPushButton("Refresh List")
+            refresh_btn.clicked.connect(self._populate)
+            confirm_btn = QPushButton("Confirm Selection")
+            confirm_btn.clicked.connect(self._handle_confirm)
+            btn_row.addWidget(refresh_btn)
+            btn_row.addWidget(confirm_btn)
+            layout.addLayout(btn_row)
+
+            self.resize(520, 420)
+            self._populate()
+
+            self.listener = DeviceListenerThread(ctx, dev_range, is_kb, self)
+            self.listener.device_detected.connect(self._on_detected)
+            self.listener.start()
+
+        def _populate(self) -> None:
+            self.table.setRowCount(0)
+            for dev in self.dev_range:
+                raw = self.ctx.devices[dev].get_HWID()
+                if not raw:
+                    continue
+                clean = raw.split("\x00")[0].strip()
+                row = self.table.rowCount()
+                self.table.insertRow(row)
+                item_id = QTableWidgetItem(str(dev))
+                item_id.setData(Qt.ItemDataRole.UserRole, dev)
+                self.table.setItem(row, 0, item_id)
+                self.table.setItem(row, 1, QTableWidgetItem(clean))
+
+        def _on_detected(self, dev: int, hwid: str) -> None:
+            for r in range(self.table.rowCount()):
+                if self.table.item(r, 0).data(Qt.ItemDataRole.UserRole) == dev:
+                    self.table.selectRow(r)
+                    break
+            self.status_label.setText(f"Detected: Device #{dev} ({hwid[:35]}...)")
+
+        def _handle_confirm(self) -> None:
+            row = self.table.currentRow()
+            if row >= 0:
+                self.selected_device = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+                self.selected_hwid = self.table.item(row, 1).text()
+                self.done(QDialog.DialogCode.Accepted)
+
+        def closeEvent(self, event) -> None:
+            if self.listener.isRunning():
+                self.listener.stop()
+                self.listener.wait(400)
+            super().closeEvent(event)
+
+    return DeviceListDialog
+
+
+def _select_devices_gui(parent=None) -> Optional[tuple[int, int]]:
+    from PySide6.QtWidgets import QDialog
+
+    ctx = Interception()
+    DeviceListDialog = _create_gui_dialogs(ctx)
+    try:
+        kb_dlg = DeviceListDialog(
+            ctx,
+            KEYBOARD_RANGE,
+            is_kb=True,
+            title="Configure Keyboard Device",
+            prompt="Tap any physical key on the keyboard you wish to bind:",
+            parent=parent,
+        )
+        if kb_dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        kb_device = kb_dlg.selected_device
+
+        mouse_dlg = DeviceListDialog(
+            ctx,
+            MOUSE_RANGE,
+            is_kb=False,
+            title="Configure Mouse Device",
+            prompt="Click left mouse button on the device you wish to bind:",
+            parent=parent,
+        )
+        if mouse_dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        mouse_device = mouse_dlg.selected_device
+
+        if kb_device is not None and mouse_device is not None:
+            return kb_device, mouse_device
         return None
-    return keyboard_device, mouse_device
+    finally:
+        ctx.destroy()
+
+
+def select_keyboard_then_mouse(parent=None) -> Optional[tuple[int, int]]:
+    """Dual-mode device query. Automatically selects between CLI prompt and Qt Dialog."""
+    try:
+        from PySide6.QtWidgets import QApplication
+        if QApplication.instance() is not None:
+            return _select_devices_gui(parent=parent)
+    except ImportError:
+        pass
+
+    return _select_devices_cli()
