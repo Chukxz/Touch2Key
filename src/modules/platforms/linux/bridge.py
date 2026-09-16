@@ -1,7 +1,11 @@
-from ..base import AbstractBridge
+from __future__ import annotations
+
 import multiprocessing
 import threading
 from datetime import datetime as _datetime
+from typing import TYPE_CHECKING
+
+from ..base import AbstractBridge
 from .workers import keyboard_worker, mouse_worker
 
 from modules.utils import (
@@ -45,11 +49,11 @@ class UInputBridge(AbstractBridge):
         self._k_respawning = False
         self._m_respawning = False
 
-        # Keyboard: single pipe, one process
+        # Keyboard IPC
         self.k_pipe_read, self.k_pipe_write = multiprocessing.Pipe(duplex=False)
         self.k_proc = None
 
-        # Mouse: movement pipe + separate button pipe, one process, two threads
+        # Mouse IPC
         self.m_pipe_read, self.m_pipe_write = multiprocessing.Pipe(duplex=False)
         self.mb_pipe_read, self.mb_pipe_write = multiprocessing.Pipe(duplex=False)
         self.m_proc = None
@@ -66,38 +70,40 @@ class UInputBridge(AbstractBridge):
     def set_respawn_callback(self, callback):
         self._respawn_callback = callback
 
-    def start_worker_processes(self, k_device_handle, m_device_handle):
-        self.k_device_handle = (
-            k_device_handle  # No-op; Existing for compatibility purposes.
-        )
-        self.m_device_handle = (
-            m_device_handle  # No-op; Existing for compatibility purposes.
-        )
+    def start_worker_processes(self, k_device_handle=None, m_device_handle=None):
+        with self.bridge_lock:
+            self.k_device_handle = k_device_handle
+            self.m_device_handle = m_device_handle
 
-        self.k_proc = multiprocessing.Process(
-            target=keyboard_worker,
-            name="Keyboard Worker",
-            args=(self.k_pipe_read,),
-            daemon=True,
-        )
-        self.k_proc.start()
-        self.system_config.set_high_priority(self.k_proc.pid, "Keyboard")
+            self.k_proc = multiprocessing.Process(
+                target=keyboard_worker,
+                name="Keyboard Worker",
+                args=(self.k_pipe_read,),
+                daemon=True,
+            )
+            self.k_proc.start()
+            self.system_config.set_high_priority(self.k_proc.pid, "Keyboard")
 
-        self.m_proc = multiprocessing.Process(
-            target=mouse_worker,
-            name="Mouse Worker",
-            args=(self.m_pipe_read, self.mb_pipe_read),
-            daemon=True,
-        )
-        self.m_proc.start()
-        self.system_config.set_high_priority(self.m_proc.pid, "Mouse")
+            self.m_proc = multiprocessing.Process(
+                target=mouse_worker,
+                name="Mouse Worker",
+                args=(self.m_pipe_read, self.mb_pipe_read),
+                daemon=True,
+            )
+            self.m_proc.start()
+            self.system_config.set_high_priority(self.m_proc.pid, "Mouse")
 
-        self.heartbeat_thread.start()
-        print(
-            f"\n[BRIDGE] - UInput Dual Engine Started. K-PID: {self.k_proc.pid} | M-PID: {self.m_proc.pid}."
-        )
+            if not self.heartbeat_thread.is_alive():
+                self.heartbeat_thread.start()
 
-    # KEYBOARD API — Linux: state=1 down, state=0 up
+            print(
+                f"\n[BRIDGE] - UInput Dual Engine Started. K-PID: {self.k_proc.pid} | M-PID: {self.m_proc.pid}."
+            )
+
+    def reload_devices(self, new_k_handle: int | None, new_m_handle: int | None) -> None:
+        """UInput virtual devices do not bind to specific physical indices."""
+        pass
+
     def key_down(self, code):
         with self.bridge_lock:
             self._pressed_keys.add(code)
@@ -115,7 +121,6 @@ class UInputBridge(AbstractBridge):
             else:
                 self._pressed_keys.discard(code)
 
-    # MOUSE API
     def mouse_move_rel(self, dx, dy):
         try:
             self.m_pipe_write.send_bytes(PACK_REL.pack(TASK_REL, int(dx), int(dy)))
@@ -198,7 +203,6 @@ class UInputBridge(AbstractBridge):
             else:
                 self._mouse_middle_down = False
 
-    # KEEPALIVE
     def _heartbeat_loop(self):
         while not self._stop_heartbeat.wait(KEEPALIVE_INTERVAL):
             self.health_check()
@@ -220,7 +224,6 @@ class UInputBridge(AbstractBridge):
                     except OSError:
                         pass
 
-    # SYSTEM API — async respawn
     def health_check(self):
         if self.k_proc is not None and not self.k_proc.is_alive():
             self._trigger_respawn_keyboard()
@@ -241,11 +244,13 @@ class UInputBridge(AbstractBridge):
             print(
                 f"\n[BRIDGE] - Keyboard Worker Died: {_datetime.now().strftime('%H:%M:%S')}!"
             )
-
             with self.bridge_lock:
                 old_proc = self.k_proc
-                self.k_pipe_read.close()
-                self.k_pipe_write.close()
+                try:
+                    self.k_pipe_read.close()
+                    self.k_pipe_write.close()
+                except Exception:
+                    pass
                 self.k_pipe_read, self.k_pipe_write = multiprocessing.Pipe(duplex=False)
                 self.k_proc = multiprocessing.Process(
                     target=keyboard_worker,
@@ -265,7 +270,6 @@ class UInputBridge(AbstractBridge):
                     self._respawn_callback("keyboard")
                 except Exception as e:
                     print(f"\n[BRIDGE] - Respawn callback (keyboard) failed: {e}.")
-
         finally:
             with self._k_respawn_lock:
                 self._k_respawning = False
@@ -284,17 +288,17 @@ class UInputBridge(AbstractBridge):
             print(
                 f"\n[BRIDGE] - Mouse Worker Died: {_datetime.now().strftime('%H:%M:%S')}!"
             )
-
             with self.bridge_lock:
                 old_proc = self.m_proc
-                self.m_pipe_read.close()
-                self.m_pipe_write.close()
-                self.mb_pipe_read.close()
-                self.mb_pipe_write.close()
+                try:
+                    self.m_pipe_read.close()
+                    self.m_pipe_write.close()
+                    self.mb_pipe_read.close()
+                    self.mb_pipe_write.close()
+                except Exception:
+                    pass
                 self.m_pipe_read, self.m_pipe_write = multiprocessing.Pipe(duplex=False)
-                self.mb_pipe_read, self.mb_pipe_write = multiprocessing.Pipe(
-                    duplex=False
-                )
+                self.mb_pipe_read, self.mb_pipe_write = multiprocessing.Pipe(duplex=False)
                 self.m_proc = multiprocessing.Process(
                     target=mouse_worker,
                     name="Mouse Worker",
@@ -312,7 +316,6 @@ class UInputBridge(AbstractBridge):
                     self._respawn_callback("mouse")
                 except Exception as e:
                     print(f"\n[BRIDGE] - Respawn callback (mouse) failed: {e}.")
-
         finally:
             with self._m_respawn_lock:
                 self._m_respawning = False
@@ -350,9 +353,7 @@ class UInputBridge(AbstractBridge):
                 except OSError:
                     pass
 
-            self._mouse_left_down = self._mouse_right_down = self._mouse_middle_down = (
-                False
-            )
+            self._mouse_left_down = self._mouse_right_down = self._mouse_middle_down = False
 
     def release_all(self):
         print("\n[BRIDGE] - Emergency Release (UInput)...")
@@ -372,11 +373,10 @@ class UInputBridge(AbstractBridge):
                     self.mb_pipe_write.send_bytes(PACK_BUTTON.pack(TASK_BUTTON, btn_up))
                 except OSError:
                     pass
-            self._mouse_left_down = self._mouse_right_down = self._mouse_middle_down = (
-                False
-            )
+            self._mouse_left_down = self._mouse_right_down = self._mouse_middle_down = False
 
         print("[BRIDGE] - Release signals dispatched.")
 
     def shutdown(self):
         self._stop_heartbeat.set()
+        self.release_all()
