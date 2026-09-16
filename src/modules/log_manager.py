@@ -74,11 +74,20 @@ class AppLogManager:
         )
         root_logger.addHandler(cls._memory_handler)
 
-        # 2. Console Handler (CLI Mode: writes to the real stdout stream)
+        # 2. Dual Console Handlers (CLI Mode: stdout for info, stderr for warnings/errors)
         if not is_gui:
-            console_handler = logging.StreamHandler(cls._orig_stdout)
-            console_handler.setFormatter(formatter)
-            root_logger.addHandler(console_handler)
+            # Standard output handler (DEBUG & INFO only)
+            stdout_handler = logging.StreamHandler(cls._orig_stdout)
+            stdout_handler.setFormatter(formatter)
+            stdout_handler.addFilter(lambda record: record.levelno < logging.WARNING)
+            root_logger.addHandler(stdout_handler)
+
+            # Standard error handler (WARNING, ERROR, CRITICAL)
+            stderr_handler = logging.StreamHandler(cls._orig_stderr)
+            stderr_handler.setFormatter(formatter)
+            stderr_handler.setLevel(logging.WARNING)
+            root_logger.addHandler(stderr_handler)
+
 
         # 3. Intercept all global print() and sys.stderr outputs
         stdout_logger = logging.getLogger("STDOUT")
