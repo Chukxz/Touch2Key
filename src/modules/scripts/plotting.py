@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication, QMainWindow
 
 from modules.database import store
@@ -14,6 +15,10 @@ class PlotterWindow(QMainWindow):
         self.resize(1100, 700)
         self.plotter = LayoutPlotterWidget(self, standalone=True)
         self.setCentralWidget(self.plotter)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        store.close()
+        super().closeEvent(event)
 
 
 def run() -> None:
