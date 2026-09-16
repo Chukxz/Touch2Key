@@ -21,7 +21,14 @@ ENV/
 .coverage
 htmlcov/
 *.prof
+
+# Ignore all TOML files everywhere
 *.toml
+**/*.toml
+
+# Allow pyproject.toml at the root (and subdirectories if applicable)
+!pyproject.toml
+!**/pyproject.toml
 
 # === Distribution / Build ===
 dist/
