@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Touch2Key Driver, Rules, and Data Uninstaller.
-Uses PySide6 dialogs when invoked within a Qt application, otherwise standard CLI prompts.
+Driver, Rules, and Data Uninstaller (GUI & CLI compatible).
+Supports both Windows (Interception driver) and Linux (udev rules).
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from modules.database import store
@@ -31,6 +32,7 @@ logger = logging.getLogger("modules.scripts.uninstall")
 
 
 def _is_admin() -> bool:
+    """Checks for Administrator (Windows) or root (Linux) privileges."""
     if SYSTEM == "Windows":
         try:
             return ctypes.windll.shell32.IsUserAnAdmin() != 0
@@ -40,6 +42,7 @@ def _is_admin() -> bool:
 
 
 def _request_elevation() -> None:
+    """Requests elevation via Windows UAC or prints sudo warning on Linux."""
     if SYSTEM == "Windows":
         script = Path(__file__).resolve()
         params = " ".join(sys.argv[1:])
@@ -47,10 +50,11 @@ def _request_elevation() -> None:
             None, "runas", sys.executable, f'"{script}" {params}', os.getcwd(), 1
         )
     else:
-        print("[!] Please execute this script with 'sudo'.")
+        print("[!] Please re-run this script with 'sudo'.")
 
 
 def _kill_adb() -> None:
+    """Terminates active adb daemon instances across platforms."""
     cmd = (
         ["taskkill", "/F", "/IM", "adb.exe", "/T"]
         if SYSTEM == "Windows"
@@ -62,40 +66,43 @@ def _kill_adb() -> None:
         pass
 
 
-def purge_data():
+def purge_data(is_gui: bool) -> None:
+    """Deletes entire data directory (database, profiles, images, jsons, settings.toml)."""
     if DATA_FOLDER.exists():
-            shutil.rmtree(DATA_FOLDER, ignore_errors=True)
+        shutil.rmtree(DATA_FOLDER, ignore_errors=True)
 
-        if is_gui:
-            logger.info("Purged data folder: %s", DATA_FOLDER)
-        else:
-            print(
-                f"[+] User data, database, and configurations purged ({DATA_FOLDER})."
-            )
+    if is_gui:
+        logger.info("Purged data directory: %s", DATA_FOLDER)
+    else:
+        print(f"    - User data directory purged ({DATA_FOLDER}).")
 
 
-def purge_diagnostics():
+def purge_diagnostics(is_gui: bool) -> None:
+    """Deletes diagnostics/ and any stray .prof profiling files in the project root."""
     if DIAGNOSTICS_FOLDER.exists():
-            shutil.rmtree(DIAGNOSTICS_FOLDER, ignore_errors=True)
+        shutil.rmtree(DIAGNOSTICS_FOLDER, ignore_errors=True)
 
-        if is_gui:
-            logger.info("Purged diagnostics folder: %s", DIAGNOSTICS_FOLDER)
-        else:
-            print(
-                f"[+] Diagnostics purged ({DIAGNOSTICS_FOLDER})."
-            )
+    for prof_file in PROJECT_ROOT.glob("*.prof"):
+        prof_file.unlink(missing_ok=True)
+
+    if is_gui:
+        logger.info("Purged diagnostics folder and root profiling files.")
+    else:
+        print("    - Diagnostics and profiling files purged.")
 
 
-def purge_logs():
+def purge_logs(is_gui: bool) -> None:
+    """Deletes logs/ and any root session log files."""
     if LOGS_FOLDER.exists():
-            shutil.rmtree(LOGS_FOLDER, ignore_errors=True)
+        shutil.rmtree(LOGS_FOLDER, ignore_errors=True)
 
-        if is_gui:
-            logger.info("Purged logs folder: %s", LOGS_FOLDER)
-        else:
-            print(
-                f"[+] Logs purged ({LOGS_FOLDER})."
-            )
+    for log_file in PROJECT_ROOT.glob("*.log"):
+        log_file.unlink(missing_ok=True)
+
+    if is_gui:
+        logger.info("Purged logs directory: %s", LOGS_FOLDER)
+    else:
+        print(f"    - Session logs purged ({LOGS_FOLDER}).")
 
 
 def run(parent=None) -> bool:
@@ -108,15 +115,15 @@ def run(parent=None) -> bool:
     parser.add_argument(
         "--purge",
         action="store_true",
-        help="Delete entire data directory (database, profiles, images, jsons, settings)",
+        help="Delete data directory (database, profiles, images, jsons, settings.toml)",
     )
     parser.add_argument(
         "--purge-all",
         action="store_true",
-        help="Delete entire data directory, diagnostics and log files",
+        help="Delete data directory, diagnostics/profiling files, and session logs",
     )
     parser.add_argument(
-        "--no-restart", action="store_true", help="Skip system reboot prompt"
+        "--no-restart", action="store_true", help="Skip system reboot prompt on Windows"
     )
 
     if is_gui:
@@ -124,9 +131,13 @@ def run(parent=None) -> bool:
     else:
         args = parser.parse_args()
 
-    # 1. Elevation Check
+    # 1. Privilege Check
     if not _is_admin():
-        msg = "Administrator / Root privileges are required to uninstall drivers and rules."
+        msg = (
+            "Administrator privileges required (Windows)."
+            if SYSTEM == "Windows"
+            else "Root/Superuser privileges required (run with 'sudo')."
+        )
         if is_gui:
             logger.error(msg)
             QMessageBox.critical(parent, "Elevation Required", msg)
@@ -137,7 +148,7 @@ def run(parent=None) -> bool:
 
     # 2. Confirmation Prompt
     if not args.yes:
-        confirm_text = "Are you sure you want to remove the driver/rules?"
+        confirm_text = "Are you sure you want to remove the driver/rules and clean binaries?"
         if is_gui:
             res = QMessageBox.question(
                 parent,
@@ -154,14 +165,15 @@ def run(parent=None) -> bool:
                 print("[!] Aborted.")
                 return False
 
-    # 3. Clean active database handles & stop ADB
+    # 3. Teardown active handles and background processes
     try:
         store.close()
     except Exception:
         pass
     _kill_adb()
 
-    # 4. Driver / Rule Removal
+    # 4. OS-Specific Driver / Rules Removal
+    needs_reboot = False
     if SYSTEM == "Windows":
         installer_exe = (
             BIN_DIR
@@ -170,31 +182,83 @@ def run(parent=None) -> bool:
             / "install-interception.exe"
         )
         if installer_exe.exists():
-            subprocess.run([str(installer_exe), "/uninstall"], capture_output=True)
-            if is_gui:
-                logger.info("Interception driver uninstalled.")
-            else:
-                print("[+] Driver removed.")
-
-            # Reboot Prompt
-            if not args.no_restart:
-                reboot_text = "System restart is required to complete driver uninstallation. Restart now?"
-                reboot_now = False
+            res = subprocess.run([str(installer_exe), "/uninstall"], capture_output=True)
+            if res.returncode == 0:
+                needs_reboot = True
                 if is_gui:
-                    res = QMessageBox.question(
-                        parent,
-                        "Restart Required",
-                        reboot_text,
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    )
-                    reboot_now = res == QMessageBox.StandardButton.Yes
+                    logger.info("Interception driver uninstalled.")
                 else:
-                    print("\n" + "=" * 55)
-                    print("!!! SYSTEM RESTART REQUIRED !!!".center(55))
-                    print("=" * 55)
-                    reboot_now = input("Restart PC now? (y/N): ").strip().lower() == "y"
+                    print("[+] Interception driver uninstalled.")
+            else:
+                if is_gui:
+                    logger.warning("Interception driver uninstall command failed.")
+                else:
+                    print("[!] Driver uninstallation reported a non-zero exit code.")
+        else:
+            msg = "Interception installer binary not found in bin/."
+            if is_gui:
+                logger.warning(msg)
+            else:
+                print(f"[!] {msg}")
 
-                if reboot_now:
+    elif SYSTEM == "Linux":
+        if UDEV_RULE_PATH.exists():
+            UDEV_RULE_PATH.unlink(missing_ok=True)
+            subprocess.run(["udevadm", "control", "--reload-rules"], check=False)
+            subprocess.run(["udevadm", "trigger"], check=False)
+            if is_gui:
+                logger.info("Udev rule removed and subsystem reloaded.")
+            else:
+                print("[+] Udev rule removed and subsystem reloaded.")
+        else:
+            msg = f"Udev rule not found at {UDEV_RULE_PATH}."
+            if is_gui:
+                logger.warning(msg)
+            else:
+                print(f"[!] {msg}")
+
+    # 5. Remove Platform Binaries
+    if BIN_DIR.exists():
+        shutil.rmtree(BIN_DIR, ignore_errors=True)
+        if is_gui:
+            logger.info("Local platform binaries deleted.")
+        else:
+            print("    - Local platform binaries deleted.")
+
+    # 6. Purge Application Data
+    if args.purge or args.purge_all:
+        purge_data(is_gui=is_gui)
+
+    if args.purge_all:
+        purge_diagnostics(is_gui=is_gui)
+        purge_logs(is_gui=is_gui)
+
+    # 7. Final Notification / Reboot Workflow
+    if is_gui:
+        logger.info("Uninstall completed successfully.")
+        if SYSTEM == "Windows" and needs_reboot and not args.no_restart:
+            res = QMessageBox.question(
+                parent,
+                "Restart Required",
+                "Driver removal requires a reboot. Restart now in 5 seconds?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if res == QMessageBox.StandardButton.Yes:
+                subprocess.run(["shutdown", "/r", "/t", "5", "/c", "Uninstall complete."])
+                return True
+        else:
+            QMessageBox.information(
+                parent, "Uninstall Complete", "Uninstallation finished successfully."
+            )
+    else:
+        print("\n[+] Uninstall complete.")
+        if SYSTEM == "Windows":
+            if needs_reboot and not args.no_restart:
+                print("\n" + "=" * 55)
+                print(" SYSTEM RESTART REQUIRED ".center(55, "="))
+                print("=" * 55)
+                choice = input("Restart PC now in 5 seconds? (y/N): ").strip().lower()
+                if choice == "y":
                     subprocess.run(
                         [
                             "shutdown",
@@ -206,49 +270,13 @@ def run(parent=None) -> bool:
                         ]
                     )
                     return True
-        else:
-            msg = "Interception installer binary not found."
-            if is_gui:
-                logger.warning(msg)
-            else:
-                print(f"[!] {msg}")
-
-    elif SYSTEM == "Linux":
-        if UDEV_RULE_PATH.exists():
-            UDEV_RULE_PATH.unlink()
-            subprocess.run(["udevadm", "control", "--reload-rules"])
-            if is_gui:
-                logger.info("Udev rules removed and reloaded.")
-            else:
-                print("[+] Udev rules removed.")
-
-    # 5. Remove Binaries
-    if BIN_DIR.exists():
-        shutil.rmtree(BIN_DIR, ignore_errors=True)
-        if is_gui:
-            logger.info("Local binaries deleted.")
-        else:
-            print("    - Local binaries deleted.")
-
-    # 6. Purge Data Folder (DB, Images, JSONs, Profiles, TOML) and Diagnostics/Log Folders
-    if args.purge:
-        purge_func()
-    
-    if args.purge_all:
-        purge_func()
-        purge_diagnostics()
-        purge_logs()
-
-    if is_gui:
-        logger.info("Uninstall completed successfully.")
-        QMessageBox.information(
-            parent, "Uninstall Complete", "Uninstallation finished successfully."
-        )
-    else:
-        print("[+] Uninstall complete.")
+                else:
+                    print("[!] Please restart your computer manually to finalize removal.")
+            input("\nPress Enter to exit...")
 
     return True
 
 
 if __name__ == "__main__":
-    run()
+    if not run():
+        sys.exit(1)
