@@ -1,11 +1,4 @@
-"""
-Touch2Key main GUI window.
-
-Layout: menu bar + toolbar at top, sidebar navigation driving a
-central QStackedWidget, a right-hand status dock fed by
-EngineSignalBridge, a bottom log console dock fed by QtLogHandler, and
-a persistent status bar.
-"""
+# src/modules/gui/main_window.py
 
 from __future__ import annotations
 
@@ -29,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from modules.database import store
+from modules.gui.dialogs.wireless_connect_dialog import connect_wireless_gui
 from modules.gui.log_bridge import install_gui_logging
 from modules.gui.pages import (
     DashboardPage,
@@ -41,7 +35,6 @@ from modules.gui.pages import (
     SettingsPage,
 )
 from modules.gui.signal_bridge import EngineSignalBridge
-from modules.gui.dialogs.wireless_connect_dialog import connect_wireless_gui
 
 if TYPE_CHECKING:
     from modules.engine import Engine
@@ -50,7 +43,7 @@ logger = logging.getLogger("modules.gui")
 
 
 class EngineWorker(QObject):
-    """Worker object to run Engine.start_headless inside a separate QThread."""
+    """Worker object to execute Engine.start_headless inside a worker QThread."""
 
     started = Signal()
     finished = Signal()
@@ -73,8 +66,10 @@ class EngineWorker(QObject):
             )
             self.started.emit()
         except Exception as exc:
-            logger.exception("Engine failed to launch in worker thread")
+            logger.exception("Engine failed during execution")
             self.failed.emit(str(exc))
+        finally:
+            self.finished.emit()
 
 
 class MainWindow(QMainWindow):
@@ -123,12 +118,10 @@ class MainWindow(QMainWindow):
 
         self.start_action = QAction("&Start Engine", self)
         self.start_action.setShortcut(QKeySequence("Ctrl+R"))
-        self.start_action.triggered.connect(self._start_engine)
 
         self.stop_action = QAction("S&top Engine", self)
         self.stop_action.setShortcut(QKeySequence("Ctrl+T"))
         self.stop_action.setEnabled(False)
-        self.stop_action.triggered.connect(self._stop_engine)
 
         toolbar.addAction(self.start_action)
         toolbar.addAction(self.stop_action)
@@ -199,8 +192,9 @@ class MainWindow(QMainWindow):
         panel = QWidget()
         panel_layout = QHBoxLayout(panel)
         self.connection_label = QLabel("Device: Disconnected")
-        self.rate_label = QLabel("Rate: --")
+        self.rate_label = QLabel("Rate: -- PPS")
         self.cursor_label = QLabel("Cursor: Shown")
+
         for lbl in (self.connection_label, self.rate_label, self.cursor_label):
             panel_layout.addWidget(lbl)
         panel_layout.addStretch()
@@ -215,6 +209,14 @@ class MainWindow(QMainWindow):
                 f"Cursor: {'Shown' if visible else 'Hidden'}"
             )
         )
+        if hasattr(self.signal_bridge, "rate_updated"):
+            self.signal_bridge.rate_updated.connect(
+                lambda rate: self.rate_label.setText(f"Rate: {rate:.1f} PPS")
+            )
+        if hasattr(self.signal_bridge, "device_status_changed"):
+            self.signal_bridge.device_status_changed.connect(
+                lambda status: self.connection_label.setText(f"Device: {status}")
+            )
 
     # ---- Bottom Log Dock ----------------------------------------------------
     def _build_log_dock(self) -> None:
@@ -270,17 +272,20 @@ class MainWindow(QMainWindow):
             self.engine = Engine(headless=True)
             self.signal_bridge.bind(self.engine.mapper_event_dispatcher)
 
-            # Update all pages with the active dispatcher instance
+            # Route engine dispatcher directly to child pages
             for page in self.pages:
                 page.dispatcher = self.engine.mapper_event_dispatcher
 
-            self.engine_thread = QThread()
+            self.engine_thread = QThread(self)
             self.engine_worker = EngineWorker(self.engine, target_window_id)
             self.engine_worker.moveToThread(self.engine_thread)
 
             self.engine_thread.started.connect(self.engine_worker.run)
             self.engine_worker.started.connect(self._on_engine_started)
             self.engine_worker.failed.connect(self._on_engine_failed)
+            self.engine_worker.finished.connect(self.engine_thread.quit)
+            self.engine_worker.finished.connect(self.engine_worker.deleteLater)
+            self.engine_thread.finished.connect(self.engine_thread.deleteLater)
 
             self.engine_thread.start()
 
@@ -301,8 +306,11 @@ class MainWindow(QMainWindow):
         self._stop_engine()
 
     def _cleanup_engine(self) -> None:
-        # Unbind signals cleanly before clearing references
         self.signal_bridge.unbind()
+
+        # Restore the standalone dispatcher for GUI pages
+        for page in self.pages:
+            page.dispatcher = self.signal_bridge.dispatcher
 
         if self.engine_thread and self.engine_thread.isRunning():
             self.engine_thread.quit()
@@ -329,4 +337,5 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         if self.engine is not None:
             self._stop_engine()
+        store.close()
         super().closeEvent(event)
