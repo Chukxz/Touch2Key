@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """
 Touch2Key Driver, Rules, and Data Uninstaller.
-Supports interactive prompt or non-interactive flag execution (-y / --purge).
+Uses PySide6 dialogs when invoked within a Qt application, otherwise standard CLI prompts.
 """
 
 from __future__ import annotations
 
 import argparse
 import ctypes
+import logging
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from modules.database import store
 from modules.database.connection import DB_PATH
@@ -25,9 +27,10 @@ from modules.utils import (
     UDEV_RULE_PATH,
 )
 
+logger = logging.getLogger("modules.scripts.uninstall")
+
 
 def _is_admin() -> bool:
-    """Checks if script is running with elevated privileges."""
     if SYSTEM == "Windows":
         try:
             return ctypes.windll.shell32.IsUserAnAdmin() != 0
@@ -37,7 +40,6 @@ def _is_admin() -> bool:
 
 
 def _request_elevation() -> None:
-    """Restarts the script with admin privileges in the current working directory."""
     if SYSTEM == "Windows":
         script = Path(__file__).resolve()
         params = " ".join(sys.argv[1:])
@@ -45,11 +47,10 @@ def _request_elevation() -> None:
             None, "runas", sys.executable, f'"{script}" {params}', os.getcwd(), 1
         )
     else:
-        print("[!] Please run this uninstaller with 'sudo'.")
+        print("[!] Please execute this script with 'sudo'.")
 
 
 def _kill_adb() -> None:
-    print("[+] Checking for running ADB processes...")
     cmd = (
         ["taskkill", "/F", "/IM", "adb.exe", "/T"]
         if SYSTEM == "Windows"
@@ -57,43 +58,63 @@ def _kill_adb() -> None:
     )
     try:
         subprocess.run(cmd, capture_output=True, check=False)
-        print("[+] ADB cleanup finished.")
-    except Exception as e:
-        print(f"[!] Note: ADB process cleanup skipped: {e}")
+    except Exception:
+        pass
 
 
-def run() -> None:
-    parser = argparse.ArgumentParser(description="Touch2Key Driver/Rules and Data Uninstaller")
+def run(parent=None) -> bool:
+    is_gui = QApplication.instance() is not None
+
+    parser = argparse.ArgumentParser(description="Touch2Key Uninstaller")
     parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
-    parser.add_argument("--purge", action="store_true", help="Purge database, profiles, and images")
-    parser.add_argument("--no-restart", action="store_true", help="Do not prompt to restart Windows")
-    args = parser.parse_args()
+    parser.add_argument("--purge", action="store_true", help="Delete database, profiles, and images")
+    parser.add_argument("--no-restart", action="store_true", help="Skip system reboot prompt")
 
-    # Elevation check
+    # In GUI mode, ignore CLI argv parsing errors
+    if is_gui:
+        args, _ = parser.parse_known_args()
+    else:
+        args = parser.parse_args()
+
+    # 1. Elevation Check
     if not _is_admin():
-        print("[!] This uninstaller requires Administrator/Root privileges.")
-        _request_elevation()
-        return
+        msg = "Administrator / Root privileges are required to uninstall drivers and rules."
+        if is_gui:
+            logger.error(msg)
+            QMessageBox.critical(parent, "Elevation Required", msg)
+        else:
+            print(f"[!] {msg}")
+            _request_elevation()
+        return False
 
-    # Interactive confirmation if -y is not passed
+    # 2. Confirmation Prompt
     if not args.yes:
-        confirm = input("Are you sure you want to uninstall Touch2Key drivers/rules? (y/N): ").strip().lower()
-        if confirm != "y":
-            print("[!] Uninstallation cancelled.")
-            return
+        confirm_text = "Are you sure you want to remove the driver/rules?"
+        if is_gui:
+            res = QMessageBox.question(
+                parent,
+                "Confirm Uninstall",
+                confirm_text,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if res != QMessageBox.StandardButton.Yes:
+                return False
+        else:
+            confirm = input(f"{confirm_text} (y/N): ").strip().lower()
+            if confirm != "y":
+                print("[!] Aborted.")
+                return False
 
-    # Close active database connections
+    # 3. Clean active database handles & stop ADB
     try:
         store.close()
     except Exception:
         pass
-
-    # Stop background ADB instances
     _kill_adb()
 
-    # Platform Driver Removal
+    # 4. Driver / Rule Removal
     if SYSTEM == "Windows":
-        print("\n--- Uninstalling Interception Driver ---")
         installer_exe = (
             BIN_DIR
             / "Interception"
@@ -102,43 +123,61 @@ def run() -> None:
         )
         if installer_exe.exists():
             subprocess.run([str(installer_exe), "/uninstall"], capture_output=True)
-            print("[+] Driver removed.")
+            if is_gui:
+                logger.info("Interception driver uninstalled.")
+            else:
+                print("[+] Driver removed.")
 
+            # Reboot Prompt
             if not args.no_restart:
-                print("\n" + "=" * 55)
-                print("!!! SYSTEM RESTART REQUIRED !!!".center(55))
-                print("=" * 55)
-                choice = input("Restart PC now? (y/N): ").strip().lower()
-                if choice == "y":
+                reboot_text = "System restart is required to complete driver uninstallation. Restart now?"
+                reboot_now = False
+                if is_gui:
+                    res = QMessageBox.question(
+                        parent,
+                        "Restart Required",
+                        reboot_text,
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    )
+                    reboot_now = (res == QMessageBox.StandardButton.Yes)
+                else:
+                    print("\n" + "=" * 55)
+                    print("!!! SYSTEM RESTART REQUIRED !!!".center(55))
+                    print("=" * 55)
+                    reboot_now = input("Restart PC now? (y/N): ").strip().lower() == "y"
+
+                if reboot_now:
                     subprocess.run(
                         ["shutdown", "/r", "/t", "5", "/c", "Touch2Key driver uninstallation complete."]
                     )
-                    return
+                    return True
         else:
-            print("[!] Interception installer binary not found. Driver may require manual removal.")
+            msg = "Interception installer binary not found."
+            if is_gui:
+                logger.warning(msg)
+            else:
+                print(f"[!] {msg}")
 
     elif SYSTEM == "Linux":
-        print("\n--- Removing Udev Rules ---")
         if UDEV_RULE_PATH.exists():
             UDEV_RULE_PATH.unlink()
             subprocess.run(["udevadm", "control", "--reload-rules"])
-            print("[+] Udev rules removed.")
-        else:
-            print("[!] Udev rule file not found.")
+            if is_gui:
+                logger.info("Udev rules removed and reloaded.")
+            else:
+                print("[+] Udev rules removed.")
 
-    # Remove Downloaded Binaries
+    # 5. Remove Binaries
     if BIN_DIR.exists():
         shutil.rmtree(BIN_DIR, ignore_errors=True)
-        print("    - Local binaries deleted.")
 
-    # Purge Database and User Assets
+    # 6. Purge Database and Artifacts
     if args.purge:
         if IMAGES_FOLDER.exists():
             shutil.rmtree(IMAGES_FOLDER, ignore_errors=True)
         if JSONS_FOLDER.exists():
             shutil.rmtree(JSONS_FOLDER, ignore_errors=True)
 
-        # Remove SQLite DB and WAL artifacts
         for ext in ("", "-wal", "-shm"):
             db_file = Path(f"{DB_PATH}{ext}")
             if db_file.exists():
@@ -146,9 +185,19 @@ def run() -> None:
                     db_file.unlink()
                 except Exception:
                     pass
-        print("    - Database, images, and user data purged.")
 
-    print("\n[+] Uninstallation complete.")
+        if is_gui:
+            logger.info("Purged user images, JSON profiles, and SQLite database.")
+        else:
+            print("[+] User data and SQLite database purged.")
+
+    if is_gui:
+        logger.info("Uninstall completed successfully.")
+        QMessageBox.information(parent, "Uninstall Complete", "Uninstallation finished successfully.")
+    else:
+        print("[+] Uninstall complete.")
+
+    return True
 
 
 if __name__ == "__main__":
