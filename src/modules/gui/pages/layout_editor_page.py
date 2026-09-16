@@ -1,5 +1,3 @@
-# src/modules/gui/pages/layout_editor_page.py
-
 from __future__ import annotations
 
 import logging
@@ -21,11 +19,11 @@ from PySide6.QtWidgets import (
 )
 
 from modules.database import store
-from modules.database.config_io import export_layout_json
+from modules.database.config_io import export_bundle, export_layout_json, import_any
 from modules.database.legacy_migration import migrate_json_layout
 from modules.gui.widgets.layout_plotter_widget import LayoutPlotterWidget
 from modules.scripts.adb_screen_capture import capture_android_screen
-from modules.utils import CIRCLE, JSONS_FOLDER, RECTANGLE, MapperEvent
+from modules.utils import CIRCLE, JSONS_FOLDER, PROFILES_FOLDER, RECTANGLE, MapperEvent
 from .base_page import BasePage
 
 if TYPE_CHECKING:
@@ -58,13 +56,15 @@ class LayoutEditorPage(BasePage):
         top_toolbar.addSpacing(16)
 
         self.switch_layout_btn = QPushButton("Switch Layout")
-        self.import_btn = QPushButton("Import (.json)")
-        self.export_btn = QPushButton("Export (.json)")
+        self.import_btn = QPushButton("Import Config / Layout")
+        self.export_btn = QPushButton("Export Layout (.json)")
+        self.export_bundle_btn = QPushButton("Export Bundle")
         self.capture_btn = QPushButton("Capture Reference Screenshot")
 
         top_toolbar.addWidget(self.switch_layout_btn)
         top_toolbar.addWidget(self.import_btn)
         top_toolbar.addWidget(self.export_btn)
+        top_toolbar.addWidget(self.export_bundle_btn)
         top_toolbar.addWidget(self.capture_btn)
         top_toolbar.addStretch()
 
@@ -112,8 +112,9 @@ class LayoutEditorPage(BasePage):
 
     def _wire_signals(self) -> None:
         self.switch_layout_btn.clicked.connect(self.open_switch_layout_dialog)
-        self.import_btn.clicked.connect(self.import_layout)
+        self.import_btn.clicked.connect(self.import_config_or_layout)
         self.export_btn.clicked.connect(self.open_export_dialog)
+        self.export_bundle_btn.clicked.connect(self._on_export_bundle)
         self.capture_btn.clicked.connect(self._trigger_screenshot_capture)
 
         self.priority_spin.valueChanged.connect(self.on_priority_changed)
@@ -129,7 +130,6 @@ class LayoutEditorPage(BasePage):
             self.plotter_widget.zone_selected.connect(self._on_zone_selected_on_canvas)
 
     def _start_draw_mode(self, shape_type: int, clicks: int) -> None:
-        """Ensures an active layout exists before entering draw mode."""
         active = store.get_active_layout()
         if active is None:
             name, ok = QInputDialog.getText(
@@ -158,7 +158,6 @@ class LayoutEditorPage(BasePage):
         self.plotter_widget.start_mode(shape_type, clicks)
 
     def _on_zone_selected_on_canvas(self, priority: int) -> None:
-        """Updates priority spinbox to reflect the currently active zone on canvas."""
         self.priority_spin.blockSignals(True)
         self.priority_spin.setValue(priority)
         self.priority_spin.blockSignals(False)
@@ -171,7 +170,6 @@ class LayoutEditorPage(BasePage):
                 self.plotter_widget.update_title(f"Zone ID {entry_id} Priority set to {val}", True)
 
     def _on_save_button_clicked(self) -> None:
-        """Saves zones directly to the active layout if one exists, otherwise prompts for a name."""
         active = store.get_active_layout()
         if active is not None and hasattr(self.plotter_widget, "save_to_database"):
             self.plotter_widget.save_to_database(active.name)
@@ -263,36 +261,31 @@ class LayoutEditorPage(BasePage):
         cancel_btn.clicked.connect(dialog.reject)
         dialog.exec()
 
-    def import_layout(self) -> None:
+    def import_config_or_layout(self) -> None:
         JSONS_FOLDER.mkdir(parents=True, exist_ok=True)
         file_path_str, _ = QFileDialog.getOpenFileName(
             self,
-            "Select JSON Mapping Profile to Import",
+            "Select Layout (.json) or Config (.toml) to Import",
             str(JSONS_FOLDER),
-            "JSON files (*.json);;All files (*.*)",
+            "Configurations (*.json *.toml);;JSON Layouts (*.json);;TOML Configs (*.toml);;All files (*.*)",
         )
         if not file_path_str:
             return
 
         file_path = Path(file_path_str)
-        if not file_path.exists():
-            QMessageBox.critical(self, "Error", f"File '{file_path.name}' not found.")
-            return
-
         try:
-            layout_id = migrate_json_layout(json_path=file_path, image_path="", set_active=True)
-            if layout_id is not None:
+            if import_any(file_path):
                 self.refresh_active_layout_display()
                 self.plotter_widget.reload_active_layout()
                 self._notify_engine_reload()
-                logger.info("Imported layout profile from '%s' (ID: %s)", file_path.name, layout_id)
+                logger.info("Imported configuration from '%s'", file_path.name)
                 QMessageBox.information(
                     self,
                     "Success",
-                    f"Imported '{file_path.stem}' successfully!\nIt is now set as the active layout.",
+                    f"Imported '{file_path.stem}' successfully and updated active state.",
                 )
             else:
-                logger.warning("Failed to import '%s': format invalid or unsupported", file_path.name)
+                logger.warning("Failed to import '%s': format invalid", file_path.name)
                 QMessageBox.critical(
                     self,
                     "Error",
@@ -300,7 +293,7 @@ class LayoutEditorPage(BasePage):
                 )
         except Exception as exc:
             logger.exception("Unexpected error while importing '%s'", file_path.name)
-            QMessageBox.critical(self, "Import Error", f"Failed to import profile:\n{exc}")
+            QMessageBox.critical(self, "Import Error", f"Failed to import:\n{exc}")
 
     def open_export_dialog(self) -> None:
         try:
@@ -377,6 +370,26 @@ class LayoutEditorPage(BasePage):
             )
         except Exception as exc:
             logger.exception("Layout export failed for ID %s ('%s')", layout.id, layout.name)
+            QMessageBox.critical(self, "Export Failed", str(exc))
+
+    def _on_export_bundle(self) -> None:
+        PROFILES_FOLDER.mkdir(parents=True, exist_ok=True)
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Destination Folder for Profile Bundle", str(PROFILES_FOLDER)
+        )
+        if not folder:
+            return
+
+        try:
+            t_file, j_file = export_bundle(Path(folder))
+            logger.info("Exported bundle to %s", folder)
+            QMessageBox.information(
+                self,
+                "Bundle Exported",
+                f"Exported configuration bundle:\n- {t_file.name}\n- {j_file.name}",
+            )
+        except Exception as exc:
+            logger.exception("Bundle export failed")
             QMessageBox.critical(self, "Export Failed", str(exc))
 
     def _trigger_screenshot_capture(self) -> None:
