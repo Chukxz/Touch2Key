@@ -114,6 +114,8 @@ MIDDLE_BUTTON_DOWN, MIDDLE_BUTTON_UP = 0x0010, 0x0020
 WINDOWS_HEADERS = ["Window ID", "Title", "Class Name", "Left", "Top", "Width", "Height"]
 PORT = "5555"
 
+Callback = Callable[..., None]
+
 EVENT_TYPE = Literal[
     "ON_CONFIG_RELOAD",
     "ON_LAYOUT_RELOAD",
@@ -173,22 +175,29 @@ class TouchEvent:
 
 @dataclass(slots=True)
 class MapperEvent:
-    action: EVENT_TYPE,
-    is_visible: bool = True,
-    sum_dx: float | None = None,
-    sum_dy: float | None = None,
-    acc_x: float | None = None,
-    acc_y: float | None = None,
-    worker_type: str | None = None,
-    target_window_id: int | None = None,
+    action: EVENT_TYPE
+    is_visible: bool = True
+    sum_dx: float | None = None
+    sum_dy: float | None = None
+    acc_x: float | None = None
+    acc_y: float | None = None
+    worker_type: str | None = None
+    target_window_id: int | None = None
 
 
 class MapperEventDispatcher:
     """Thread-safe event dispatcher for cross-thread engine and GUI notifications."""
 
-    def __init__(self):
+    _NO_ARGS: frozenset[EVENT_TYPE] = frozenset({
+        "ON_CONFIG_RELOAD",
+        "ON_LAYOUT_RELOAD",
+        "ON_WASD_BLOCK",
+    })
+
+    def __init__(self) -> None:
         self._lock = threading.Lock()
-        self.callback_registry: dict[str, list] = {
+
+        self.callback_registry: dict[EVENT_TYPE, list[Callback]] = {
             "ON_CONFIG_RELOAD": [],
             "ON_LAYOUT_RELOAD": [],
             "ON_WASD_BLOCK": [],
@@ -198,41 +207,70 @@ class MapperEventDispatcher:
             "ON_TARGET_WINDOW_CHANGE": [],
         }
 
-    def register_callback(self, event_type: EVENT_TYPE, func) -> None:
+    def register_callback(
+        self,
+        event_type: EVENT_TYPE,
+        func: Callback,
+    ) -> None:
         with self._lock:
-            if event_type in self.callback_registry:
-                if func not in self.callback_registry[event_type]:
-                    self.callback_registry[event_type].append(func)
+            callbacks = self.callback_registry[event_type]
 
-    def unregister_callback(self, event_type: EVENT_TYPE, func) -> None:
+            if func not in callbacks:
+                callbacks.append(func)
+
+    def unregister_callback(
+        self,
+        event_type: EVENT_TYPE,
+        func: Callback,
+    ) -> None:
         with self._lock:
-            if event_type in self.callback_registry and func in self.callback_registry[event_type]:
-                self.callback_registry[event_type].remove(func)
+            callbacks = self.callback_registry[event_type]
 
-    def dispatch(self, event_object: MapperEvent) -> None:
-        key = event_object.action
+            if func in callbacks:
+                callbacks.remove(func)
+
+    def dispatch(self, event: MapperEvent) -> None:
         with self._lock:
-            callbacks = list(self.callback_registry.get(key, []))
+            callbacks = tuple(
+                self.callback_registry.get(event.action, ())
+            )
 
-        for func in callbacks:
+        args = self._get_callback_args(event)
+
+        for callback in callbacks:
             try:
-                if key in ("ON_CONFIG_RELOAD", "ON_LAYOUT_RELOAD", "ON_WASD_BLOCK"):
-                    func()
-                elif key == "ON_TARGET_WINDOW_CHANGE":
-                    func(event_object.target_window_id)
-                elif key == "ON_MENU_MODE_TOGGLE":
-                    func(event_object.is_visible)
-                elif key == "ON_AGGREGATION":
-                    func(
-                        event_object.sum_dx,
-                        event_object.sum_dy,
-                        event_object.acc_x,
-                        event_object.acc_y,
-                    )
-                elif key == "ON_WORKER_RESPAWN":
-                    func(event_object.worker_type)
+                callback(*args)
             except Exception:
-                pass
+                logger.exception(
+                    "Error in callback for event %s",
+                    event.action,
+                )
+
+    @staticmethod
+    def _get_callback_args(event: MapperEvent) -> tuple:
+        action = event.action
+
+        if action in MapperEventDispatcher._NO_ARGS:
+            return ()
+
+        if action == "ON_MENU_MODE_TOGGLE":
+            return (event.is_visible,)
+
+        if action == "ON_AGGREGATION":
+            return (
+                event.sum_dx,
+                event.sum_dy,
+                event.acc_x,
+                event.acc_y,
+            )
+
+        if action == "ON_WORKER_RESPAWN":
+            return (event.worker_type,)
+
+        if action == "ON_TARGET_WINDOW_CHANGE":
+            return (event.target_window_id,)
+
+        return ()
 
 
 SCANCODES = {
