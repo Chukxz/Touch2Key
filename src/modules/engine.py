@@ -326,11 +326,8 @@ class Engine:
             return
         self.is_shutting_down = True
 
-        # Unregister active dispatcher callbacks
-        self.mapper_event_dispatcher.unregister_callback("ON_DEVICES_CHANGED", self._on_devices_changed)
-        self.mapper_event_dispatcher.unregister_callback("ON_LAYOUT_RELOAD", self._on_layout_reload)
-        self.mapper_event_dispatcher.unregister_callback("ON_MENU_MODE_TOGGLE", self._set_is_visible)
-
+        # Flushes every callback across the entire engine and child mappers
+        self.mapper_event_dispatcher.unregister_all()
 
         if not self.headless:
             try:
