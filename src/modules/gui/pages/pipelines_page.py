@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -25,6 +26,8 @@ from .base_page import BasePage
 
 if TYPE_CHECKING:
     from modules.utils import MapperEventDispatcher
+
+logger = logging.getLogger("modules.gui.pipelines_page")
 
 
 class PipelinesPage(BasePage):
@@ -369,83 +372,100 @@ class PipelinesPage(BasePage):
 
     def load_active_layout_zones(self) -> None:
         self.pipeline_list.clear()
-        zones = store.get_active_layout_zones()
-        for zone in zones:
-            item = QListWidgetItem(f"{zone.name or 'Zone'} [{zone.scancode}] (Prio: {zone.priority})")
-            item.setData(Qt.ItemDataRole.UserRole, zone.id)
-            self.pipeline_list.addItem(item)
+        try:
+            zones = store.get_active_layout_zones()
+            for zone in zones:
+                item = QListWidgetItem(f"{zone.name or 'Zone'} [{zone.scancode}] (Prio: {zone.priority})")
+                item.setData(Qt.ItemDataRole.UserRole, zone.id)
+                self.pipeline_list.addItem(item)
+        except Exception as exc:
+            logger.exception("Failed to load active layout zones from database")
 
     def _on_zone_selected(self) -> None:
         items = self.pipeline_list.selectedItems()
         if not items:
             return
         zone_id = items[0].data(Qt.ItemDataRole.UserRole)
-        zone = store.zones.get(zone_id)
-        if not zone:
-            return
+        try:
+            zone = store.zones.get(zone_id)
+            if not zone:
+                return
 
-        self.name_edit.setText(zone.name)
-        self.priority_spin.setValue(zone.priority)
-        self.output_key_edit.setText(zone.scancode)
+            self.name_edit.setText(zone.name)
+            self.priority_spin.setValue(zone.priority)
+            self.output_key_edit.setText(zone.scancode)
 
-        if zone.zone_type == "CIRCLE":
-            self.region_type_combo.setCurrentIndex(1)
-            self.reg_center_x.setValue(zone.cx or 0.0)
-            self.reg_center_y.setValue(zone.cy or 0.0)
-            self.reg_radius.setValue(zone.r or 50.0)
-        else:
-            self.region_type_combo.setCurrentIndex(2)
-            self.reg_x1.setValue(zone.x1 or 0.0)
-            self.reg_y1.setValue(zone.y1 or 0.0)
-            self.reg_x2.setValue(zone.x2 or 0.0)
-            self.reg_y2.setValue(zone.y2 or 0.0)
+            if zone.zone_type == "CIRCLE":
+                self.region_type_combo.setCurrentIndex(1)
+                self.reg_center_x.setValue(zone.cx or 0.0)
+                self.reg_center_y.setValue(zone.cy or 0.0)
+                self.reg_radius.setValue(zone.r or 50.0)
+            else:
+                self.region_type_combo.setCurrentIndex(2)
+                self.reg_x1.setValue(zone.x1 or 0.0)
+                self.reg_y1.setValue(zone.y1 or 0.0)
+                self.reg_x2.setValue(zone.x2 or 0.0)
+                self.reg_y2.setValue(zone.y2 or 0.0)
+        except Exception as exc:
+            logger.exception("Failed to retrieve zone ID %s metadata", zone_id)
 
     def _on_save_pipeline(self) -> None:
-        active_layout = store.get_active_layout()
-        if not active_layout:
-            QMessageBox.warning(self, "No Active Layout", "Please set an active layout before saving pipelines.")
-            return
+        try:
+            active_layout = store.get_active_layout()
+            if not active_layout:
+                QMessageBox.warning(self, "No Active Layout", "Please set an active layout before saving pipelines.")
+                return
 
-        reg_idx = self.region_type_combo.currentIndex()
-        z_type = "CIRCLE" if reg_idx == 1 else "RECTANGLE"
+            reg_idx = self.region_type_combo.currentIndex()
+            z_type = "CIRCLE" if reg_idx == 1 else "RECTANGLE"
 
-        zone_fields = {
-            "layout_id": active_layout.id,
-            "name": self.name_edit.text().strip(),
-            "scancode": self.output_key_edit.text().strip() or "space",
-            "zone_type": z_type,
-            "priority": int(self.priority_spin.value()),
-            "move_camera": int(self.semantic_type_combo.currentIndex() == 5),
-            "cx": self.reg_center_x.value() if z_type == "CIRCLE" else None,
-            "cy": self.reg_center_y.value() if z_type == "CIRCLE" else None,
-            "r": self.reg_radius.value() if z_type == "CIRCLE" else None,
-            "x1": self.reg_x1.value() if z_type == "RECTANGLE" else None,
-            "y1": self.reg_y1.value() if z_type == "RECTANGLE" else None,
-            "x2": self.reg_x2.value() if z_type == "RECTANGLE" else None,
-            "y2": self.reg_y2.value() if z_type == "RECTANGLE" else None,
-        }
+            zone_fields = {
+                "layout_id": active_layout.id,
+                "name": self.name_edit.text().strip(),
+                "scancode": self.output_key_edit.text().strip() or "space",
+                "zone_type": z_type,
+                "priority": int(self.priority_spin.value()),
+                "move_camera": int(self.semantic_type_combo.currentIndex() == 5),
+                "cx": self.reg_center_x.value() if z_type == "CIRCLE" else None,
+                "cy": self.reg_center_y.value() if z_type == "CIRCLE" else None,
+                "r": self.reg_radius.value() if z_type == "CIRCLE" else None,
+                "x1": self.reg_x1.value() if z_type == "RECTANGLE" else None,
+                "y1": self.reg_y1.value() if z_type == "RECTANGLE" else None,
+                "x2": self.reg_x2.value() if z_type == "RECTANGLE" else None,
+                "y2": self.reg_y2.value() if z_type == "RECTANGLE" else None,
+            }
 
-        selected = self.pipeline_list.selectedItems()
-        if selected:
-            zone_id = selected[0].data(Qt.ItemDataRole.UserRole)
-            store.zones.update(zone_id, **zone_fields)
-        else:
-            store.zones.create(**zone_fields)
+            selected = self.pipeline_list.selectedItems()
+            if selected:
+                zone_id = selected[0].data(Qt.ItemDataRole.UserRole)
+                store.zones.update(zone_id, **zone_fields)
+                logger.info("Updated pipeline zone ID %s ('%s')", zone_id, zone_fields["name"])
+            else:
+                new_zone = store.zones.create(**zone_fields)
+                logger.info("Created new pipeline zone ID %s ('%s')", new_zone.id, zone_fields["name"])
 
-        self.load_active_layout_zones()
-        if self.dispatcher:
-            self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
-        QMessageBox.information(self, "Saved", "Pipeline saved and synced to engine.")
+            self.load_active_layout_zones()
+            if self.dispatcher:
+                self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+            QMessageBox.information(self, "Saved", "Pipeline saved and synced to engine.")
+        except Exception as exc:
+            logger.exception("Failed to save pipeline zone")
+            QMessageBox.critical(self, "Error", f"Could not save pipeline:\n{exc}")
 
     def _on_delete_zone(self) -> None:
         selected = self.pipeline_list.selectedItems()
         if not selected:
             return
         zone_id = selected[0].data(Qt.ItemDataRole.UserRole)
-        store.zones.delete(zone_id)
-        self.load_active_layout_zones()
-        if self.dispatcher:
-            self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+        try:
+            store.zones.delete(zone_id)
+            logger.info("Deleted pipeline zone ID %s", zone_id)
+            self.load_active_layout_zones()
+            if self.dispatcher:
+                self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+        except Exception as exc:
+            logger.exception("Failed to delete zone ID %s", zone_id)
+            QMessageBox.critical(self, "Database Error", f"Could not delete zone:\n{exc}")
 
     def _on_origin_type_changed(self, idx: int) -> None:
         is_fixed = idx == 1
