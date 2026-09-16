@@ -1,58 +1,66 @@
+"""
+Pre-flight environment and dependency checks.
+Callable by both the CLI bootstrap and GUI startup workers.
+"""
+
+from __future__ import annotations
+
 import shutil
 from pathlib import Path
 from modules.utils import SYSTEM, ADB
 
 
-def _check_adb():
-    """Verify ADB is available."""
-    # Check system PATH or local bin folder
-    if shutil.which("adb") == ADB.as_posix():
+def check_adb() -> bool:
+    """Verify ADB binary is available in PATH or project bin folder."""
+    if ADB.exists():
         return True
 
-    # Check custom bin directory
-    if ADB.exists():
+    system_adb = shutil.which("adb")
+    if system_adb and Path(system_adb).exists():
         return True
 
     return False
 
 
-def _check_driver():
-    """Verify system driver (Platform specific)."""
+def check_driver() -> bool:
+    """Verify low-level driver or kernel subsystem access."""
     if SYSTEM == "Windows":
-        # Interception typically doesn't have a simple 'which' check.
-        # Instead, we can attempt to create an Interception context to verify driver access.
-        from interception.interception import Interception
-
-        return Interception().valid
+        try:
+            from interception.interception import Interception
+            return Interception().valid
+        except Exception:
+            return False
 
     elif SYSTEM == "Linux":
-        # Check if user has permission to read uinput
         return Path("/dev/uinput").exists()
 
     return False
 
 
-def run():
-    """Execute all checks. Returns False if any check fails."""
-    checks = {"ADB": _check_adb(), "Driver": _check_driver()}
+def run(verbose: bool = True) -> bool:
+    """Executes pre-flight checks. Returns True if all pass, False otherwise."""
+    checks = {
+        "ADB": check_adb(),
+        "Driver": check_driver(),
+    }
 
     failed = [name for name, status in checks.items() if not status]
 
     if failed:
-        print(f"[!] Pre-flight failed:")
-        if "ADB" in failed:
-            print("    - ADB not found. Run 'touch2key-setup' to download it.")
-        if SYSTEM == "Windows" and "Driver" in failed:
-            print(
-                "    - Driver not found. Run 'touch2key-setup' to configure environment or restart the system if the driver is installed."
-            )
-        elif SYSTEM == "Linux" and "Driver" in failed:
-            print(
-                "    - Driver not found. Run 'sudo touch2key-setup' to configure environment."
-            )
+        if verbose:
+            print("[!] Pre-flight failed:")
+            if "ADB" in failed:
+                print("    - ADB not found. Run setup to download it.")
+            if SYSTEM == "Windows" and "Driver" in failed:
+                print(
+                    "    - Interception driver not found. Run setup or restart PC if recently installed."
+                )
+            elif SYSTEM == "Linux" and "Driver" in failed:
+                print("    - uinput permissions missing. Run 'sudo setup' to configure udev rules.")
         return False
 
-    print("[+] Pre-flight checks passed.")
+    if verbose:
+        print("[+] Pre-flight checks passed.")
     return True
 
 
