@@ -17,7 +17,7 @@ from modules.database import store
 from modules.gui.main_window import MainWindow
 from modules.platforms import check_single_instance
 from modules.scripts.pre_flight import run as pre_flight_run
-from modules.utils import DIAGNOSTICS_FOLDER
+from modules.utils import DIAGNOSTICS_FOLDER, SYSTEM
 
 if TYPE_CHECKING:
     from cProfile import Profile
@@ -32,16 +32,29 @@ def profiler_cleanup(prof: Profile | None, filename: str = "touch2key_gui.prof")
         DIAGNOSTICS_FOLDER.mkdir(parents=True, exist_ok=True)
         dump_path = DIAGNOSTICS_FOLDER / filename
         prof.dump_stats(dump_path)
-        print(f"[+] Profiling metrics saved to: {dump_path}")
+        print(f"[+] Profiling data saved to: {dump_path}")
 
 
 def run(parser: argparse.ArgumentParser | None = None) -> None:
     global gui_profiler
 
+    # -----------------------------------------------------------------------
+    # 0. OS & Environment Validation
+    # -----------------------------------------------------------------------
+    if SYSTEM == "Linux":
+        from modules.platforms.linux import check_display_protocol
+        if not check_display_protocol():
+            sys.exit(1)
+    elif SYSTEM != "Windows":
+        print(f"[!] Unsupported OS: {SYSTEM}")
+        sys.exit(1)
+
+    # -----------------------------------------------------------------------
+    # 1. CLI Argument Parsing
+    # -----------------------------------------------------------------------
     if parser is None:
         parser = argparse.ArgumentParser(description="Touch2Key GUI Application")
     
-    # Defaults to False; only True when '--profile' is explicitly passed in the terminal
     parser.add_argument(
         "--profile",
         action="store_true",
@@ -55,24 +68,29 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         gui_profiler = cProfile.Profile()
         gui_profiler.enable()
 
-    # 1. Multiprocessing safety for spawned workers
+    # -----------------------------------------------------------------------
+    # 2. Boot Sequence
+    # -----------------------------------------------------------------------
+    # Multiprocessing safety for spawned workers
     try:
         multiprocessing.set_start_method("spawn", force=True)
     except RuntimeError:
         pass
 
-    # 2. System checks
+    # System pre-flight checks (Drivers, Rules, ADB)
     if not pre_flight_run():
         profiler_cleanup(gui_profiler)
         sys.exit(1)
 
-    # 3. Guard against duplicate running GUI instances
+    # Guard against duplicate running GUI instances
     success, _ = check_single_instance(GUI_APP_NAME)
     if not success:
         profiler_cleanup(gui_profiler)
         sys.exit(0)
 
-    # 4. Enable High-DPI scaling
+    # -----------------------------------------------------------------------
+    # 3. GUI Initialization
+    # -----------------------------------------------------------------------
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
@@ -81,7 +99,6 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     app.setApplicationName("Touch2Key")
     app.setQuitOnLastWindowClosed(True)
 
-    # 5. Launch Main Window
     window = MainWindow()
     window.show()
 
