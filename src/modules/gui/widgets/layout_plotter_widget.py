@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import json
 import math
 import os
 from pathlib import Path
@@ -785,7 +786,6 @@ class _DraggableShape(_Draggable):
             self.canvas.mpl_disconnect(cid)
 
 
-
 class LayoutPlotterWidget(QWidget):
     layout_saved = Signal(str, int)
 
@@ -816,6 +816,9 @@ class LayoutPlotterWidget(QWidget):
         self.labels_artists: dict[int, Text] = {}
         self.label_drag_managers: dict[int, _DraggableLabel] = {}
         self.shape_drag_managers: dict[int, _DraggableShape] = {}
+        self.bezel_artist: Rectangle | None = None
+        self.bezel_text_artist: Text | None = None
+        self.active_bezel_height = 14.0
 
         self.init_params_helper()
         self.bg_cache = None
@@ -832,11 +835,6 @@ class LayoutPlotterWidget(QWidget):
         self.reload_active_layout()
 
     def _setup_shortcuts(self) -> None:
-        """Installs shortcuts with the appropriate Qt context.
-        
-        - Standalone CLI: WindowShortcut (active anywhere inside the standalone window).
-        - Embedded GUI: WidgetWithChildrenShortcut (only active when the plotter area has focus).
-        """
         context = (
             Qt.ShortcutContext.WindowShortcut
             if self.standalone
@@ -854,7 +852,7 @@ class LayoutPlotterWidget(QWidget):
             ("Space", self.enter_marking_mode),
             ("Esc", self._on_escape_pressed),
         ]
-        
+
         self._shortcuts_registry = []
         for key_seq, callback in shortcuts:
             sc = QShortcut(QKeySequence(key_seq), self, callback)
@@ -870,7 +868,7 @@ class LayoutPlotterWidget(QWidget):
             self.reset_state()
 
     def reload_active_layout(self) -> bool:
-        """Reloads the active layout image and shapes from the database."""
+        """Reloads active layout image, zones, and dynamic bezel overlay."""
         active_layout = store.get_active_layout()
         if active_layout is None:
             self._render_empty_state("No active layout set in the database.")
@@ -907,8 +905,53 @@ class LayoutPlotterWidget(QWidget):
         self.bg_cache = None
 
         self.load_active_layout_zones()
+        self._render_bezel_notch()
         self.canvas.draw_idle()
         return True
+
+    def _render_bezel_notch(self) -> None:
+        """Renders an overlay indicating the top bezel return zone."""
+        if self.bezel_artist is not None:
+            try:
+                self.bezel_artist.remove()
+            except Exception:
+                pass
+        if self.bezel_text_artist is not None:
+            try:
+                self.bezel_text_artist.remove()
+            except Exception:
+                pass
+
+        if self.width <= 0:
+            return
+
+        self.bezel_artist = Rectangle(
+            (0, 0),
+            self.width,
+            self.active_bezel_height,
+            fill=True,
+            facecolor=(1.0, 0.2, 0.2, 0.25),
+            edgecolor=(1.0, 0.4, 0.4, 0.7),
+            linewidth=1.0,
+            linestyle="--",
+            zorder=8,
+        )
+        self.bezel_artist.set_visible(self.show_overlays)
+        self.ax.add_patch(self.bezel_artist)
+
+        self.bezel_text_artist = Text(
+            self.width / 2.0,
+            self.active_bezel_height / 2.0,
+            f"Bezel Notch ({self.active_bezel_height:.0f}px)",
+            color="white",
+            fontsize=7,
+            ha="center",
+            va="center",
+            zorder=9,
+            alpha=0.8,
+        )
+        self.bezel_text_artist.set_visible(self.show_overlays)
+        self.ax.add_artist(self.bezel_text_artist)
 
     def _render_empty_state(self, message: str) -> None:
         self.ax.clear()
@@ -976,6 +1019,7 @@ class LayoutPlotterWidget(QWidget):
         self.width = 0
         self.height = 0
         self.dpi = 0
+        self.active_bezel_height = 14.0
 
         for uid in list(self.shapes_artists.keys()):
             self.shapes_artists[uid].remove()
@@ -1044,6 +1088,16 @@ class LayoutPlotterWidget(QWidget):
         scale_y = self.height / (self.active_layout.height or self.height)
 
         for zone in zones:
+            cfg_raw = getattr(zone, "pipeline_config", "{}") or "{}"
+            try:
+                cfg = json.loads(cfg_raw)
+                reg = cfg.get("region", {})
+                if reg.get("type") == "BEZEL" or zone.zone_type == "BEZEL":
+                    self.active_bezel_height = float(reg.get("bezel_height", 14.0))
+                    continue
+            except Exception:
+                pass
+
             key_name = get_key_from_scancode(zone.scancode)
             _, bridge_key = get_scancode_and_bridge_key_from_key(key_name)
             self.mode = zone.zone_type
@@ -1071,6 +1125,7 @@ class LayoutPlotterWidget(QWidget):
                 hex_code=zone.scancode,
                 move_camera=zone.move_camera,
                 priority=zone.priority,
+                pipeline_config=cfg_raw,
             )
 
         self.mouse_wheel_radius = self.active_layout.mouse_wheel_radius
@@ -1084,6 +1139,10 @@ class LayoutPlotterWidget(QWidget):
             artist.set_visible(self.show_overlays)
         for artist in self.labels_artists.values():
             artist.set_visible(self.show_overlays)
+        if self.bezel_artist:
+            self.bezel_artist.set_visible(self.show_overlays)
+        if self.bezel_text_artist:
+            self.bezel_text_artist.set_visible(self.show_overlays)
         self.update_title(f"OVERLAYS: {state_str} | {DEF_STR}")
 
     def label(self, center_x, center_y, label_text, fc):
@@ -1427,6 +1486,7 @@ class LayoutPlotterWidget(QWidget):
             hex_code=hex_code,
             move_camera=False,
             priority=0,
+            pipeline_config="{}",
         )
         self.reset_state()
 
@@ -1441,11 +1501,14 @@ class LayoutPlotterWidget(QWidget):
         hex_code: str,
         move_camera: bool = False,
         priority: int = 0,
+        pipeline_config: str = "{}",
     ):
         if cx is None:
             return
 
-        saved, entry_id = self.save_entry(bridge_key, hex_code, cx, cy, r, bb, move_camera, priority)
+        saved, entry_id = self.save_entry(
+            bridge_key, hex_code, cx, cy, r, bb, move_camera, priority, pipeline_config
+        )
         if not saved:
             return
 
@@ -1567,6 +1630,7 @@ class LayoutPlotterWidget(QWidget):
                 "val1": 0, "val2": 0, "val3": 0, "val4": 0,
                 "move_camera": data["move_camera"],
                 "priority": data.get("priority", 0),
+                "pipeline_config": data.get("pipeline_config", "{}"),
             }
             if data["type"] == CIRCLE:
                 entry["val1"] = data["r"]
@@ -1639,6 +1703,7 @@ class LayoutPlotterWidget(QWidget):
                     r=float(item["val1"]),
                     move_camera=bool(item["move_camera"]),
                     priority=int(item["priority"]),
+                    pipeline_config=item["pipeline_config"],
                 )
             else:
                 store.zones.create(
@@ -1652,6 +1717,7 @@ class LayoutPlotterWidget(QWidget):
                     y2=float(item["val4"]),
                     move_camera=bool(item["move_camera"]),
                     priority=int(item["priority"]),
+                    pipeline_config=item["pipeline_config"],
                 )
 
         store.set_active_layout(layout_id)
@@ -1660,7 +1726,18 @@ class LayoutPlotterWidget(QWidget):
         self.layout_saved.emit(user_name, layout_id)
         self.update_title(f"SAVED: {user_name} | {HELP_STR}")
 
-    def save_entry(self, bridge_key, hex_code, cx, cy, r, bb, move_camera, priority=0):
+    def save_entry(
+        self,
+        bridge_key,
+        hex_code,
+        cx,
+        cy,
+        r,
+        bb,
+        move_camera,
+        priority=0,
+        pipeline_config="{}",
+    ):
         uid = self.count
         inc_count = True
         saved = False
@@ -1741,6 +1818,7 @@ class LayoutPlotterWidget(QWidget):
             "bb": bb,
             "move_camera": move_camera,
             "priority": priority,
+            "pipeline_config": pipeline_config,
         }
 
         self.shapes[uid] = entry
