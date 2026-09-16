@@ -1,8 +1,6 @@
-# src/modules/database/legacy_migration.py
-
 """
 One-time importer from legacy/current TOML config and JSON layout files
-into the SQLite database.
+into the SQLite database with full 5-stage pipeline synthesis.
 """
 
 from __future__ import annotations
@@ -25,6 +23,75 @@ def _read_keys(doc: dict) -> tuple[Optional[str], Optional[str]]:
     toggle_key = keys.get("toggle_key")
     sprint_key = keys.get("sprint_key")
     return toggle_key, sprint_key
+
+
+def _build_default_pipeline_config(
+    zone_type: str,
+    move_camera: bool,
+    cx: float = 0.0,
+    cy: float = 0.0,
+    r: float = 50.0,
+    bezel_height: float = 14.0,
+) -> str:
+    """Synthesizes complete 5-stage pipeline metadata for imported legacy zones."""
+    if zone_type == "CIRCLE":
+        reg_idx = 1
+    elif zone_type == "BEZEL":
+        reg_idx = 3
+    else:
+        reg_idx = 2
+
+    sem_idx = 5 if move_camera else (2 if zone_type == "BEZEL" else 0)
+    sem_mode = (
+        "TRACK_FIRE"
+        if move_camera
+        else ("TOGGLE_MODE" if zone_type == "BEZEL" else "BUTTON")
+    )
+    trans_idx = 1 if move_camera else 0
+    trans_type = "DELTA" if move_camera else "IDENTITY"
+
+    cfg = {
+        "region": {
+            "type_idx": reg_idx,
+            "type": zone_type,
+            "bezel_height": bezel_height,
+        },
+        "origin": {
+            "type_idx": 1,
+            "type": "FIXED",
+            "anchor_x": cx,
+            "anchor_y": cy,
+            "snap_radius": 80.0,
+        },
+        "constraint": {
+            "type_idx": 0,
+            "type": "NONE",
+            "radius": r,
+            "half_w": 50.0,
+            "half_h": 50.0,
+            "leash_radius": 150.0,
+        },
+        "transform": {
+            "type_idx": trans_idx,
+            "type": trans_type,
+            "sens_x": 1.0,
+            "sens_y": 1.0,
+            "deadzone": 0.0,
+            "threshold": 50.0,
+            "joy_dz": 10.0,
+            "joy_walk": 80.0,
+            "joy_sprint": 120.0,
+            "joy_hysteresis": 5.0,
+            "dt_interval": 0.30,
+            "dt_dist": 35.0,
+        },
+        "semantics": {
+            "type_idx": sem_idx,
+            "mode": sem_mode,
+            "is_mouse_button": False,
+        },
+    }
+    return json.dumps(cfg)
 
 
 def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
@@ -84,7 +151,7 @@ def migrate_json_layout(
     layout_name: str | None = None,
     set_active: bool = True,
 ) -> Optional[int]:
-    """Imports a JSON layout file into a new layouts row plus its layout_zones."""
+    """Imports a JSON layout file into a new layouts row plus its layout_zones with synthesized pipeline configs."""
     path = Path(json_path)
     if not path.is_absolute() and not path.exists():
         path = JSONS_FOLDER / path
@@ -136,7 +203,7 @@ def migrate_json_layout(
                 continue
 
             zone_type = str(item.get("type", "")).upper()
-            if zone_type not in ("CIRCLE", "RECTANGLE"):
+            if zone_type not in ("CIRCLE", "RECTANGLE", "BEZEL"):
                 logger.warning(
                     "Skipping zone with unrecognized type %r for scancode %s.",
                     zone_type,
@@ -149,29 +216,67 @@ def migrate_json_layout(
                 move_camera = bool(item.get("move_camera", False))
 
                 if zone_type == "CIRCLE":
+                    cx = float(item["cx"])
+                    cy = float(item["cy"])
+                    r = float(item["val1"])
+                    pipeline_cfg = _build_default_pipeline_config(
+                        zone_type="CIRCLE",
+                        move_camera=move_camera,
+                        cx=cx,
+                        cy=cy,
+                        r=r,
+                    )
                     store.zones.create(
                         layout_id=layout_id,
                         scancode=str(scancode),
                         name=item.get("name", ""),
                         zone_type="CIRCLE",
-                        cx=float(item["cx"]),
-                        cy=float(item["cy"]),
-                        r=float(item["val1"]),
+                        cx=cx,
+                        cy=cy,
+                        r=r,
                         move_camera=move_camera,
                         priority=priority,
+                        pipeline_config=pipeline_cfg,
                     )
-                else:
+                elif zone_type == "BEZEL":
+                    bezel_h = float(item.get("bezel_height", item.get("val2", 14.0)))
+                    pipeline_cfg = _build_default_pipeline_config(
+                        zone_type="BEZEL",
+                        move_camera=False,
+                        bezel_height=bezel_h,
+                    )
+                    store.zones.create(
+                        layout_id=layout_id,
+                        scancode=str(scancode),
+                        name=item.get("name", "Bezel Notch"),
+                        zone_type="BEZEL",
+                        priority=priority or 150,
+                        move_camera=False,
+                        pipeline_config=pipeline_cfg,
+                    )
+                else:  # RECTANGLE
+                    x1 = float(item["val1"])
+                    y1 = float(item["val2"])
+                    x2 = float(item["val3"])
+                    y2 = float(item["val4"])
+                    pipeline_cfg = _build_default_pipeline_config(
+                        zone_type="RECTANGLE",
+                        move_camera=move_camera,
+                        cx=(x1 + x2) / 2.0,
+                        cy=(y1 + y2) / 2.0,
+                    )
                     store.zones.create(
                         layout_id=layout_id,
                         scancode=str(scancode),
                         name=item.get("name", ""),
                         zone_type="RECTANGLE",
-                        x1=float(item["val1"]),
-                        y1=float(item["val2"]),
-                        x2=float(item["val3"]),
-                        y2=float(item["val4"]),
+                        x1=x1,
+                        y1=y1,
+                        x2=x2,
+                        y2=y2,
                         move_camera=move_camera,
                         priority=priority,
+                        pipeline_config=pipeline_cfg,
                     )
                 imported += 1
             except (KeyError, ValueError) as e:
