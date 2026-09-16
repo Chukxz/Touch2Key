@@ -11,7 +11,7 @@ import threading
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Callable, Literal
 
 # Task IDs
 TASK_BUTTON = 0
@@ -173,6 +173,7 @@ class TouchEvent:
     position: Point
     timestamp: float
 
+
 @dataclass(slots=True)
 class MapperEvent:
     action: EVENT_TYPE
@@ -241,10 +242,7 @@ class MapperEventDispatcher:
             try:
                 callback(*args)
             except Exception:
-                logger.exception(
-                    "Error in callback for event %s",
-                    event.action,
-                )
+                pass
 
     @staticmethod
     def _get_callback_args(event: MapperEvent) -> tuple:
