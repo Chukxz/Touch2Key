@@ -18,6 +18,7 @@ from modules.gui.main_window import MainWindow
 from modules.platforms import check_single_instance
 from modules.scripts.pre_flight import run as pre_flight_run
 from modules.utils import DIAGNOSTICS_FOLDER, SYSTEM
+from modules.log_manager import AppLogManager
 
 if TYPE_CHECKING:
     from cProfile import Profile
@@ -48,6 +49,9 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     elif SYSTEM != "Windows":
         print(f"[!] Unsupported OS: {SYSTEM}")
         sys.exit(1)
+
+    # Initialize GUI logging (no terminal spam + buffers file output)
+    AppLogManager.setup_logging(is_gui=True, log_prefix="touch2key_gui")
 
     # -----------------------------------------------------------------------
     # 1. CLI Argument Parsing
