@@ -20,6 +20,8 @@ from modules.database import store
 from modules.utils import (
     BIN_DIR,
     DATA_FOLDER,
+    DIAGNOSTICS_FOLDER,
+    LOGS_FOLDER,
     PROJECT_ROOT,
     SYSTEM,
     UDEV_RULE_PATH,
@@ -60,6 +62,42 @@ def _kill_adb() -> None:
         pass
 
 
+def purge_data():
+    if DATA_FOLDER.exists():
+            shutil.rmtree(DATA_FOLDER, ignore_errors=True)
+
+        if is_gui:
+            logger.info("Purged data folder: %s", DATA_FOLDER)
+        else:
+            print(
+                f"[+] User data, database, and configurations purged ({DATA_FOLDER})."
+            )
+
+
+def purge_diagnostics():
+    if DIAGNOSTICS_FOLDER.exists():
+            shutil.rmtree(DIAGNOSTICS_FOLDER, ignore_errors=True)
+
+        if is_gui:
+            logger.info("Purged diagnostics folder: %s", DIAGNOSTICS_FOLDER)
+        else:
+            print(
+                f"[+] Diagnostics purged ({DIAGNOSTICS_FOLDER})."
+            )
+
+
+def purge_logs():
+    if LOGS_FOLDER.exists():
+            shutil.rmtree(LOGS_FOLDER, ignore_errors=True)
+
+        if is_gui:
+            logger.info("Purged logs folder: %s", LOGS_FOLDER)
+        else:
+            print(
+                f"[+] Logs purged ({LOGS_FOLDER})."
+            )
+
+
 def run(parent=None) -> bool:
     is_gui = QApplication.instance() is not None
 
@@ -75,7 +113,7 @@ def run(parent=None) -> bool:
     parser.add_argument(
         "--purge-all",
         action="store_true",
-        help="Delete entire data directory, and profiling (.prof) file",
+        help="Delete entire data directory, diagnostics and log files",
     )
     parser.add_argument(
         "--no-restart", action="store_true", help="Skip system reboot prompt"
@@ -192,17 +230,14 @@ def run(parent=None) -> bool:
         else:
             print("    - Local binaries deleted.")
 
-    # 6. Purge Data Directory (DB, Images, JSONs, Profiles, TOML)
+    # 6. Purge Data Folder (DB, Images, JSONs, Profiles, TOML) and Diagnostics/Log Folders
     if args.purge:
-        if DATA_FOLDER.exists():
-            shutil.rmtree(DATA_FOLDER, ignore_errors=True)
-
-        if is_gui:
-            logger.info("Purged entire data directory: %s", DATA_FOLDER)
-        else:
-            print(
-                f"[+] User data, database, and configurations purged ({DATA_FOLDER})."
-            )
+        purge_func()
+    
+    if args.purge_all:
+        purge_func()
+        purge_diagnostics()
+        purge_logs()
 
     if is_gui:
         logger.info("Uninstall completed successfully.")
