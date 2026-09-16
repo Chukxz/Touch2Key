@@ -83,9 +83,7 @@ class Mapper:
             "ON_CONFIG_RELOAD", self._update_config
         )
 
-        self.mapper_event_dispatcher.register_callback(
-    "ON_TARGET_WINDOW_CHANGE", self.rebind_target_window
-)
+        self.mapper_event_dispatcher.register_callback("ON_TARGET_WINDOW_CHANGE", self.rebind_target_window)
 
         self.running = True
         self.window_thread = threading.Thread(
@@ -134,11 +132,9 @@ class Mapper:
             else:
                 self.window_id = self.window_manager.get_foreground_window()
                 self.game_window_class_name = (
-                self.window_manager.get_window_class_name(self.window_id) if self.window_id else None
-            )
+                self.window_manager.get_window_class_name(self.window_id) if self.window_id else None)
                 self.game_window_info = (
-                self._get_window_info(self.window_id) if self.window_id else None
-            )
+                self._get_window_info(self.window_id) if self.window_id else None)
                 self.window_lost = self.window_id is None
                 logger.warning("Target window invalidated. Rebound to foreground HWND: %s", self.window_id)
 
