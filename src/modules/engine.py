@@ -29,9 +29,9 @@ from modules.core.key_mapper import KeyMapper
 from modules.core.wasd_mapper import WASDMapper
 from modules.core.pipeline import BezelReturnToggle, Pipeline
 from modules.scripts.pre_flight import run as pre_flight_run
-from modules.core.list_windows import select_window
-from modules.core.key_capture import capture_keys, capture_performance_settings
 from modules.core.gestures import TwoFingerTapTracker
+from modules.cli.list_windows import select_window
+from modules.cli.key_capture import capture_keys, capture_performance_settings
 
 NAME = "Touch2Key_Engine"
 profiler: Profile | None = None
