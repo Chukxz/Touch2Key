@@ -89,26 +89,30 @@ class ProfilesPage(BasePage):
 
     def load_profiles(self) -> None:
         self.profile_list.clear()
-        layouts = store.layouts.list_all()
-        active_layout = store.get_active_layout()
-        active_id = active_layout.id if active_layout else None
+        try:
+            layouts = store.layouts.list_all()
+            active_layout = store.get_active_layout()
+            active_id = active_layout.id if active_layout else None
 
-        for layout in layouts:
-            zones = store.zones.list_for_layout(layout.id)
-            display_text = f"{layout.name}  [{len(zones)} zones]  ({layout.width}x{layout.height} @ {layout.dpi} DPI)"
+            for layout in layouts:
+                zones = store.zones.list_for_layout(layout.id)
+                display_text = f"{layout.name}  [{len(zones)} zones]  ({layout.width}x{layout.height} @ {layout.dpi} DPI)"
 
-            item = QListWidgetItem(display_text)
-            item.setData(Qt.ItemDataRole.UserRole, layout.id)
+                item = QListWidgetItem(display_text)
+                item.setData(Qt.ItemDataRole.UserRole, layout.id)
 
-            if layout.id == active_id:
-                item.setText(f"★ {display_text} (Active)")
-                font = item.font()
-                font.setBold(True)
-                item.setFont(font)
+                if layout.id == active_id:
+                    item.setText(f"★ {display_text} (Active)")
+                    font = item.font()
+                    font.setBold(True)
+                    item.setFont(font)
 
-            self.profile_list.addItem(item)
+                self.profile_list.addItem(item)
 
-        self._on_selection_changed()
+            self._on_selection_changed()
+        except Exception as exc:
+            logger.exception("Failed to load layout profiles from database")
+            QMessageBox.critical(self, "Database Error", f"Could not load profiles:\n{exc}")
 
     def _get_selected_layout_id(self) -> int | None:
         selected = self.profile_list.selectedItems()
@@ -124,16 +128,19 @@ class ProfilesPage(BasePage):
             return
 
         layout_id = selected[0].data(Qt.ItemDataRole.UserRole)
-        layout = store.layouts.get(layout_id)
-        if not layout:
-            return
+        try:
+            layout = store.layouts.get(layout_id)
+            if not layout:
+                return
 
-        zones = store.zones.list_for_layout(layout.id)
-        img_info = layout.image_path if layout.image_path else "None"
-        self.details_label.setText(
-            f"ID: {layout.id} | Canvas: {layout.width}x{layout.height} ({layout.dpi} DPI) | "
-            f"Zones: {len(zones)} | Image: {img_info}"
-        )
+            zones = store.zones.list_for_layout(layout.id)
+            img_info = layout.image_path if layout.image_path else "None"
+            self.details_label.setText(
+                f"ID: {layout.id} | Canvas: {layout.width}x{layout.height} ({layout.dpi} DPI) | "
+                f"Zones: {len(zones)} | Image: {img_info}"
+            )
+        except Exception as exc:
+            logger.exception("Failed to fetch details for layout ID %s", layout_id)
 
     def _notify_reload(self) -> None:
         if self.dispatcher is not None:
@@ -145,10 +152,15 @@ class ProfilesPage(BasePage):
         if layout_id is None:
             return
 
-        store.settings.update(active_layout_id=layout_id)
-        self.load_profiles()
-        self._notify_reload()
-        QMessageBox.information(self, "Profile Activated", "Active profile updated and hot-reloaded.")
+        try:
+            store.settings.update(active_layout_id=layout_id)
+            self.load_profiles()
+            self._notify_reload()
+            logger.info("Activated profile ID %s", layout_id)
+            QMessageBox.information(self, "Profile Activated", "Active profile updated and hot-reloaded.")
+        except Exception as exc:
+            logger.exception("Failed to set active profile ID %s", layout_id)
+            QMessageBox.critical(self, "Database Error", f"Could not activate profile:\n{exc}")
 
     def _on_new_profile(self) -> None:
         name, ok = QInputDialog.getText(self, "New Profile", "Enter profile name:")
@@ -156,47 +168,53 @@ class ProfilesPage(BasePage):
             return
 
         name = name.strip()
-        if store.layouts.get_by_name(name) is not None:
-            QMessageBox.warning(self, "Name Conflict", f"Profile '{name}' already exists.")
-            return
+        try:
+            if store.layouts.get_by_name(name) is not None:
+                QMessageBox.warning(self, "Name Conflict", f"Profile '{name}' already exists.")
+                return
 
-        settings = store.settings.get()
-        new_layout = store.layouts.create(
-            name=name,
-            width=settings.json_dev_width,
-            height=settings.json_dev_height,
-            dpi=settings.json_dev_dpi,
-        )
-        store.settings.update(active_layout_id=new_layout.id)
-        self.load_profiles()
-        self._notify_reload()
+            settings = store.settings.get()
+            new_layout = store.layouts.create(
+                name=name,
+                width=settings.json_dev_width,
+                height=settings.json_dev_height,
+                dpi=settings.json_dev_dpi,
+            )
+            store.settings.update(active_layout_id=new_layout.id)
+            self.load_profiles()
+            self._notify_reload()
+            logger.info("Created new profile '%s' (ID: %s)", name, new_layout.id)
+        except Exception as exc:
+            logger.exception("Failed to create new profile '%s'", name)
+            QMessageBox.critical(self, "Database Error", f"Could not create profile:\n{exc}")
 
     def _on_rename(self) -> None:
         layout_id = self._get_selected_layout_id()
         if layout_id is None:
             return
 
-        layout = store.layouts.get(layout_id)
-        if not layout:
-            return
-
-        new_name, ok = QInputDialog.getText(
-            self, "Rename Profile", "Enter new name:", text=layout.name
-        )
-        if not ok or not new_name.strip() or new_name.strip() == layout.name:
-            return
-
-        target_name = new_name.strip()
-        if store.layouts.get_by_name(target_name) is not None:
-            QMessageBox.warning(self, "Name Conflict", f"A profile named '{target_name}' already exists.")
-            return
-
         try:
+            layout = store.layouts.get(layout_id)
+            if not layout:
+                return
+
+            new_name, ok = QInputDialog.getText(
+                self, "Rename Profile", "Enter new name:", text=layout.name
+            )
+            if not ok or not new_name.strip() or new_name.strip() == layout.name:
+                return
+
+            target_name = new_name.strip()
+            if store.layouts.get_by_name(target_name) is not None:
+                QMessageBox.warning(self, "Name Conflict", f"A profile named '{target_name}' already exists.")
+                return
+
             store.layouts.update(layout_id, name=target_name)
             self.load_profiles()
             self._notify_reload()
+            logger.info("Renamed profile ID %s to '%s'", layout_id, target_name)
         except Exception as exc:
-            logger.exception("Failed to rename profile")
+            logger.exception("Failed to rename profile ID %s", layout_id)
             QMessageBox.critical(self, "Error", f"Could not rename profile:\n{exc}")
 
     def _on_duplicate(self) -> None:
@@ -204,21 +222,27 @@ class ProfilesPage(BasePage):
         if layout_id is None:
             return
 
-        source = store.layouts.get(layout_id)
-        if source is None:
-            return
-
-        new_name, ok = QInputDialog.getText(
-            self, "Duplicate Profile", "New profile name:", text=f"{source.name}_copy"
-        )
-        if not ok or not new_name.strip():
-            return
-
         try:
-            store.layouts.duplicate(layout_id, new_name.strip())
+            source = store.layouts.get(layout_id)
+            if source is None:
+                return
+
+            new_name, ok = QInputDialog.getText(
+                self, "Duplicate Profile", "New profile name:", text=f"{source.name}_copy"
+            )
+            if not ok or not new_name.strip():
+                return
+
+            target_name = new_name.strip()
+            if store.layouts.get_by_name(target_name) is not None:
+                QMessageBox.warning(self, "Name Conflict", f"A profile named '{target_name}' already exists.")
+                return
+
+            new_layout = store.layouts.duplicate(layout_id, target_name)
             self.load_profiles()
+            logger.info("Duplicated profile ID %s to '%s' (ID: %s)", layout_id, target_name, new_layout.id)
         except Exception as exc:
-            logger.exception("Failed to duplicate profile")
+            logger.exception("Failed to duplicate profile ID %s", layout_id)
             QMessageBox.critical(self, "Error", f"Could not duplicate profile:\n{exc}")
 
     def _on_clear_zones(self) -> None:
@@ -233,9 +257,14 @@ class ProfilesPage(BasePage):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if confirm == QMessageBox.StandardButton.Yes:
-            store.zones.delete_all_for_layout(layout_id)
-            self.load_profiles()
-            self._notify_reload()
+            try:
+                store.zones.delete_all_for_layout(layout_id)
+                self.load_profiles()
+                self._notify_reload()
+                logger.info("Cleared all zones for profile ID %s", layout_id)
+            except Exception as exc:
+                logger.exception("Failed to clear zones for profile ID %s", layout_id)
+                QMessageBox.critical(self, "Database Error", f"Could not clear zones:\n{exc}")
 
     def _on_delete(self) -> None:
         layout_id = self._get_selected_layout_id()
@@ -251,14 +280,19 @@ class ProfilesPage(BasePage):
         if confirm != QMessageBox.StandardButton.Yes:
             return
 
-        active_layout = store.get_active_layout()
-        is_active = active_layout and active_layout.id == layout_id
+        try:
+            active_layout = store.get_active_layout()
+            is_active = active_layout and active_layout.id == layout_id
 
-        store.zones.delete_all_for_layout(layout_id)
-        store.layouts.delete(layout_id)
+            store.zones.delete_all_for_layout(layout_id)
+            store.layouts.delete(layout_id)
 
-        if is_active:
-            store.settings.update(active_layout_id=None)
+            if is_active:
+                store.settings.update(active_layout_id=None)
 
-        self.load_profiles()
-        self._notify_reload()
+            self.load_profiles()
+            self._notify_reload()
+            logger.info("Deleted profile ID %s", layout_id)
+        except Exception as exc:
+            logger.exception("Failed to delete profile ID %s", layout_id)
+            QMessageBox.critical(self, "Database Error", f"Could not delete profile:\n{exc}")
