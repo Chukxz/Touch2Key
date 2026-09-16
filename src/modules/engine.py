@@ -386,7 +386,7 @@ class Engine:
 def profiler_cleanup(prof: Profile | None) -> None:
     if prof:
         prof.disable()
-        prof.dump_stats(PROJECT_ROOT / "touch2key.prof")
+        prof.dump_stats(PROJECT_ROOT / "touch2key_cli.prof")
 
 
 def run(parser: argparse.ArgumentParser | None = None) -> None:
