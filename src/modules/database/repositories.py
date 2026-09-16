@@ -156,8 +156,15 @@ class AppSettingsRepository:
     def reset_to_defaults(self) -> AppSettings:
         conn = connection_manager.get_connection()
         with conn:
+            cursor = conn.execute("SELECT active_layout_id FROM app_settings WHERE id = 1;")
+            row = cursor.fetchone()
+            active_layout_id = row[0] if row else None
+
             conn.execute("DELETE FROM app_settings WHERE id = 1;")
-            conn.execute("INSERT INTO app_settings (id) VALUES (1);")
+            conn.execute(
+                "INSERT INTO app_settings (id, active_layout_id) VALUES (1, ?);",
+                (active_layout_id,),
+            )
         return self.get()
 
 
