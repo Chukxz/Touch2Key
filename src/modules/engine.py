@@ -14,11 +14,11 @@ from modules.utils import (
     ADB,
     SHORT_DELAY,
     SYSTEM,
-    PROJECT_ROOT,
     MapperEvent,
     MapperEventDispatcher,
     TouchEvent,
     TouchPhase,
+    DIAGNOSTICS_FOLDER,
 )
 from modules.core.config import AppConfig
 from modules.core.layout_loader import LayoutLoader
@@ -383,10 +383,14 @@ class Engine:
             os._exit(0)
 
 
-def profiler_cleanup(prof: Profile | None) -> None:
+def profiler_cleanup(prof: Profile | None, filename: str = "touch2key_cli.prof") -> None:
     if prof:
         prof.disable()
-        prof.dump_stats(PROJECT_ROOT / "touch2key_cli.prof")
+        DIAGNOSTICS_FOLDER.mkdir(parents=True, exist_ok=True)
+        dump_path = DIAGNOSTICS_FOLDER / filename
+        prof.dump_stats(dump_path)
+        print(f"[+] Profiling metrics saved to: {dump_path}")
+
 
 
 def run(parser: argparse.ArgumentParser | None = None) -> None:
