@@ -24,7 +24,7 @@ from modules.database.config_io import (
     export_settings_toml,
     import_any,
 )
-from modules.utils import MapperEvent, TOML_PATH
+from modules.utils import MapperEvent, PROFILES_FOLDER, TOML_PATH
 from .base_page import BasePage
 
 if TYPE_CHECKING:
@@ -119,7 +119,7 @@ class SettingsPage(BasePage):
         # -------------------------------------------------------------------
         io_row = QHBoxLayout()
         self.export_toml_btn = QPushButton("Export settings.toml")
-        self.import_toml_btn = QPushButton("Import Config (.toml / .json)")
+        self.import_toml_btn = QPushButton("Import Config (.toml / .json / Bundle)")
         self.export_bundle_btn = QPushButton("Export Full Bundle")
 
         io_row.addWidget(self.export_toml_btn)
@@ -339,11 +339,12 @@ class SettingsPage(BasePage):
             QMessageBox.critical(self, "Export Error", str(exc))
 
     def _on_import_toml(self) -> None:
+        PROFILES_FOLDER.mkdir(parents=True, exist_ok=True)
         path_str, _ = QFileDialog.getOpenFileName(
             self,
-            "Import Settings or Bundle",
-            str(TOML_PATH.parent),
-            "Config files (*.toml *.json);;All files (*.*)",
+            "Import Settings, Layout or Bundle",
+            str(PROFILES_FOLDER),
+            "Supported Files (*.toml *.json);;TOML files (*.toml);;JSON files (*.json);;All files (*.*)",
         )
         if not path_str:
             return
@@ -372,7 +373,10 @@ class SettingsPage(BasePage):
             QMessageBox.critical(self, "Import Error", f"Failed to import file:\n{exc}")
 
     def _on_export_bundle(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Select Target Folder for Bundle")
+        PROFILES_FOLDER.mkdir(parents=True, exist_ok=True)
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Target Folder for Bundle", str(PROFILES_FOLDER)
+        )
         if not folder:
             return
 
