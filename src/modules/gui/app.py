@@ -1,5 +1,5 @@
 """
-GUI entry point with optional cProfile tracing.
+GUI entry point with environment validation and optional cProfile tracing.
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     # -----------------------------------------------------------------------
     if parser is None:
         parser = argparse.ArgumentParser(description="Touch2Key GUI Application")
-    
+
     parser.add_argument(
         "--profile",
         action="store_true",
@@ -71,25 +71,22 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     # -----------------------------------------------------------------------
     # 2. Boot Sequence
     # -----------------------------------------------------------------------
-    # Multiprocessing safety for spawned workers
     try:
         multiprocessing.set_start_method("spawn", force=True)
     except RuntimeError:
         pass
 
-    # System pre-flight checks (Drivers, Rules, ADB)
     if not pre_flight_run():
         profiler_cleanup(gui_profiler)
         sys.exit(1)
 
-    # Guard against duplicate running GUI instances
     success, _ = check_single_instance(GUI_APP_NAME)
     if not success:
         profiler_cleanup(gui_profiler)
         sys.exit(0)
 
     # -----------------------------------------------------------------------
-    # 3. GUI Initialization
+    # 3. Application Execution
     # -----------------------------------------------------------------------
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
