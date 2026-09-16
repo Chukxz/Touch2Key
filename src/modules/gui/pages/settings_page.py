@@ -8,9 +8,12 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
+    QLineEdit,
     QMessageBox,
     QPushButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -28,7 +31,7 @@ if TYPE_CHECKING:
 
 
 class SettingsPage(BasePage):
-    """General settings page for handedness, sensitivity, deadzones, and TOML sync."""
+    """General settings page covering input tuning, performance, hotkeys, and data reset."""
 
     title = "Settings"
 
@@ -39,53 +42,99 @@ class SettingsPage(BasePage):
     ):
         super().__init__(dispatcher, parent)
 
-        form_widget = QWidget()
-        form = QFormLayout(form_widget)
+        # -------------------------------------------------------------------
+        # 1. Input & Controls Group
+        # -------------------------------------------------------------------
+        input_group = QGroupBox("Touch & Input Controls")
+        input_form = QFormLayout(input_group)
 
-        self.left_handed_check = QCheckBox("Left-handed")
-        form.addRow(self.left_handed_check)
+        self.left_handed_check = QCheckBox("Left-handed mode")
+        input_form.addRow(self.left_handed_check)
 
         self.anchored_floating_check = QCheckBox("Anchored Floating Joystick")
         self.anchored_floating_check.setToolTip(
-            "When enabled with a plotted HUD joystick circle, touches near the center lock "
-            "to the fixed anchor, while touches elsewhere float dynamically."
+            "Locks touches near center to the anchor, floats dynamically elsewhere."
         )
-        form.addRow(self.anchored_floating_check)
+        input_form.addRow(self.anchored_floating_check)
 
         self.snap_radius_spin = QDoubleSpinBox()
         self.snap_radius_spin.setRange(10.0, 500.0)
         self.snap_radius_spin.setSingleStep(5.0)
         self.snap_radius_spin.setSuffix(" px")
-        self.snap_radius_spin.setToolTip(
-            "Touch proximity radius around the fixed HUD icon to snap the center."
-        )
-        form.addRow("Joystick Snap Radius:", self.snap_radius_spin)
+        input_form.addRow("Joystick Snap Radius:", self.snap_radius_spin)
 
         self.sensitivity_spin = QDoubleSpinBox()
         self.sensitivity_spin.setRange(0.1, 10.0)
         self.sensitivity_spin.setSingleStep(0.1)
-        form.addRow("Sensitivity:", self.sensitivity_spin)
+        input_form.addRow("Sensitivity:", self.sensitivity_spin)
 
         self.deadzone_spin = QDoubleSpinBox()
         self.deadzone_spin.setRange(0.0, 1.0)
         self.deadzone_spin.setSingleStep(0.01)
-        form.addRow("Deadzone:", self.deadzone_spin)
+        input_form.addRow("Deadzone:", self.deadzone_spin)
 
-        self.content_layout().addWidget(form_widget)
+        self.content_layout().addWidget(input_group)
 
-        self.reset_defaults_btn = QPushButton("Reset to Defaults")
-        self.content_layout().addWidget(self.reset_defaults_btn)
+        # -------------------------------------------------------------------
+        # 2. Performance & ADB Engine Group
+        # -------------------------------------------------------------------
+        perf_group = QGroupBox("Performance & Pipeline")
+        perf_form = QFormLayout(perf_group)
 
-        # TOML Settings & Bundle IO
-        toml_btn_row = QHBoxLayout()
+        self.rate_cap_spin = QDoubleSpinBox()
+        self.rate_cap_spin.setRange(30.0, 1000.0)
+        self.rate_cap_spin.setSingleStep(10.0)
+        self.rate_cap_spin.setSuffix(" Hz")
+        perf_form.addRow("ADB Rate Cap:", self.rate_cap_spin)
+
+        self.pps_alert_spin = QDoubleSpinBox()
+        self.pps_alert_spin.setRange(10.0, 500.0)
+        self.pps_alert_spin.setSingleStep(5.0)
+        self.pps_alert_spin.setSuffix(" PPS")
+        perf_form.addRow("PPS Alert Threshold:", self.pps_alert_spin)
+
+        self.content_layout().addWidget(perf_group)
+
+        # -------------------------------------------------------------------
+        # 3. Keybinds Group
+        # -------------------------------------------------------------------
+        keys_group = QGroupBox("Hotkeys")
+        keys_form = QFormLayout(keys_group)
+
+        self.toggle_key_input = QLineEdit()
+        self.toggle_key_input.setPlaceholderText("e.g. F1, grave, etc.")
+        keys_form.addRow("Mapping Toggle Key:", self.toggle_key_input)
+
+        self.sprint_key_input = QLineEdit()
+        self.sprint_key_input.setPlaceholderText("e.g. shift")
+        keys_form.addRow("Sprint Key:", self.sprint_key_input)
+
+        self.content_layout().addWidget(keys_group)
+
+        # -------------------------------------------------------------------
+        # 4. Import / Export / Backup
+        # -------------------------------------------------------------------
+        io_row = QHBoxLayout()
         self.export_toml_btn = QPushButton("Export settings.toml")
-        self.import_toml_btn = QPushButton("Import settings.toml")
+        self.import_toml_btn = QPushButton("Import Config (.toml / .json)")
         self.export_bundle_btn = QPushButton("Export Full Bundle")
 
-        toml_btn_row.addWidget(self.export_toml_btn)
-        toml_btn_row.addWidget(self.import_toml_btn)
-        toml_btn_row.addWidget(self.export_bundle_btn)
-        self.content_layout().addLayout(toml_btn_row)
+        io_row.addWidget(self.export_toml_btn)
+        io_row.addWidget(self.import_toml_btn)
+        io_row.addWidget(self.export_bundle_btn)
+        self.content_layout().addLayout(io_row)
+
+        # -------------------------------------------------------------------
+        # 5. Database Reset Actions
+        # -------------------------------------------------------------------
+        reset_row = QHBoxLayout()
+        self.reset_defaults_btn = QPushButton("Reset Settings to Defaults")
+        self.delete_all_btn = QPushButton("Wipe Database (Factory Reset)")
+        self.delete_all_btn.setStyleSheet("color: #d9534f;")
+
+        reset_row.addWidget(self.reset_defaults_btn)
+        reset_row.addWidget(self.delete_all_btn)
+        self.content_layout().addLayout(reset_row)
 
         self.content_layout().addStretch()
 
@@ -98,11 +147,19 @@ class SettingsPage(BasePage):
         self.snap_radius_spin.valueChanged.connect(self._on_snap_radius_changed)
         self.sensitivity_spin.valueChanged.connect(self._on_sensitivity_changed)
         self.deadzone_spin.valueChanged.connect(self._on_deadzone_changed)
-        self.reset_defaults_btn.clicked.connect(self._on_reset_defaults)
+
+        self.rate_cap_spin.valueChanged.connect(self._on_rate_cap_changed)
+        self.pps_alert_spin.valueChanged.connect(self._on_pps_alert_changed)
+
+        self.toggle_key_input.editingFinished.connect(self._on_keys_changed)
+        self.sprint_key_input.editingFinished.connect(self._on_keys_changed)
 
         self.export_toml_btn.clicked.connect(self._on_export_toml)
         self.import_toml_btn.clicked.connect(self._on_import_toml)
         self.export_bundle_btn.clicked.connect(self._on_export_bundle)
+
+        self.reset_defaults_btn.clicked.connect(self._on_reset_defaults)
+        self.delete_all_btn.clicked.connect(self._on_delete_all)
 
     def on_page_shown(self) -> None:
         self.load_settings()
@@ -119,19 +176,33 @@ class SettingsPage(BasePage):
         self.snap_radius_spin.blockSignals(True)
         self.sensitivity_spin.blockSignals(True)
         self.deadzone_spin.blockSignals(True)
+        self.rate_cap_spin.blockSignals(True)
+        self.pps_alert_spin.blockSignals(True)
+        self.toggle_key_input.blockSignals(True)
+        self.sprint_key_input.blockSignals(True)
 
-        self.left_handed_check.setChecked(settings.left_handed)
-        self.anchored_floating_check.setChecked(settings.anchored_floating_joystick)
+        self.left_handed_check.setChecked(bool(settings.left_handed))
+        self.anchored_floating_check.setChecked(bool(settings.anchored_floating_joystick))
         self.snap_radius_spin.setValue(settings.joystick_snap_radius)
-        self.snap_radius_spin.setEnabled(settings.anchored_floating_joystick)
+        self.snap_radius_spin.setEnabled(bool(settings.anchored_floating_joystick))
         self.sensitivity_spin.setValue(settings.sensitivity)
         self.deadzone_spin.setValue(settings.deadzone)
+
+        self.rate_cap_spin.setValue(settings.adb_rate_cap)
+        self.pps_alert_spin.setValue(settings.pps_alert_threshold)
+
+        self.toggle_key_input.setText(settings.toggle_key or "")
+        self.sprint_key_input.setText(settings.sprint_key or "")
 
         self.left_handed_check.blockSignals(False)
         self.anchored_floating_check.blockSignals(False)
         self.snap_radius_spin.blockSignals(False)
         self.sensitivity_spin.blockSignals(False)
         self.deadzone_spin.blockSignals(False)
+        self.rate_cap_spin.blockSignals(False)
+        self.pps_alert_spin.blockSignals(False)
+        self.toggle_key_input.blockSignals(False)
+        self.sprint_key_input.blockSignals(False)
 
     def _on_left_handed_changed(self, checked: bool) -> None:
         store.settings.update(left_handed=int(checked))
@@ -154,10 +225,58 @@ class SettingsPage(BasePage):
         store.settings.update(deadzone=value)
         self._notify_reload()
 
-    def _on_reset_defaults(self) -> None:
-        store.settings.reset_to_defaults()
-        self.load_settings()
+    def _on_rate_cap_changed(self, value: float) -> None:
+        store.settings.update(adb_rate_cap=value)
         self._notify_reload()
+
+    def _on_pps_alert_changed(self, value: float) -> None:
+        store.settings.update(pps_alert_threshold=value)
+        self._notify_reload()
+
+    def _on_keys_changed(self) -> None:
+        store.settings.update(
+            toggle_key=self.toggle_key_input.text().strip(),
+            sprint_key=self.sprint_key_input.text().strip(),
+        )
+        self._notify_reload()
+
+    def _on_reset_defaults(self) -> None:
+        reply = QMessageBox.question(
+            self,
+            "Reset Settings",
+            "Reset all tuning knobs and configurations to defaults?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            store.settings.reset_to_defaults()
+            self.load_settings()
+            self._notify_reload()
+            QMessageBox.information(self, "Reset", "Settings reset to defaults.")
+
+    def _on_delete_all(self) -> None:
+        reply = QMessageBox.warning(
+            self,
+            "Wipe Database",
+            "Are you sure you want to delete ALL layouts and reset all settings?\nThis cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            # Delete all layouts (which CASCADE deletes layout_zones)
+            for layout in store.layouts.list_all():
+                store.layouts.delete(layout.id)
+
+            # Reset settings row and decouple active profile
+            store.settings.reset_to_defaults()
+            store.settings.update(active_layout_id=None)
+
+            self.load_settings()
+            self._notify_reload()
+            if self.dispatcher:
+                self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+
+            QMessageBox.information(self, "Wiped", "All layouts and settings cleared.")
 
     def _on_export_toml(self) -> None:
         path_str, _ = QFileDialog.getSaveFileName(
