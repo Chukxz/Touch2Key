@@ -107,6 +107,8 @@ def interactive_menu() -> None:
     while True:
         list_profiles()
         print("Commands:")
+        print("  [st] Export App Settings to settings.toml")
+        print("  [lt] Import App Settings from settings.toml")
         print("  [s] Select / Switch Active Profile")
         print("  [i] Import JSON Profile")
         print("  [e] Export Profile to JSON")
@@ -117,6 +119,14 @@ def interactive_menu() -> None:
 
         if choice == "q":
             break
+        elif choice == "st":
+            export_settings_to_toml()
+            print("Settings exported to settings.toml.")
+        elif choice == "lt":
+            if import_settings_from_toml():
+                print("Settings imported successfully from settings.toml.")
+            else:
+                print("Failed to import settings.toml (file not found or invalid).")
         elif choice == "s":
             raw_id = input("Enter Layout ID to activate: ").strip()
             if raw_id.isdigit():
