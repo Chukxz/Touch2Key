@@ -1,13 +1,27 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 from modules.core.pipeline import (
     AlwaysRegion,
-    CircleRegion,
+    CircularRegion,
+    RectangularRegion,
+    FixedOrigin,
+    DynamicOrigin,
+    AnchoredDynamicOrigin,
+    NoConstraint,
+    RadialConstraint,
+    LeashConstraint,
+    IdentityTransform,
+    DeltaTransform,
+    JoystickSectorTransform,
+    ButtonSemantic,
+    ToggleSemantic,
+    PointerMoveSemantic,
+    DirectionalKeySemantic,
     Pipeline,
-    RectRegion,
 )
 from modules.utils import Point
 
@@ -18,48 +32,118 @@ def create_pipeline_from_zone(
     screen_height: float,
     toggle_mode_callback: Any | None = None,
 ) -> Pipeline | None:
+    """Builds a typed 5-stage Pipeline instance from database zone metadata."""
     cfg_raw = getattr(zone, "pipeline_config", "{}") or "{}"
     try:
         cfg = json.loads(cfg_raw)
     except Exception:
         cfg = {}
 
-    reg = cfg.get("region", {})
-    reg_type = reg.get("type")
+    reg_cfg = cfg.get("region", {})
+    reg_type = reg_cfg.get("type", zone.zone_type)
 
-    # Bezel notch is managed at Engine level as the Master Bezel Return Toggle
+    # Master Bezel Return is managed at the root Engine level
     if reg_type == "BEZEL" or zone.zone_type == "BEZEL":
         return None
 
     # Stage 1: Region Selection
     if reg_type == "ALWAYS":
         region = AlwaysRegion()
-    elif reg_type == "RECTANGLE" or (not reg_type and zone.zone_type == "RECTANGLE"):
-        region = RectRegion(
-            left=float(zone.x1 or 0.0),
-            top=float(zone.y1 or 0.0),
-            right=float(zone.x2 or screen_width),
-            bottom=float(zone.y2 or screen_height),
+    elif reg_type == "RECTANGLE":
+        x1 = float(zone.x1 if zone.x1 is not None else 0.0)
+        y1 = float(zone.y1 if zone.y1 is not None else 0.0)
+        x2 = float(zone.x2 if zone.x2 is not None else screen_width)
+        y2 = float(zone.y2 if zone.y2 is not None else screen_height)
+        region = RectangularRegion(top_left=Point(x1, y1), bottom_right=Point(x2, y2))
+    else:  # CIRCLE default
+        cx = float(zone.cx if zone.cx is not None else 0.0)
+        cy = float(zone.cy if zone.cy is not None else 0.0)
+        r = float(zone.r if zone.r is not None else 50.0)
+        region = CircularRegion(center=Point(cx, cy), radius=r)
+
+    # Stage 2: Origin Selection
+    orig_cfg = cfg.get("origin", {})
+    orig_type = orig_cfg.get("type", "FIXED")
+    if orig_type == "DYNAMIC":
+        origin = DynamicOrigin()
+    elif orig_type == "ANCHORED":
+        anchor = Point(
+            float(orig_cfg.get("anchor_x", zone.cx or 0.0)),
+            float(orig_cfg.get("anchor_y", zone.cy or 0.0)),
+        )
+        snap_r = float(orig_cfg.get("snap_radius", 80.0))
+        origin = AnchoredDynamicOrigin(default_anchor=anchor, snap_radius=snap_r)
+    else:
+        fixed_pt = Point(float(zone.cx or 0.0), float(zone.cy or 0.0))
+        origin = FixedOrigin(position=fixed_pt)
+
+    # Stage 3: Constraint Selection
+    const_cfg = cfg.get("constraint", {})
+    const_type = const_cfg.get("type", "NONE")
+    if const_type == "RADIAL":
+        radius = float(const_cfg.get("radius", zone.r or 100.0))
+        constraint = RadialConstraint(radius=radius)
+    elif const_type == "LEASH":
+        leash_r = float(const_cfg.get("leash_radius", 150.0))
+        constraint = LeashConstraint(leash_radius=leash_r)
+    else:
+        constraint = NoConstraint()
+
+    # Stage 4: Transformation Selection
+    trans_cfg = cfg.get("transform", {})
+    trans_type = trans_cfg.get("type", "IDENTITY")
+    if trans_type == "DELTA":
+        sx = float(trans_cfg.get("sens_x", 1.0))
+        sy = float(trans_cfg.get("sens_y", 1.0))
+        transformation = DeltaTransform(sensitivity_x=sx, sensitivity_y=sy)
+    elif trans_type == "JOYSTICK":
+        transformation = JoystickSectorTransform(
+            dead_zone=float(trans_cfg.get("joy_dz", 10.0)),
+            walk_radius=float(trans_cfg.get("joy_walk", 80.0)),
+            sprint_radius=float(trans_cfg.get("joy_sprint", 120.0)),
+            hysteresis_rad=math.radians(float(trans_cfg.get("joy_hysteresis", 5.0))),
         )
     else:
-        region = CircleRegion(
-            center=Point(float(zone.cx or 0.0), float(zone.cy or 0.0)),
-            radius=float(zone.r or 50.0),
-        )
+        transformation = IdentityTransform()
+
+    # Stage 5: Semantics Selection
+    sem_cfg = cfg.get("semantics", {})
+    sem_mode = sem_cfg.get("mode", "BUTTON")
+    is_mouse_button = bool(sem_cfg.get("is_mouse_button", False))
+    target_key = str(zone.scancode or "space")
+
+    semantics: list[Any] = []
+    allow_multi_claim = False
+    type_precedence = 2
+
+    if sem_mode == "TOGGLE_MODE":
+        semantics.append(ToggleSemantic(output="toggle_mode", is_mode_switch=True))
+    elif sem_mode == "TOGGLE_KEY":
+        semantics.append(ToggleSemantic(output=target_key, is_mode_switch=False))
+    elif sem_mode == "WASD":
+        semantics.append(DirectionalKeySemantic())
+        type_precedence = 1
+    elif sem_mode == "POINTER":
+        semantics.append(PointerMoveSemantic())
+        type_precedence = 0
+    elif sem_mode == "TRACK_FIRE":
+        semantics.append(ButtonSemantic(output=target_key, mouse_button=is_mouse_button))
+        semantics.append(PointerMoveSemantic())
+        allow_multi_claim = True
+    else:  # BUTTON
+        semantics.append(ButtonSemantic(output=target_key, mouse_button=is_mouse_button))
+        allow_multi_claim = True
 
     priority = int(zone.priority if zone.priority is not None else 0)
-    sem = cfg.get("semantics", {})
-    sem_mode = sem.get("mode", "BUTTON")
 
-    # Stage 5: Semantic Mapping Handlers
-    pipeline = Pipeline(
+    return Pipeline(
         region=region,
+        origin=origin,
+        constraint=constraint,
+        transformation=transformation,
+        semantics=semantics,
         priority=priority,
-        key=zone.scancode,
-        config=cfg,
-        is_toggle=(sem_mode == "TOGGLE_KEY"),
-        is_mode_switch=(sem_mode == "TOGGLE_MODE"),
-        on_mode_toggle=toggle_mode_callback,
+        type_precedence=type_precedence,
+        creation_id=int(zone.id or 0),
+        allow_multi_claim=allow_multi_claim,
     )
-
-    return pipeline
