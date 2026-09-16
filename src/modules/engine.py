@@ -20,6 +20,7 @@ from modules.utils import (
     TouchEvent,
     TouchPhase,
 )
+from modules.log_manager import AppLogManager
 from modules.core.config import AppConfig
 from modules.core.layout_loader import LayoutLoader
 from modules.core.touch_reader import TouchReader
@@ -340,6 +341,9 @@ def profiler_cleanup(prof: Profile | None, filename: str = "touch2key_cli.prof")
 
 def run(parser: argparse.ArgumentParser | None = None) -> None:
     global cli_profiler
+
+    # Initialize CLI logging (prints to terminal + buffers file output)
+    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_cli")
 
     if parser is None:
         parser = argparse.ArgumentParser(description="Touch2Key Engine")
