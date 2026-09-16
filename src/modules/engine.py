@@ -70,7 +70,6 @@ class Engine:
         self.mapper_event_dispatcher = dispatcher or MapperEventDispatcher()
         self.two_finger_tap_tracker = TwoFingerTapTracker()
 
-        # Listen for hot-reload requests dispatched from GUI or scripts
         self.mapper_event_dispatcher.register_callback(
             "ON_DEVICES_CHANGED", self._on_devices_changed
         )
@@ -83,7 +82,7 @@ class Engine:
                 pass
 
     def _on_devices_changed(self, event: MapperEvent) -> None:
-        """Handles hot-reloading worker processes without tearing down the entire app."""
+        """Handles hot-reloading worker processes without restarting the main app."""
         if not self.bridge_class:
             return
         payload = getattr(event, "payload", {}) or {}
@@ -123,8 +122,10 @@ class Engine:
 
     def _on_layout_reload(self) -> None:
         if self.layout_loader is not None:
+            self.layout_loader.reload()
             dev_w = float(self.layout_loader.width)
-            self.bezel_pipeline = BezelReturnToggle(screen_width=dev_w, bezel_height=14.0)
+            bezel_h = float(self.layout_loader.bezel_height)
+            self.bezel_pipeline = BezelReturnToggle(screen_width=dev_w, bezel_height=bezel_h)
 
     def _build_pipeline_tiers(self) -> list[list[Pipeline]]:
         all_pipelines: list[Pipeline] = []
@@ -138,12 +139,15 @@ class Engine:
         if self.mouse_mapper and self.mouse_mapper.pipeline:
             all_pipelines.append(self.mouse_mapper.pipeline)
 
+        if self.layout_loader and self.layout_loader.custom_pipelines:
+            all_pipelines.extend(self.layout_loader.custom_pipelines)
+
         all_pipelines.sort(
             key=lambda p: (
                 -p.priority,
-                -p.type_precedence,
-                p.region.area,
-                p.creation_id,
+                -getattr(p, "type_precedence", 0),
+                getattr(p.region, "area", 0.0),
+                getattr(p, "creation_id", 0),
             )
         )
 
@@ -155,7 +159,7 @@ class Engine:
                 last_tier = tiers[-1]
                 if (
                     p.priority == last_tier[0].priority
-                    and p.type_precedence == last_tier[0].type_precedence
+                    and getattr(p, "type_precedence", 0) == getattr(last_tier[0], "type_precedence", 0)
                 ):
                     last_tier.append(p)
                 else:
@@ -234,7 +238,6 @@ class Engine:
         m_device_handle: int | None = None
 
         if SYSTEM == "Windows":
-            # Check database cache first, then query if unassigned
             k_device_handle = store.get("windows_keyboard_device", default=None)
             m_device_handle = store.get("windows_mouse_device", default=None)
 
@@ -249,7 +252,11 @@ class Engine:
                     store.set("windows_mouse_device", m_device_handle)
 
         config = AppConfig(self.mapper_event_dispatcher)
-        self.layout_loader = LayoutLoader(config, self.foreground_window)
+        self.layout_loader = LayoutLoader(
+            config=config,
+            foreground_window=self.foreground_window,
+            toggle_mode_callback=self.toggle_mode,
+        )
         self.touch_reader = TouchReader(config, self.mapper_event_dispatcher, rate_cap)
 
         emulator_map = {"toggle_key": toggle_key, "sprint_key": sprint_key}
@@ -264,7 +271,8 @@ class Engine:
         )
 
         dev_w = float(self.layout_loader.width)
-        self.bezel_pipeline = BezelReturnToggle(screen_width=dev_w, bezel_height=14.0)
+        bezel_h = float(self.layout_loader.bezel_height)
+        self.bezel_pipeline = BezelReturnToggle(screen_width=dev_w, bezel_height=bezel_h)
 
         self.mouse_mapper = MouseMapper(self.mapper)
         self.key_mapper = KeyMapper(self.mapper, on_toggle_mode=self.toggle_mode)
@@ -412,7 +420,6 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         profiler_cleanup(cli_profiler)
         sys.exit(0)
 
-    # If launched headlessly, run without requiring a persistent GUI window
     engine = Engine(headless=False)
     try:
         engine._start()
