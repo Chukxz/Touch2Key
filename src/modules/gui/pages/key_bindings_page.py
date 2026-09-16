@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QWidget,
 )
@@ -17,6 +19,8 @@ from .base_page import BasePage
 
 if TYPE_CHECKING:
     from modules.utils import MapperEventDispatcher
+
+logger = logging.getLogger("modules.gui.key_bindings_page")
 
 
 class KeyCaptureFilter(QObject):
@@ -47,7 +51,7 @@ class KeyBindingsPage(BasePage):
     def __init__(
         self,
         dispatcher: MapperEventDispatcher | None = None,
-        parent=None,
+        parent: QWidget | None = None,
     ):
         super().__init__(dispatcher, parent)
         self._active_filter: KeyCaptureFilter | None = None
@@ -81,9 +85,12 @@ class KeyBindingsPage(BasePage):
         self.load_bindings()
 
     def load_bindings(self) -> None:
-        settings = store.settings.get()
-        self.toggle_key_label.setText(settings.toggle_key or "Not set")
-        self.sprint_key_label.setText(settings.sprint_key or "Not set")
+        try:
+            settings = store.settings.get()
+            self.toggle_key_label.setText(settings.toggle_key or "Not set")
+            self.sprint_key_label.setText(settings.sprint_key or "Not set")
+        except Exception as exc:
+            logger.exception("Failed to load key bindings from database")
 
     def _begin_capture(self, target_field: str) -> None:
         btn = self.toggle_key_btn if target_field == "toggle_key" else self.sprint_key_btn
@@ -98,9 +105,14 @@ class KeyBindingsPage(BasePage):
             btn.setEnabled(True)
 
             if key_name:
-                store.settings.update(**{target_field: key_name})
-                if self.dispatcher:
-                    self.dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+                try:
+                    store.settings.update(**{target_field: key_name})
+                    if self.dispatcher:
+                        self.dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+                    logger.info("Bound %s to key '%s'", target_field, key_name)
+                except Exception as exc:
+                    logger.exception("Failed to update key binding for %s", target_field)
+                    QMessageBox.critical(self, "Error", f"Could not save key binding:\n{exc}")
             self.load_bindings()
 
         self._active_filter = KeyCaptureFilter(on_captured, self)
