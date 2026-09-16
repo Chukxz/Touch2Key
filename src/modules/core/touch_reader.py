@@ -60,12 +60,28 @@ class TouchReader:
         self.touch_event_processor: Any = None
         self.process: subprocess.Popen | None = None
 
-        self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self._update_matrix)
+        self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self._on_config_reload)
 
         threading.Thread(target=self._update_rotation, daemon=True).start()
         threading.Thread(target=self._get_touches, daemon=True).start()
         self.wireless_thread = threading.Thread(target=self._connect_wirelessly, daemon=True)
         self.wireless_thread.start()
+
+    def _on_config_reload(self) -> None:
+        """Dynamically updates rate-limiting intervals and matrix transforms."""
+        with self.config.config_lock:
+            new_cap = getattr(self.config.settings, "adb_rate_cap", self.adb_rate_cap)
+            if new_cap > 0 and new_cap != self.adb_rate_cap:
+                self.adb_rate_cap = float(new_cap)
+                self.move_interval = 1.0 / self.adb_rate_cap
+                logger.info(
+                    "TouchReader pacing updated on the fly: %.1f Hz (%.4fs interval)",
+                    self.adb_rate_cap,
+                    self.move_interval,
+                )
+
+        with self.rotation_lock:
+            self._update_matrix()
 
     def _connect_wirelessly(self) -> None:
         connecting = True
@@ -82,7 +98,6 @@ class TouchReader:
                             self.device = dev
                             self._configure_device()
 
-                        # Terminate existing stream so _get_touches reattaches to the wireless device
                         if self.process is not None:
                             try:
                                 self.process.terminate()
