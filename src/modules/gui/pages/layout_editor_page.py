@@ -22,6 +22,7 @@ from modules.database.config_io import export_layout_json
 from modules.database.legacy_migration import migrate_json_layout
 from modules.gui.widgets.layout_plotter_widget import LayoutPlotterWidget
 from modules.utils import CIRCLE, JSONS_FOLDER, RECTANGLE, MapperEvent
+from modules.scripts.adb_screen_capture import _capture_android_screen
 from .base_page import BasePage
 
 if TYPE_CHECKING:
@@ -281,8 +282,7 @@ class LayoutEditorPage(BasePage):
             QMessageBox.critical(self, "Export Failed", str(e))
 
     def _trigger_screenshot_capture(self) -> None:
-        try:
-            from modules.scripts.adb_screen_capture import _capture_android_screen
+        try:         
             _capture_android_screen()
 
             self.refresh_active_layout_display()
