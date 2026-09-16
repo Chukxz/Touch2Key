@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import datetime
+import logging
 from pathlib import Path
 import subprocess
 from PIL import Image
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from modules.database import store
 from modules.utils import (
@@ -16,15 +18,43 @@ from modules.utils import (
     rotate_resolution,
 )
 
+logger = logging.getLogger("modules.scripts.adb_screen_capture")
 
-def capture_android_screen(custom_img_name: str | None = None) -> Path:
+
+def _log_info(msg: str, is_gui: bool) -> None:
+    if is_gui:
+        logger.info(msg)
+    else:
+        print(f"[INFO] {msg}")
+
+
+def _log_warning(msg: str, is_gui: bool) -> None:
+    if is_gui:
+        logger.warning(msg)
+    else:
+        print(f"[WARNING] {msg}")
+
+
+def capture_android_screen(custom_img_name: str | None = None, parent=None) -> Path:
+    """
+    Captures an Android screen screenshot via ADB, embeds DPI metadata into the PNG header,
+    and binds the file path and resolution metrics to the active SQLite layout.
+    """
+    is_gui = QApplication.instance() is not None
+
     device_id = get_adb_device()
     if not device_id:
-        raise RuntimeError("No ADB device detected.")
+        err = "No ADB device detected."
+        if is_gui:
+            logger.error(err)
+        raise RuntimeError(err)
 
     raw_res = get_screen_size(device_id)
     if raw_res is None:
-        raise RuntimeError("Could not retrieve screen resolution.")
+        err = "Could not retrieve screen resolution from ADB."
+        if is_gui:
+            logger.error(err)
+        raise RuntimeError(err)
 
     dpi = get_dpi(device_id)
     img_rotation = get_rotation(device_id)
@@ -38,8 +68,9 @@ def capture_android_screen(custom_img_name: str | None = None) -> Path:
     full_save_path = (IMAGES_FOLDER / filename).resolve()
     android_tmp = "/data/local/tmp/temp_cap.png"
 
+    _log_info(f"Capturing {width}x{height} screen (Orientation: {img_rotation})...", is_gui)
+
     try:
-        print(f"[PROCESS] Capturing {width}x{height} screen (Orientation: {img_rotation})...")
         subprocess.run(
             [ADB, "-s", device_id, "shell", "screencap", "-p", android_tmp],
             check=True,
@@ -51,7 +82,10 @@ def capture_android_screen(custom_img_name: str | None = None) -> Path:
             timeout=20,
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-        raise RuntimeError(f"ADB screen capture failed: {exc}") from exc
+        err_msg = f"ADB screen capture failed: {exc}"
+        if is_gui:
+            logger.exception(err_msg)
+        raise RuntimeError(err_msg) from exc
     finally:
         try:
             subprocess.run(
@@ -66,9 +100,9 @@ def capture_android_screen(custom_img_name: str | None = None) -> Path:
     try:
         with Image.open(full_save_path) as img:
             img.save(full_save_path, dpi=(dpi, dpi))
-            print(f"[INFO] DPI ({dpi}) embedded.")
+            _log_info(f"DPI metadata ({dpi}) embedded into image.", is_gui)
     except Exception as exc:
-        print(f"[WARNING] DPI metadata write failed: {exc}")
+        _log_warning(f"DPI metadata write failed: {exc}", is_gui)
 
     # Synchronize with active database layout
     active_layout = store.get_active_layout()
@@ -80,20 +114,29 @@ def capture_android_screen(custom_img_name: str | None = None) -> Path:
             height=height,
             dpi=dpi,
         )
-        print(f"[INFO] Image and resolution linked to Layout ID {active_layout.id} ('{active_layout.name}').")
+        _log_info(
+            f"Image and resolution linked to Layout ID {active_layout.id} ('{active_layout.name}').",
+            is_gui,
+        )
     else:
-        print("[WARNING] Image captured, but no active layout is set in database.")
+        _log_warning("Image captured, but no active layout is set in database.", is_gui)
 
-    print(f"\n[SUCCESS]\nFile: {full_save_path}")
+    if not is_gui:
+        print(f"\n[SUCCESS]\nFile: {full_save_path}")
+
     return full_save_path
 
 
 def run() -> None:
-    print("[PROCESS] Initializing screen capture...")
+    is_gui = QApplication.instance() is not None
+    _log_info("Initializing screen capture...", is_gui)
     try:
         capture_android_screen()
     except Exception as exc:
-        print(f"[ERROR] {exc}")
+        if is_gui:
+            logger.error("Capture process error: %s", exc)
+        else:
+            print(f"[ERROR] {exc}")
 
 
 if __name__ == "__main__":
