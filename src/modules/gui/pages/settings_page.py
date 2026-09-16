@@ -76,6 +76,49 @@ class SettingsPage(BasePage):
 
         self.load_settings()
 
+        toml_btn_row = QHBoxLayout()
+        self.export_toml_btn = QPushButton("Export to settings.toml")
+        self.import_toml_btn = QPushButton("Import from settings.toml")
+        toml_btn_row.addWidget(self.export_toml_btn)
+        toml_btn_row.addWidget(self.import_toml_btn)
+        self.content_layout().addLayout(toml_btn_row)
+
+        self.export_toml_btn.clicked.connect(self._on_export_toml)
+        self.import_toml_btn.clicked.connect(self._on_import_toml)
+
+    def _on_export_toml(self) -> None:
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+        from modules.utils import TOML_PATH
+
+        path_str, _ = QFileDialog.getSaveFileName(
+            self, "Export Settings", str(TOML_PATH), "TOML files (*.toml);;All files (*.*)"
+        )
+        if not path_str:
+            return
+
+        try:
+            export_settings_to_toml(Path(path_str))
+            QMessageBox.information(self, "Exported", f"Settings exported to:\n{Path(path_str).name}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", str(e))
+
+    def _on_import_toml(self) -> None:
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+        from modules.utils import TOML_PATH
+
+        path_str, _ = QFileDialog.getOpenFileName(
+            self, "Import Settings", str(TOML_PATH.parent), "TOML files (*.toml);;All files (*.*)"
+        )
+        if not path_str:
+            return
+
+        if import_settings_from_toml(Path(path_str)):
+            self.load_settings()
+            self._notify_reload()
+            QMessageBox.information(self, "Imported", "Settings imported and applied successfully.")
+        else:
+            QMessageBox.warning(self, "Import Failed", "Could not parse or apply settings from file.")
+
     def on_page_shown(self) -> None:
         self.load_settings()
 
