@@ -14,11 +14,11 @@ from modules.utils import (
     ADB,
     SHORT_DELAY,
     SYSTEM,
+    DIAGNOSTICS_FOLDER,
     MapperEvent,
     MapperEventDispatcher,
     TouchEvent,
     TouchPhase,
-    DIAGNOSTICS_FOLDER,
 )
 from modules.core.config import AppConfig
 from modules.core.layout_loader import LayoutLoader
@@ -34,7 +34,7 @@ from modules.cli.list_windows import select_window
 from modules.cli.key_capture import capture_keys, capture_performance_settings
 
 NAME = "Touch2Key_Engine"
-profiler: Profile | None = None
+cli_profiler: Profile | None = None
 
 if TYPE_CHECKING:
     from cProfile import Profile
@@ -62,13 +62,12 @@ class Engine:
         self.wasd_mapper: WASDMapper | None = None
         self.bezel_pipeline: Pipeline | None = None
 
-        self.is_visible = False  # Start in Game Mode (cursor hidden)
+        self.is_visible = False
         self.lock = threading.Lock()
         self.is_shutting_down = False
         self.mapper_event_dispatcher = MapperEventDispatcher()
         self.two_finger_tap_tracker = TwoFingerTapTracker()
 
-        # ONLY register global keyboard hotkeys when running pure CLI mode
         if not self.headless:
             import keyboard
             keyboard.add_hotkey("esc", self._shutdown)
@@ -79,7 +78,6 @@ class Engine:
             self.is_visible = not self.is_visible
             new_state = self.is_visible
 
-        # Reset hardware keys & trackers on transition
         self.bridge_class.health_check()
         if self.mouse_mapper:
             self.mouse_mapper.touch_up()
@@ -89,7 +87,6 @@ class Engine:
             self.wasd_mapper.touch_up()
         self.two_finger_tap_tracker.reset()
 
-        # Dispatch state change across engine and Qt Signal Bridge
         self.mapper_event_dispatcher.dispatch(
             MapperEvent(action="ON_MENU_MODE_TOGGLE", is_visible=new_state)
         )
@@ -106,7 +103,6 @@ class Engine:
             self.two_finger_tap_tracker.reset()
 
     def _on_layout_reload(self) -> None:
-        """Rebuilds resolution-dependent boundaries such as the top bezel gate."""
         if self.layout_loader is not None:
             dev_w = float(self.layout_loader.width)
             self.bezel_pipeline = BezelReturnToggle(screen_width=dev_w, bezel_height=14.0)
@@ -123,7 +119,6 @@ class Engine:
         if self.mouse_mapper and self.mouse_mapper.pipeline:
             all_pipelines.append(self.mouse_mapper.pipeline)
 
-        # 4-Key Sort: (-priority, -type_precedence, area, creation_id)
         all_pipelines.sort(
             key=lambda p: (
                 -p.priority,
@@ -133,7 +128,6 @@ class Engine:
             )
         )
 
-        # Group into strict dispatch tiers
         tiers: list[list[Pipeline]] = []
         for p in all_pipelines:
             if not tiers:
@@ -154,22 +148,16 @@ class Engine:
         if not (self.mouse_mapper and self.key_mapper and self.wasd_mapper and self.mapper):
             return
 
-        # -------------------------------------------------------------------
-        # 1. MENU MODE (Cursor Visible) NAVIGATION & RETURN GATES
-        # -------------------------------------------------------------------
         if self.is_visible:
-            # Evaluate strict stationary two-finger tap
             if self.two_finger_tap_tracker.process(touch_event):
                 self.toggle_mode()
                 return
 
-            # Bezel notch fallback
             if self.bezel_pipeline and self.bezel_pipeline.claims(touch_event):
                 self.two_finger_tap_tracker.reset()
                 self.toggle_mode()
                 return
 
-            # Pass-through relative mapping to OS cursor for UI navigation
             if touch_event.contact_id == 0 and not self.two_finger_tap_tracker._contacts:
                 gx, gy = self.mapper.device_to_game_abs(
                     touch_event.position.x, touch_event.position.y
@@ -183,14 +171,10 @@ class Engine:
                     self.bridge_class.left_click_up()
             return
 
-        # -------------------------------------------------------------------
-        # 2. GAME MODE (Cursor Hidden) PIPELINE DISPATCH
-        # -------------------------------------------------------------------
         self.mapper.event_count += 1
         tiers = self._build_pipeline_tiers()
         sink = self.key_mapper.output_sink
 
-        # Routing for already active touches
         claimed_existing = False
         for tier in tiers:
             for p in tier:
@@ -201,7 +185,6 @@ class Engine:
         if claimed_existing:
             return
 
-        # Evaluation for new touches (DOWN)
         if touch_event.phase is TouchPhase.DOWN:
             for tier in tiers:
                 tier_claimed = False
@@ -222,7 +205,7 @@ class Engine:
 
     def start_headless(
         self,
-        window_id: int,
+        window_id: int | None,
         rate_cap: float = 250.0,
         pps: float = 60.0,
         toggle_key: str | None = None,
@@ -233,7 +216,6 @@ class Engine:
 
         if SYSTEM == "Windows":
             from modules.platforms.windows import select_keyboard_then_mouse
-
             res = select_keyboard_then_mouse()
             if res:
                 k_device_handle, m_device_handle = res
@@ -298,49 +280,14 @@ class Engine:
         )
 
         if not self.headless:
-           import keyboard
-           keyboard.wait()
-
-
-class Engine:
-    def __init__(self, headless: bool = False):
-        platform_mod = get_platform()
-        self.headless = headless
-
-        self.system_config = platform_mod.SystemConfig()
-        self.system_config.set_high_priority(os.getpid(), "Main")
-        self.system_config.set_dpi_awareness()
-        self.system_config.set_timer_resolution()
-
-        self.window_manager = platform_mod.WindowManager()
-        self.foreground_window = self.window_manager.get_foreground_window()
-        self.bridge_class = platform_mod.Bridge(self.window_manager, self.system_config)
-
-        self.touch_reader: TouchReader | None = None
-        self.layout_loader: LayoutLoader | None = None
-        self.mapper: Mapper | None = None
-        self.mouse_mapper: MouseMapper | None = None
-        self.key_mapper: KeyMapper | None = None
-        self.wasd_mapper: WASDMapper | None = None
-        self.bezel_pipeline: Pipeline | None = None
-
-        self.is_visible = False  # Start in Game Mode (cursor hidden)
-        self.lock = threading.Lock()
-        self.is_shutting_down = False
-        self.mapper_event_dispatcher = MapperEventDispatcher()
-        self.two_finger_tap_tracker = TwoFingerTapTracker()
-
-        # ONLY register global keyboard hotkeys when running pure CLI mode
-        if not self.headless:
             import keyboard
-            keyboard.add_hotkey("esc", self._shutdown)
+            keyboard.wait()
 
     def _shutdown(self) -> None:
         if self.is_shutting_down:
             return
         self.is_shutting_down = True
 
-        # Unhook global keyboard hotkeys strictly in CLI mode
         if not self.headless:
             try:
                 import keyboard
@@ -375,15 +322,14 @@ class Engine:
         except Exception:
             pass
 
-        profiler_cleanup(profiler)
+        profiler_cleanup(cli_profiler)
         store.close()
-        
-        # Hard terminate only if CLI mode; keep host process alive in GUI mode
+
         if not self.headless:
             os._exit(0)
 
 
-def profiler_cleanup(prof: Profile | None, filename: str = "touch2key_cli.prof") -> None:
+def profiler_cleanup(prof: Profile | None, filename: str = "touch2key_engine.prof") -> None:
     if prof:
         prof.disable()
         DIAGNOSTICS_FOLDER.mkdir(parents=True, exist_ok=True)
@@ -392,21 +338,35 @@ def profiler_cleanup(prof: Profile | None, filename: str = "touch2key_cli.prof")
         print(f"[+] Profiling metrics saved to: {dump_path}")
 
 
-
 def run(parser: argparse.ArgumentParser | None = None) -> None:
-    global profiler
+    global cli_profiler
+
     if parser is None:
         parser = argparse.ArgumentParser(description="Touch2Key Engine")
-        parser.add_argument("--profile", action="store_true", help="Enable profiling")
+
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        default=False,
+        help="Enable cProfile execution tracing",
+    )
 
     args = parser.parse_args()
     if args.profile:
         import cProfile
+        cli_profiler = cProfile.Profile()
+        cli_profiler.enable()
 
-        profiler = cProfile.Profile()
-        profiler.enable()
+    if SYSTEM == "Linux":
+        from modules.platforms.linux import check_display_protocol
+        if not check_display_protocol():
+            sys.exit(1)
+    elif SYSTEM != "Windows":
+        print(f"[!] Unsupported OS: {SYSTEM}")
+        sys.exit(1)
 
     if not pre_flight_run():
+        profiler_cleanup(cli_profiler)
         sys.exit(1)
 
     try:
@@ -416,6 +376,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
 
     success, _ = check_single_instance(NAME)
     if not success:
+        profiler_cleanup(cli_profiler)
         sys.exit(0)
 
     app = QApplication.instance() or QApplication(sys.argv)
@@ -425,6 +386,8 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         engine._start()
     except KeyboardInterrupt:
         engine._shutdown()
+    finally:
+        profiler_cleanup(cli_profiler)
 
 
 if __name__ == "__main__":
