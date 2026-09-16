@@ -70,10 +70,6 @@ class Engine:
         self.mapper_event_dispatcher = dispatcher or MapperEventDispatcher()
         self.two_finger_tap_tracker = TwoFingerTapTracker()
 
-        self.mapper_event_dispatcher.register_callback(
-            "ON_DEVICES_CHANGED", self._on_devices_changed
-        )
-
         if not self.headless:
             try:
                 import keyboard
@@ -83,7 +79,7 @@ class Engine:
 
     def _on_devices_changed(self, event: MapperEvent) -> None:
         """Handles hot-reloading worker processes without restarting the main app."""
-        if not self.bridge_class:
+        if not self.bridge_class or self.bridge_class.k_proc is None:
             return
         payload = getattr(event, "payload", {}) or {}
         k_id = payload.get("keyboard_id")
@@ -285,6 +281,9 @@ class Engine:
         self.mapper_event_dispatcher.register_callback(
             "ON_LAYOUT_RELOAD", self._on_layout_reload
         )
+        self.mapper_event_dispatcher.register_callback(
+            "ON_DEVICES_CHANGED", self._on_devices_changed
+        )
 
         self.bridge_class.start_worker_processes(k_device_handle, m_device_handle)
 
@@ -326,6 +325,12 @@ class Engine:
         if self.is_shutting_down:
             return
         self.is_shutting_down = True
+
+        # Unregister active dispatcher callbacks
+        self.mapper_event_dispatcher.unregister_callback("ON_DEVICES_CHANGED", self._on_devices_changed)
+        self.mapper_event_dispatcher.unregister_callback("ON_LAYOUT_RELOAD", self._on_layout_reload)
+        self.mapper_event_dispatcher.unregister_callback("ON_MENU_MODE_TOGGLE", self._set_is_visible)
+
 
         if not self.headless:
             try:
