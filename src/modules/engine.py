@@ -6,6 +6,7 @@ import os
 import sys
 import threading
 from typing import TYPE_CHECKING
+
 from PySide6.QtWidgets import QApplication
 
 from modules.database import store
@@ -42,7 +43,7 @@ if TYPE_CHECKING:
 
 
 class Engine:
-    def __init__(self, headless: bool = False):
+    def __init__(self, headless: bool = False, dispatcher: MapperEventDispatcher | None = None):
         platform_mod = get_platform()
         self.headless = headless
 
@@ -66,12 +67,29 @@ class Engine:
         self.is_visible = False
         self.lock = threading.Lock()
         self.is_shutting_down = False
-        self.mapper_event_dispatcher = MapperEventDispatcher()
+        self.mapper_event_dispatcher = dispatcher or MapperEventDispatcher()
         self.two_finger_tap_tracker = TwoFingerTapTracker()
 
+        # Listen for hot-reload requests dispatched from GUI or scripts
+        self.mapper_event_dispatcher.register_callback(
+            "ON_DEVICES_CHANGED", self._on_devices_changed
+        )
+
         if not self.headless:
-            import keyboard
-            keyboard.add_hotkey("esc", self._shutdown)
+            try:
+                import keyboard
+                keyboard.add_hotkey("esc", self._shutdown)
+            except Exception:
+                pass
+
+    def _on_devices_changed(self, event: MapperEvent) -> None:
+        """Handles hot-reloading worker processes without tearing down the entire app."""
+        if not self.bridge_class:
+            return
+        payload = getattr(event, "payload", {}) or {}
+        k_id = payload.get("keyboard_id")
+        m_id = payload.get("mouse_id")
+        self.bridge_class.reload_devices(k_id, m_id)
 
     def toggle_mode(self) -> None:
         """Toggles between Game Mode and Menu/Cursor Mode."""
@@ -216,10 +234,19 @@ class Engine:
         m_device_handle: int | None = None
 
         if SYSTEM == "Windows":
-            from modules.platforms.windows import select_keyboard_then_mouse
-            res = select_keyboard_then_mouse()
-            if res:
-                k_device_handle, m_device_handle = res
+            # Check database cache first, then query if unassigned
+            k_device_handle = store.get("windows_keyboard_device", default=None)
+            m_device_handle = store.get("windows_mouse_device", default=None)
+
+            if k_device_handle is None or m_device_handle is None:
+                from modules.platforms.windows.query_interception_device import (
+                    select_keyboard_then_mouse,
+                )
+                res = select_keyboard_then_mouse()
+                if res:
+                    k_device_handle, m_device_handle = res
+                    store.set("windows_keyboard_device", k_device_handle)
+                    store.set("windows_mouse_device", m_device_handle)
 
         config = AppConfig(self.mapper_event_dispatcher)
         self.layout_loader = LayoutLoader(config, self.foreground_window)
@@ -281,8 +308,11 @@ class Engine:
         )
 
         if not self.headless:
-            import keyboard
-            keyboard.wait()
+            try:
+                import keyboard
+                keyboard.wait()
+            except Exception:
+                pass
 
     def _shutdown(self) -> None:
         if self.is_shutting_down:
@@ -342,7 +372,6 @@ def profiler_cleanup(prof: Profile | None, filename: str = "touch2key_cli.prof")
 def run(parser: argparse.ArgumentParser | None = None) -> None:
     global cli_profiler
 
-    # Initialize CLI logging (prints to terminal + buffers file output)
     AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_cli")
 
     if parser is None:
@@ -383,9 +412,8 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         profiler_cleanup(cli_profiler)
         sys.exit(0)
 
-    app = QApplication.instance() or QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(True)
-    engine = Engine()
+    # If launched headlessly, run without requiring a persistent GUI window
+    engine = Engine(headless=False)
     try:
         engine._start()
     except KeyboardInterrupt:
