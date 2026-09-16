@@ -213,22 +213,36 @@ class MapperEventDispatcher:
         event_type: EVENT_TYPE,
         func: Callback,
     ) -> None:
-        with self._lock:
-            callbacks = self.callback_registry[event_type]
+        try:
+            with self._lock:
+                if event_type not in self.callback_registry:
+                    print(f"[!] Unknown event type '{event_type}' during callback registration.")
+                    return
 
-            if func not in callbacks:
-                callbacks.append(func)
+                callbacks = self.callback_registry[event_type]
+                if func not in callbacks:
+                    callbacks.append(func)
+        except Exception as exc:
+            func_name = getattr(func, "__name__", repr(func))
+            print(f"[!] Error registering callback {func_name} for event {event_type}: {exc}")
 
     def unregister_callback(
         self,
         event_type: EVENT_TYPE,
         func: Callback,
     ) -> None:
-        with self._lock:
-            callbacks = self.callback_registry[event_type]
+        try:
+            with self._lock:
+                if event_type not in self.callback_registry:
+                    print(f"[!] Unknown event type '{event_type}' during callback unregistration.")
+                    return
 
-            if func in callbacks:
-                callbacks.remove(func)
+                callbacks = self.callback_registry[event_type]
+                if func in callbacks:
+                    callbacks.remove(func)
+        except Exception as exc:
+            func_name = getattr(func, "__name__", repr(func))
+            print(f"[!] Error unregistering callback {func_name} for event {event_type}: {exc}")
 
     def dispatch(self, event: MapperEvent) -> None:
         with self._lock:
@@ -241,8 +255,9 @@ class MapperEventDispatcher:
         for callback in callbacks:
             try:
                 callback(*args)
-            except Exception:
-                pass
+            except Exception as exc:
+                func_name = getattr(callback, "__name__", repr(callback))
+                print(f"[!] Error in callback {func_name} for event {event.action}: {exc}")
 
     @staticmethod
     def _get_callback_args(event: MapperEvent) -> tuple:
@@ -269,6 +284,7 @@ class MapperEventDispatcher:
             return (event.target_window_id,)
 
         return ()
+
 
 
 SCANCODES = {
