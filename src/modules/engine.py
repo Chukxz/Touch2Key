@@ -329,7 +329,7 @@ class Engine:
             os._exit(0)
 
 
-def profiler_cleanup(prof: Profile | None, filename: str = "touch2key_engine.prof") -> None:
+def profiler_cleanup(prof: Profile | None, filename: str = "touch2key_cli.prof") -> None:
     if prof:
         prof.disable()
         DIAGNOSTICS_FOLDER.mkdir(parents=True, exist_ok=True)
