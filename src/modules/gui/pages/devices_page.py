@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 
 from modules.gui.dialogs.wireless_connect_dialog import connect_wireless_gui
 from modules.platforms import get_platform
-from modules.utils import WINDOWS_HEADERS
+from modules.utils import WINDOWS_HEADERS, MapperEvent
 from .base_page import BasePage
 
 if TYPE_CHECKING:
