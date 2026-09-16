@@ -17,11 +17,9 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from modules.database import store
-from modules.database.connection import DB_PATH
 from modules.utils import (
     BIN_DIR,
-    IMAGES_FOLDER,
-    JSONS_FOLDER,
+    DATA_FOLDER,
     PROJECT_ROOT,
     SYSTEM,
     UDEV_RULE_PATH,
@@ -67,10 +65,9 @@ def run(parent=None) -> bool:
 
     parser = argparse.ArgumentParser(description="Touch2Key Uninstaller")
     parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
-    parser.add_argument("--purge", action="store_true", help="Delete database, profiles, and images")
+    parser.add_argument("--purge", action="store_true", help="Delete entire data directory (database, profiles, images, settings)")
     parser.add_argument("--no-restart", action="store_true", help="Skip system reboot prompt")
 
-    # In GUI mode, ignore CLI argv parsing errors
     if is_gui:
         args, _ = parser.parse_known_args()
     else:
@@ -170,26 +167,20 @@ def run(parent=None) -> bool:
     # 5. Remove Binaries
     if BIN_DIR.exists():
         shutil.rmtree(BIN_DIR, ignore_errors=True)
+        if is_gui:
+            logger.info("Local binaries deleted.")
+        else:
+            print("    - Local binaries deleted.")
 
-    # 6. Purge Database and Artifacts
+    # 6. Purge Data Directory (DB, Images, JSONs, Profiles, TOML)
     if args.purge:
-        if IMAGES_FOLDER.exists():
-            shutil.rmtree(IMAGES_FOLDER, ignore_errors=True)
-        if JSONS_FOLDER.exists():
-            shutil.rmtree(JSONS_FOLDER, ignore_errors=True)
-
-        for ext in ("", "-wal", "-shm"):
-            db_file = Path(f"{DB_PATH}{ext}")
-            if db_file.exists():
-                try:
-                    db_file.unlink()
-                except Exception:
-                    pass
+        if DATA_FOLDER.exists():
+            shutil.rmtree(DATA_FOLDER, ignore_errors=True)
 
         if is_gui:
-            logger.info("Purged user images, JSON profiles, and SQLite database.")
+            logger.info("Purged entire data directory: %s", DATA_FOLDER)
         else:
-            print("[+] User data and SQLite database purged.")
+            print(f"[+] User data, database, and configurations purged ({DATA_FOLDER}).")
 
     if is_gui:
         logger.info("Uninstall completed successfully.")
