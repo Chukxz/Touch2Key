@@ -271,7 +271,7 @@ def interactive_menu() -> None:
 # CLI Entry Point
 # ---------------------------------------------------------------------------
 
-def main() -> None:
+def run() -> None:
     parser = argparse.ArgumentParser(description="Touch2Key CLI Layout & Config Manager")
     parser.add_argument("-l", "--list", action="store_true", help="List all saved profiles")
     parser.add_argument("-s", "--set-active", type=int, metavar="ID", help="Set active layout by ID")
@@ -314,4 +314,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run()
