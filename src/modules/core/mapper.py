@@ -83,6 +83,10 @@ class Mapper:
             "ON_CONFIG_RELOAD", self._update_config
         )
 
+        self.mapper_event_dispatcher.register_callback(
+    "ON_TARGET_WINDOW_CHANGE", self.rebind_target_window
+)
+
         self.running = True
         self.window_thread = threading.Thread(
             target=self._update_game_window_info, daemon=True
@@ -117,6 +121,26 @@ class Mapper:
             if hasattr(s, "toggle_key") and s.toggle_key:
                 self.emulator["toggle_key"] = s.toggle_key
                 self.toggle_key_scancode = SCANCODES.get(s.toggle_key)
+
+    def rebind_target_window(self, new_window_id: int | None) -> None:
+        """Updates the target HWND / Window ID dynamically on the active engine."""
+        with self.lock:
+            if new_window_id and self.window_manager.is_window_valid(new_window_id):
+                self.window_id = new_window_id
+                self.game_window_class_name = self.window_manager.get_window_class_name(new_window_id)
+                self.game_window_info = self._get_window_info(new_window_id)
+                self.window_lost = False
+                logger.info("Engine live-rebound to Window ID: %s (%s)", self.window_id, self.game_window_class_name)
+            else:
+                self.window_id = self.window_manager.get_foreground_window()
+                self.game_window_class_name = (
+                self.window_manager.get_window_class_name(self.window_id) if self.window_id else None
+            )
+                self.game_window_info = (
+                self._get_window_info(self.window_id) if self.window_id else None
+            )
+                self.window_lost = self.window_id is None
+                logger.warning("Target window invalidated. Rebound to foreground HWND: %s", self.window_id)
 
     def _get_window_info(self, window_id: int) -> dict:
         width, height = self.window_manager.get_window_dimensions(window_id)
