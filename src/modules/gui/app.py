@@ -17,7 +17,7 @@ from modules.database import store
 from modules.gui.main_window import MainWindow
 from modules.platforms import check_single_instance
 from modules.scripts.pre_flight import run as pre_flight_run
-from modules.utils import PROJECT_ROOT
+from modules.utils import DIAGNOSTICS_FOLDER
 
 if TYPE_CHECKING:
     from cProfile import Profile
@@ -26,12 +26,13 @@ GUI_APP_NAME = "Touch2Key_GUI"
 gui_profiler: Profile | None = None
 
 
-def profiler_cleanup(prof: Profile | None) -> None:
+def profiler_cleanup(prof: Profile | None, filename: str = "touch2key_gui.prof") -> None:
     if prof:
         prof.disable()
-        dump_path = PROJECT_ROOT / "touch2key_gui.prof"
+        DIAGNOSTICS_FOLDER.mkdir(parents=True, exist_ok=True)
+        dump_path = DIAGNOSTICS_FOLDER / filename
         prof.dump_stats(dump_path)
-        print(f"[+] Profiling data saved to: {dump_path}")
+        print(f"[+] Profiling metrics saved to: {dump_path}")
 
 
 def run(parser: argparse.ArgumentParser | None = None) -> None:
