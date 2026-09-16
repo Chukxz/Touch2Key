@@ -1,13 +1,14 @@
 """
-GUI entry point. Intended to be wired as a `touch2key-gui` console
-script in pyproject.toml's [project.scripts], parallel to the existing
-`touch2key = "modules.engine:run"` CLI entry.
+GUI entry point with optional cProfile tracing.
 """
 
 from __future__ import annotations
 
+import argparse
+import cProfile
 import multiprocessing
 import sys
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
@@ -16,27 +17,61 @@ from modules.database import store
 from modules.gui.main_window import MainWindow
 from modules.platforms import check_single_instance
 from modules.scripts.pre_flight import run as pre_flight_run
+from modules.utils import PROJECT_ROOT
+
+if TYPE_CHECKING:
+    from cProfile import Profile
 
 GUI_APP_NAME = "Touch2Key_GUI"
+gui_profiler: Profile | None = None
 
 
-def run() -> None:
-    # 1. Multiprocessing safety for spawned bridge worker processes
+def profiler_cleanup(prof: Profile | None) -> None:
+    if prof:
+        prof.disable()
+        dump_path = PROJECT_ROOT / "touch2key_gui.prof"
+        prof.dump_stats(dump_path)
+        print(f"[+] Profiling data saved to: {dump_path}")
+
+
+def run(parser: argparse.ArgumentParser | None = None) -> None:
+    global gui_profiler
+
+    if parser is None:
+        parser = argparse.ArgumentParser(description="Touch2Key GUI Application")
+    
+    # Defaults to False; only True when '--profile' is explicitly passed in the terminal
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        default=False,
+        help="Enable cProfile execution tracing",
+    )
+
+    args, _ = parser.parse_known_args()
+
+    if args.profile:
+        gui_profiler = cProfile.Profile()
+        gui_profiler.enable()
+
+    # 1. Multiprocessing safety for spawned workers
     try:
         multiprocessing.set_start_method("spawn", force=True)
     except RuntimeError:
         pass
 
-    # 2. Run system checks (Interception driver / udev / ADB)
+    # 2. System checks
     if not pre_flight_run():
+        profiler_cleanup(gui_profiler)
         sys.exit(1)
 
     # 3. Guard against duplicate running GUI instances
     success, _ = check_single_instance(GUI_APP_NAME)
     if not success:
+        profiler_cleanup(gui_profiler)
         sys.exit(0)
 
-    # 4. Enable High-DPI scaling before QApplication construction
+    # 4. Enable High-DPI scaling
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
@@ -49,10 +84,13 @@ def run() -> None:
     window = MainWindow()
     window.show()
 
-    exit_code = app.exec()
+    exit_code = 0
+    try:
+        exit_code = app.exec()
+    finally:
+        store.close()
+        profiler_cleanup(gui_profiler)
 
-    # 6. Clean database connection shutdown on exit
-    store.close()
     sys.exit(exit_code)
 
 
