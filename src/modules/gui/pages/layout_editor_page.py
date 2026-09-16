@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QMessageBox,
@@ -21,8 +22,8 @@ from modules.database import store
 from modules.database.config_io import export_layout_json
 from modules.database.legacy_migration import migrate_json_layout
 from modules.gui.widgets.layout_plotter_widget import LayoutPlotterWidget
-from modules.utils import CIRCLE, JSONS_FOLDER, RECTANGLE, MapperEvent
 from modules.scripts.adb_screen_capture import capture_android_screen
+from modules.utils import CIRCLE, JSONS_FOLDER, RECTANGLE, MapperEvent
 from .base_page import BasePage
 
 if TYPE_CHECKING:
@@ -43,7 +44,9 @@ class LayoutEditorPage(BasePage):
     ):
         super().__init__(dispatcher, parent)
 
+        # -------------------------------------------------------------------
         # Toolbar Row 1: Profile & File Operations
+        # -------------------------------------------------------------------
         top_toolbar = QHBoxLayout()
         top_toolbar.setContentsMargins(0, 0, 0, 0)
 
@@ -65,7 +68,9 @@ class LayoutEditorPage(BasePage):
 
         self.content_layout().addLayout(top_toolbar)
 
+        # -------------------------------------------------------------------
         # Toolbar Row 2: Zone Drawing & Priority Controls
+        # -------------------------------------------------------------------
         tools_row = QHBoxLayout()
         tools_row.setContentsMargins(0, 0, 0, 0)
 
@@ -90,7 +95,9 @@ class LayoutEditorPage(BasePage):
 
         self.content_layout().addLayout(tools_row)
 
+        # -------------------------------------------------------------------
         # Interactive Canvas
+        # -------------------------------------------------------------------
         self.plotter_widget = LayoutPlotterWidget(self, standalone=False)
         self.content_layout().addWidget(self.plotter_widget, stretch=1)
 
@@ -109,19 +116,59 @@ class LayoutEditorPage(BasePage):
 
         self.priority_spin.valueChanged.connect(self.on_priority_changed)
 
-        self.add_circle_btn.clicked.connect(lambda: self.plotter_widget.start_mode(CIRCLE, 3))
-        self.add_rect_btn.clicked.connect(lambda: self.plotter_widget.start_mode(RECTANGLE, 4))
+        self.add_circle_btn.clicked.connect(lambda: self._start_draw_mode(CIRCLE, 3))
+        self.add_rect_btn.clicked.connect(lambda: self._start_draw_mode(RECTANGLE, 4))
         self.toggle_overlays_btn.clicked.connect(self.plotter_widget.toggle_visibility)
         self.cancel_action_btn.clicked.connect(self.plotter_widget.reset_state)
-        self.save_btn.clicked.connect(self.plotter_widget.enter_naming_mode)
+        self.save_btn.clicked.connect(self._on_save_button_clicked)
 
         self.plotter_widget.layout_saved.connect(self._on_layout_saved)
+        if hasattr(self.plotter_widget, "zone_selected"):
+            self.plotter_widget.zone_selected.connect(self._on_zone_selected_on_canvas)
+
+    def _start_draw_mode(self, shape_type: int, clicks: int) -> None:
+        """Ensures an active layout exists before entering draw mode."""
+        active = store.get_active_layout()
+        if active is None:
+            name, ok = QInputDialog.getText(
+                self, "New Profile Required", "No active profile found. Enter a name to create one:"
+            )
+            if not ok or not name.strip():
+                return
+            settings = store.settings.get()
+            new_layout = store.layouts.create(
+                name=name.strip(),
+                width=settings.json_dev_width,
+                height=settings.json_dev_height,
+                dpi=settings.json_dev_dpi,
+            )
+            store.settings.update(active_layout_id=new_layout.id)
+            self.refresh_active_layout_display()
+            self.plotter_widget.reload_active_layout()
+            self._notify_engine_reload()
+
+        self.plotter_widget.start_mode(shape_type, clicks)
+
+    def _on_zone_selected_on_canvas(self, priority: int) -> None:
+        """Updates priority spinbox to reflect the currently active zone on canvas."""
+        self.priority_spin.blockSignals(True)
+        self.priority_spin.setValue(priority)
+        self.priority_spin.blockSignals(False)
 
     def on_priority_changed(self, val: int) -> None:
         if self.plotter_widget.current_draggable:
             entry_id = self.plotter_widget.current_draggable.entry_id
-            self.plotter_widget.shapes[entry_id]["priority"] = val
-            self.plotter_widget.update_title(f"Zone ID {entry_id} Priority set to {val}", True)
+            if entry_id in self.plotter_widget.shapes:
+                self.plotter_widget.shapes[entry_id]["priority"] = val
+                self.plotter_widget.update_title(f"Zone ID {entry_id} Priority set to {val}", True)
+
+    def _on_save_button_clicked(self) -> None:
+        """Saves zones directly to the active layout if one exists, otherwise prompts for a name."""
+        active = store.get_active_layout()
+        if active is not None and hasattr(self.plotter_widget, "save_to_database"):
+            self.plotter_widget.save_to_database(active.name)
+        else:
+            self.plotter_widget.enter_naming_mode()
 
     def _notify_engine_reload(self) -> None:
         if self.dispatcher is not None:
@@ -157,8 +204,15 @@ class LayoutEditorPage(BasePage):
 
         dialog_layout.addWidget(QLabel("Select a layout to set as active:"))
         layout_list = QListWidget()
-        for l in all_layouts:
+        active = store.get_active_layout()
+        selected_row = 0
+
+        for idx, l in enumerate(all_layouts):
             layout_list.addItem(l.name)
+            if active and l.id == active.id:
+                selected_row = idx
+
+        layout_list.setCurrentRow(selected_row)
         dialog_layout.addWidget(layout_list)
 
         btn_row = QHBoxLayout()
@@ -233,8 +287,15 @@ class LayoutEditorPage(BasePage):
 
         dialog_layout.addWidget(QLabel("Select layout to export:"))
         layout_list = QListWidget()
-        for l in all_layouts:
+        active = store.get_active_layout()
+        selected_row = 0
+
+        for idx, l in enumerate(all_layouts):
             layout_list.addItem(l.name)
+            if active and l.id == active.id:
+                selected_row = idx
+
+        layout_list.setCurrentRow(selected_row)
         dialog_layout.addWidget(layout_list)
 
         btn_row = QHBoxLayout()
@@ -248,6 +309,7 @@ class LayoutEditorPage(BasePage):
         def on_export_confirm() -> None:
             selected_items = layout_list.selectedItems()
             if not selected_items:
+                QMessageBox.warning(dialog, "Selection Required", "Please select a layout to export.")
                 return
             target_name = selected_items[0].text()
             target_layout = next(l for l in all_layouts if l.name == target_name)
@@ -282,9 +344,8 @@ class LayoutEditorPage(BasePage):
             QMessageBox.critical(self, "Export Failed", str(e))
 
     def _trigger_screenshot_capture(self) -> None:
-        try:         
+        try:
             capture_android_screen()
-
             self.refresh_active_layout_display()
             self.plotter_widget.reload_active_layout()
             self._notify_engine_reload()
@@ -292,4 +353,3 @@ class LayoutEditorPage(BasePage):
         except Exception as exc:
             logger.exception("Screenshot capture failed")
             QMessageBox.critical(self, "Capture Failed", str(exc))
-
