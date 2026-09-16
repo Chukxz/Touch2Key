@@ -104,6 +104,15 @@ class DevicesPage(BasePage):
                 )
                 logger.info("Bound target window: '%s' (HWND: %s)", self.selected_window_title, self.selected_window_id)
 
+                # Broadcast live HWND rebind to the active Engine
+                if self.dispatcher:
+                    self.dispatcher.dispatch(
+                        MapperEvent(
+                            action="ON_TARGET_WINDOW_CHANGE",
+                            target_window_id=self.selected_window_id,
+                        )
+                    )
+
     def _update_list(self) -> None:
         try:
             visible = self.window_manager.find_visible_windows()
