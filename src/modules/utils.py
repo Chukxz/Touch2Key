@@ -124,6 +124,7 @@ EVENT_TYPE = Literal[
     "ON_AGGREGATION",
     "ON_WORKER_RESPAWN",
     "ON_TARGET_WINDOW_CHANGE",
+    "ON_DEVICES_CHANGED",
 ]
 
 # ---------------------------------------------------------------------------
@@ -184,6 +185,7 @@ class MapperEvent:
     acc_y: float | None = None
     worker_type: str | None = None
     target_window_id: int | None = None
+    payload: dict | None = None
 
 
 class MapperEventDispatcher:
@@ -206,6 +208,7 @@ class MapperEventDispatcher:
             "ON_AGGREGATION": [],
             "ON_WORKER_RESPAWN": [],
             "ON_TARGET_WINDOW_CHANGE": [],
+            "ON_DEVICES_CHANGED": [],
         }
 
     def register_callback(
@@ -283,8 +286,10 @@ class MapperEventDispatcher:
         if action == "ON_TARGET_WINDOW_CHANGE":
             return (event.target_window_id,)
 
-        return ()
+        if action == "ON_DEVICES_CHANGED":
+            return (event,)
 
+        return ()
 
 
 SCANCODES = {
