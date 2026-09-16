@@ -1,5 +1,3 @@
-# src/modules/gui/pages/profiles_page.py
-
 from __future__ import annotations
 
 import logging
