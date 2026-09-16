@@ -1,162 +1,107 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView,
+    QFrame,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QMessageBox,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
+    QVBoxLayout,
     QWidget,
 )
 
-from modules.gui.dialogs.wireless_connect_dialog import connect_wireless_gui
-from modules.platforms import get_platform
-from modules.utils import WINDOWS_HEADERS, MapperEvent
-from .base_page import BasePage
+from modules.database import store
+from modules.utils import MapperEvent, SYSTEM
 
-if TYPE_CHECKING:
-    from modules.utils import MapperEventDispatcher
-
-logger = logging.getLogger("modules.gui.devices_page")
+logger = logging.getLogger("modules.gui.pages.devices")
 
 
-class DevicesPage(BasePage):
-    """Dynamic, non-blocking visible window monitor and ADB target selector."""
+class DevicesPage(QWidget):
+    def __init__(self, dispatcher, parent=None):
+        super().__init__(parent)
+        self.dispatcher = dispatcher
 
-    title = "Devices"
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
 
-    def __init__(
-        self,
-        dispatcher: MapperEventDispatcher | None = None,
-        parent: QWidget | None = None,
-    ):
-        super().__init__(dispatcher, parent)
-        self.selected_window_id: int | None = None
-        self.selected_window_title: str = ""
+        title = QLabel("Hardware & Device Configuration")
+        title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        layout.addWidget(title)
 
-        self.window_manager = get_platform().WindowManager()
-        self.windows_id_mapping: dict[int, int] = {}
-        self.main_store: set[int] = set()
-        self.tmp_store: set[int] = set()
-        self.windows_data: dict[int, list] = {}
+        desc = QLabel(
+            "Select and assign physical input devices. On Windows, this routes "
+            "Interception kernel drivers directly to your designated keyboard and mouse."
+        )
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
 
-        self.status_label = QLabel("Selected Target: None")
-        self.status_label.setStyleSheet("font-weight: bold; color: palette(highlight);")
-        self.content_layout().addWidget(self.status_label)
+        # Status Display Box
+        self.info_frame = QFrame()
+        self.info_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        frame_layout = QVBoxLayout(self.info_frame)
 
-        self.table = QTableWidget()
-        self.table.setColumnCount(len(WINDOWS_HEADERS))
-        self.table.setHorizontalHeaderLabels(WINDOWS_HEADERS)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.verticalHeader().setVisible(False)
+        self.k_label = QLabel("Configured Keyboard: None")
+        self.m_label = QLabel("Configured Mouse: None")
+        frame_layout.addWidget(self.k_label)
+        frame_layout.addWidget(self.m_label)
+        layout.addWidget(self.info_frame)
 
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        # Action Buttons
+        btn_layout = QHBoxLayout()
+        self.rebind_btn = QPushButton("Detect & Rebind Hardware")
+        self.rebind_btn.clicked.connect(self._handle_rebind)
+        btn_layout.addWidget(self.rebind_btn)
+        btn_layout.addStretch()
 
-        self.content_layout().addWidget(self.table)
+        layout.addLayout(btn_layout)
+        layout.addStretch()
 
-        btn_row = QHBoxLayout()
-        self.refresh_btn = QPushButton("Refresh Windows")
-        self.select_btn = QPushButton("Bind Target Window")
-        self.connect_wireless_btn = QPushButton("Connect Wirelessly (ADB)")
+        self._refresh_ui()
 
-        btn_row.addWidget(self.refresh_btn)
-        btn_row.addWidget(self.select_btn)
-        btn_row.addWidget(self.connect_wireless_btn)
-        self.content_layout().addLayout(btn_row)
+    def _refresh_ui(self) -> None:
+        if SYSTEM == "Windows":
+            k_id = store.get("windows_keyboard_device", default=None)
+            m_id = store.get("windows_mouse_device", default=None)
+            self.k_label.setText(f"Configured Keyboard ID: {k_id if k_id is not None else 'Unassigned'}")
+            self.m_label.setText(f"Configured Mouse ID:    {m_id if m_id is not None else 'Unassigned'}")
+            self.rebind_btn.setEnabled(True)
+        else:
+            self.k_label.setText("Virtual UInput subsystem active (Kernel-managed).")
+            self.m_label.setText("Mouse movements routed via Linux evdev.")
+            self.rebind_btn.setEnabled(False)
 
-        self.table.itemSelectionChanged.connect(self._on_row_selected)
-        self.select_btn.clicked.connect(self._on_row_selected)
-        self.refresh_btn.clicked.connect(self._update_list)
-        self.connect_wireless_btn.clicked.connect(lambda: connect_wireless_gui(self))
+    def _handle_rebind(self) -> None:
+        if SYSTEM != "Windows":
+            return
 
-        self.poll_timer = QTimer(self)
-        self.poll_timer.timeout.connect(self._update_list)
-        self.poll_timer.start(1500)
+        from modules.platforms.windows.query_interception_device import select_keyboard_then_mouse
 
-    def on_page_shown(self) -> None:
-        self._update_list()
+        devices = select_keyboard_then_mouse(parent=self)
+        if not devices:
+            logger.info("Device re-selection cancelled by user.")
+            return
 
-    def _on_row_selected(self) -> None:
-        row = self.table.currentRow()
-        if row >= 0:
-            id_item = self.table.item(row, 0)
-            title_item = self.table.item(row, 1)
-            if id_item and title_item:
-                self.selected_window_id = id_item.data(Qt.ItemDataRole.UserRole)
-                self.selected_window_title = title_item.text()
-                self.status_label.setText(
-                    f"Selected Target: {self.selected_window_title} (HWND: {self.selected_window_id})"
-                )
-                logger.info("Bound target window: '%s' (HWND: %s)", self.selected_window_title, self.selected_window_id)
+        k_device, m_device = devices
 
-                # Broadcast live HWND rebind to the active Engine
-                if self.dispatcher:
-                    self.dispatcher.dispatch(
-                        MapperEvent(
-                            action="ON_TARGET_WINDOW_CHANGE",
-                            target_window_id=self.selected_window_id,
-                        )
-                    )
+        # 1. Update persistent store
+        store.set("windows_keyboard_device", k_device)
+        store.set("windows_mouse_device", m_device)
+        self._refresh_ui()
 
-    def _update_list(self) -> None:
-        try:
-            visible = self.window_manager.find_visible_windows()
-            self.windows_data.clear()
-            self.tmp_store.clear()
+        # 2. Hot-reload active running engine
+        self.dispatcher.dispatch(
+            MapperEvent(
+                action="ON_DEVICES_CHANGED",
+                payload={"keyboard_id": k_device, "mouse_id": m_device},
+            )
+        )
 
-            for window_id, meta in visible.items():
-                left, top = self.window_manager.get_window_position(window_id)
-                width, height = self.window_manager.get_window_dimensions(window_id)
-                if width == 0 or height == 0:
-                    continue
-
-                self.tmp_store.add(window_id)
-                self.windows_data[window_id] = [
-                    window_id,
-                    meta["title"],
-                    meta["class_name"],
-                    left,
-                    top,
-                    width,
-                    height,
-                ]
-
-            added = self.tmp_store - self.main_store
-            removed = self.main_store - self.tmp_store
-            self.main_store = set(self.tmp_store)
-
-            for window_id in removed:
-                del_idx = self.windows_id_mapping.pop(window_id, None)
-                if del_idx is not None:
-                    self.table.removeRow(del_idx)
-                    for wid, idx in self.windows_id_mapping.items():
-                        if idx > del_idx:
-                            self.windows_id_mapping[wid] = idx - 1
-
-            for window_id in added:
-                row = self.table.rowCount()
-                self.table.insertRow(row)
-                data = self.windows_data[window_id]
-                for col_idx, val in enumerate(data):
-                    item = QTableWidgetItem(str(val))
-                    if col_idx == 0:
-                        item.setData(Qt.ItemDataRole.UserRole, window_id)
-                    self.table.setItem(row, col_idx, item)
-                self.windows_id_mapping[window_id] = row
-        except Exception as exc:
-            logger.exception("Failed to poll visible windows from window manager")
+        logger.info("Devices reloaded successfully: K=%d, M=%d", k_device, m_device)
+        QMessageBox.information(
+            self,
+            "Devices Updated",
+            f"Hardware reloaded:\nKeyboard ID: {k_device}\nMouse ID: {m_device}",
+        )
