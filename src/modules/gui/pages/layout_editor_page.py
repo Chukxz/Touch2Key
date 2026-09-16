@@ -1,3 +1,5 @@
+# src/modules/gui/pages/layout_editor_page.py
+
 from __future__ import annotations
 
 import logging
@@ -135,17 +137,23 @@ class LayoutEditorPage(BasePage):
             )
             if not ok or not name.strip():
                 return
-            settings = store.settings.get()
-            new_layout = store.layouts.create(
-                name=name.strip(),
-                width=settings.json_dev_width,
-                height=settings.json_dev_height,
-                dpi=settings.json_dev_dpi,
-            )
-            store.settings.update(active_layout_id=new_layout.id)
-            self.refresh_active_layout_display()
-            self.plotter_widget.reload_active_layout()
-            self._notify_engine_reload()
+            try:
+                settings = store.settings.get()
+                new_layout = store.layouts.create(
+                    name=name.strip(),
+                    width=settings.json_dev_width,
+                    height=settings.json_dev_height,
+                    dpi=settings.json_dev_dpi,
+                )
+                store.settings.update(active_layout_id=new_layout.id)
+                self.refresh_active_layout_display()
+                self.plotter_widget.reload_active_layout()
+                self._notify_engine_reload()
+                logger.info("Initialized default profile '%s' (ID: %s) for drawing", new_layout.name, new_layout.id)
+            except Exception as exc:
+                logger.exception("Failed to initialize profile for drawing")
+                QMessageBox.critical(self, "Error", f"Could not create profile:\n{exc}")
+                return
 
         self.plotter_widget.start_mode(shape_type, clicks)
 
@@ -176,15 +184,19 @@ class LayoutEditorPage(BasePage):
             self.dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
 
     def refresh_active_layout_display(self) -> None:
-        active_layout = store.get_active_layout()
-        if active_layout is not None:
-            self.active_layout_label.setText(
-                f"Active Layout: {active_layout.name} (ID: {active_layout.id})"
-            )
-        else:
-            self.active_layout_label.setText("Active Layout: None")
+        try:
+            active_layout = store.get_active_layout()
+            if active_layout is not None:
+                self.active_layout_label.setText(
+                    f"Active Layout: {active_layout.name} (ID: {active_layout.id})"
+                )
+            else:
+                self.active_layout_label.setText("Active Layout: None")
+        except Exception as exc:
+            logger.exception("Failed to refresh active layout display")
 
     def _on_layout_saved(self, name: str, layout_id: int) -> None:
+        logger.info("Layout '%s' (ID: %s) saved to database", name, layout_id)
         self.refresh_active_layout_display()
         self._notify_engine_reload()
         QMessageBox.information(
@@ -192,7 +204,13 @@ class LayoutEditorPage(BasePage):
         )
 
     def open_switch_layout_dialog(self) -> None:
-        all_layouts = store.layouts.list_all()
+        try:
+            all_layouts = store.layouts.list_all()
+        except Exception as exc:
+            logger.exception("Failed to query layouts for switch dialog")
+            QMessageBox.critical(self, "Database Error", f"Could not list profiles:\n{exc}")
+            return
+
         if not all_layouts:
             QMessageBox.information(self, "No Layouts", "No layouts found in the database.")
             return
@@ -230,11 +248,16 @@ class LayoutEditorPage(BasePage):
             target_name = selected_items[0].text()
             target_layout = next(l for l in all_layouts if l.name == target_name)
 
-            store.settings.update(active_layout_id=target_layout.id)
-            self.refresh_active_layout_display()
-            self.plotter_widget.reload_active_layout()
-            self._notify_engine_reload()
-            dialog.accept()
+            try:
+                store.settings.update(active_layout_id=target_layout.id)
+                self.refresh_active_layout_display()
+                self.plotter_widget.reload_active_layout()
+                self._notify_engine_reload()
+                logger.info("Switched active layout to '%s' (ID: %s)", target_layout.name, target_layout.id)
+                dialog.accept()
+            except Exception as exc:
+                logger.exception("Failed to switch active layout to '%s'", target_name)
+                QMessageBox.critical(dialog, "Error", f"Failed to switch layout:\n{exc}")
 
         select_btn.clicked.connect(on_select)
         cancel_btn.clicked.connect(dialog.reject)
@@ -256,26 +279,37 @@ class LayoutEditorPage(BasePage):
             QMessageBox.critical(self, "Error", f"File '{file_path.name}' not found.")
             return
 
-        layout_id = migrate_json_layout(json_path=file_path, image_path="", set_active=True)
-
-        if layout_id is not None:
-            self.refresh_active_layout_display()
-            self.plotter_widget.reload_active_layout()
-            self._notify_engine_reload()
-            QMessageBox.information(
-                self,
-                "Success",
-                f"Imported '{file_path.stem}' successfully!\nIt is now set as the active layout.",
-            )
-        else:
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"Failed to import {file_path.name}. Check log console for details.",
-            )
+        try:
+            layout_id = migrate_json_layout(json_path=file_path, image_path="", set_active=True)
+            if layout_id is not None:
+                self.refresh_active_layout_display()
+                self.plotter_widget.reload_active_layout()
+                self._notify_engine_reload()
+                logger.info("Imported layout profile from '%s' (ID: %s)", file_path.name, layout_id)
+                QMessageBox.information(
+                    self,
+                    "Success",
+                    f"Imported '{file_path.stem}' successfully!\nIt is now set as the active layout.",
+                )
+            else:
+                logger.warning("Failed to import '%s': format invalid or unsupported", file_path.name)
+                QMessageBox.critical(
+                    self,
+                    "Error",
+                    f"Failed to import {file_path.name}. Check log console for details.",
+                )
+        except Exception as exc:
+            logger.exception("Unexpected error while importing '%s'", file_path.name)
+            QMessageBox.critical(self, "Import Error", f"Failed to import profile:\n{exc}")
 
     def open_export_dialog(self) -> None:
-        all_layouts = store.layouts.list_all()
+        try:
+            all_layouts = store.layouts.list_all()
+        except Exception as exc:
+            logger.exception("Failed to retrieve layouts for export")
+            QMessageBox.critical(self, "Database Error", f"Could not list profiles:\n{exc}")
+            return
+
         if not all_layouts:
             QMessageBox.information(self, "Empty", "No layouts found in database to export.")
             return
@@ -335,20 +369,23 @@ class LayoutEditorPage(BasePage):
 
         try:
             out_file = export_layout_json(layout.id, Path(save_path_str))
+            logger.info("Exported layout ID %s ('%s') to '%s'", layout.id, layout.name, out_file)
             QMessageBox.information(
                 self,
                 "Success",
                 f"Layout exported successfully to:\n{out_file.name}",
             )
-        except Exception as e:
-            QMessageBox.critical(self, "Export Failed", str(e))
+        except Exception as exc:
+            logger.exception("Layout export failed for ID %s ('%s')", layout.id, layout.name)
+            QMessageBox.critical(self, "Export Failed", str(exc))
 
     def _trigger_screenshot_capture(self) -> None:
         try:
-            capture_android_screen()
+            capture_android_screen(parent=self)
             self.refresh_active_layout_display()
             self.plotter_widget.reload_active_layout()
             self._notify_engine_reload()
+            logger.info("Screenshot captured and linked to active layout")
             QMessageBox.information(self, "Screenshot", "Reference screenshot captured and linked.")
         except Exception as exc:
             logger.exception("Screenshot capture failed")
