@@ -18,11 +18,13 @@ dependencies = [
   "matplotlib>=3.10.8",
   "pillow>=12.1.0",
   "psutil>=7.2.1",
-  "PySide6>=6.11.1 ",
+  "PySide6>=6.11.1",
   "requests>=2.34.2",
-  "tomlkit>=0.14.0", # --- Windows Only Dependencies ---
+  "tomlkit>=0.14.0",
+  # --- Windows Only Dependencies ---
   "pywin32>=311 ; sys_platform == 'win32'",
-  "interception-python>=1.13.6 ; sys_platform == 'win32'", # --- Linux Only Dependencies ---
+  "interception-python>=1.13.6 ; sys_platform == 'win32'",
+  # --- Linux Only Dependencies ---
   "python-xlib>=0.31 ; sys_platform == 'linux'",
   "evdev>=1.7.0 ; sys_platform == 'linux'",
 ]
@@ -48,16 +50,15 @@ dev = [
 
 [project.scripts]
 touch2key = "modules.main:run"
-touch2key-gui = "modules.gui.app:run"
+touch2key-adb = "modules.scripts.show_adb_path:run"
 touch2key-capture = "modules.scripts.adb_screen_capture:run"
-touch2key-plot = "modules.scripts.plotting:run"
+touch2key-gui = "modules.gui.app:run"
+touch2key-manage = "modules.cli.layout_manager:run"
+touch2key-plot = "modules.cli.layout_plotter:run"
 touch2key-preflight = "modules.scripts.pre_flight:run"
-touch2key-reset = "modules.scripts.hard_reset_toml:run"
-touch2key-select = "modules.scripts.select_layout:run"
 touch2key-setup = "modules.scripts.setup:run"
-touch2key-show = "modules.scripts.show:run"
 touch2key-uninstall = "modules.scripts.uninstall:run"
-touch2key-wireless = "modules.scripts.force_wireless:run"
+touch2key-wireless = "modules.cli.wireless_connect:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]

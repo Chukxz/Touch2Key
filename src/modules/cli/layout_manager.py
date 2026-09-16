@@ -10,7 +10,6 @@ import/export, and bundled profile migrations without opening the PySide6 GUI.
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 from typing import Optional
 
@@ -22,7 +21,6 @@ from modules.database.config_io import (
     import_any,
 )
 from modules.database.legacy_migration import (
-    migrate_all,
     migrate_json_layout,
     migrate_toml_config,
 )

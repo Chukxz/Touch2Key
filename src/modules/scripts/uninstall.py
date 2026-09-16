@@ -64,9 +64,22 @@ def run(parent=None) -> bool:
     is_gui = QApplication.instance() is not None
 
     parser = argparse.ArgumentParser(description="Touch2Key Uninstaller")
-    parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
-    parser.add_argument("--purge", action="store_true", help="Delete entire data directory (database, profiles, images, settings)")
-    parser.add_argument("--no-restart", action="store_true", help="Skip system reboot prompt")
+    parser.add_argument(
+        "-y", "--yes", action="store_true", help="Skip confirmation prompt"
+    )
+    parser.add_argument(
+        "--purge",
+        action="store_true",
+        help="Delete entire data directory (database, profiles, images, jsons, settings)",
+    )
+    parser.add_argument(
+        "--purge-all",
+        action="store_true",
+        help="Delete entire data directory, and profiling (.prof) file",
+    )
+    parser.add_argument(
+        "--no-restart", action="store_true", help="Skip system reboot prompt"
+    )
 
     if is_gui:
         args, _ = parser.parse_known_args()
@@ -136,7 +149,7 @@ def run(parent=None) -> bool:
                         reboot_text,
                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     )
-                    reboot_now = (res == QMessageBox.StandardButton.Yes)
+                    reboot_now = res == QMessageBox.StandardButton.Yes
                 else:
                     print("\n" + "=" * 55)
                     print("!!! SYSTEM RESTART REQUIRED !!!".center(55))
@@ -145,7 +158,14 @@ def run(parent=None) -> bool:
 
                 if reboot_now:
                     subprocess.run(
-                        ["shutdown", "/r", "/t", "5", "/c", "Touch2Key driver uninstallation complete."]
+                        [
+                            "shutdown",
+                            "/r",
+                            "/t",
+                            "5",
+                            "/c",
+                            "Touch2Key driver uninstallation complete.",
+                        ]
                     )
                     return True
         else:
@@ -180,11 +200,15 @@ def run(parent=None) -> bool:
         if is_gui:
             logger.info("Purged entire data directory: %s", DATA_FOLDER)
         else:
-            print(f"[+] User data, database, and configurations purged ({DATA_FOLDER}).")
+            print(
+                f"[+] User data, database, and configurations purged ({DATA_FOLDER})."
+            )
 
     if is_gui:
         logger.info("Uninstall completed successfully.")
-        QMessageBox.information(parent, "Uninstall Complete", "Uninstallation finished successfully.")
+        QMessageBox.information(
+            parent, "Uninstall Complete", "Uninstallation finished successfully."
+        )
     else:
         print("[+] Uninstall complete.")
 

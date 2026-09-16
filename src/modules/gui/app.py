@@ -27,7 +27,9 @@ GUI_APP_NAME = "Touch2Key_GUI"
 gui_profiler: Profile | None = None
 
 
-def profiler_cleanup(prof: Profile | None, filename: str = "touch2key_gui.prof") -> None:
+def profiler_cleanup(
+    prof: Profile | None, filename: str = "touch2key_gui.prof"
+) -> None:
     if prof:
         prof.disable()
         DIAGNOSTICS_FOLDER.mkdir(parents=True, exist_ok=True)
@@ -44,6 +46,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     # -----------------------------------------------------------------------
     if SYSTEM == "Linux":
         from modules.platforms.linux import check_display_protocol
+
         if not check_display_protocol():
             sys.exit(1)
     elif SYSTEM != "Windows":
@@ -96,7 +99,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
 
-    app = QApplication.instance() or QApplication(sys.argv)
+    app = QApplication(sys.argv)
     app.setApplicationName("Touch2Key")
     app.setQuitOnLastWindowClosed(True)
 

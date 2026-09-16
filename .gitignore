@@ -1,5 +1,8 @@
-# === Project Specifics ===
+# === User Data ===
+# Ignore user-generated mappings, assets, and local config
+data/
 
+# === Project Specifics ===
 # Ignore Drivers, Binaries, and Platform Tools
 # These are OS-specific and large; they should be managed via setup scripts, not Git
 bin/
@@ -52,6 +55,3 @@ diagnostics/
 *.sqlite
 *.sqlite3
 *.db
-
-# === User data ===
-data/

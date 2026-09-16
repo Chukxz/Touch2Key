@@ -7,6 +7,9 @@
 
 **Touch2Key** is a high-performance, cross-platform input mapper designed to seamlessly translate touch interactions (via Android/ADB) into zero-latency keyboard and mouse inputs on your PC.
 
+This is the Second Touch2Key Published Implementation with full GUI and CLI support.
+The first version with only CLI support + Basic GUI windows, can be accessed [here.]("https://github.com/Chukxz/touch2key")
+
 Enable **Developer Options** and **Wireless Debugging** (5 GHz Wi-Fi recommended) on your Android device and accept the authorization prompt when connecting.
 
 Touch2Key can be paired with game streamers like **Sunshine/Moonlight** or **Apollo/Artemis** for full visual and audio streaming. Disable all virtual controller/mouse inputs within your streaming host to prevent mapping conflicts.
@@ -91,10 +94,42 @@ On startup, the engine launches an interactive Window Selector dialog that lists
 
 *(Note: Windows requires a system reboot after installation to fully load the driver).*
 
+---
+
 ## Uninstallation
 Because Touch2Key installs system-level drivers and kernel rules, **simply running `pip uninstall Touch2Key` is not sufficient.** You should first run the included uninstaller before uninstalling via pip to avoid any issues or residual files.
 
+### CLI Mode
+
+| Action | Command | Description |
+| :--- | :--- | :--- |
+| **Standard** | `touch2key-uninstall` | Removes drivers/rules/binaries; preserves all user data. |
+| **Purge** | `touch2key-uninstall --purge` | Removes drivers/rules/binaries **AND** deletes all user data — all saved jsons/images/profiles files, settings toml file and database files. |
+| **Purge-All** | `touch2key-uninstall --purge-all` | Removes drivers/rules/binaries **AND** deletes all user and diagnostic data — all saved jsons/images/profiles files, settings toml file, database files **AND** the diagnostics (profiling — .prof) and log files. |
+
 *(Note: Windows requires a system reboot after uninstallation to fully release the driver).*
+
+---
+
+## Command Line Interface (CLI)
+| Command | Description |
+| :--- | :--- |
+| `touch2key` | Launches the CLI engine. |
+| `touch2key --profile` | Launches the CLI engine and also runs profiling. |
+| `touch2key-adb` | Displays full ADB executable path if found.|
+| `touch2key-capture` | ADB screen capture. |
+| `touch2key-gui` | Launches the GUI engine. |
+| `touch2key-gui --profile` | Launches the GUI engine and also runs profiling. |
+| `touch2key-manage` | Layout Manager.|
+| `touch2key-plot` | Mapping visualizer. |
+| `touch2key-preflight` | Diagnostic checks. |
+| `touch2key-setup` | OS configuration wizard. |
+| `touch2key-uninstall` | Safely removes drivers, rules and binaries. |
+| `touch2key-uninstall --purge` | Uninstalls and removes jsons/images and the settings toml file. |
+| `touch2key-uninstall --purge-all` | Purges and removes the profiling (.prof) file. |
+| `touch2key-wireless` | Forces ADB wireless connection. |
+
+---
 
 ## Contributing
 Please use `black` for formatting (recommended), `pytest` for unit testing (optional), and `snakeviz` for visual view of the profile (optional).
@@ -102,6 +137,8 @@ Please use `black` for formatting (recommended), `pytest` for unit testing (opti
 Install these via running `pip install .[dev]` during installation.
 
 To support editable mode run `pip install -e .[dev]` (add the `-e` flag) during installation, but note that contributions to the Touch2Key's github repository would likely require permissions from the author(s).
+
+---
 
 ## License
 MIT License.
