@@ -343,8 +343,8 @@ class TouchReader:
                         timestamp=data["timestamp"],
                     )
                     self.touch_event_processor(event)
-                except Exception as e:
-                    logger.debug("Error processing touch event: %s", e)
+                except Exception:
+                    pass
 
             if data["phase"] is TouchPhase.DOWN:
                 data["phase"] = TouchPhase.MOVE
