@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from typing import TYPE_CHECKING, NamedTuple
 
 from modules.utils import SYSTEM
@@ -23,27 +24,22 @@ class PlatformModules(NamedTuple):
 
 
 def _check_single_instance_windows(instance_name: str) -> tuple[bool, int | None]:
-    """Uses a named Mutex to prevent duplicate instances on Windows."""
     import ctypes
-
     mutex_name = f"Global\\{instance_name}"
     handle = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
     last_error = ctypes.windll.kernel32.GetLastError()
     if last_error == 183:  # ERROR_ALREADY_EXISTS
         return False, None
-    if not handle:  # creation genuinely failed for another reason
+    if not handle:
         print(f"[UTILITY] - Mutex creation failed (error {last_error}).")
         return False, None
     return True, handle
 
 
 def _check_single_instance_linux(instance_name: str) -> tuple[bool, object | None]:
-    """Uses a lockfile to prevent duplicate Linux instances."""
     import fcntl
-
     lock_file = f"/tmp/{instance_name}.lock"
     try:
-        # 'a' mode creates the file if it doesn't exist
         handle = open(lock_file, "a")
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         return True, handle
@@ -52,7 +48,6 @@ def _check_single_instance_linux(instance_name: str) -> tuple[bool, object | Non
 
 
 def check_single_instance(instance_name: str) -> tuple[bool, object | None]:
-    """Wrapper to check if another instance is running."""
     if SYSTEM == "Windows":
         return _check_single_instance_windows(instance_name)
     elif SYSTEM == "Linux":
@@ -60,11 +55,7 @@ def check_single_instance(instance_name: str) -> tuple[bool, object | None]:
     raise RuntimeError(f"Unsupported platform: {SYSTEM}")
 
 
-def get_platform():
-    """
-    Returns the platform-specific modules.
-    Imports are deferred inside the function to avoid circular imports.
-    """
+def get_platform() -> PlatformModules:
     if SYSTEM == "Windows":
         from .windows.bridge import InterceptionBridge as Bridge
         from .windows.window import WindowManager
@@ -85,40 +76,30 @@ def get_platform():
         raise RuntimeError(f"Unsupported platform: {SYSTEM}")
 
 
-def get_specific_mt_key(event):
-    """
-    Returns a specific string like 'lshift' or 'rshift'
-    by inspecting the low-level Qt event in the Matplotlib event.
-    """
+def get_specific_mt_key(event) -> str:
+    """Safe mapping helper for Matplotlib canvas events."""
+    gui_event = getattr(event, "guiEvent", None)
+    if not gui_event or not hasattr(gui_event, "nativeScanCode"):
+        return str(event.key)
 
-    gui_event = event.guiEvent
-    if not gui_event:
-        return event.key
-
-    # Cross-platform way to get the native scancode
     scan_code = gui_event.nativeScanCode()
-
-    # Use the abstracted mapping layer for the translation
     mapped_key = get_platform().Mapping().get_key_from_scancode(scan_code)
-
-    # Fallback to the standard key if it wasn't in our modifier map
-    return mapped_key if mapped_key else event.key
+    return mapped_key if mapped_key else str(event.key)
 
 
-def get_specific_qt_key(event):
-    """
-    Returns a specific string like 'lshift' or 'rshift'
-    by inspecting the Qt event.
-    """
+def get_specific_qt_key(event) -> str:
+    """Safe mapping helper for PySide6 key events."""
+    if not hasattr(event, "nativeScanCode"):
+        return getattr(event, "text", lambda: "")()
 
-    # Cross-platform way to get the native scancode
     scan_code = event.nativeScanCode()
-
-    # Use the abstracted mapping layer for the translation
     mapped_key = get_platform().Mapping().get_key_from_scancode(scan_code)
-
-    # Fallback to the standard key if it wasn't in our modifier map
     return mapped_key if mapped_key else event.text()
 
 
-__all__ = ["check_single_instance", "get_platform"]
+__all__ = [
+    "check_single_instance",
+    "get_platform",
+    "get_specific_mt_key",
+    "get_specific_qt_key",
+]
