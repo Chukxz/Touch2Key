@@ -1,5 +1,3 @@
-# src/modules/gui/main_window.py
-
 from __future__ import annotations
 
 import logging
@@ -43,7 +41,7 @@ logger = logging.getLogger("modules.gui")
 
 
 class EngineWorker(QObject):
-    """Worker object to execute Engine.start_headless inside a worker QThread."""
+    """Worker object to execute Engine.start_headless inside a dedicated QThread."""
 
     started = Signal()
     finished = Signal()
@@ -66,7 +64,7 @@ class EngineWorker(QObject):
             )
             self.started.emit()
         except Exception as exc:
-            logger.exception("Engine failed during execution")
+            logger.exception("Engine encountered an error during execution")
             self.failed.emit(str(exc))
         finally:
             self.finished.emit()
@@ -89,6 +87,7 @@ class MainWindow(QMainWindow):
         self._build_log_dock()
         self._build_status_bar()
         self._wire_dashboard_buttons()
+        self._setup_cross_page_sync()
 
     # ---- Menu / Toolbar ---------------------------------------------------
     def _build_menu_and_toolbar(self) -> None:
@@ -181,6 +180,19 @@ class MainWindow(QMainWindow):
         if hasattr(current_page, "on_page_shown"):
             current_page.on_page_shown()
 
+    def _setup_cross_page_sync(self) -> None:
+        """Ensures sibling pages synchronize immediately when database rows change."""
+        def _on_global_layout_reload() -> None:
+            self.profiles_page.load_profiles()
+            self.layout_editor_page.refresh_active_layout_display()
+            self.layout_editor_page.plotter_widget.reload_active_layout()
+
+        def _on_global_config_reload() -> None:
+            self.settings_page.load_settings()
+
+        self.signal_bridge.dispatcher.register_callback("ON_LAYOUT_RELOAD", _on_global_layout_reload)
+        self.signal_bridge.dispatcher.register_callback("ON_CONFIG_RELOAD", _on_global_config_reload)
+
     # ---- Right-Hand Status Dock --------------------------------------------
     def _build_status_dock(self) -> None:
         dock = QDockWidget("Status", self)
@@ -272,9 +284,16 @@ class MainWindow(QMainWindow):
             self.engine = Engine(headless=True)
             self.signal_bridge.bind(self.engine.mapper_event_dispatcher)
 
-            # Route engine dispatcher directly to child pages
+            # Route active engine dispatcher to pages and register sync callbacks
             for page in self.pages:
                 page.dispatcher = self.engine.mapper_event_dispatcher
+
+            self.engine.mapper_event_dispatcher.register_callback(
+                "ON_LAYOUT_RELOAD", self.profiles_page.load_profiles
+            )
+            self.engine.mapper_event_dispatcher.register_callback(
+                "ON_LAYOUT_RELOAD", self.layout_editor_page.refresh_active_layout_display
+            )
 
             self.engine_thread = QThread(self)
             self.engine_worker = EngineWorker(self.engine, target_window_id)
