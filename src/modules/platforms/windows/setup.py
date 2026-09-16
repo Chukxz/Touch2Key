@@ -1,15 +1,18 @@
-import os
-import sys
+from __future__ import annotations
+
 import ctypes
-import subprocess
-import shutil
-import requests
-import zipfile
+import os
 import shlex
+import shutil
+import subprocess
+import sys
+import zipfile
 from pathlib import Path
+
+import requests
+
 from modules.utils import PROJECT_ROOT
 
-# --- Configuration ---
 BIN_DIR = PROJECT_ROOT / "bin"
 ADB_URL = "https://dl.google.com/android/repository/platform-tools-latest-windows.zip"
 INTERCEPTION_API_URL = (
@@ -21,33 +24,36 @@ INTERCEPTION_EXE = (
 
 
 def is_admin() -> bool:
-    """Checks if the script is running with Windows Administrative privileges."""
+    """Checks if the process holds Windows Administrator privileges."""
     try:
         return ctypes.windll.shell32.IsUserAnAdmin() != 0
     except Exception:
         return False
 
 
-def request_elevation():
-    """Restarts the script with Windows UAC elevation."""
+def request_elevation() -> bool:
+    """Prompts a Windows UAC elevation dialog to run the script as Admin."""
     script = Path(__file__).resolve()
     params = shlex.join(sys.argv[1:]) if sys.argv[1:] else ""
-    ctypes.windll.shell32.ShellExecuteW(
+    res = ctypes.windll.shell32.ShellExecuteW(
         None, "runas", sys.executable, f'"{script}" {params}', str(script.parent), 1
     )
+    return res > 32
 
 
-def _kill_adb():
-    """Force terminates ADB processes on Windows."""
+def kill_adb() -> None:
+    """Terminates running adb.exe processes."""
     print("[+] Terminating existing ADB processes...")
     subprocess.run(
-        ["taskkill", "/F", "/IM", "adb.exe", "/T"], capture_output=True, check=False
+        ["taskkill", "/F", "/IM", "adb.exe", "/T"],
+        capture_output=True,
+        check=False,
     )
 
 
-def _download_adb():
-    """Downloads and extracts Android platform-tools for Windows."""
-    print("[+] Checking if ADB is available...")
+def download_adb() -> None:
+    """Downloads and unpacks Android platform-tools for Windows."""
+    print("[+] Checking ADB installation...")
     BIN_DIR.mkdir(parents=True, exist_ok=True)
 
     platform_tools_dir = BIN_DIR / "platform-tools"
@@ -57,10 +63,10 @@ def _download_adb():
         print("[+] ADB is already present.")
         return
 
-    print("[+] Downloading ADB (this may take a moment)...")
+    print("[+] Downloading ADB tools...")
     try:
         if zip_path.exists():
-            os.remove(zip_path)
+            zip_path.unlink()
         if platform_tools_dir.exists():
             shutil.rmtree(platform_tools_dir)
 
@@ -71,26 +77,25 @@ def _download_adb():
             f.write(response.content)
 
         if not zipfile.is_zipfile(zip_path):
-            raise ValueError("Downloaded file is not a valid ZIP structure.")
+            raise ValueError("Downloaded ADB archive is not a valid ZIP file.")
 
-        print("[+] Extracting ADB...")
+        print("[+] Extracting ADB tools...")
         with zipfile.ZipFile(zip_path, "r") as z:
             z.extractall(BIN_DIR)
         print("[+] ADB setup complete.")
 
-    except Exception as e:
-        print(f"\n[!] Error during ADB setup: {e}")
+    except Exception as exc:
         if platform_tools_dir.exists():
             shutil.rmtree(platform_tools_dir)
-        sys.exit(1)
+        raise RuntimeError(f"Failed to install ADB: {exc}") from exc
     finally:
         if zip_path.exists():
-            os.remove(zip_path)
+            zip_path.unlink(missing_ok=True)
 
 
-def _download_interception():
-    """Fetches and extracts the latest Interception release for Windows."""
-    print("[+] Checking if Interception driver files are available...")
+def download_interception() -> None:
+    """Fetches and extracts the latest Interception driver bundle."""
+    print("[+] Checking Interception driver files...")
     interception_dir = BIN_DIR / "Interception"
     installer_exe = (
         interception_dir / "command line installer" / "install-interception.exe"
@@ -98,10 +103,10 @@ def _download_interception():
     zip_path = BIN_DIR / "interception.zip"
 
     if installer_exe.exists():
-        print("[+] Interception files are already present.")
+        print("[+] Interception binaries are already present.")
         return
 
-    print("[+] Querying GitHub for Interception release...")
+    print("[+] Querying GitHub API for latest Interception release...")
     try:
         api_response = requests.get(INTERCEPTION_API_URL, timeout=30)
         api_response.raise_for_status()
@@ -117,9 +122,9 @@ def _download_interception():
         )
 
         if not download_url:
-            raise ValueError("Could not find a .zip asset in the latest release.")
+            raise ValueError("No valid .zip release asset found on GitHub.")
 
-        print(f"[+] Downloading Interception (this may take a moment)...")
+        print("[+] Downloading Interception bundle...")
         zip_response = requests.get(download_url, timeout=60)
         zip_response.raise_for_status()
 
@@ -130,87 +135,87 @@ def _download_interception():
             z.extractall(BIN_DIR)
 
         print("[+] Interception download complete.")
-    except Exception as e:
-        print(f"\n[!] Error downloading Interception: {e}")
-        sys.exit(1)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to fetch Interception driver: {exc}") from exc
     finally:
         if zip_path.exists():
-            os.remove(zip_path)
+            zip_path.unlink(missing_ok=True)
 
 
-def _setup_driver():
-    """Handles driver registration (requires Admin)."""
+def register_driver() -> bool:
+    """Registers the Interception driver with Windows."""
+    if not INTERCEPTION_EXE.exists():
+        raise FileNotFoundError(f"Missing installer executable: {INTERCEPTION_EXE}")
+
+    print("[+] Registering Interception kernel driver...")
+    result = subprocess.run(
+        [str(INTERCEPTION_EXE), "/install"],
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode == 0:
+        print("[+] Interception driver registered successfully.")
+        return True
+
+    print(
+        "[!] Interception driver registration returned non-zero. "
+        "The driver might already be active. Run preflight to verify."
+    )
+    return False
+
+
+def setup_windows(interactive: bool = True) -> bool:
+    """
+    Executes full platform setup for Windows.
+    Returns True if a reboot is needed for the driver, otherwise False.
+    """
+    print("--- Windows Platform Setup ---")
+
+    kill_adb()
+    download_adb()
+    download_interception()
+
     if not is_admin():
-        request_elevation()
-        sys.exit(0)
-
-    return _register_driver()
-
-
-def _register_driver():
-    try:
-        print("[+] Registering Interception driver...")
-        result = subprocess.run(
-            [str(INTERCEPTION_EXE), "/install"], capture_output=True
-        )
-
-        if result.returncode == 0:
-            print("[+] Driver registered successfully!")
-            return True
+        if interactive:
+            print("[!] Elevation required to install Interception driver.")
+            if request_elevation():
+                sys.exit(0)
+            raise PermissionError("UAC elevation prompt was rejected.")
         else:
-            print(
-                f"[!] Failed to register driver (driver may already be installed run 'touch2key-preflight' to confirm)."
+            raise PermissionError(
+                "Driver registration requires Administrator privileges. "
+                "Please restart the application as Administrator."
             )
-            return False
 
-    except FileNotFoundError:
-        print("[!] Error: The interception executable was not found.")
-        return False
-    except Exception as e:
-        print(f"[!] An unexpected error occurred: {e}")
-        return False
+    needs_reboot = register_driver()
 
-
-def setup_windows():
-    print("--- Touch2Key Windows Setup Wizard ---")
-
-    # Prepare Environment
-    _kill_adb()
-    _download_adb()
-    _download_interception()
-
-    # Setup Driver
-    needs_reboot = _setup_driver()
-
-    # Finalize
-    if needs_reboot:
-        print("\n" + "=" * 55)
-        print("!!! SYSTEM RESTART REQUIRED !!!".center(55))
-        print("=" * 55)
-        choice = (
-            input("Restart PC now (Will restart in 5 seconds)? (y/n): ").strip().lower()
-        )
-        if choice == "y":
-            # os.system('shutdown /r /t 5 /c "Touch2Key driver installation complete."')
-            subprocess.run(
-                [
-                    "shutdown",
-                    "/r",
-                    "/t",
-                    "5",
-                    "/c",
-                    "Touch2Key driver installation complete.",
-                ]
-            )
+    if interactive:
+        if needs_reboot:
+            print("\n" + "=" * 55)
+            print(" SYSTEM RESTART REQUIRED ".center(55, "="))
+            print("=" * 55)
+            choice = input("Restart PC now in 5 seconds? (y/N): ").strip().lower()
+            if choice == "y":
+                subprocess.run(
+                    [
+                        "shutdown",
+                        "/r",
+                        "/t",
+                        "5",
+                        "/c",
+                        "Driver installation complete.",
+                    ]
+                )
+            else:
+                print("[+] Please reboot manually to finalize driver registration.")
         else:
-            print(
-                "\n[+] Please remember to restart your computer as soon as possible to complete the installation process."
-            )
-    else:
-        print("\n[+] Setup complete! You are ready to use Touch2Key.")
+            print("\n[+] Setup finished successfully.")
 
-    input("\nPress Enter to exit...")
+        input("\nPress Enter to exit...")
+
+    return needs_reboot
 
 
 if __name__ == "__main__":
-    setup_windows()
+    setup_windows(interactive=True)
