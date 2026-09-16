@@ -283,11 +283,7 @@ class LayoutEditorPage(BasePage):
     def _trigger_screenshot_capture(self) -> None:
         try:
             from modules.scripts.adb_screen_capture import _capture_android_screen
-            captured_path = _capture_android_screen()
-            
-            active = store.get_active_layout()
-            if active and captured_path:
-                store.layouts.update(active.id, image_path=str(captured_path))
+            _capture_android_screen()
 
             self.refresh_active_layout_display()
             self.plotter_widget.reload_active_layout()
@@ -296,3 +292,4 @@ class LayoutEditorPage(BasePage):
         except Exception as exc:
             logger.exception("Screenshot capture failed")
             QMessageBox.critical(self, "Capture Failed", str(exc))
+
