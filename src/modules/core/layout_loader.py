@@ -17,9 +17,8 @@ logger = logging.getLogger("modules.core.layout_loader")
 
 
 class LayoutLoader:
-    """Database-backed layout loader. Maintains the normalized touch zone
-    interface expected by legacy mappers while instantiating dynamic 5-stage
-    touch pipelines directly from SQLite.
+    """Database-backed layout loader. Maintains normalized touch zone data
+    for legacy consumers while compiling dynamic 5-stage touch pipelines.
     """
 
     def __init__(
@@ -49,7 +48,6 @@ class LayoutLoader:
 
         self._load_layout()
 
-        # Listen for hot-reload notifications triggered by GUI or scripts
         if self.mapper_event_dispatcher is not None:
             self.mapper_event_dispatcher.register_callback(
                 "ON_LAYOUT_RELOAD", self._on_dispatcher_reload
@@ -60,7 +58,7 @@ class LayoutLoader:
             return self.mouse_wheel_radius, self.sprint_distance
 
     def _load_layout(self) -> None:
-        """Fetches active layout metadata, compiles dynamic pipelines, and normalizes zones."""
+        """Loads metadata, parses custom pipelines, and extracts bezel height."""
         layout = store.get_active_layout()
         if layout is None:
             logger.warning("No active layout found in SQLite database.")
@@ -85,7 +83,6 @@ class LayoutLoader:
             self.mouse_wheel_radius = layout.mouse_wheel_radius
             self.sprint_distance = layout.sprint_distance
 
-            # 1. Parse pipelines and determine dynamic bezel height
             compiled_pipelines: list[Pipeline] = []
             extracted_bezel_height = 14.0
 
@@ -112,10 +109,8 @@ class LayoutLoader:
             self.custom_pipelines = compiled_pipelines
             self.bezel_height = extracted_bezel_height
 
-            # 2. Build normalized touch zones list for legacy pipeline consumers
             normalized: list[tuple[str, dict[str, Any]]] = []
             for z in zones:
-                # Bezel return notches are handled at the engine root level
                 if z.zone_type == "BEZEL":
                     continue
 
@@ -142,7 +137,7 @@ class LayoutLoader:
             self.json_data = normalized
 
             logger.info(
-                "Active layout '%s' loaded. (%dx%d, %d zones, %d custom pipelines, bezel: %.1fpx)",
+                "Active layout '%s' loaded. (%dx%d, %d zones, %d pipelines, bezel: %.1fpx)",
                 self.active_layout.name,
                 self.width,
                 self.height,
@@ -152,13 +147,11 @@ class LayoutLoader:
             )
 
     def _on_dispatcher_reload(self) -> None:
-        """Internal callback invoked when ON_LAYOUT_RELOAD is received from the dispatcher."""
         self._load_layout()
 
     def reload(self) -> None:
-        """Hot-reloads active layout from SQLite and broadcasts the event across the engine."""
         self._load_layout()
         self.config.reload_config()
         if self.mapper_event_dispatcher is not None:
             self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
-        logger.info("Layout hot-reloaded from database and dispatch broadcast sent.")
+        logger.info("Layout hot-reloaded and dispatched.")
