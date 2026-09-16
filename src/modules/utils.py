@@ -32,21 +32,34 @@ KEEPALIVE_INTERVAL = 5.0
 if TYPE_CHECKING:
     from multiprocessing import Process
 
-# Paths
+# ---------------------------------------------------------------------------
+# Project & Data Paths
+# ---------------------------------------------------------------------------
 CURRENT_DIR = Path(__file__).resolve().parent
 SRC_DIR = CURRENT_DIR.parent
 PROJECT_ROOT = SRC_DIR.parent
 SYSTEM = platform.system()
 
+# Binaries & Driver Rules
+BIN_DIR = PROJECT_ROOT / "bin"
 ADB_NAME = "adb.exe" if SYSTEM == "Windows" else "adb"
-ADB = PROJECT_ROOT / "bin" / "platform-tools" / ADB_NAME
+ADB = BIN_DIR / "platform-tools" / ADB_NAME
 UDEV_RULE_PATH = Path("/etc/udev/rules.d/99-touch2key.rules")
 
-IMAGES_FOLDER = SRC_DIR / "resources" / "images"
-JSONS_FOLDER = SRC_DIR / "resources" / "jsons"
-TOML_PATH = PROJECT_ROOT / "settings.toml"
+# Centralized Data Directory
+DATA_FOLDER = PROJECT_ROOT / "data"
+IMAGES_FOLDER = DATA_FOLDER / "images"
+JSONS_FOLDER = DATA_FOLDER / "jsons"
+TOML_PATH = DATA_FOLDER / "settings.toml"
 
+# Auto-create data directories on module import
+DATA_FOLDER.mkdir(parents=True, exist_ok=True)
+IMAGES_FOLDER.mkdir(parents=True, exist_ok=True)
+JSONS_FOLDER.mkdir(parents=True, exist_ok=True)
+
+# ---------------------------------------------------------------------------
 # Constants
+# ---------------------------------------------------------------------------
 DEF_DPI = 160
 
 DOWN = "DOWN"
