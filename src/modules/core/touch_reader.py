@@ -30,7 +30,12 @@ logger = logging.getLogger("modules.core.touch_reader")
 
 
 class TouchReader:
-    def __init__(self, config: AppConfig, dispatcher: MapperEventDispatcher, rate_cap: float = DEFAULT_ADB_RATE_CAP):
+    def __init__(
+        self,
+        config: AppConfig,
+        dispatcher: MapperEventDispatcher,
+        rate_cap: float = DEFAULT_ADB_RATE_CAP,
+    ):
         self.config = config
         self.mapper_event_dispatcher = dispatcher
 
@@ -52,7 +57,7 @@ class TouchReader:
         self.move_interval = 1.0 / self.adb_rate_cap if self.adb_rate_cap > 0 else 0.0001
         self.last_dispatch_times = [0.0] * self.max_slots
 
-        self.touch_event_processor = None
+        self.touch_event_processor: Any = None
         self.process: subprocess.Popen | None = None
 
         self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self._update_matrix)
@@ -76,6 +81,13 @@ class TouchReader:
                         with self.config.config_lock:
                             self.device = dev
                             self._configure_device()
+
+                        # Terminate existing stream so _get_touches reattaches to the wireless device
+                        if self.process is not None:
+                            try:
+                                self.process.terminate()
+                            except Exception:
+                                pass
                     except Exception:
                         with self.config.config_lock:
                             self.device = None
@@ -84,6 +96,8 @@ class TouchReader:
                             self._update_matrix()
                 else:
                     time.sleep(LONG_DELAY)
+            else:
+                time.sleep(LONG_DELAY)
 
     def _find_touch_device_event(self) -> str | None:
         if ADB is not None and self.device is not None:
@@ -170,7 +184,9 @@ class TouchReader:
         elif self.rotation == 3:
             self.matrix = (0.0, -1.0, h, 1.0, 0.0, 0.0)
 
-    def _rotate_coordinates(self, x: float | None, y: float | None, matrix: tuple) -> tuple[float, float]:
+    def _rotate_coordinates(
+        self, x: float | None, y: float | None, matrix: tuple[float, ...]
+    ) -> tuple[float, float]:
         if x is None or y is None:
             return 0.0, 0.0
         a, b, c, d, e, f = matrix
@@ -182,7 +198,13 @@ class TouchReader:
 
     def _ensure_slot(self, slot: int) -> None:
         if slot not in self.slots:
-            self.slots[slot] = {"x": None, "y": None, "tid": -1, "phase": None, "timestamp": 0.0}
+            self.slots[slot] = {
+                "x": None,
+                "y": None,
+                "tid": -1,
+                "phase": None,
+                "timestamp": 0.0,
+            }
 
     @staticmethod
     def _parse_hex_signed(value_hex: str) -> int:
@@ -254,10 +276,12 @@ class TouchReader:
                             self.slots[current_slot]["tid"] = tid
 
                             if tid >= 0 and prev_id == -1:
-                                self.slots[current_slot].update({
-                                    "phase": TouchPhase.DOWN,
-                                    "timestamp": time.perf_counter(),
-                                })
+                                self.slots[current_slot].update(
+                                    {
+                                        "phase": TouchPhase.DOWN,
+                                        "timestamp": time.perf_counter(),
+                                    }
+                                )
                                 self.active_touches += 1
                             elif tid == -1 and prev_id != -1:
                                 self.slots[current_slot]["phase"] = TouchPhase.UP
@@ -310,7 +334,13 @@ class TouchReader:
             if data["phase"] is TouchPhase.DOWN:
                 data["phase"] = TouchPhase.MOVE
             elif data["phase"] is TouchPhase.UP:
-                self.slots[slot] = {"x": None, "y": None, "tid": -1, "phase": None, "timestamp": 0.0}
+                self.slots[slot] = {
+                    "x": None,
+                    "y": None,
+                    "tid": -1,
+                    "phase": None,
+                    "timestamp": 0.0,
+                }
 
         if lift_up:
             self.active_touches = 0
