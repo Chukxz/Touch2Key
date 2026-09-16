@@ -106,6 +106,8 @@ Because Touch2Key installs system-level drivers and kernel rules, **simply runni
 | **Standard** | `touch2key-uninstall` | Removes drivers/rules/binaries; preserves all user data. |
 | **Purge** | `touch2key-uninstall --purge` | Removes drivers/rules/binaries **AND** deletes all user data — all saved jsons/images/profiles files, settings toml file and database files. |
 | **Purge-All** | `touch2key-uninstall --purge-all` | Removes drivers/rules/binaries **AND** deletes all user and diagnostic data — all saved jsons/images/profiles files, settings toml file, database files **AND** the diagnostics (profiling — .prof) and log files. |
+| **Skip Confirmation** | `touch2key-uninstall [--yes, -y]` | Skip confirmation prompt. |
+| **Skip Reboot** | `touch2key-uninstall --no-restart` | Skip reboot prompt (Windows). |
 
 *(Note: Windows requires a system reboot after uninstallation to fully release the driver).*
 

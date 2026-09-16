@@ -9,9 +9,8 @@ from pathlib import Path
 
 import requests
 
-from modules.utils import PROJECT_ROOT, UDEV_RULE_PATH
+from modules.utils import BIN_FOLDER, UDEV_RULE_PATH
 
-BIN_DIR = PROJECT_ROOT / "bin"
 ADB_URL = "https://dl.google.com/android/repository/platform-tools-latest-linux.zip"
 
 
@@ -33,10 +32,10 @@ def kill_adb() -> None:
 def download_adb() -> None:
     """Downloads and extracts Android platform-tools for Linux."""
     print("[+] Checking ADB installation...")
-    BIN_DIR.mkdir(parents=True, exist_ok=True)
+    BIN_FOLDER.mkdir(parents=True, exist_ok=True)
 
-    platform_tools_dir = BIN_DIR / "platform-tools"
-    zip_path = BIN_DIR / "adb.zip"
+    platform_tools_dir = BIN_FOLDER / "platform-tools"
+    zip_path = BIN_FOLDER / "adb.zip"
 
     if (platform_tools_dir / "adb").exists():
         print("[+] ADB binary present.")
@@ -60,7 +59,7 @@ def download_adb() -> None:
 
         print("[+] Extracting platform tools...")
         with zipfile.ZipFile(zip_path, "r") as z:
-            z.extractall(BIN_DIR)
+            z.extractall(BIN_FOLDER)
 
         (platform_tools_dir / "adb").chmod(0o755)
         print("[+] ADB installed with execution permissions.")
@@ -90,12 +89,14 @@ def setup_udev_rules(interactive: bool = True) -> None:
 
     # Escalate privileges when running unprivileged
     print("[!] Root permissions required to configure /etc/udev/rules.d.")
-    
+
     # Try GUI PolicyKit agent if interactive GUI or pkexec is available
     if not interactive and shutil.which("pkexec"):
         cmd = [
-            "pkexec", "sh", "-c",
-            f"printf '{rule_content}' > {rule_path} && udevadm control --reload-rules && udevadm trigger"
+            "pkexec",
+            "sh",
+            "-c",
+            f"printf '{rule_content}' > {rule_path} && udevadm control --reload-rules && udevadm trigger",
         ]
         res = subprocess.run(cmd, capture_output=True)
         if res.returncode != 0:
@@ -106,8 +107,10 @@ def setup_udev_rules(interactive: bool = True) -> None:
     # Fallback to standard sudo for CLI
     if shutil.which("sudo"):
         cmd = [
-            "sudo", "sh", "-c",
-            f"printf '{rule_content}' > {rule_path} && udevadm control --reload-rules && udevadm trigger"
+            "sudo",
+            "sh",
+            "-c",
+            f"printf '{rule_content}' > {rule_path} && udevadm control --reload-rules && udevadm trigger",
         ]
         res = subprocess.run(cmd)
         if res.returncode != 0:
@@ -115,7 +118,9 @@ def setup_udev_rules(interactive: bool = True) -> None:
         print("[+] Udev rules deployed via sudo.")
         return
 
-    raise PermissionError("Could not elevate permissions. Run with 'sudo' or install 'pkexec'.")
+    raise PermissionError(
+        "Could not elevate permissions. Run with 'sudo' or install 'pkexec'."
+    )
 
 
 def setup_linux(interactive: bool = True) -> bool:

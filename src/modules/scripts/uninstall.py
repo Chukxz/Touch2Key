@@ -19,7 +19,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from modules.database import store
 from modules.utils import (
-    BIN_DIR,
+    BIN_FOLDER,
     DATA_FOLDER,
     DIAGNOSTICS_FOLDER,
     LOGS_FOLDER,
@@ -228,7 +228,7 @@ def run(parent=None) -> bool:
     needs_reboot = False
     if SYSTEM == "Windows":
         installer_exe = (
-            BIN_DIR
+            BIN_FOLDER
             / "Interception"
             / "command line installer"
             / "install-interception.exe"
@@ -264,8 +264,8 @@ def run(parent=None) -> bool:
             return False
 
     # 5. Remove Platform Binaries
-    if BIN_DIR.exists():
-        shutil.rmtree(BIN_DIR, ignore_errors=True)
+    if BIN_FOLDER.exists():
+        shutil.rmtree(BIN_FOLDER, ignore_errors=True)
         if is_gui:
             logger.info("Local platform binaries deleted.")
         else:
