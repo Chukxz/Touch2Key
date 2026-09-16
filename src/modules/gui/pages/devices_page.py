@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
@@ -7,17 +8,22 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QWidget,
 )
 
+from modules.gui.dialogs.wireless_connect_dialog import connect_wireless_gui
 from modules.platforms import get_platform
 from modules.utils import WINDOWS_HEADERS
 from .base_page import BasePage
 
 if TYPE_CHECKING:
     from modules.utils import MapperEventDispatcher
+
+logger = logging.getLogger("modules.gui.devices_page")
 
 
 class DevicesPage(BasePage):
@@ -28,7 +34,7 @@ class DevicesPage(BasePage):
     def __init__(
         self,
         dispatcher: MapperEventDispatcher | None = None,
-        parent=None,
+        parent: QWidget | None = None,
     ):
         super().__init__(dispatcher, parent)
         self.selected_window_id: int | None = None
@@ -76,6 +82,7 @@ class DevicesPage(BasePage):
         self.table.itemSelectionChanged.connect(self._on_row_selected)
         self.select_btn.clicked.connect(self._on_row_selected)
         self.refresh_btn.clicked.connect(self._update_list)
+        self.connect_wireless_btn.clicked.connect(lambda: connect_wireless_gui(self))
 
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self._update_list)
@@ -95,48 +102,52 @@ class DevicesPage(BasePage):
                 self.status_label.setText(
                     f"Selected Target: {self.selected_window_title} (HWND: {self.selected_window_id})"
                 )
+                logger.info("Bound target window: '%s' (HWND: %s)", self.selected_window_title, self.selected_window_id)
 
     def _update_list(self) -> None:
-        visible = self.window_manager.find_visible_windows()
-        self.windows_data.clear()
-        self.tmp_store.clear()
+        try:
+            visible = self.window_manager.find_visible_windows()
+            self.windows_data.clear()
+            self.tmp_store.clear()
 
-        for window_id, meta in visible.items():
-            left, top = self.window_manager.get_window_position(window_id)
-            width, height = self.window_manager.get_window_dimensions(window_id)
-            if width == 0 or height == 0:
-                continue
+            for window_id, meta in visible.items():
+                left, top = self.window_manager.get_window_position(window_id)
+                width, height = self.window_manager.get_window_dimensions(window_id)
+                if width == 0 or height == 0:
+                    continue
 
-            self.tmp_store.add(window_id)
-            self.windows_data[window_id] = [
-                window_id,
-                meta["title"],
-                meta["class_name"],
-                left,
-                top,
-                width,
-                height,
-            ]
+                self.tmp_store.add(window_id)
+                self.windows_data[window_id] = [
+                    window_id,
+                    meta["title"],
+                    meta["class_name"],
+                    left,
+                    top,
+                    width,
+                    height,
+                ]
 
-        added = self.tmp_store - self.main_store
-        removed = self.main_store - self.tmp_store
-        self.main_store = set(self.tmp_store)
+            added = self.tmp_store - self.main_store
+            removed = self.main_store - self.tmp_store
+            self.main_store = set(self.tmp_store)
 
-        for window_id in removed:
-            del_idx = self.windows_id_mapping.pop(window_id, None)
-            if del_idx is not None:
-                self.table.removeRow(del_idx)
-                for wid, idx in self.windows_id_mapping.items():
-                    if idx > del_idx:
-                        self.windows_id_mapping[wid] = idx - 1
+            for window_id in removed:
+                del_idx = self.windows_id_mapping.pop(window_id, None)
+                if del_idx is not None:
+                    self.table.removeRow(del_idx)
+                    for wid, idx in self.windows_id_mapping.items():
+                        if idx > del_idx:
+                            self.windows_id_mapping[wid] = idx - 1
 
-        for window_id in added:
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            data = self.windows_data[window_id]
-            for col_idx, val in enumerate(data):
-                item = QTableWidgetItem(str(val))
-                if col_idx == 0:
-                    item.setData(Qt.ItemDataRole.UserRole, window_id)
-                self.table.setItem(row, col_idx, item)
-            self.windows_id_mapping[window_id] = row
+            for window_id in added:
+                row = self.table.rowCount()
+                self.table.insertRow(row)
+                data = self.windows_data[window_id]
+                for col_idx, val in enumerate(data):
+                    item = QTableWidgetItem(str(val))
+                    if col_idx == 0:
+                        item.setData(Qt.ItemDataRole.UserRole, window_id)
+                    self.table.setItem(row, col_idx, item)
+                self.windows_id_mapping[window_id] = row
+        except Exception as exc:
+            logger.exception("Failed to poll visible windows from window manager")
