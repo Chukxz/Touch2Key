@@ -67,11 +67,12 @@ CREATE TABLE IF NOT EXISTS layout_zones (
     layout_id INTEGER NOT NULL REFERENCES layouts(id) ON DELETE CASCADE,
     scancode TEXT NOT NULL,
     name TEXT NOT NULL DEFAULT '',
-    zone_type TEXT NOT NULL CHECK (zone_type IN ('CIRCLE', 'RECTANGLE')),
+    zone_type TEXT NOT NULL CHECK (zone_type IN ('CIRCLE', 'RECTANGLE', 'BEZEL')),
     cx REAL, cy REAL, r REAL,
     x1 REAL, y1 REAL, x2 REAL, y2 REAL,
     move_camera INTEGER NOT NULL DEFAULT 0,
-    priority INTEGER NOT NULL DEFAULT 0
+    priority INTEGER NOT NULL DEFAULT 0,
+    pipeline_config TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_layout_zones_layout_id ON layout_zones(layout_id);
 """
@@ -101,25 +102,8 @@ class ConnectionManager:
 
         # Run migrations ONLY ONCE globally before threads start connecting
         conn = sqlite3.connect(self.db_path)
-        # Default isolation_level ("" = deferred) is kept deliberately --
-        # NOT set to None. Repositories rely on `with conn:` to wrap
-        # multi-statement writes (e.g. delete-then-insert in
-        # reset_to_defaults, or duplicate()'s layout-plus-zones copy)
-        # in a real transaction with commit/rollback. isolation_level=
-        # None puts sqlite3 in autocommit mode, where `with conn:`
-        # silently does nothing and a failure mid-sequence leaves
-        # partial writes -- easy trap, worth calling out explicitly.
         conn.row_factory = sqlite3.Row
 
-        # Some filesystems (network mounts, certain overlay/container
-        # filesystems) don't support the shared-memory locking WAL
-        # needs; sqlite then silently stays on the prior journal mode
-        # instead of raising. Check the actual result rather than
-        # assuming the request succeeded -- WAL not sticking isn't
-        # fatal (the app still works, just without WAL's concurrent
-        # reader/writer benefit), but it's worth knowing about instead
-        # of debugging phantom "why isn't this reader seeing my write"
-        # issues later.
         actual_mode = conn.execute("PRAGMA journal_mode = WAL;").fetchone()[0]
         if actual_mode.lower() != "wal":
             logger.warning(
@@ -132,12 +116,19 @@ class ConnectionManager:
             )
 
         conn.execute("PRAGMA foreign_keys = ON;")
-        conn.execute("PRAGMA synchronous = NORMAL;")  # safe with WAL, faster than FULL
+        conn.execute("PRAGMA synchronous = NORMAL;")
         conn.executescript(_SCHEMA)
         conn.execute(_SEED_DEFAULT_SETTINGS_ROW)
 
-        # If this was a completely fresh database, stamp it with the latest version
-        # so it doesn't try to run migrations from version 0 on the next launch.
+        # In-flight migration guard for existing database files
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(layout_zones);")
+        columns = [row["name"] for row in cursor.fetchall()]
+        if "pipeline_config" not in columns:
+            cursor.execute(
+                "ALTER TABLE layout_zones ADD COLUMN pipeline_config TEXT NOT NULL DEFAULT '{}';"
+            )
+
         set_fresh_install_version(conn)
 
         conn.commit()
@@ -154,6 +145,4 @@ class ConnectionManager:
             self._local.connection = None
 
 
-# Module-level singleton: one ConnectionManager per process, shared by
-# every repository and by the Store facade in __init__.py.
 connection_manager = ConnectionManager()
