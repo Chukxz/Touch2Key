@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QFileDialog,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -16,7 +18,8 @@ from PySide6.QtWidgets import (
 )
 
 from modules.database import store
-from modules.utils import MapperEvent
+from modules.database.config_io import export_bundle, export_layout_json, import_any
+from modules.utils import JSONS_FOLDER, PROFILES_FOLDER, MapperEvent
 from .base_page import BasePage
 
 if TYPE_CHECKING:
@@ -27,7 +30,8 @@ logger = logging.getLogger("modules.gui.profiles_page")
 
 class ProfilesPage(BasePage):
     """Database-backed Profiles management page.
-    Manages layout lifecycles, zone associations, duplication, renaming, and activation.
+    Manages layout lifecycles, zone associations, duplication, renaming, activation,
+    and profile/layout/bundle importing and exporting.
     """
 
     title = "Profiles"
@@ -47,7 +51,7 @@ class ProfilesPage(BasePage):
         self.details_label.setStyleSheet("color: palette(placeholder-text); padding: 4px;")
         self.content_layout().addWidget(self.details_label)
 
-        # Action Buttons Layout
+        # Action Buttons Layout - Row 1: Profile CRUD
         btn_row_1 = QHBoxLayout()
         self.activate_btn = QPushButton("Set Active")
         self.new_btn = QPushButton("New Blank Profile")
@@ -60,16 +64,28 @@ class ProfilesPage(BasePage):
         btn_row_1.addWidget(self.duplicate_btn)
         self.content_layout().addLayout(btn_row_1)
 
+        # Action Buttons Layout - Row 2: Imports & Exports
         btn_row_2 = QHBoxLayout()
+        self.import_btn = QPushButton("Import (.json / .toml / Bundle)")
+        self.export_json_btn = QPushButton("Export Selected (.json)")
+        self.export_bundle_btn = QPushButton("Export Selected Bundle")
+
+        btn_row_2.addWidget(self.import_btn)
+        btn_row_2.addWidget(self.export_json_btn)
+        btn_row_2.addWidget(self.export_bundle_btn)
+        self.content_layout().addLayout(btn_row_2)
+
+        # Action Buttons Layout - Row 3: Maintenance
+        btn_row_3 = QHBoxLayout()
         self.clear_zones_btn = QPushButton("Clear Zones")
         self.delete_btn = QPushButton("Delete Profile")
         self.delete_btn.setStyleSheet("color: #d9534f;")
         self.refresh_btn = QPushButton("Refresh")
 
-        btn_row_2.addWidget(self.clear_zones_btn)
-        btn_row_2.addWidget(self.delete_btn)
-        btn_row_2.addWidget(self.refresh_btn)
-        self.content_layout().addLayout(btn_row_2)
+        btn_row_3.addWidget(self.clear_zones_btn)
+        btn_row_3.addWidget(self.delete_btn)
+        btn_row_3.addWidget(self.refresh_btn)
+        self.content_layout().addLayout(btn_row_3)
 
         self._wire_signals()
         self.load_profiles()
@@ -83,6 +99,11 @@ class ProfilesPage(BasePage):
         self.new_btn.clicked.connect(self._on_new_profile)
         self.rename_btn.clicked.connect(self._on_rename)
         self.duplicate_btn.clicked.connect(self._on_duplicate)
+
+        self.import_btn.clicked.connect(self._on_import_clicked)
+        self.export_json_btn.clicked.connect(self._on_export_json_clicked)
+        self.export_bundle_btn.clicked.connect(self._on_export_bundle_clicked)
+
         self.clear_zones_btn.clicked.connect(self._on_clear_zones)
         self.delete_btn.clicked.connect(self._on_delete)
         self.refresh_btn.clicked.connect(self.load_profiles)
@@ -244,6 +265,100 @@ class ProfilesPage(BasePage):
         except Exception as exc:
             logger.exception("Failed to duplicate profile ID %s", layout_id)
             QMessageBox.critical(self, "Error", f"Could not duplicate profile:\n{exc}")
+
+    def _on_import_clicked(self) -> None:
+        PROFILES_FOLDER.mkdir(parents=True, exist_ok=True)
+        file_path_str, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Profile / Layout / Config",
+            str(PROFILES_FOLDER),
+            "Supported Files (*.json *.toml);;JSON Layouts (*.json);;TOML Configs (*.toml);;All files (*.*)",
+        )
+        if not file_path_str:
+            return
+
+        file_path = Path(file_path_str)
+        try:
+            if import_any(file_path):
+                self.load_profiles()
+                self._notify_reload()
+                logger.info("Imported profile/configuration from '%s'", file_path.name)
+                QMessageBox.information(
+                    self,
+                    "Import Successful",
+                    f"Imported '{file_path.stem}' and refreshed profile repository.",
+                )
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Import Failed",
+                    f"Could not import {file_path.name}. Check log console for details.",
+                )
+        except Exception as exc:
+            logger.exception("Failed to import file %s", file_path.name)
+            QMessageBox.critical(self, "Import Error", f"Error during import:\n{exc}")
+
+    def _on_export_json_clicked(self) -> None:
+        layout_id = self._get_selected_layout_id()
+        if layout_id is None:
+            return
+
+        layout = store.layouts.get(layout_id)
+        if not layout:
+            return
+
+        JSONS_FOLDER.mkdir(parents=True, exist_ok=True)
+        default_save_path = str(JSONS_FOLDER / f"{layout.name}.json")
+
+        save_path_str, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Layout JSON As",
+            default_save_path,
+            "JSON files (*.json);;All files (*.*)",
+        )
+        if not save_path_str:
+            return
+
+        try:
+            out_file = export_layout_json(layout_id, Path(save_path_str))
+            logger.info("Exported profile %s to %s", layout_id, out_file)
+            QMessageBox.information(
+                self,
+                "Export Successful",
+                f"Exported layout to:\n{out_file.name}",
+            )
+        except Exception as exc:
+            logger.exception("Failed to export profile JSON")
+            QMessageBox.critical(self, "Export Failed", str(exc))
+
+    def _on_export_bundle_clicked(self) -> None:
+        layout_id = self._get_selected_layout_id()
+        if layout_id is None:
+            return
+
+        layout = store.layouts.get(layout_id)
+        if not layout:
+            return
+
+        PROFILES_FOLDER.mkdir(parents=True, exist_ok=True)
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Target Folder for Profile Bundle", str(PROFILES_FOLDER)
+        )
+        if not folder:
+            return
+
+        try:
+            # Set active temporarily to bind settings or use bundle directly
+            t_file, j_file = export_bundle(Path(folder), profile_name=layout.name)
+            logger.info("Exported bundle for %s", layout.name)
+            QMessageBox.information(
+                self,
+                "Bundle Exported",
+                f"Exported configuration bundle:\n- {t_file.name}\n- {j_file.name}",
+            )
+        except Exception as exc:
+            logger.exception("Failed to export bundle")
+            QMessageBox.critical(self, "Export Failed", str(exc))
 
     def _on_clear_zones(self) -> None:
         layout_id = self._get_selected_layout_id()
