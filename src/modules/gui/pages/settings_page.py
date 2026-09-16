@@ -1,16 +1,26 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
+
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
+    QHBoxLayout,
+    QMessageBox,
     QPushButton,
     QWidget,
 )
 
 from modules.database import store
-from modules.utils import MapperEvent
+from modules.database.config_io import (
+    export_bundle,
+    export_settings_toml,
+    import_any,
+)
+from modules.utils import MapperEvent, TOML_PATH
 from .base_page import BasePage
 
 if TYPE_CHECKING:
@@ -18,14 +28,14 @@ if TYPE_CHECKING:
 
 
 class SettingsPage(BasePage):
-    """General settings page for handedness, sensitivity, deadzones, and joystick modes."""
+    """General settings page for handedness, sensitivity, deadzones, and TOML sync."""
 
     title = "Settings"
 
     def __init__(
         self,
         dispatcher: MapperEventDispatcher | None = None,
-        parent=None,
+        parent: QWidget | None = None,
     ):
         super().__init__(dispatcher, parent)
 
@@ -63,10 +73,26 @@ class SettingsPage(BasePage):
 
         self.content_layout().addWidget(form_widget)
 
-        self.reset_defaults_btn = QPushButton("Reset to defaults")
+        self.reset_defaults_btn = QPushButton("Reset to Defaults")
         self.content_layout().addWidget(self.reset_defaults_btn)
+
+        # TOML Settings & Bundle IO
+        toml_btn_row = QHBoxLayout()
+        self.export_toml_btn = QPushButton("Export settings.toml")
+        self.import_toml_btn = QPushButton("Import settings.toml")
+        self.export_bundle_btn = QPushButton("Export Full Bundle")
+
+        toml_btn_row.addWidget(self.export_toml_btn)
+        toml_btn_row.addWidget(self.import_toml_btn)
+        toml_btn_row.addWidget(self.export_bundle_btn)
+        self.content_layout().addLayout(toml_btn_row)
+
         self.content_layout().addStretch()
 
+        self._wire_signals()
+        self.load_settings()
+
+    def _wire_signals(self) -> None:
         self.left_handed_check.toggled.connect(self._on_left_handed_changed)
         self.anchored_floating_check.toggled.connect(self._on_anchored_floating_changed)
         self.snap_radius_spin.valueChanged.connect(self._on_snap_radius_changed)
@@ -74,50 +100,9 @@ class SettingsPage(BasePage):
         self.deadzone_spin.valueChanged.connect(self._on_deadzone_changed)
         self.reset_defaults_btn.clicked.connect(self._on_reset_defaults)
 
-        self.load_settings()
-
-        toml_btn_row = QHBoxLayout()
-        self.export_toml_btn = QPushButton("Export to settings.toml")
-        self.import_toml_btn = QPushButton("Import from settings.toml")
-        toml_btn_row.addWidget(self.export_toml_btn)
-        toml_btn_row.addWidget(self.import_toml_btn)
-        self.content_layout().addLayout(toml_btn_row)
-
         self.export_toml_btn.clicked.connect(self._on_export_toml)
         self.import_toml_btn.clicked.connect(self._on_import_toml)
-
-    def _on_export_toml(self) -> None:
-        from PySide6.QtWidgets import QFileDialog, QMessageBox
-        from modules.utils import TOML_PATH
-
-        path_str, _ = QFileDialog.getSaveFileName(
-            self, "Export Settings", str(TOML_PATH), "TOML files (*.toml);;All files (*.*)"
-        )
-        if not path_str:
-            return
-
-        try:
-            export_settings_to_toml(Path(path_str))
-            QMessageBox.information(self, "Exported", f"Settings exported to:\n{Path(path_str).name}")
-        except Exception as e:
-            QMessageBox.critical(self, "Export Error", str(e))
-
-    def _on_import_toml(self) -> None:
-        from PySide6.QtWidgets import QFileDialog, QMessageBox
-        from modules.utils import TOML_PATH
-
-        path_str, _ = QFileDialog.getOpenFileName(
-            self, "Import Settings", str(TOML_PATH.parent), "TOML files (*.toml);;All files (*.*)"
-        )
-        if not path_str:
-            return
-
-        if import_settings_from_toml(Path(path_str)):
-            self.load_settings()
-            self._notify_reload()
-            QMessageBox.information(self, "Imported", "Settings imported and applied successfully.")
-        else:
-            QMessageBox.warning(self, "Import Failed", "Could not parse or apply settings from file.")
+        self.export_bundle_btn.clicked.connect(self._on_export_bundle)
 
     def on_page_shown(self) -> None:
         self.load_settings()
@@ -173,3 +158,65 @@ class SettingsPage(BasePage):
         store.settings.reset_to_defaults()
         self.load_settings()
         self._notify_reload()
+
+    def _on_export_toml(self) -> None:
+        path_str, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Settings",
+            str(TOML_PATH),
+            "TOML files (*.toml);;All files (*.*)",
+        )
+        if not path_str:
+            return
+
+        try:
+            out_path = export_settings_toml(Path(path_str))
+            QMessageBox.information(
+                self,
+                "Exported",
+                f"Settings exported successfully to:\n{out_path.name}",
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", str(e))
+
+    def _on_import_toml(self) -> None:
+        path_str, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Settings or Bundle",
+            str(TOML_PATH.parent),
+            "Config files (*.toml *.json);;All files (*.*)",
+        )
+        if not path_str:
+            return
+
+        if import_any(Path(path_str)):
+            self.load_settings()
+            self._notify_reload()
+            if self.dispatcher:
+                self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+            QMessageBox.information(
+                self,
+                "Imported",
+                "Configuration imported and synced to database.",
+            )
+        else:
+            QMessageBox.warning(
+                self,
+                "Import Failed",
+                "Could not parse or apply settings from file.",
+            )
+
+    def _on_export_bundle(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Select Target Folder for Bundle")
+        if not folder:
+            return
+
+        try:
+            t_file, j_file = export_bundle(Path(folder))
+            QMessageBox.information(
+                self,
+                "Bundle Exported",
+                f"Exported configuration bundle:\n- {t_file.name}\n- {j_file.name}",
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Bundle Export Failed", str(e))
