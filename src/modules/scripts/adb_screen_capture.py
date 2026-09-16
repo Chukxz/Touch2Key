@@ -17,7 +17,7 @@ from modules.utils import (
 )
 
 
-def _capture_android_screen(custom_img_name: str | None = None) -> Path:
+def capture_android_screen(custom_img_name: str | None = None) -> Path:
     device_id = get_adb_device()
     if not device_id:
         raise RuntimeError("No ADB device detected.")
@@ -91,7 +91,7 @@ def _capture_android_screen(custom_img_name: str | None = None) -> Path:
 def run() -> None:
     print("[PROCESS] Initializing screen capture...")
     try:
-        _capture_android_screen()
+        capture_android_screen()
     except Exception as exc:
         print(f"[ERROR] {exc}")
 
