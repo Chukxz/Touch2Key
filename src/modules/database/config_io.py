@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Optional
 import time
@@ -8,11 +9,13 @@ import tomlkit
 
 from modules.database import store
 from modules.database.legacy_migration import migrate_all, migrate_json_layout, migrate_toml_config
-from modules.utils import CIRCLE, JSONS_FOLDER, TOML_PATH, PROFILES_FOLDER
+from modules.utils import CIRCLE, JSONS_FOLDER, PROFILES_FOLDER, TOML_PATH
+
+logger = logging.getLogger("modules.database.config_io")
 
 
 def export_layout_json(layout_id: int, target_path: Optional[Path] = None) -> Path:
-    """Exports a single layout row and its zones to a JSON file."""
+    """Exports a single layout row and its zones to a JSON file in data/jsons/."""
     layout = store.layouts.get(layout_id)
     if not layout:
         raise ValueError(f"Layout ID {layout_id} does not exist.")
@@ -48,9 +51,11 @@ def export_layout_json(layout_id: int, target_path: Optional[Path] = None) -> Pa
         "content": content,
     }
 
+    out_file.parent.mkdir(parents=True, exist_ok=True)
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(json_data, f, indent=4)
 
+    logger.info("Exported layout JSON to %s", out_file)
     return out_file
 
 
@@ -58,7 +63,7 @@ def export_settings_toml(
     target_path: Path = TOML_PATH,
     linked_json_path: Optional[Path] = None,
 ) -> Path:
-    """Exports app_settings to TOML, optionally binding an active layout JSON path."""
+    """Exports app_settings to TOML in data/settings.toml or custom target."""
     s = store.settings.get()
     active_layout = store.get_active_layout()
 
@@ -108,11 +113,12 @@ def export_settings_toml(
     with open(target_path, "w", encoding="utf-8") as f:
         f.write(tomlkit.dumps(doc))
 
+    logger.info("Exported settings TOML to %s", target_path)
     return target_path
 
 
 def export_bundle(target_dir: Optional[Path] = None, profile_name: Optional[str] = None) -> tuple[Path, Path]:
-    """Exports both active layout (.json) and linked settings (.toml) into a directory."""
+    """Exports both active layout (.json) and linked settings (.toml) into data/profiles/<name>/."""
     active_layout = store.get_active_layout()
     if not active_layout:
         raise ValueError("No active layout available to bundle.")
@@ -126,22 +132,34 @@ def export_bundle(target_dir: Optional[Path] = None, profile_name: Optional[str]
     json_file = export_layout_json(active_layout.id, out_dir / f"{name}.json")
     toml_file = export_settings_toml(out_dir / f"{name}.toml", linked_json_path=json_file)
 
+    logger.info("Exported full profile bundle to %s", out_dir)
     return toml_file, json_file
 
 
-def import_any(file_path: Path) -> bool:
-    """Universal importer supporting .json (layout), .toml (settings), or bundled .toml."""
-    if not file_path.exists():
+def import_any(file_or_dir_path: Path) -> bool:
+    """Universal importer supporting .json layout, .toml config, or bundled profile directories."""
+    path = Path(file_or_dir_path)
+    if not path.exists():
+        logger.warning("Import target '%s' does not exist.", path)
         return False
 
-    suffix = file_path.suffix.lower()
+    if path.is_dir():
+        toml_files = list(path.glob("*.toml"))
+        if toml_files:
+            migrate_all(toml_files[0])
+            logger.info("Imported profile bundle from directory: %s", path)
+            return True
+        json_files = list(path.glob("*.json"))
+        if json_files:
+            return migrate_json_layout(json_files[0], set_active=True) is not None
+        return False
 
+    suffix = path.suffix.lower()
     if suffix == ".json":
-        layout_id = migrate_json_layout(file_path, set_active=True)
+        layout_id = migrate_json_layout(path, set_active=True)
         return layout_id is not None
-
     elif suffix == ".toml":
-        migrate_all(file_path)
+        migrate_all(path)
         return True
 
     return False
