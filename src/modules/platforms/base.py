@@ -1,5 +1,7 @@
-from typing import Any
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
+from typing import Any
 
 
 class AbstractWindowManager(ABC):
@@ -8,15 +10,15 @@ class AbstractWindowManager(ABC):
         pass
 
     @abstractmethod
-    def is_window_valid(self, window_id) -> bool:
+    def is_window_valid(self, window_id: int) -> bool:
         pass
 
     @abstractmethod
-    def is_window_visible(self, window_id) -> bool:
+    def is_window_visible(self, window_id: int) -> bool:
         pass
 
     @abstractmethod
-    def get_window_class_name(self, window_id) -> str:
+    def get_window_class_name(self, window_id: int) -> str:
         pass
 
     @abstractmethod
@@ -28,11 +30,11 @@ class AbstractWindowManager(ABC):
         pass
 
     @abstractmethod
-    def get_window_dimensions(self, window_id) -> tuple[int, int]:
+    def get_window_dimensions(self, window_id: int) -> tuple[int, int]:
         pass
 
     @abstractmethod
-    def get_window_position(self, window_id) -> tuple[int, int]:
+    def get_window_position(self, window_id: int) -> tuple[int, int]:
         pass
 
     @abstractmethod
@@ -47,10 +49,6 @@ class AbstractWindowManager(ABC):
 
     @abstractmethod
     def find_visible_windows(self) -> dict[int, dict]:
-        """
-        Returns visible windows with pre-fetched metadata in a single pass.
-        Keys are window IDs. Values are dicts with 'title': str, 'class_name': str.
-        """
         pass
 
 
@@ -58,8 +56,14 @@ class AbstractBridge(ABC):
     @abstractmethod
     def start_worker_processes(
         self, k_device_handle: int | None, m_device_handle: int | None
-    ):
-        """Starts the worker processes for keyboard and mouse."""
+    ) -> None:
+        pass
+
+    @abstractmethod
+    def reload_devices(
+        self, new_k_handle: int | None, new_m_handle: int | None
+    ) -> None:
+        """Hot-reloads driver devices and restarts workers."""
         pass
 
     @abstractmethod
@@ -103,13 +107,12 @@ class AbstractBridge(ABC):
         pass
 
     @abstractmethod
-    def health_check(self):
-        """Monitors and restarts driver-specific worker processes."""
+    def health_check(self) -> None:
         pass
 
     @abstractmethod
-    def shutdown(self):
-        """Stops the heartbeat thread. Call before process teardown."""
+    def shutdown(self) -> None:
+        pass
 
     @abstractmethod
     def release_all(self) -> None:
@@ -117,8 +120,6 @@ class AbstractBridge(ABC):
 
     @abstractmethod
     def set_respawn_callback(self, callback) -> None:
-        """Registers callback (worker_type: str) to be invoked after a worker
-        process respawns. worker_type is 'keyboard' or 'mouse'."""
         pass
 
 
@@ -139,14 +140,8 @@ class AbstractSystemConfig(ABC):
 class AbstractMapping(ABC):
     @abstractmethod
     def get_key_from_scancode(self, scancode: int) -> str:
-        """
-        Translates a native OS scancode into a standardized key name.
-        """
         pass
 
     @abstractmethod
     def get_scancode_from_key(self, key_name: str) -> int:
-        """
-        Translates a standardized key name into a native OS scancode.
-        """
         pass
