@@ -48,14 +48,19 @@ UDEV_RULE_PATH = Path("/etc/udev/rules.d/99-touch2key.rules")
 
 # Centralized Data Directory
 DATA_FOLDER = PROJECT_ROOT / "data"
+DB_FOLDER = DATA_FOLDER / "db"
 IMAGES_FOLDER = DATA_FOLDER / "images"
 JSONS_FOLDER = DATA_FOLDER / "jsons"
+PROFILES_FOLDER = DATA_FOLDER / "profiles"
 TOML_PATH = DATA_FOLDER / "settings.toml"
+DB_PATH = DB_FOLDER / "touch2key.db"
 
-# Auto-create data directories on module import
+# Auto-create runtime directories on module import
 DATA_FOLDER.mkdir(parents=True, exist_ok=True)
+DB_FOLDER.mkdir(parents=True, exist_ok=True)
 IMAGES_FOLDER.mkdir(parents=True, exist_ok=True)
 JSONS_FOLDER.mkdir(parents=True, exist_ok=True)
+PROFILES_FOLDER.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------------------------
 # Constants
