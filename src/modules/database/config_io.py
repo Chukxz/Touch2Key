@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Optional
-
+import time
 import tomlkit
 
 from modules.database import store
 from modules.database.legacy_migration import migrate_all, migrate_json_layout, migrate_toml_config
-from modules.utils import CIRCLE, JSONS_FOLDER, TOML_PATH
+from modules.utils import CIRCLE, JSONS_FOLDER, TOML_PATH, PROFILES_FOLDER
 
 
 def export_layout_json(layout_id: int, target_path: Optional[Path] = None) -> Path:
@@ -111,17 +111,20 @@ def export_settings_toml(
     return target_path
 
 
-def export_bundle(target_dir: Path, profile_name: Optional[str] = None) -> tuple[Path, Path]:
+def export_bundle(target_dir: Optional[Path] = None, profile_name: Optional[str] = None) -> tuple[Path, Path]:
     """Exports both active layout (.json) and linked settings (.toml) into a directory."""
     active_layout = store.get_active_layout()
     if not active_layout:
         raise ValueError("No active layout available to bundle.")
 
     name = profile_name or active_layout.name
-    target_dir.mkdir(parents=True, exist_ok=True)
 
-    json_file = export_layout_json(active_layout.id, target_dir / f"{name}.json")
-    toml_file = export_settings_toml(target_dir / f"{name}.toml", linked_json_path=json_file)
+    PROFILES_FOLDER.mkdir(parents=True, exist_ok=True)
+    out_dir = (target_dir or PROFILES_FOLDER) / f"{name}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    json_file = export_layout_json(active_layout.id, out_dir / f"{name}.json")
+    toml_file = export_settings_toml(out_dir / f"{name}.toml", linked_json_path=json_file)
 
     return toml_file, json_file
 
