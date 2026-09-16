@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -28,6 +29,8 @@ from .base_page import BasePage
 
 if TYPE_CHECKING:
     from modules.utils import MapperEventDispatcher
+
+logger = logging.getLogger("modules.gui.settings_page")
 
 
 class SettingsPage(BasePage):
@@ -169,76 +172,103 @@ class SettingsPage(BasePage):
             self.dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
 
     def load_settings(self) -> None:
-        settings = store.settings.get()
+        try:
+            settings = store.settings.get()
 
-        self.left_handed_check.blockSignals(True)
-        self.anchored_floating_check.blockSignals(True)
-        self.snap_radius_spin.blockSignals(True)
-        self.sensitivity_spin.blockSignals(True)
-        self.deadzone_spin.blockSignals(True)
-        self.rate_cap_spin.blockSignals(True)
-        self.pps_alert_spin.blockSignals(True)
-        self.toggle_key_input.blockSignals(True)
-        self.sprint_key_input.blockSignals(True)
+            self.left_handed_check.blockSignals(True)
+            self.anchored_floating_check.blockSignals(True)
+            self.snap_radius_spin.blockSignals(True)
+            self.sensitivity_spin.blockSignals(True)
+            self.deadzone_spin.blockSignals(True)
+            self.rate_cap_spin.blockSignals(True)
+            self.pps_alert_spin.blockSignals(True)
+            self.toggle_key_input.blockSignals(True)
+            self.sprint_key_input.blockSignals(True)
 
-        self.left_handed_check.setChecked(bool(settings.left_handed))
-        self.anchored_floating_check.setChecked(bool(settings.anchored_floating_joystick))
-        self.snap_radius_spin.setValue(settings.joystick_snap_radius)
-        self.snap_radius_spin.setEnabled(bool(settings.anchored_floating_joystick))
-        self.sensitivity_spin.setValue(settings.sensitivity)
-        self.deadzone_spin.setValue(settings.deadzone)
+            self.left_handed_check.setChecked(bool(settings.left_handed))
+            self.anchored_floating_check.setChecked(bool(settings.anchored_floating_joystick))
+            self.snap_radius_spin.setValue(settings.joystick_snap_radius)
+            self.snap_radius_spin.setEnabled(bool(settings.anchored_floating_joystick))
+            self.sensitivity_spin.setValue(settings.sensitivity)
+            self.deadzone_spin.setValue(settings.deadzone)
 
-        self.rate_cap_spin.setValue(settings.adb_rate_cap)
-        self.pps_alert_spin.setValue(settings.pps_alert_threshold)
+            self.rate_cap_spin.setValue(settings.adb_rate_cap)
+            self.pps_alert_spin.setValue(settings.pps_alert_threshold)
 
-        self.toggle_key_input.setText(settings.toggle_key or "")
-        self.sprint_key_input.setText(settings.sprint_key or "")
+            self.toggle_key_input.setText(settings.toggle_key or "")
+            self.sprint_key_input.setText(settings.sprint_key or "")
 
-        self.left_handed_check.blockSignals(False)
-        self.anchored_floating_check.blockSignals(False)
-        self.snap_radius_spin.blockSignals(False)
-        self.sensitivity_spin.blockSignals(False)
-        self.deadzone_spin.blockSignals(False)
-        self.rate_cap_spin.blockSignals(False)
-        self.pps_alert_spin.blockSignals(False)
-        self.toggle_key_input.blockSignals(False)
-        self.sprint_key_input.blockSignals(False)
+            self.left_handed_check.blockSignals(False)
+            self.anchored_floating_check.blockSignals(False)
+            self.snap_radius_spin.blockSignals(False)
+            self.sensitivity_spin.blockSignals(False)
+            self.deadzone_spin.blockSignals(False)
+            self.rate_cap_spin.blockSignals(False)
+            self.pps_alert_spin.blockSignals(False)
+            self.toggle_key_input.blockSignals(False)
+            self.sprint_key_input.blockSignals(False)
+        except Exception as exc:
+            logger.exception("Failed to load settings from database")
 
     def _on_left_handed_changed(self, checked: bool) -> None:
-        store.settings.update(left_handed=int(checked))
-        self._notify_reload()
+        try:
+            store.settings.update(left_handed=int(checked))
+            self._notify_reload()
+        except Exception as exc:
+            logger.exception("Failed to update left_handed setting")
 
     def _on_anchored_floating_changed(self, checked: bool) -> None:
-        self.snap_radius_spin.setEnabled(checked)
-        store.settings.update(anchored_floating_joystick=int(checked))
-        self._notify_reload()
+        try:
+            self.snap_radius_spin.setEnabled(checked)
+            store.settings.update(anchored_floating_joystick=int(checked))
+            self._notify_reload()
+        except Exception as exc:
+            logger.exception("Failed to update anchored_floating_joystick setting")
 
     def _on_snap_radius_changed(self, value: float) -> None:
-        store.settings.update(joystick_snap_radius=value)
-        self._notify_reload()
+        try:
+            store.settings.update(joystick_snap_radius=value)
+            self._notify_reload()
+        except Exception as exc:
+            logger.exception("Failed to update joystick_snap_radius setting")
 
     def _on_sensitivity_changed(self, value: float) -> None:
-        store.settings.update(sensitivity=value)
-        self._notify_reload()
+        try:
+            store.settings.update(sensitivity=value)
+            self._notify_reload()
+        except Exception as exc:
+            logger.exception("Failed to update sensitivity setting")
 
     def _on_deadzone_changed(self, value: float) -> None:
-        store.settings.update(deadzone=value)
-        self._notify_reload()
+        try:
+            store.settings.update(deadzone=value)
+            self._notify_reload()
+        except Exception as exc:
+            logger.exception("Failed to update deadzone setting")
 
     def _on_rate_cap_changed(self, value: float) -> None:
-        store.settings.update(adb_rate_cap=value)
-        self._notify_reload()
+        try:
+            store.settings.update(adb_rate_cap=value)
+            self._notify_reload()
+        except Exception as exc:
+            logger.exception("Failed to update adb_rate_cap setting")
 
     def _on_pps_alert_changed(self, value: float) -> None:
-        store.settings.update(pps_alert_threshold=value)
-        self._notify_reload()
+        try:
+            store.settings.update(pps_alert_threshold=value)
+            self._notify_reload()
+        except Exception as exc:
+            logger.exception("Failed to update pps_alert_threshold setting")
 
     def _on_keys_changed(self) -> None:
-        store.settings.update(
-            toggle_key=self.toggle_key_input.text().strip(),
-            sprint_key=self.sprint_key_input.text().strip(),
-        )
-        self._notify_reload()
+        try:
+            store.settings.update(
+                toggle_key=self.toggle_key_input.text().strip(),
+                sprint_key=self.sprint_key_input.text().strip(),
+            )
+            self._notify_reload()
+        except Exception as exc:
+            logger.exception("Failed to update hotkey settings")
 
     def _on_reset_defaults(self) -> None:
         reply = QMessageBox.question(
@@ -249,10 +279,15 @@ class SettingsPage(BasePage):
             QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            store.settings.reset_to_defaults()
-            self.load_settings()
-            self._notify_reload()
-            QMessageBox.information(self, "Reset", "Settings reset to defaults.")
+            try:
+                store.settings.reset_to_defaults()
+                self.load_settings()
+                self._notify_reload()
+                logger.info("Application settings reset to defaults")
+                QMessageBox.information(self, "Reset", "Settings reset to defaults.")
+            except Exception as exc:
+                logger.exception("Failed to reset settings to defaults")
+                QMessageBox.critical(self, "Error", f"Failed to reset settings:\n{exc}")
 
     def _on_delete_all(self) -> None:
         reply = QMessageBox.warning(
@@ -263,20 +298,23 @@ class SettingsPage(BasePage):
             QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            # Delete all layouts (which CASCADE deletes layout_zones)
-            for layout in store.layouts.list_all():
-                store.layouts.delete(layout.id)
+            try:
+                for layout in store.layouts.list_all():
+                    store.layouts.delete(layout.id)
 
-            # Reset settings row and decouple active profile
-            store.settings.reset_to_defaults()
-            store.settings.update(active_layout_id=None)
+                store.settings.reset_to_defaults()
+                store.settings.update(active_layout_id=None)
 
-            self.load_settings()
-            self._notify_reload()
-            if self.dispatcher:
-                self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+                self.load_settings()
+                self._notify_reload()
+                if self.dispatcher:
+                    self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
 
-            QMessageBox.information(self, "Wiped", "All layouts and settings cleared.")
+                logger.info("Database wiped and reset to factory defaults")
+                QMessageBox.information(self, "Wiped", "All layouts and settings cleared.")
+            except Exception as exc:
+                logger.exception("Failed to wipe database")
+                QMessageBox.critical(self, "Error", f"Failed to wipe database:\n{exc}")
 
     def _on_export_toml(self) -> None:
         path_str, _ = QFileDialog.getSaveFileName(
@@ -290,13 +328,15 @@ class SettingsPage(BasePage):
 
         try:
             out_path = export_settings_toml(Path(path_str))
+            logger.info("Exported settings TOML to '%s'", out_path)
             QMessageBox.information(
                 self,
                 "Exported",
                 f"Settings exported successfully to:\n{out_path.name}",
             )
-        except Exception as e:
-            QMessageBox.critical(self, "Export Error", str(e))
+        except Exception as exc:
+            logger.exception("Failed to export settings TOML")
+            QMessageBox.critical(self, "Export Error", str(exc))
 
     def _on_import_toml(self) -> None:
         path_str, _ = QFileDialog.getOpenFileName(
@@ -308,22 +348,28 @@ class SettingsPage(BasePage):
         if not path_str:
             return
 
-        if import_any(Path(path_str)):
-            self.load_settings()
-            self._notify_reload()
-            if self.dispatcher:
-                self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
-            QMessageBox.information(
-                self,
-                "Imported",
-                "Configuration imported and synced to database.",
-            )
-        else:
-            QMessageBox.warning(
-                self,
-                "Import Failed",
-                "Could not parse or apply settings from file.",
-            )
+        try:
+            if import_any(Path(path_str)):
+                self.load_settings()
+                self._notify_reload()
+                if self.dispatcher:
+                    self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+                logger.info("Imported configuration from '%s'", path_str)
+                QMessageBox.information(
+                    self,
+                    "Imported",
+                    "Configuration imported and synced to database.",
+                )
+            else:
+                logger.warning("Could not parse or apply settings from '%s'", path_str)
+                QMessageBox.warning(
+                    self,
+                    "Import Failed",
+                    "Could not parse or apply settings from file.",
+                )
+        except Exception as exc:
+            logger.exception("Unexpected error importing '%s'", path_str)
+            QMessageBox.critical(self, "Import Error", f"Failed to import file:\n{exc}")
 
     def _on_export_bundle(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select Target Folder for Bundle")
@@ -332,10 +378,12 @@ class SettingsPage(BasePage):
 
         try:
             t_file, j_file = export_bundle(Path(folder))
+            logger.info("Exported configuration bundle: '%s', '%s'", t_file.name, j_file.name)
             QMessageBox.information(
                 self,
                 "Bundle Exported",
                 f"Exported configuration bundle:\n- {t_file.name}\n- {j_file.name}",
             )
-        except Exception as e:
-            QMessageBox.critical(self, "Bundle Export Failed", str(e))
+        except Exception as exc:
+            logger.exception("Bundle export failed")
+            QMessageBox.critical(self, "Bundle Export Failed", str(exc))
