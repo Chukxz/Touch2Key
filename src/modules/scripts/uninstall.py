@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Driver, Rules, and Data Uninstaller (GUI & CLI compatible).
-Supports both Windows (Interception driver) and Linux (udev rules).
+Supports Windows (Interception driver) and Linux (udev rules with pkexec/sudo fallback).
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ logger = logging.getLogger("modules.scripts.uninstall")
 
 
 def _is_admin() -> bool:
-    """Checks for Administrator (Windows) or root (Linux) privileges."""
+    """Checks if current process has elevated privileges."""
     if SYSTEM == "Windows":
         try:
             return ctypes.windll.shell32.IsUserAnAdmin() != 0
@@ -41,16 +41,13 @@ def _is_admin() -> bool:
     return os.geteuid() == 0
 
 
-def _request_elevation() -> None:
-    """Requests elevation via Windows UAC or prints sudo warning on Linux."""
-    if SYSTEM == "Windows":
-        script = Path(__file__).resolve()
-        params = " ".join(sys.argv[1:])
-        ctypes.windll.shell32.ShellExecuteW(
-            None, "runas", sys.executable, f'"{script}" {params}', os.getcwd(), 1
-        )
-    else:
-        print("[!] Please re-run this script with 'sudo'.")
+def _request_windows_elevation() -> None:
+    """Triggers Windows UAC prompt to relaunch uninstaller as Administrator."""
+    script = Path(__file__).resolve()
+    params = " ".join(sys.argv[1:])
+    ctypes.windll.shell32.ShellExecuteW(
+        None, "runas", sys.executable, f'"{script}" {params}', os.getcwd(), 1
+    )
 
 
 def _kill_adb() -> None:
@@ -64,6 +61,63 @@ def _kill_adb() -> None:
         subprocess.run(cmd, capture_output=True, check=False)
     except Exception:
         pass
+
+
+def _remove_linux_udev_rules(is_gui: bool) -> bool:
+    """
+    Removes the udev rule file and reloads udevadm.
+    Elevates via pkexec in GUI mode or sudo in CLI mode if unprivileged.
+    """
+    rule_path = Path(UDEV_RULE_PATH)
+    if not rule_path.exists():
+        if is_gui:
+            logger.info("No udev rule found at %s. Skipping removal.", rule_path)
+        else:
+            print(f"[+] No udev rule found at {rule_path}.")
+        return True
+
+    # Try direct unprivileged removal first (in case running as root)
+    if _is_admin():
+        try:
+            rule_path.unlink()
+            subprocess.run(["udevadm", "control", "--reload-rules"], check=True)
+            subprocess.run(["udevadm", "trigger"], check=True)
+            if is_gui:
+                logger.info("Udev rule removed and subsystem reloaded as root.")
+            else:
+                print("[+] Udev rule removed and subsystem reloaded.")
+            return True
+        except Exception as exc:
+            if is_gui:
+                logger.error("Failed to remove udev rule as root: %s", exc)
+            else:
+                print(f"[!] Error removing udev rule: {exc}")
+            return False
+
+    # Escalate privileges when running unprivileged
+    cmd_str = f"rm -f {rule_path} && udevadm control --reload-rules && udevadm trigger"
+
+    # In GUI mode, prefer PolicyKit graphical prompt
+    if is_gui and shutil.which("pkexec"):
+        logger.info("Invoking PolicyKit (pkexec) to remove udev rule...")
+        res = subprocess.run(["pkexec", "sh", "-c", cmd_str], capture_output=True)
+        if res.returncode == 0:
+            logger.info("Udev rule removed successfully via PolicyKit.")
+            return True
+        logger.warning("pkexec authentication canceled or failed.")
+        return False
+
+    # In CLI mode, use standard sudo
+    if shutil.which("sudo"):
+        print("[!] Sudo authentication required to delete /etc/udev/rules.d rule...")
+        res = subprocess.run(["sudo", "sh", "-c", cmd_str])
+        if res.returncode == 0:
+            print("[+] Udev rule removed via sudo.")
+            return True
+        print("[!] Sudo authentication failed.")
+        return False
+
+    return False
 
 
 def purge_data(is_gui: bool) -> None:
@@ -131,19 +185,17 @@ def run(parent=None) -> bool:
     else:
         args = parser.parse_args()
 
-    # 1. Privilege Check
-    if not _is_admin():
-        msg = (
-            "Administrator privileges required (Windows)."
-            if SYSTEM == "Windows"
-            else "Root/Superuser privileges required (run with 'sudo')."
-        )
+    # 1. Platform-Specific Elevation Check
+    # Windows requires the entire process to run elevated to talk to the driver installer.
+    # Linux can remain unprivileged and elevate only during udev rule removal via pkexec.
+    if SYSTEM == "Windows" and not _is_admin():
+        msg = "Administrator privileges are required to uninstall the Interception driver."
         if is_gui:
             logger.error(msg)
             QMessageBox.critical(parent, "Elevation Required", msg)
         else:
             print(f"[!] {msg}")
-            _request_elevation()
+            _request_windows_elevation()
         return False
 
     # 2. Confirmation Prompt
@@ -202,20 +254,14 @@ def run(parent=None) -> bool:
                 print(f"[!] {msg}")
 
     elif SYSTEM == "Linux":
-        if UDEV_RULE_PATH.exists():
-            UDEV_RULE_PATH.unlink(missing_ok=True)
-            subprocess.run(["udevadm", "control", "--reload-rules"], check=False)
-            subprocess.run(["udevadm", "trigger"], check=False)
+        success = _remove_linux_udev_rules(is_gui=is_gui)
+        if not success:
+            err_msg = "Could not remove udev rules due to lack of administrative permissions."
             if is_gui:
-                logger.info("Udev rule removed and subsystem reloaded.")
+                QMessageBox.critical(parent, "Permission Denied", err_msg)
             else:
-                print("[+] Udev rule removed and subsystem reloaded.")
-        else:
-            msg = f"Udev rule not found at {UDEV_RULE_PATH}."
-            if is_gui:
-                logger.warning(msg)
-            else:
-                print(f"[!] {msg}")
+                print(f"[!] {err_msg}")
+            return False
 
     # 5. Remove Platform Binaries
     if BIN_DIR.exists():
