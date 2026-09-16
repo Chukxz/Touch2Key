@@ -189,7 +189,7 @@ class MapperEvent:
 
 
 class MapperEventDispatcher:
-    """Thread-safe event dispatcher for cross-thread engine and GUI notifications."""
+    """Thread-safe event dispatcher for cross-thread engine, worker, and GUI notifications."""
 
     _NO_ARGS: frozenset[EVENT_TYPE] = frozenset({
         "ON_CONFIG_RELOAD",
@@ -247,6 +247,23 @@ class MapperEventDispatcher:
             func_name = getattr(func, "__name__", repr(func))
             print(f"[!] Error unregistering callback {func_name} for event {event_type}: {exc}")
 
+    def unregister_by_owner(self, owner: Any) -> None:
+        """Removes all callbacks bound to a specific instance by checking func.__self__."""
+        try:
+            with self._lock:
+                for event_type, callbacks in self.callback_registry.items():
+                    self.callback_registry[event_type] = [
+                        cb for cb in callbacks if getattr(cb, "__self__", None) is not owner
+                    ]
+        except Exception as exc:
+            print(f"[!] Error unregistering callbacks for owner {owner}: {exc}")
+
+    def unregister_all(self) -> None:
+        """Flushes every registered callback across all event categories in a single call."""
+        with self._lock:
+            for event_type in self.callback_registry:
+                self.callback_registry[event_type].clear()
+
     def dispatch(self, event: MapperEvent) -> None:
         with self._lock:
             callbacks = tuple(
@@ -290,6 +307,7 @@ class MapperEventDispatcher:
             return (event,)
 
         return ()
+
 
 
 SCANCODES = {
