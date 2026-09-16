@@ -54,6 +54,8 @@ JSONS_FOLDER = DATA_FOLDER / "jsons"
 PROFILES_FOLDER = DATA_FOLDER / "profiles"
 TOML_PATH = DATA_FOLDER / "settings.toml"
 DB_PATH = DB_FOLDER / "touch2key.db"
+DIAGNOSTICS_FOLDER = PROJECT_ROOT / "diagnostics"
+LOGS_FOLDER = PROJECT_ROOT / "logs"
 
 # Auto-create runtime directories on module import
 DATA_FOLDER.mkdir(parents=True, exist_ok=True)
@@ -61,6 +63,8 @@ DB_FOLDER.mkdir(parents=True, exist_ok=True)
 IMAGES_FOLDER.mkdir(parents=True, exist_ok=True)
 JSONS_FOLDER.mkdir(parents=True, exist_ok=True)
 PROFILES_FOLDER.mkdir(parents=True, exist_ok=True)
+DIAGNOSTICS_FOLDER.mkdir(parents=True, exist_ok=True)
+LOGS_FOLDER.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------------------------
 # Constants
