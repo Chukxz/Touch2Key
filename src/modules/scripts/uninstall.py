@@ -1,22 +1,29 @@
-import os
-import sys
-import shutil
+#!/usr/bin/env python3
+"""
+Touch2Key Driver, Rules, and Data Uninstaller.
+Supports interactive prompt or non-interactive flag execution (-y / --purge).
+"""
+
+from __future__ import annotations
+
 import argparse
-import subprocess
-import tkinter as tk
 import ctypes
-from tkinter import messagebox
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
+from modules.database import store
+from modules.database.connection import DB_PATH
 from modules.utils import (
-    PROJECT_ROOT,
-    SYSTEM,
+    BIN_DIR,
     IMAGES_FOLDER,
     JSONS_FOLDER,
+    PROJECT_ROOT,
+    SYSTEM,
     UDEV_RULE_PATH,
 )
-
-BIN_DIR = PROJECT_ROOT / "bin"
 
 
 def _is_admin() -> bool:
@@ -24,41 +31,24 @@ def _is_admin() -> bool:
     if SYSTEM == "Windows":
         try:
             return ctypes.windll.shell32.IsUserAnAdmin() != 0
-        except:
+        except Exception:
             return False
     return os.geteuid() == 0
 
 
-def _request_elevation():
-    """Restarts the script with admin privileges in the correct directory."""
+def _request_elevation() -> None:
+    """Restarts the script with admin privileges in the current working directory."""
     if SYSTEM == "Windows":
         script = Path(__file__).resolve()
         params = " ".join(sys.argv[1:])
-
-        # 5th argument (os.getcwd()) ensures the new process starts
-        # in the correct project folder instead of C:\Windows\System32
         ctypes.windll.shell32.ShellExecuteW(
             None, "runas", sys.executable, f'"{script}" {params}', os.getcwd(), 1
         )
     else:
-        print("[!] Please run this script with 'sudo'.")
+        print("[!] Please run this uninstaller with 'sudo'.")
 
 
-def _confirm_uninstall(message):
-    root = None
-    try:
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        return messagebox.askyesno("Touch2Key Uninstall", message, parent=root)
-    except Exception:
-        return input(f"{message} (y/n): ").lower() == "y"
-    finally:
-        if root:
-            root.destroy()
-
-
-def _kill_adb():
+def _kill_adb() -> None:
     print("[+] Checking for running ADB processes...")
     cmd = (
         ["taskkill", "/F", "/IM", "adb.exe", "/T"]
@@ -69,35 +59,41 @@ def _kill_adb():
         subprocess.run(cmd, capture_output=True, check=False)
         print("[+] ADB cleanup finished.")
     except Exception as e:
-        print(f"[!] Note: Could not kill ADB (might not be running): {e}")
+        print(f"[!] Note: ADB process cleanup skipped: {e}")
 
 
-def run():
-    # Admin Check First
+def run() -> None:
+    parser = argparse.ArgumentParser(description="Touch2Key Driver/Rules and Data Uninstaller")
+    parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
+    parser.add_argument("--purge", action="store_true", help="Purge database, profiles, and images")
+    parser.add_argument("--no-restart", action="store_true", help="Do not prompt to restart Windows")
+    args = parser.parse_args()
+
+    # Elevation check
     if not _is_admin():
         print("[!] This uninstaller requires Administrator/Root privileges.")
         _request_elevation()
         return
 
-    parser = argparse.ArgumentParser(description="Touch2Key Driver/Rules Uninstaller")
-    parser.add_argument("--purge", action="store_true", help="Delete JSON/Images.")
-    args = parser.parse_args()
+    # Interactive confirmation if -y is not passed
+    if not args.yes:
+        confirm = input("Are you sure you want to uninstall Touch2Key drivers/rules? (y/N): ").strip().lower()
+        if confirm != "y":
+            print("[!] Uninstallation cancelled.")
+            return
 
-    # Confirm
-    msg = "Are you sure you want to uninstall Touch2Key Driver/Rules?"
-    if not _confirm_uninstall(msg):
-        print("[!] Aborted.")
+    # Close active database connections
+    try:
+        store.close()
+    except Exception:
+        pass
 
-        if SYSTEM == "Windows":
-            input("\nPress Enter to exit...")
-
-        return
-
-    # Cleanup
+    # Stop background ADB instances
     _kill_adb()
 
+    # Platform Driver Removal
     if SYSTEM == "Windows":
-        print(f"\n--- Uninstalling Interception Driver ---")
+        print("\n--- Uninstalling Interception Driver ---")
         installer_exe = (
             BIN_DIR
             / "Interception"
@@ -108,62 +104,51 @@ def run():
             subprocess.run([str(installer_exe), "/uninstall"], capture_output=True)
             print("[+] Driver removed.")
 
-            print("\n" + "=" * 55)
-            print("!!! SYSTEM RESTART REQUIRED !!!".center(55))
-            print("=" * 55)
-            choice = (
-                input("Restart PC now (Will restart in 5 seconds)? (y/n): ")
-                .strip()
-                .lower()
-            )
-
-            if choice == "y":
-                # os.system(
-                #     'shutdown /r /t 5 /c "Touch2Key driver uninstallation complete."'
-                # )
-                subprocess.run(
-                    [
-                        "shutdown",
-                        "/r",
-                        "/t",
-                        "5",
-                        "/c",
-                        "Touch2Key driver uninstallation complete.",
-                    ]
-                )
-            else:
-                print(
-                    "[!] Please remember to restart your computer to complete the uninstallation process."
-                )
+            if not args.no_restart:
+                print("\n" + "=" * 55)
+                print("!!! SYSTEM RESTART REQUIRED !!!".center(55))
+                print("=" * 55)
+                choice = input("Restart PC now? (y/N): ").strip().lower()
+                if choice == "y":
+                    subprocess.run(
+                        ["shutdown", "/r", "/t", "5", "/c", "Touch2Key driver uninstallation complete."]
+                    )
+                    return
         else:
-            print(
-                "[!] Interception installer not found. Driver might need manual removal."
-            )
+            print("[!] Interception installer binary not found. Driver may require manual removal.")
 
     elif SYSTEM == "Linux":
-        print(f"\n--- Removing Udev Rules ---")
+        print("\n--- Removing Udev Rules ---")
         if UDEV_RULE_PATH.exists():
             UDEV_RULE_PATH.unlink()
             subprocess.run(["udevadm", "control", "--reload-rules"])
             print("[+] Udev rules removed.")
         else:
-            print("[!] Udev rule file not found. Manual cleanup might be needed.")
+            print("[!] Udev rule file not found.")
 
-    # Remove Files
+    # Remove Downloaded Binaries
     if BIN_DIR.exists():
-        shutil.rmtree(BIN_DIR)
-        print("    - Binaries deleted.")
+        shutil.rmtree(BIN_DIR, ignore_errors=True)
+        print("    - Local binaries deleted.")
 
+    # Purge Database and User Assets
     if args.purge:
         if IMAGES_FOLDER.exists():
-            shutil.rmtree(IMAGES_FOLDER)
+            shutil.rmtree(IMAGES_FOLDER, ignore_errors=True)
         if JSONS_FOLDER.exists():
-            shutil.rmtree(JSONS_FOLDER)
-        print("    - User data purged.")
+            shutil.rmtree(JSONS_FOLDER, ignore_errors=True)
 
-    print("\n[+] Uninstall complete.")
+        # Remove SQLite DB and WAL artifacts
+        for ext in ("", "-wal", "-shm"):
+            db_file = Path(f"{DB_PATH}{ext}")
+            if db_file.exists():
+                try:
+                    db_file.unlink()
+                except Exception:
+                    pass
+        print("    - Database, images, and user data purged.")
 
-    input("\nPress Enter to exit...")
+    print("\n[+] Uninstallation complete.")
 
 
 if __name__ == "__main__":
