@@ -76,7 +76,7 @@ class LayoutZone:
     layout_id: int
     scancode: str
     name: str
-    zone_type: str  # 'CIRCLE' | 'RECTANGLE'
+    zone_type: str  # 'CIRCLE' | 'RECTANGLE' | 'BEZEL'
     cx: Optional[float]
     cy: Optional[float]
     r: Optional[float]
@@ -86,16 +86,18 @@ class LayoutZone:
     y2: Optional[float]
     move_camera: bool
     priority: int
+    pipeline_config: str
 
     @classmethod
     def from_row(cls, row) -> "LayoutZone":
         data = {
             f.name: row[f.name]
             for f in dataclass_fields(cls)
-            if f.name not in ("move_camera", "priority")
+            if f.name not in ("move_camera", "priority", "pipeline_config")
         }
         data["move_camera"] = bool(row["move_camera"])
         data["priority"] = int(row["priority"]) if "priority" in row.keys() else 0
+        data["pipeline_config"] = str(row["pipeline_config"]) if "pipeline_config" in row.keys() else "{}"
         return cls(**data)
 
 
@@ -125,9 +127,6 @@ class AppSettingsRepository:
         conn = connection_manager.get_connection()
         row = conn.execute("SELECT * FROM app_settings WHERE id = 1;").fetchone()
         if row is None:
-            # Defensive: connection.py seeds this row on schema
-            # creation, so reaching here means it was deleted out from
-            # under us (e.g. a manual DB edit). Re-seed rather than crash.
             with conn:
                 conn.execute("INSERT OR IGNORE INTO app_settings (id) VALUES (1);")
             row = conn.execute("SELECT * FROM app_settings WHERE id = 1;").fetchone()
@@ -253,19 +252,11 @@ class LayoutsRepository:
         return layout
 
     def delete(self, layout_id: int) -> None:
-        """Cascades to layout_zones via ON DELETE CASCADE. If this
-        layout was app_settings.active_layout_id, that column is set
-        to NULL by its own foreign key clause -- callers should pick a
-        new active layout afterward if one is needed."""
         conn = connection_manager.get_connection()
         with conn:
             conn.execute("DELETE FROM layouts WHERE id = ?;", (layout_id,))
 
     def delete_all(self) -> None:
-        """Deletes all layouts from the database.
-        Because of the foreign key constraints in the schema, this automatically
-        deletes every single zone in layout_zones and safely sets
-        app_settings.active_layout_id to NULL."""
         conn = connection_manager.get_connection()
         with conn:
             conn.execute("DELETE FROM layouts;")
@@ -299,6 +290,8 @@ class LayoutsRepository:
                 x2=zone.x2,
                 y2=zone.y2,
                 move_camera=zone.move_camera,
+                priority=zone.priority,
+                pipeline_config=zone.pipeline_config,
             )
         return new_layout
 
@@ -318,9 +311,10 @@ class LayoutZonesRepository:
         "y2",
         "move_camera",
         "priority",
+        "pipeline_config",
     }
 
-    VALID_ZONE_TYPES = {"CIRCLE", "RECTANGLE"}
+    VALID_ZONE_TYPES = {"CIRCLE", "RECTANGLE", "BEZEL"}
     _REQUIRED_ON_CREATE = {"layout_id", "scancode", "zone_type"}
 
     def list_for_layout(self, layout_id: int) -> list[LayoutZone]:
@@ -352,6 +346,8 @@ class LayoutZonesRepository:
 
         fields.setdefault("name", "")
         fields.setdefault("move_camera", False)
+        fields.setdefault("priority", 0)
+        fields.setdefault("pipeline_config", "{}")
         fields["move_camera"] = int(bool(fields["move_camera"]))
 
         columns = ", ".join(fields)
