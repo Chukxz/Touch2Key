@@ -33,7 +33,7 @@ class Mapper:
         pps: float,
         emulator: dict[str, str | None],
         window_id: int | None,
-        ref: Engine, 
+        ref: Engine,
     ):
         self.layout_loader = layout_loader
         self.config = self.layout_loader.config
@@ -60,18 +60,26 @@ class Mapper:
             self.window_id = window_id
         else:
             self.window_id = self.window_manager.get_foreground_window()
-            logger.info("Defaulting to foreground target window: HWND %s", self.window_id)
+            logger.info(
+                "Defaulting to foreground target window: HWND %s", self.window_id
+            )
 
         self.game_window_class_name: str | None = (
-            self.window_manager.get_window_class_name(self.window_id) if self.window_id else None
+            self.window_manager.get_window_class_name(self.window_id)
+            if self.window_id
+            else None
         )
-        self.game_window_info: dict | None = {
-            "window_id": self.window_id,
-            "left": 0,
-            "top": 0,
-            "width": self.screen_w,
-            "height": self.screen_h,
-        } if self.window_id else None
+        self.game_window_info: dict | None = (
+            {
+                "window_id": self.window_id,
+                "left": 0,
+                "top": 0,
+                "width": self.screen_w,
+                "height": self.screen_h,
+            }
+            if self.window_id
+            else None
+        )
 
         self.window_lost = self.window_id is None
         self.wasd_block = 0
@@ -83,7 +91,9 @@ class Mapper:
             "ON_CONFIG_RELOAD", self._update_config
         )
 
-        self.mapper_event_dispatcher.register_callback("ON_TARGET_WINDOW_CHANGE", self.rebind_target_window)
+        self.mapper_event_dispatcher.register_callback(
+            "ON_TARGET_WINDOW_CHANGE", self.rebind_target_window
+        )
 
         self.running = True
         self.window_thread = threading.Thread(
@@ -125,18 +135,31 @@ class Mapper:
         with self.lock:
             if new_window_id and self.window_manager.is_window_valid(new_window_id):
                 self.window_id = new_window_id
-                self.game_window_class_name = self.window_manager.get_window_class_name(new_window_id)
+                self.game_window_class_name = self.window_manager.get_window_class_name(
+                    new_window_id
+                )
                 self.game_window_info = self._get_window_info(new_window_id)
                 self.window_lost = False
-                logger.info("Engine live-rebound to Window ID: %s (%s)", self.window_id, self.game_window_class_name)
+                logger.info(
+                    "Engine live-rebound to Window ID: %s (%s)",
+                    self.window_id,
+                    self.game_window_class_name,
+                )
             else:
                 self.window_id = self.window_manager.get_foreground_window()
                 self.game_window_class_name = (
-                self.window_manager.get_window_class_name(self.window_id) if self.window_id else None)
+                    self.window_manager.get_window_class_name(self.window_id)
+                    if self.window_id
+                    else None
+                )
                 self.game_window_info = (
-                self._get_window_info(self.window_id) if self.window_id else None)
+                    self._get_window_info(self.window_id) if self.window_id else None
+                )
                 self.window_lost = self.window_id is None
-                logger.warning("Target window invalidated. Rebound to foreground HWND: %s", self.window_id)
+                logger.warning(
+                    "Target window invalidated. Rebound to foreground HWND: %s",
+                    self.window_id,
+                )
 
     def _get_window_info(self, window_id: int) -> dict:
         width, height = self.window_manager.get_window_dimensions(window_id)

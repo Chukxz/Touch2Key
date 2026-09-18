@@ -4,7 +4,7 @@ CLI Layout & Profile Manager.
 
 Provides terminal-based profile switching, duplication, renaming,
 zone/pipeline inspection, JSON layout import/export, TOML app_settings
-import/export, and bundled profile migrations without opening the PySide6 GUI.
+import/export, schema reset, and bulk synchronization of zones to AppSettings.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
-from modules.database import store
+from modules.database import reset_layout_zones_to_app_settings, store
 from modules.database.config_io import (
     export_bundle,
     export_layout_json,
@@ -26,10 +26,10 @@ from modules.database.legacy_migration import (
 )
 from modules.utils import JSONS_FOLDER, PROFILES_FOLDER, TOML_PATH
 
-
 # ---------------------------------------------------------------------------
 # Profile Inspection & Management
 # ---------------------------------------------------------------------------
+
 
 def list_profiles() -> None:
     """Lists all saved layouts with resolution, DPI, and zone metrics."""
@@ -62,16 +62,20 @@ def list_layout_zones(layout_id: int) -> None:
 
     zones = store.zones.list_for_layout(layout_id)
     if not zones:
-        print(f"\nNo pipelines/zones configured for layout '{layout.name}' (ID: {layout_id}).\n")
+        print(
+            f"\nNo pipelines/zones configured for layout '{layout.name}' (ID: {layout_id}).\n"
+        )
         return
 
     print(f"\n--- Zones / Pipelines for '{layout.name}' (ID: {layout_id}) ---")
     for z in zones:
         if z.zone_type == "CIRCLE":
             coords = f"Center=({z.cx}, {z.cy}), R={z.r}"
-        else:
+        elif z.zone_type == "RECTANGLE":
             coords = f"Rect=({z.x1}, {z.y1}) -> ({z.x2}, {z.y2})"
-        cam_flag = " [MoveCam]" if z.move_camera else ""
+        else:
+            coords = "Bezel Notch"
+        cam_flag = " [MoveCam/TrackFire]" if z.move_camera else ""
         print(
             f"  [{z.id}] {z.name or 'Unnamed'} | Key: {z.scancode} | "
             f"Type: {z.zone_type} | Prio: {z.priority} | {coords}{cam_flag}"
@@ -109,7 +113,9 @@ def duplicate_profile(layout_id: int, new_name: str) -> Optional[int]:
 
     try:
         new_layout = store.layouts.duplicate(layout_id, clean_name)
-        print(f"Duplicated '{source.name}' -> '{new_layout.name}' (ID: {new_layout.id}).")
+        print(
+            f"Duplicated '{source.name}' -> '{new_layout.name}' (ID: {new_layout.id})."
+        )
         return new_layout.id
     except Exception as exc:
         print(f"Failed to duplicate profile: {exc}")
@@ -174,6 +180,7 @@ def clear_zones(layout_id: int) -> bool:
 # Import & Export Pipelines
 # ---------------------------------------------------------------------------
 
+
 def import_profile_json(file_path: Path) -> Optional[int]:
     """Imports a JSON layout mapping file into SQLite and activates it."""
     if not file_path.exists():
@@ -186,13 +193,17 @@ def import_profile_json(file_path: Path) -> Optional[int]:
         set_active=True,
     )
     if layout_id:
-        print(f"Imported '{file_path.name}' successfully as Active Layout (ID: {layout_id}).")
+        print(
+            f"Imported '{file_path.name}' successfully as Active Layout (ID: {layout_id})."
+        )
     else:
         print(f"Failed to import '{file_path.name}'.")
     return layout_id
 
 
-def export_profile_json(layout_id: int, output_path: Path | None = None) -> Optional[Path]:
+def export_profile_json(
+    layout_id: int, output_path: Path | None = None
+) -> Optional[Path]:
     """Exports a specific layout ID to a standard JSON layout file."""
     try:
         out_file = export_layout_json(layout_id, output_path)
@@ -207,6 +218,7 @@ def export_profile_json(layout_id: int, output_path: Path | None = None) -> Opti
 # Interactive Terminal Menu
 # ---------------------------------------------------------------------------
 
+
 def interactive_menu() -> None:
     """Terminal CLI UI loop."""
     while True:
@@ -217,6 +229,7 @@ def interactive_menu() -> None:
         print("  [cp]  Duplicate Profile")
         print("  [rn]  Rename Profile")
         print("  [cz]  Clear Zones for Profile")
+        print("  [rz]  Reset All Zones in Layout to App Settings")
         print("  [d]   Delete Profile")
         print("  [i]   Import Layout from JSON")
         print("  [e]   Export Profile to JSON")
@@ -248,7 +261,9 @@ def interactive_menu() -> None:
                 target_id = int(raw_id)
                 source = store.layouts.get(target_id)
                 if source:
-                    new_name = input(f"Enter name for copy of '{source.name}': ").strip()
+                    new_name = input(
+                        f"Enter name for copy of '{source.name}': "
+                    ).strip()
                     duplicate_profile(target_id, new_name)
 
         elif choice == "rn":
@@ -264,20 +279,50 @@ def interactive_menu() -> None:
             raw_id = input("Enter Layout ID to clear zones: ").strip()
             if raw_id.isdigit():
                 target_id = int(raw_id)
-                confirm = input(f"Clear all zones for Layout ID {target_id}? (y/N): ").strip().lower()
+                confirm = (
+                    input(f"Clear all zones for Layout ID {target_id}? (y/N): ")
+                    .strip()
+                    .lower()
+                )
                 if confirm == "y":
                     clear_zones(target_id)
+
+        elif choice == "rz":
+            raw_id = input(
+                "Enter Layout ID to reset zones (Leave blank for active): "
+            ).strip()
+            target_id = int(raw_id) if raw_id.isdigit() else None
+            active = (
+                store.layouts.get(target_id) if target_id else store.get_active_layout()
+            )
+            if active:
+                count = reset_layout_zones_to_app_settings(active.id)
+                print(
+                    f"Reset {count} zones in layout '{active.name}' to default AppSettings."
+                )
+            else:
+                print("No layout selected or active.")
 
         elif choice == "d":
             raw_id = input("Enter Layout ID to delete: ").strip()
             if raw_id.isdigit():
                 target_id = int(raw_id)
-                confirm = input(f"Confirm delete Layout ID {target_id} and its zones? (y/N): ").strip().lower()
+                confirm = (
+                    input(
+                        f"Confirm delete Layout ID {target_id} and its zones? (y/N): "
+                    )
+                    .strip()
+                    .lower()
+                )
                 if confirm == "y":
                     delete_profile(target_id)
 
         elif choice == "i":
-            raw_path = input(f"Enter path to JSON file [Default: {JSONS_FOLDER}]: ").strip().strip('"')
+            raw_path = (
+                input(f"Enter path to JSON file [Default: {JSONS_FOLDER}]: ")
+                .strip()
+                .strip('"')
+            )
             if raw_path:
                 import_profile_json(Path(raw_path))
 
@@ -297,10 +342,16 @@ def interactive_menu() -> None:
                 print("Failed to import settings.toml (file missing or invalid).")
 
         elif choice == "eb":
-            raw_id = input("Enter Layout ID to bundle (Leave blank for active): ").strip()
+            raw_id = input(
+                "Enter Layout ID to bundle (Leave blank for active): "
+            ).strip()
             target_id = int(raw_id) if raw_id.isdigit() else None
             try:
-                active = store.layouts.get(target_id) if target_id else store.get_active_layout()
+                active = (
+                    store.layouts.get(target_id)
+                    if target_id
+                    else store.get_active_layout()
+                )
                 if active:
                     t_path, j_path = export_bundle(profile_name=active.name)
                     print(f"Bundle exported:\n  - TOML: {t_path}\n  - JSON: {j_path}")
@@ -310,14 +361,24 @@ def interactive_menu() -> None:
                 print(f"Export bundle failed: {exc}")
 
         elif choice == "ib":
-            raw_path = input(f"Enter path to file or bundle folder [Default: {PROFILES_FOLDER}]: ").strip().strip('"')
+            raw_path = (
+                input(
+                    f"Enter path to file or bundle folder [Default: {PROFILES_FOLDER}]: "
+                )
+                .strip()
+                .strip('"')
+            )
             if raw_path and import_any(Path(raw_path)):
                 print("Configuration imported and synced to SQLite.")
             else:
-                print("Import failed. Check that file/folder exists and syntax is valid.")
+                print(
+                    "Import failed. Check that file/folder exists and syntax is valid."
+                )
 
         elif choice == "r":
-            confirm = input("Reset all app settings to defaults? (y/N): ").strip().lower()
+            confirm = (
+                input("Reset all app settings to defaults? (y/N): ").strip().lower()
+            )
             if confirm == "y":
                 store.settings.reset_to_defaults()
                 print("Application settings reset to defaults.")
@@ -329,27 +390,110 @@ def interactive_menu() -> None:
 # CLI Argument Entry Point
 # ---------------------------------------------------------------------------
 
+
 def run() -> None:
-    parser = argparse.ArgumentParser(description="Touch2Key CLI Layout & Config Manager")
-    parser.add_argument("-l", "--list", action="store_true", help="List all saved profiles")
-    parser.add_argument("-s", "--set-active", type=int, metavar="ID", help="Set active layout by ID")
-    parser.add_argument("--list-zones", type=int, metavar="ID", help="List all zones/pipelines for layout by ID")
-    parser.add_argument("--duplicate", nargs=2, metavar=("ID", "NAME"), help="Duplicate layout by ID to a new name")
-    parser.add_argument("--rename", nargs=2, metavar=("ID", "NAME"), help="Rename layout by ID")
-    parser.add_argument("--delete", type=int, metavar="ID", help="Delete layout and zones by ID")
-    parser.add_argument("--clear-zones", type=int, metavar="ID", help="Clear all touch zones for layout by ID")
+    parser = argparse.ArgumentParser(description="CLI Layout & Profile Manager")
+    parser.add_argument(
+        "-l", "--list", action="store_true", help="List all saved profiles"
+    )
+    parser.add_argument(
+        "-s", "--set-active", type=int, metavar="ID", help="Set active layout by ID"
+    )
+    parser.add_argument(
+        "--list-zones",
+        type=int,
+        metavar="ID",
+        help="List all zones/pipelines for layout by ID",
+    )
+    parser.add_argument(
+        "--duplicate",
+        nargs=2,
+        metavar=("ID", "NAME"),
+        help="Duplicate layout by ID to a new name",
+    )
+    parser.add_argument(
+        "--rename", nargs=2, metavar=("ID", "NAME"), help="Rename layout by ID"
+    )
+    parser.add_argument(
+        "--delete", type=int, metavar="ID", help="Delete layout and zones by ID"
+    )
+    parser.add_argument(
+        "--clear-zones",
+        type=int,
+        metavar="ID",
+        help="Clear all touch zones for layout by ID",
+    )
+    parser.add_argument(
+        "--reset-zones",
+        type=int,
+        nargs="?",
+        const=-1,
+        metavar="ID",
+        help="Reset layout zones to AppSettings",
+    )
 
-    parser.add_argument("-i", "--import-json", type=Path, metavar="PATH", help="Import a layout from JSON")
-    parser.add_argument("-e", "--export-json", type=int, metavar="ID", help="Export a layout to JSON by ID")
-    parser.add_argument("-o", "--output", type=Path, metavar="OUT_PATH", help="Custom output path for JSON export")
+    parser.add_argument(
+        "-i",
+        "--import-json",
+        type=Path,
+        metavar="PATH",
+        help="Import a layout from JSON",
+    )
+    parser.add_argument(
+        "-e",
+        "--export-json",
+        type=int,
+        metavar="ID",
+        help="Export a layout to JSON by ID",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        metavar="OUT_PATH",
+        help="Custom output path for JSON export",
+    )
 
-    parser.add_argument("--export-toml", type=Path, nargs="?", const=TOML_PATH, metavar="OUT_PATH", help="Export app_settings to TOML")
-    parser.add_argument("--import-toml", type=Path, nargs="?", const=TOML_PATH, metavar="IN_PATH", help="Import app_settings from TOML")
+    parser.add_argument(
+        "--export-toml",
+        type=Path,
+        nargs="?",
+        const=TOML_PATH,
+        metavar="OUT_PATH",
+        help="Export app_settings to TOML",
+    )
+    parser.add_argument(
+        "--import-toml",
+        type=Path,
+        nargs="?",
+        const=TOML_PATH,
+        metavar="IN_PATH",
+        help="Import app_settings from TOML",
+    )
 
-    parser.add_argument("--export-bundle", type=Path, nargs="?", const=PROFILES_FOLDER, metavar="OUT_DIR", help="Export profile bundle (.toml + .json) into data/profiles/")
-    parser.add_argument("--import-bundle", type=Path, metavar="PATH", help="Import profile bundle via settings.toml or folder")
-    parser.add_argument("--import-any", type=Path, metavar="PATH", help="Import any config file (.json, .toml, or directory)")
-    parser.add_argument("--reset-settings", action="store_true", help="Reset app settings to defaults")
+    parser.add_argument(
+        "--export-bundle",
+        type=Path,
+        nargs="?",
+        const=PROFILES_FOLDER,
+        metavar="OUT_DIR",
+        help="Export profile bundle (.toml + .json) into data/profiles/",
+    )
+    parser.add_argument(
+        "--import-bundle",
+        type=Path,
+        metavar="PATH",
+        help="Import profile bundle via settings.toml or folder",
+    )
+    parser.add_argument(
+        "--import-any",
+        type=Path,
+        metavar="PATH",
+        help="Import any config file (.json, .toml, or directory)",
+    )
+    parser.add_argument(
+        "--reset-settings", action="store_true", help="Reset app settings to defaults"
+    )
 
     args = parser.parse_args()
 
@@ -368,6 +512,16 @@ def run() -> None:
             delete_profile(args.delete)
         elif args.clear_zones is not None:
             clear_zones(args.clear_zones)
+        elif args.reset_zones is not None:
+            target_id = args.reset_zones
+            if target_id == -1:
+                active = store.get_active_layout()
+                target_id = active.id if active else None
+            if target_id is not None:
+                count = reset_layout_zones_to_app_settings(target_id)
+                print(f"Reset {count} zones in layout ID {target_id} to AppSettings.")
+            else:
+                print("No layout specified or active.")
         elif args.import_json is not None:
             import_profile_json(args.import_json)
         elif args.export_json is not None:

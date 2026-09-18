@@ -43,7 +43,9 @@ if TYPE_CHECKING:
 
 
 class Engine:
-    def __init__(self, headless: bool = False, dispatcher: MapperEventDispatcher | None = None):
+    def __init__(
+        self, headless: bool = False, dispatcher: MapperEventDispatcher | None = None
+    ):
         platform_mod = get_platform()
         self.headless = headless
 
@@ -73,6 +75,7 @@ class Engine:
         if not self.headless:
             try:
                 import keyboard
+
                 keyboard.add_hotkey("esc", self._shutdown)
             except Exception:
                 pass
@@ -121,7 +124,9 @@ class Engine:
             self.layout_loader.reload()
             dev_w = float(self.layout_loader.width)
             bezel_h = float(self.layout_loader.bezel_height)
-            self.bezel_pipeline = BezelReturnToggle(screen_width=dev_w, bezel_height=bezel_h)
+            self.bezel_pipeline = BezelReturnToggle(
+                screen_width=dev_w, bezel_height=bezel_h
+            )
 
     def _build_pipeline_tiers(self) -> list[list[Pipeline]]:
         all_pipelines: list[Pipeline] = []
@@ -153,10 +158,9 @@ class Engine:
                 tiers.append([p])
             else:
                 last_tier = tiers[-1]
-                if (
-                    p.priority == last_tier[0].priority
-                    and getattr(p, "type_precedence", 0) == getattr(last_tier[0], "type_precedence", 0)
-                ):
+                if p.priority == last_tier[0].priority and getattr(
+                    p, "type_precedence", 0
+                ) == getattr(last_tier[0], "type_precedence", 0):
                     last_tier.append(p)
                 else:
                     tiers.append([p])
@@ -164,7 +168,9 @@ class Engine:
         return tiers
 
     def _process_touch_event(self, touch_event: TouchEvent) -> None:
-        if not (self.mouse_mapper and self.key_mapper and self.wasd_mapper and self.mapper):
+        if not (
+            self.mouse_mapper and self.key_mapper and self.wasd_mapper and self.mapper
+        ):
             return
 
         if self.is_visible:
@@ -177,7 +183,10 @@ class Engine:
                 self.toggle_mode()
                 return
 
-            if touch_event.contact_id == 0 and not self.two_finger_tap_tracker._contacts:
+            if (
+                touch_event.contact_id == 0
+                and not self.two_finger_tap_tracker._contacts
+            ):
                 gx, gy = self.mapper.device_to_game_abs(
                     touch_event.position.x, touch_event.position.y
                 )
@@ -241,6 +250,7 @@ class Engine:
                 from modules.platforms.windows.query_interception_device import (
                     select_keyboard_then_mouse,
                 )
+
                 res = select_keyboard_then_mouse()
                 if res:
                     k_device_handle, m_device_handle = res
@@ -268,7 +278,9 @@ class Engine:
 
         dev_w = float(self.layout_loader.width)
         bezel_h = float(self.layout_loader.bezel_height)
-        self.bezel_pipeline = BezelReturnToggle(screen_width=dev_w, bezel_height=bezel_h)
+        self.bezel_pipeline = BezelReturnToggle(
+            screen_width=dev_w, bezel_height=bezel_h
+        )
 
         self.mouse_mapper = MouseMapper(self.mapper)
         self.key_mapper = KeyMapper(self.mapper, on_toggle_mode=self.toggle_mode)
@@ -317,6 +329,7 @@ class Engine:
         if not self.headless:
             try:
                 import keyboard
+
                 keyboard.wait()
             except Exception:
                 pass
@@ -332,6 +345,7 @@ class Engine:
         if not self.headless:
             try:
                 import keyboard
+
                 keyboard.unhook_all_hotkeys()
             except Exception:
                 pass
@@ -370,7 +384,9 @@ class Engine:
             os._exit(0)
 
 
-def profiler_cleanup(prof: Profile | None, filename: str = "touch2key_cli.prof") -> None:
+def profiler_cleanup(
+    prof: Profile | None, filename: str = "touch2key_cli.prof"
+) -> None:
     if prof:
         prof.disable()
         DIAGNOSTICS_FOLDER.mkdir(parents=True, exist_ok=True)
@@ -397,11 +413,13 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     args = parser.parse_args()
     if args.profile:
         import cProfile
+
         cli_profiler = cProfile.Profile()
         cli_profiler.enable()
 
     if SYSTEM == "Linux":
         from modules.platforms.linux import check_display_protocol
+
         if not check_display_protocol():
             sys.exit(1)
     elif SYSTEM != "Windows":

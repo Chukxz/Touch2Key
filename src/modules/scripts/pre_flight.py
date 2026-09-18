@@ -32,6 +32,7 @@ def check_driver() -> bool:
     if SYSTEM == "Windows":
         try:
             from interception.interception import Interception
+
             return Interception().valid
         except Exception:
             return False
@@ -59,11 +60,17 @@ def run(verbose: bool = True, parent=None) -> bool:
     if failed:
         err_lines = []
         if "ADB" in failed:
-            err_lines.append("• ADB binary not found. Run setup to download platform-tools.")
+            err_lines.append(
+                "• ADB binary not found. Run setup to download platform-tools."
+            )
         if SYSTEM == "Windows" and "Driver" in failed:
-            err_lines.append("• Interception driver not accessible. Run setup or restart your PC.")
+            err_lines.append(
+                "• Interception driver not accessible. Run setup or restart your PC."
+            )
         elif SYSTEM == "Linux" and "Driver" in failed:
-            err_lines.append("• /dev/uinput access missing. Run 'sudo setup' to configure udev rules.")
+            err_lines.append(
+                "• /dev/uinput access missing. Run 'sudo setup' to configure udev rules."
+            )
 
         err_msg = "\n".join(err_lines)
 

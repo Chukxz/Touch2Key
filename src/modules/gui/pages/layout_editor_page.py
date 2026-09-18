@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
 
 from modules.database import store
 from modules.database.config_io import export_bundle, export_layout_json, import_any
-from modules.database.legacy_migration import migrate_json_layout
 from modules.gui.widgets.layout_plotter_widget import LayoutPlotterWidget
 from modules.scripts.adb_screen_capture import capture_android_screen
 from modules.utils import CIRCLE, JSONS_FOLDER, PROFILES_FOLDER, RECTANGLE, MapperEvent
@@ -44,14 +43,14 @@ class LayoutEditorPage(BasePage):
     ):
         super().__init__(dispatcher, parent)
 
-        # -------------------------------------------------------------------
         # Toolbar Row 1: Profile & File Operations
-        # -------------------------------------------------------------------
         top_toolbar = QHBoxLayout()
         top_toolbar.setContentsMargins(0, 0, 0, 0)
 
         self.active_layout_label = QLabel("Active Layout: None")
-        self.active_layout_label.setStyleSheet("font-weight: bold; color: palette(highlight);")
+        self.active_layout_label.setStyleSheet(
+            "font-weight: bold; color: palette(highlight);"
+        )
         top_toolbar.addWidget(self.active_layout_label)
         top_toolbar.addSpacing(16)
 
@@ -70,9 +69,7 @@ class LayoutEditorPage(BasePage):
 
         self.content_layout().addLayout(top_toolbar)
 
-        # -------------------------------------------------------------------
         # Toolbar Row 2: Zone Drawing & Priority Controls
-        # -------------------------------------------------------------------
         tools_row = QHBoxLayout()
         tools_row.setContentsMargins(0, 0, 0, 0)
 
@@ -97,9 +94,7 @@ class LayoutEditorPage(BasePage):
 
         self.content_layout().addLayout(tools_row)
 
-        # -------------------------------------------------------------------
         # Interactive Canvas
-        # -------------------------------------------------------------------
         self.plotter_widget = LayoutPlotterWidget(self, standalone=False)
         self.content_layout().addWidget(self.plotter_widget, stretch=1)
 
@@ -126,14 +121,15 @@ class LayoutEditorPage(BasePage):
         self.save_btn.clicked.connect(self._on_save_button_clicked)
 
         self.plotter_widget.layout_saved.connect(self._on_layout_saved)
-        if hasattr(self.plotter_widget, "zone_selected"):
-            self.plotter_widget.zone_selected.connect(self._on_zone_selected_on_canvas)
+        self.plotter_widget.zone_selected.connect(self._on_zone_selected_on_canvas)
 
-    def _start_draw_mode(self, shape_type: int, clicks: int) -> None:
+    def _start_draw_mode(self, shape_type: str, clicks: int) -> None:
         active = store.get_active_layout()
         if active is None:
             name, ok = QInputDialog.getText(
-                self, "New Profile Required", "No active profile found. Enter a name to create one:"
+                self,
+                "New Profile Required",
+                "No active profile found. Enter a name to create one:",
             )
             if not ok or not name.strip():
                 return
@@ -149,7 +145,11 @@ class LayoutEditorPage(BasePage):
                 self.refresh_active_layout_display()
                 self.plotter_widget.reload_active_layout()
                 self._notify_engine_reload()
-                logger.info("Initialized default profile '%s' (ID: %s) for drawing", new_layout.name, new_layout.id)
+                logger.info(
+                    "Initialized default profile '%s' (ID: %s) for drawing",
+                    new_layout.name,
+                    new_layout.id,
+                )
             except Exception as exc:
                 logger.exception("Failed to initialize profile for drawing")
                 QMessageBox.critical(self, "Error", f"Could not create profile:\n{exc}")
@@ -167,7 +167,9 @@ class LayoutEditorPage(BasePage):
             entry_id = self.plotter_widget.current_draggable.entry_id
             if entry_id in self.plotter_widget.shapes:
                 self.plotter_widget.shapes[entry_id]["priority"] = val
-                self.plotter_widget.update_title(f"Zone ID {entry_id} Priority set to {val}", True)
+                self.plotter_widget.update_title(
+                    f"Zone ID {entry_id} Priority set to {val}", True
+                )
 
     def _on_save_button_clicked(self) -> None:
         active = store.get_active_layout()
@@ -198,7 +200,9 @@ class LayoutEditorPage(BasePage):
         self.refresh_active_layout_display()
         self._notify_engine_reload()
         QMessageBox.information(
-            self, "Layout Saved", f"Layout '{name}' saved successfully (ID: {layout_id})."
+            self,
+            "Layout Saved",
+            f"Layout '{name}' saved successfully (ID: {layout_id}).",
         )
 
     def open_switch_layout_dialog(self) -> None:
@@ -206,11 +210,15 @@ class LayoutEditorPage(BasePage):
             all_layouts = store.layouts.list_all()
         except Exception as exc:
             logger.exception("Failed to query layouts for switch dialog")
-            QMessageBox.critical(self, "Database Error", f"Could not list profiles:\n{exc}")
+            QMessageBox.critical(
+                self, "Database Error", f"Could not list profiles:\n{exc}"
+            )
             return
 
         if not all_layouts:
-            QMessageBox.information(self, "No Layouts", "No layouts found in the database.")
+            QMessageBox.information(
+                self, "No Layouts", "No layouts found in the database."
+            )
             return
 
         dialog = QDialog(self)
@@ -251,11 +259,17 @@ class LayoutEditorPage(BasePage):
                 self.refresh_active_layout_display()
                 self.plotter_widget.reload_active_layout()
                 self._notify_engine_reload()
-                logger.info("Switched active layout to '%s' (ID: %s)", target_layout.name, target_layout.id)
+                logger.info(
+                    "Switched active layout to '%s' (ID: %s)",
+                    target_layout.name,
+                    target_layout.id,
+                )
                 dialog.accept()
             except Exception as exc:
                 logger.exception("Failed to switch active layout to '%s'", target_name)
-                QMessageBox.critical(dialog, "Error", f"Failed to switch layout:\n{exc}")
+                QMessageBox.critical(
+                    dialog, "Error", f"Failed to switch layout:\n{exc}"
+                )
 
         select_btn.clicked.connect(on_select)
         cancel_btn.clicked.connect(dialog.reject)
@@ -300,11 +314,15 @@ class LayoutEditorPage(BasePage):
             all_layouts = store.layouts.list_all()
         except Exception as exc:
             logger.exception("Failed to retrieve layouts for export")
-            QMessageBox.critical(self, "Database Error", f"Could not list profiles:\n{exc}")
+            QMessageBox.critical(
+                self, "Database Error", f"Could not list profiles:\n{exc}"
+            )
             return
 
         if not all_layouts:
-            QMessageBox.information(self, "Empty", "No layouts found in database to export.")
+            QMessageBox.information(
+                self, "Empty", "No layouts found in database to export."
+            )
             return
 
         dialog = QDialog(self)
@@ -336,7 +354,9 @@ class LayoutEditorPage(BasePage):
         def on_export_confirm() -> None:
             selected_items = layout_list.selectedItems()
             if not selected_items:
-                QMessageBox.warning(dialog, "Selection Required", "Please select a layout to export.")
+                QMessageBox.warning(
+                    dialog, "Selection Required", "Please select a layout to export."
+                )
                 return
             target_name = selected_items[0].text()
             target_layout = next(l for l in all_layouts if l.name == target_name)
@@ -362,14 +382,18 @@ class LayoutEditorPage(BasePage):
 
         try:
             out_file = export_layout_json(layout.id, Path(save_path_str))
-            logger.info("Exported layout ID %s ('%s') to '%s'", layout.id, layout.name, out_file)
+            logger.info(
+                "Exported layout ID %s ('%s') to '%s'", layout.id, layout.name, out_file
+            )
             QMessageBox.information(
                 self,
                 "Success",
                 f"Layout exported successfully to:\n{out_file.name}",
             )
         except Exception as exc:
-            logger.exception("Layout export failed for ID %s ('%s')", layout.id, layout.name)
+            logger.exception(
+                "Layout export failed for ID %s ('%s')", layout.id, layout.name
+            )
             QMessageBox.critical(self, "Export Failed", str(exc))
 
     def _on_export_bundle(self) -> None:
@@ -399,7 +423,9 @@ class LayoutEditorPage(BasePage):
             self.plotter_widget.reload_active_layout()
             self._notify_engine_reload()
             logger.info("Screenshot captured and linked to active layout")
-            QMessageBox.information(self, "Screenshot", "Reference screenshot captured and linked.")
+            QMessageBox.information(
+                self, "Screenshot", "Reference screenshot captured and linked."
+            )
         except Exception as exc:
             logger.exception("Screenshot capture failed")
             QMessageBox.critical(self, "Capture Failed", str(exc))

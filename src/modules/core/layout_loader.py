@@ -153,5 +153,7 @@ class LayoutLoader:
         self._load_layout()
         self.config.reload_config()
         if self.mapper_event_dispatcher is not None:
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+            self.mapper_event_dispatcher.dispatch(
+                MapperEvent(action="ON_LAYOUT_RELOAD")
+            )
         logger.info("Layout hot-reloaded and dispatched.")

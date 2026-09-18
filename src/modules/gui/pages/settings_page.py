@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -45,9 +44,7 @@ class SettingsPage(BasePage):
     ):
         super().__init__(dispatcher, parent)
 
-        # -------------------------------------------------------------------
         # 1. Input & Controls Group
-        # -------------------------------------------------------------------
         input_group = QGroupBox("Touch & Input Controls")
         input_form = QFormLayout(input_group)
 
@@ -78,9 +75,7 @@ class SettingsPage(BasePage):
 
         self.content_layout().addWidget(input_group)
 
-        # -------------------------------------------------------------------
         # 2. Performance & ADB Engine Group
-        # -------------------------------------------------------------------
         perf_group = QGroupBox("Performance & Pipeline")
         perf_form = QFormLayout(perf_group)
 
@@ -98,9 +93,7 @@ class SettingsPage(BasePage):
 
         self.content_layout().addWidget(perf_group)
 
-        # -------------------------------------------------------------------
         # 3. Keybinds Group
-        # -------------------------------------------------------------------
         keys_group = QGroupBox("Hotkeys")
         keys_form = QFormLayout(keys_group)
 
@@ -114,9 +107,7 @@ class SettingsPage(BasePage):
 
         self.content_layout().addWidget(keys_group)
 
-        # -------------------------------------------------------------------
         # 4. Import / Export / Backup
-        # -------------------------------------------------------------------
         io_row = QHBoxLayout()
         self.export_toml_btn = QPushButton("Export settings.toml")
         self.import_toml_btn = QPushButton("Import Config (.toml / .json / Bundle)")
@@ -127,9 +118,7 @@ class SettingsPage(BasePage):
         io_row.addWidget(self.export_bundle_btn)
         self.content_layout().addLayout(io_row)
 
-        # -------------------------------------------------------------------
         # 5. Database Reset Actions
-        # -------------------------------------------------------------------
         reset_row = QHBoxLayout()
         self.reset_defaults_btn = QPushButton("Reset Settings to Defaults")
         self.delete_all_btn = QPushButton("Wipe Database (Factory Reset)")
@@ -186,7 +175,9 @@ class SettingsPage(BasePage):
             self.sprint_key_input.blockSignals(True)
 
             self.left_handed_check.setChecked(bool(settings.left_handed))
-            self.anchored_floating_check.setChecked(bool(settings.anchored_floating_joystick))
+            self.anchored_floating_check.setChecked(
+                bool(settings.anchored_floating_joystick)
+            )
             self.snap_radius_spin.setValue(settings.joystick_snap_radius)
             self.snap_radius_spin.setEnabled(bool(settings.anchored_floating_joystick))
             self.sensitivity_spin.setValue(settings.sensitivity)
@@ -311,7 +302,9 @@ class SettingsPage(BasePage):
                     self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
 
                 logger.info("Database wiped and reset to factory defaults")
-                QMessageBox.information(self, "Wiped", "All layouts and settings cleared.")
+                QMessageBox.information(
+                    self, "Wiped", "All layouts and settings cleared."
+                )
             except Exception as exc:
                 logger.exception("Failed to wipe database")
                 QMessageBox.critical(self, "Error", f"Failed to wipe database:\n{exc}")
@@ -382,7 +375,9 @@ class SettingsPage(BasePage):
 
         try:
             t_file, j_file = export_bundle(Path(folder))
-            logger.info("Exported configuration bundle: '%s', '%s'", t_file.name, j_file.name)
+            logger.info(
+                "Exported configuration bundle: '%s', '%s'", t_file.name, j_file.name
+            )
             QMessageBox.information(
                 self,
                 "Bundle Exported",

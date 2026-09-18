@@ -28,10 +28,12 @@ def run(parent=None) -> bool:
 
         if SYSTEM == "Windows":
             from modules.platforms.windows import setup_windows
+
             needs_reboot = setup_windows(interactive=not is_gui)
 
         elif SYSTEM == "Linux":
             from modules.platforms.linux import setup_linux
+
             needs_reboot = setup_linux(interactive=not is_gui)
 
         else:
@@ -44,7 +46,9 @@ def run(parent=None) -> bool:
             return False
 
         if is_gui:
-            logger.info("Setup finished successfully (reboot required: %s)", needs_reboot)
+            logger.info(
+                "Setup finished successfully (reboot required: %s)", needs_reboot
+            )
             if needs_reboot:
                 QMessageBox.information(
                     parent,

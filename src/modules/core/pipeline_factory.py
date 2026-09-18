@@ -127,11 +127,15 @@ def create_pipeline_from_zone(
         semantics.append(PointerMoveSemantic())
         type_precedence = 0
     elif sem_mode == "TRACK_FIRE":
-        semantics.append(ButtonSemantic(output=target_key, mouse_button=is_mouse_button))
+        semantics.append(
+            ButtonSemantic(output=target_key, mouse_button=is_mouse_button)
+        )
         semantics.append(PointerMoveSemantic())
         allow_multi_claim = True
     else:  # BUTTON
-        semantics.append(ButtonSemantic(output=target_key, mouse_button=is_mouse_button))
+        semantics.append(
+            ButtonSemantic(output=target_key, mouse_button=is_mouse_button)
+        )
         allow_multi_claim = True
 
     priority = int(zone.priority if zone.priority is not None else 0)

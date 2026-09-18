@@ -54,17 +54,23 @@ class TouchReader:
         self.matrix = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
 
         self.adb_rate_cap = rate_cap
-        self.move_interval = 1.0 / self.adb_rate_cap if self.adb_rate_cap > 0 else 0.0001
+        self.move_interval = (
+            1.0 / self.adb_rate_cap if self.adb_rate_cap > 0 else 0.0001
+        )
         self.last_dispatch_times = [0.0] * self.max_slots
 
         self.touch_event_processor: Any = None
         self.process: subprocess.Popen | None = None
 
-        self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self._on_config_reload)
+        self.mapper_event_dispatcher.register_callback(
+            "ON_CONFIG_RELOAD", self._on_config_reload
+        )
 
         threading.Thread(target=self._update_rotation, daemon=True).start()
         threading.Thread(target=self._get_touches, daemon=True).start()
-        self.wireless_thread = threading.Thread(target=self._connect_wirelessly, daemon=True)
+        self.wireless_thread = threading.Thread(
+            target=self._connect_wirelessly, daemon=True
+        )
         self.wireless_thread.start()
 
     def _on_config_reload(self) -> None:
@@ -143,10 +149,22 @@ class TouchReader:
         return None
 
     def _get_max_slots(self) -> int:
-        if ADB is not None and self.device is not None and self.device_touch_event is not None:
+        if (
+            ADB is not None
+            and self.device is not None
+            and self.device_touch_event is not None
+        ):
             try:
                 result = subprocess.run(
-                    [ADB, "-s", self.device, "shell", "getevent", "-p", self.device_touch_event],
+                    [
+                        ADB,
+                        "-s",
+                        self.device,
+                        "shell",
+                        "getevent",
+                        "-p",
+                        self.device_touch_event,
+                    ],
                     capture_output=True,
                     text=True,
                     timeout=2,
@@ -259,9 +277,21 @@ class TouchReader:
                 time.sleep(LONG_DELAY)
                 continue
 
-            if ADB is not None and self.device is not None and self.device_touch_event is not None:
+            if (
+                ADB is not None
+                and self.device is not None
+                and self.device_touch_event is not None
+            ):
                 self.process = subprocess.Popen(
-                    [ADB, "-s", self.device, "shell", "getevent", "-l", self.device_touch_event],
+                    [
+                        ADB,
+                        "-s",
+                        self.device,
+                        "shell",
+                        "getevent",
+                        "-l",
+                        self.device_touch_event,
+                    ],
                     stdout=subprocess.PIPE,
                     text=True,
                     bufsize=0,
@@ -334,7 +364,11 @@ class TouchReader:
 
             rx, ry = self._rotate_coordinates(data["x"], data["y"], matrix)
 
-            if data["x"] is not None and data["y"] is not None and self.touch_event_processor:
+            if (
+                data["x"] is not None
+                and data["y"] is not None
+                and self.touch_event_processor
+            ):
                 try:
                     event = TouchEvent(
                         contact_id=slot,

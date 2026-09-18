@@ -200,7 +200,9 @@ def run(parent=None) -> bool:
 
     # 2. Confirmation Prompt
     if not args.yes:
-        confirm_text = "Are you sure you want to remove the driver/rules and clean binaries?"
+        confirm_text = (
+            "Are you sure you want to remove the driver/rules and clean binaries?"
+        )
         if is_gui:
             res = QMessageBox.question(
                 parent,
@@ -234,7 +236,9 @@ def run(parent=None) -> bool:
             / "install-interception.exe"
         )
         if installer_exe.exists():
-            res = subprocess.run([str(installer_exe), "/uninstall"], capture_output=True)
+            res = subprocess.run(
+                [str(installer_exe), "/uninstall"], capture_output=True
+            )
             if res.returncode == 0:
                 needs_reboot = True
                 if is_gui:
@@ -256,7 +260,9 @@ def run(parent=None) -> bool:
     elif SYSTEM == "Linux":
         success = _remove_linux_udev_rules(is_gui=is_gui)
         if not success:
-            err_msg = "Could not remove udev rules due to lack of administrative permissions."
+            err_msg = (
+                "Could not remove udev rules due to lack of administrative permissions."
+            )
             if is_gui:
                 QMessageBox.critical(parent, "Permission Denied", err_msg)
             else:
@@ -290,7 +296,9 @@ def run(parent=None) -> bool:
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if res == QMessageBox.StandardButton.Yes:
-                subprocess.run(["shutdown", "/r", "/t", "5", "/c", "Uninstall complete."])
+                subprocess.run(
+                    ["shutdown", "/r", "/t", "5", "/c", "Uninstall complete."]
+                )
                 return True
         else:
             QMessageBox.information(
@@ -317,7 +325,9 @@ def run(parent=None) -> bool:
                     )
                     return True
                 else:
-                    print("[!] Please restart your computer manually to finalize removal.")
+                    print(
+                        "[!] Please restart your computer manually to finalize removal."
+                    )
             input("\nPress Enter to exit...")
 
     return True

@@ -1,34 +1,19 @@
-"""
-Thread-local sqlite3 connection management for Touch2Key's database
-layer. Each thread that touches the database gets its own connection
-(sqlite3.Connection objects are not safe to share across threads, and
-WAL mode makes per-thread connections the simpler and faster choice
-here since Mapper/TouchReader/GUI threads all read config concurrently
-while writes -- a settings save, a layout edit -- are comparatively
-rare).
+"""Thread-local sqlite3 connection management for the database layer.
 
-WAL mode lets one writer proceed while readers keep reading against
-the last-committed snapshot, matching this app's actual traffic
-pattern: frequent reads in or near the hot touch loop, against
-occasional writes from the GUI or a hotkey handler.
+Each thread gets its own connection. WAL mode allows concurrent readers
+against the last-committed snapshot while writers execute updates.
 """
-
-from __future__ import annotations
 
 import logging
 import sqlite3
 import threading
 from pathlib import Path
 
-from modules.utils import DB_PATH
 from modules.database.migrations import run_migrations, set_fresh_install_version
+from modules.utils import DB_PATH
 
 logger = logging.getLogger("modules.database.connection")
 
-
-# layouts before app_settings/layout_zones so both FOREIGN KEY targets
-# already exist textually in the script, even though sqlite doesn't
-# strictly require creation order for this -- it reads more clearly.
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS layouts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,6 +44,10 @@ CREATE TABLE IF NOT EXISTS app_settings (
     adb_rate_cap REAL NOT NULL DEFAULT 250.0,
     pps_alert_threshold REAL NOT NULL DEFAULT 60.0,
     active_layout_id INTEGER REFERENCES layouts(id) ON DELETE SET NULL,
+    typematic_enabled INTEGER NOT NULL DEFAULT 1,
+    typematic_delay_ms REAL NOT NULL DEFAULT 250.0,
+    typematic_rate_hz REAL NOT NULL DEFAULT 30.0,
+    typematic_exclude_keys TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -70,8 +59,6 @@ CREATE TABLE IF NOT EXISTS layout_zones (
     zone_type TEXT NOT NULL CHECK (zone_type IN ('CIRCLE', 'RECTANGLE', 'BEZEL')),
     cx REAL, cy REAL, r REAL,
     x1 REAL, y1 REAL, x2 REAL, y2 REAL,
-    move_camera INTEGER NOT NULL DEFAULT 0,
-    priority INTEGER NOT NULL DEFAULT 0,
     pipeline_config TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_layout_zones_layout_id ON layout_zones(layout_id);
@@ -81,12 +68,7 @@ _SEED_DEFAULT_SETTINGS_ROW = "INSERT OR IGNORE INTO app_settings (id) VALUES (1)
 
 
 class ConnectionManager:
-    """Owns one sqlite3.Connection per thread, all pointed at the same
-    on-disk database file. Call get_connection() from any thread;
-    schema creation runs once per new connection (CREATE TABLE IF NOT
-    EXISTS is cheap and idempotent, so no separate "have we migrated"
-    flag is needed for schema itself -- see legacy_migration.py for
-    one-time *data* import from TOML/JSON, which does need one)."""
+    """Owns one sqlite3.Connection per thread, pointed at the on-disk database file."""
 
     def __init__(self, db_path: Path | str = DB_PATH):
         self.db_path = Path(db_path)
@@ -100,17 +82,13 @@ class ConnectionManager:
         if conn is not None:
             return conn
 
-        # Run migrations ONLY ONCE globally before threads start connecting
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
 
         actual_mode = conn.execute("PRAGMA journal_mode = WAL;").fetchone()[0]
         if actual_mode.lower() != "wal":
             logger.warning(
-                "Requested WAL journal mode but got '%s' instead -- the "
-                "filesystem at %s may not support it. Falling back to "
-                "this mode; reads/writes still work, just without WAL's "
-                "concurrent access benefit.",
+                "Requested WAL journal mode but got '%s' instead for %s.",
                 actual_mode,
                 self.db_path,
             )
@@ -120,7 +98,7 @@ class ConnectionManager:
         conn.executescript(_SCHEMA)
         conn.execute(_SEED_DEFAULT_SETTINGS_ROW)
 
-        # In-flight migration guard for existing database files
+        # Migration safeguard: ensure pipeline_config column exists
         cursor = conn.cursor()
         cursor.execute("PRAGMA table_info(layout_zones);")
         columns = [row["name"] for row in cursor.fetchall()]
@@ -136,9 +114,7 @@ class ConnectionManager:
         return conn
 
     def close_current_thread_connection(self) -> None:
-        """Call when a worker thread is shutting down (e.g. from
-        TouchReader.stop() or Engine._shutdown()) to release that
-        thread's connection promptly instead of waiting on GC."""
+        """Closes the current thread's connection promptly upon worker or engine shutdown."""
         conn = getattr(self._local, "connection", None)
         if conn is not None:
             conn.close()

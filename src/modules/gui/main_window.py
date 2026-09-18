@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
-from PySide6.QtCore import QThread, Signal
-from PySide6.QtGui import QAction
+
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QDockWidget,
     QHBoxLayout,
     QMainWindow,
@@ -26,7 +26,9 @@ from modules.gui.pages.performance_page import PerformancePage
 from modules.gui.pages.pipelines_page import PipelinesPage
 from modules.gui.pages.profiles_page import ProfilesPage
 from modules.gui.pages.settings_page import SettingsPage
-from modules.utils import MapperEvent, MapperEventDispatcher
+from modules.gui.pages.typematic_page import TypematicPage
+
+from modules.utils import MapperEventDispatcher
 
 logger = logging.getLogger("modules.gui.main_window")
 
@@ -44,7 +46,7 @@ class QtLogHandler(logging.Handler):
 
 
 class EngineWorker(QThread):
-    """Executes the Touch2Key mapping engine on a background worker thread."""
+    """Executes the mapping engine on a background worker thread."""
 
     started_signal = Signal()
     stopped_signal = Signal()
@@ -63,12 +65,20 @@ class EngineWorker(QThread):
         pps: float,
         toggle_key: str | None,
         sprint_key: str | None,
+        typematic_enabled: bool = True,
+        typematic_delay_ms: float = 250.0,
+        typematic_rate_hz: float = 30.0,
+        typematic_exclude_keys: str | None = None,
     ) -> None:
         self.window_id = window_id
         self.rate_cap = rate_cap
         self.pps = pps
         self.toggle_key = toggle_key
         self.sprint_key = sprint_key
+        self.typematic_enabled = typematic_enabled
+        self.typematic_delay_ms = typematic_delay_ms
+        self.typematic_rate_hz = typematic_rate_hz
+        self.typematic_exclude_keys = typematic_exclude_keys
         self._is_running = True
         self.start()
 
@@ -77,12 +87,17 @@ class EngineWorker(QThread):
             self.engine = Engine(headless=True)
             self.engine.mapper_event_dispatcher = self.dispatcher
 
+            # Forward all engine knobs including typematic repeat parameters
             self.engine.start_headless(
                 window_id=self.window_id,
                 rate_cap=self.rate_cap,
                 pps=self.pps,
                 toggle_key=self.toggle_key,
                 sprint_key=self.sprint_key,
+                typematic_enabled=self.typematic_enabled,
+                typematic_delay_ms=self.typematic_delay_ms,
+                typematic_rate_hz=self.typematic_rate_hz,
+                typematic_exclude_keys=self.typematic_exclude_keys,
             )
             self.started_signal.emit()
 
@@ -130,6 +145,8 @@ class MainWindow(QMainWindow):
         # Navigation Sidebar
         # -------------------------------------------------------------------
         nav_panel = QVBoxLayout()
+        self.nav_group = QButtonGroup(self)
+        self.nav_group.setExclusive(True)
         self.nav_buttons: dict[str, QPushButton] = {}
 
         self.pages: dict[str, QWidget] = {
@@ -141,12 +158,14 @@ class MainWindow(QMainWindow):
             "Key Bindings": KeyBindingsPage(self.dispatcher, self),
             "Performance": PerformancePage(self.dispatcher, self),
             "Settings": SettingsPage(self.dispatcher, self),
+            "Typematic": TypematicPage(self.dispatcher, self),
         }
 
         self.stack = QStackedWidget()
         for idx, (title, widget) in enumerate(self.pages.items()):
             btn = QPushButton(title)
             btn.setCheckable(True)
+            self.nav_group.addButton(btn, idx)
             btn.clicked.connect(lambda _, i=idx, t=title: self._switch_page(i, t))
             nav_panel.addWidget(btn)
             self.nav_buttons[title] = btn
@@ -154,9 +173,11 @@ class MainWindow(QMainWindow):
 
         nav_panel.addStretch()
 
-        # Engine Quick Action Button on Sidebar
+        # Engine Action Button
         self.sidebar_engine_btn = QPushButton("Start Engine")
-        self.sidebar_engine_btn.setStyleSheet("font-weight: bold; background-color: #2e7d32; color: white; padding: 8px;")
+        self.sidebar_engine_btn.setStyleSheet(
+            "font-weight: bold; background-color: #2e7d32; color: white; padding: 8px;"
+        )
         self.sidebar_engine_btn.clicked.connect(self._toggle_engine)
         nav_panel.addWidget(self.sidebar_engine_btn)
 
@@ -169,16 +190,20 @@ class MainWindow(QMainWindow):
         self.log_dock = QDockWidget("Application Logs", self)
         self.log_console = QPlainTextEdit()
         self.log_console.setReadOnly(True)
-        self.log_console.setStyleSheet("background-color: #1e1e1e; color: #d4d4d4; font-family: monospace;")
+        self.log_console.setStyleSheet(
+            "background-color: #1e1e1e; color: #d4d4d4; font-family: monospace;"
+        )
         self.log_dock.setWidget(self.log_console)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.log_dock)
 
-        # Set default active page
+        # Activate initial view
         self._switch_page(0, "Dashboard")
 
     def _setup_logging(self) -> None:
         handler = QtLogHandler(self.log_console)
-        formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] [%(name)s]: %(message)s", "%H:%M:%S")
+        formatter = logging.Formatter(
+            "[%(asctime)s] [%(levelname)s] [%(name)s]: %(message)s", "%H:%M:%S"
+        )
         handler.setFormatter(formatter)
         logging.getLogger().addHandler(handler)
         logging.getLogger().setLevel(logging.INFO)
@@ -190,8 +215,8 @@ class MainWindow(QMainWindow):
 
     def _switch_page(self, index: int, title: str) -> None:
         self.stack.setCurrentIndex(index)
-        for name, btn in self.nav_buttons.items():
-            btn.setChecked(name == title)
+        if title in self.nav_buttons:
+            self.nav_buttons[title].setChecked(True)
 
         page_widget = self.stack.currentWidget()
         if hasattr(page_widget, "on_page_shown"):
@@ -202,7 +227,6 @@ class MainWindow(QMainWindow):
             self.sidebar_engine_btn.setEnabled(False)
             self.engine_worker.stop_engine()
         else:
-            # Safe Pull: Target window from DevicesPage & Knobs from SQLite
             devices_page = self.pages.get("Devices")
             target_hwnd = getattr(devices_page, "selected_window_id", None)
             settings = store.settings.get()
@@ -214,25 +238,37 @@ class MainWindow(QMainWindow):
                 pps=settings.pps_alert_threshold,
                 toggle_key=settings.toggle_key,
                 sprint_key=settings.sprint_key,
+                typematic_enabled=settings.typematic_enabled,
+                typematic_delay_ms=settings.typematic_delay_ms,
+                typematic_rate_hz=settings.typematic_rate_hz,
+                typematic_exclude_keys=settings.typematic_exclude_keys,
             )
 
     def _on_engine_started(self) -> None:
         self.sidebar_engine_btn.setText("Stop Engine")
-        self.sidebar_engine_btn.setStyleSheet("font-weight: bold; background-color: #c62828; color: white; padding: 8px;")
+        self.sidebar_engine_btn.setStyleSheet(
+            "font-weight: bold; background-color: #c62828; color: white; padding: 8px;"
+        )
         self.sidebar_engine_btn.setEnabled(True)
         logger.info("Touch mapping engine started successfully")
 
     def _on_engine_stopped(self) -> None:
         self.sidebar_engine_btn.setText("Start Engine")
-        self.sidebar_engine_btn.setStyleSheet("font-weight: bold; background-color: #2e7d32; color: white; padding: 8px;")
+        self.sidebar_engine_btn.setStyleSheet(
+            "font-weight: bold; background-color: #2e7d32; color: white; padding: 8px;"
+        )
         self.sidebar_engine_btn.setEnabled(True)
         logger.info("Touch mapping engine stopped")
 
     def _on_engine_error(self, err_msg: str) -> None:
         self.sidebar_engine_btn.setText("Start Engine")
-        self.sidebar_engine_btn.setStyleSheet("font-weight: bold; background-color: #2e7d32; color: white; padding: 8px;")
+        self.sidebar_engine_btn.setStyleSheet(
+            "font-weight: bold; background-color: #2e7d32; color: white; padding: 8px;"
+        )
         self.sidebar_engine_btn.setEnabled(True)
-        QMessageBox.critical(self, "Engine Error", f"Mapping engine encountered an error:\n{err_msg}")
+        QMessageBox.critical(
+            self, "Engine Error", f"Mapping engine encountered an error:\n{err_msg}"
+        )
 
     def closeEvent(self, event) -> None:
         if self.engine_worker.isRunning():

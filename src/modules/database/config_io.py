@@ -1,14 +1,12 @@
-from __future__ import annotations
-
 import json
 import logging
 from pathlib import Path
 from typing import Optional
-import time
+
 import tomlkit
 
 from modules.database import store
-from modules.database.legacy_migration import migrate_all, migrate_json_layout, migrate_toml_config
+from modules.database.legacy_migration import migrate_all, migrate_json_layout
 from modules.utils import CIRCLE, JSONS_FOLDER, PROFILES_FOLDER, TOML_PATH
 
 logger = logging.getLogger("modules.database.config_io")
@@ -26,19 +24,22 @@ def export_layout_json(layout_id: int, target_path: Optional[Path] = None) -> Pa
     zones = store.zones.list_for_layout(layout.id)
     content = []
     for zone in zones:
-        content.append({
-            "name": zone.name,
-            "scancode": zone.scancode,
-            "type": zone.zone_type,
-            "cx": zone.cx or 0.0,
-            "cy": zone.cy or 0.0,
-            "val1": zone.r if zone.zone_type == CIRCLE else (zone.x1 or 0.0),
-            "val2": zone.y1 or 0.0,
-            "val3": zone.x2 or 0.0,
-            "val4": zone.y2 or 0.0,
-            "move_camera": bool(zone.move_camera),
-            "priority": zone.priority,
-        })
+        content.append(
+            {
+                "name": zone.name,
+                "scancode": zone.scancode,
+                "type": zone.zone_type,
+                "cx": zone.cx or 0.0,
+                "cy": zone.cy or 0.0,
+                "val1": zone.r if zone.zone_type == CIRCLE else (zone.x1 or 0.0),
+                "val2": zone.y1 or 0.0,
+                "val3": zone.x2 or 0.0,
+                "val4": zone.y2 or 0.0,
+                "move_camera": bool(zone.move_camera),
+                "priority": zone.priority,
+                "pipeline_config": zone.pipeline_config,
+            }
+        )
 
     json_data = {
         "metadata": {
@@ -72,8 +73,12 @@ def export_settings_toml(
     # System Section
     system = tomlkit.table()
     system.add("left_handed", bool(s.left_handed))
-    system.add("json_dev_width", active_layout.width if active_layout else s.json_dev_width)
-    system.add("json_dev_height", active_layout.height if active_layout else s.json_dev_height)
+    system.add(
+        "json_dev_width", active_layout.width if active_layout else s.json_dev_width
+    )
+    system.add(
+        "json_dev_height", active_layout.height if active_layout else s.json_dev_height
+    )
     system.add("json_dev_dpi", active_layout.dpi if active_layout else s.json_dev_dpi)
     system.add("image_path", active_layout.image_path if active_layout else "")
 
@@ -117,7 +122,9 @@ def export_settings_toml(
     return target_path
 
 
-def export_bundle(target_dir: Optional[Path] = None, profile_name: Optional[str] = None) -> tuple[Path, Path]:
+def export_bundle(
+    target_dir: Optional[Path] = None, profile_name: Optional[str] = None
+) -> tuple[Path, Path]:
     """Exports both active layout (.json) and linked settings (.toml) into data/profiles/<name>/."""
     active_layout = store.get_active_layout()
     if not active_layout:
@@ -130,7 +137,9 @@ def export_bundle(target_dir: Optional[Path] = None, profile_name: Optional[str]
     out_dir.mkdir(parents=True, exist_ok=True)
 
     json_file = export_layout_json(active_layout.id, out_dir / f"{name}.json")
-    toml_file = export_settings_toml(out_dir / f"{name}.toml", linked_json_path=json_file)
+    toml_file = export_settings_toml(
+        out_dir / f"{name}.toml", linked_json_path=json_file
+    )
 
     logger.info("Exported full profile bundle to %s", out_dir)
     return toml_file, json_file

@@ -1,9 +1,7 @@
-"""
-One-time importer from legacy/current TOML config and JSON layout files
+"""One-time importer from legacy/current TOML config and JSON layout files
+
 into the SQLite database with full 5-stage pipeline synthesis.
 """
-
-from __future__ import annotations
 
 import json
 import logging
@@ -12,8 +10,8 @@ from typing import Any, Optional
 
 import tomlkit
 
+from modules.database import store
 from modules.utils import JSONS_FOLDER, TOML_PATH
-from . import store
 
 logger = logging.getLogger("modules.database.legacy_migration")
 
@@ -28,6 +26,7 @@ def _read_keys(doc: dict) -> tuple[Optional[str], Optional[str]]:
 def _build_default_pipeline_config(
     zone_type: str,
     move_camera: bool,
+    priority: int = 0,
     cx: float = 0.0,
     cy: float = 0.0,
     r: float = 50.0,
@@ -51,6 +50,7 @@ def _build_default_pipeline_config(
     trans_type = "DELTA" if move_camera else "IDENTITY"
 
     cfg = {
+        "priority": priority,
         "region": {
             "type_idx": reg_idx,
             "type": zone_type,
@@ -151,7 +151,7 @@ def migrate_json_layout(
     layout_name: str | None = None,
     set_active: bool = True,
 ) -> Optional[int]:
-    """Imports a JSON layout file into a new layouts row plus its layout_zones with synthesized pipeline configs."""
+    """Imports a JSON layout file into SQLite with synthesized 5-stage pipeline configs."""
     path = Path(json_path)
     if not path.is_absolute() and not path.exists():
         path = JSONS_FOLDER / path
@@ -171,7 +171,9 @@ def migrate_json_layout(
         metadata = data["metadata"]
         content = data["content"]
     except KeyError as e:
-        logger.error("JSON layout %s missing expected metadata/content key: %s", path, e)
+        logger.error(
+            "JSON layout %s missing expected metadata/content key: %s", path, e
+        )
         return None
 
     target_name = layout_name or path.stem
@@ -215,67 +217,55 @@ def migrate_json_layout(
                 priority = int(item.get("priority", 0))
                 move_camera = bool(item.get("move_camera", False))
 
-                if zone_type == "CIRCLE":
-                    cx = float(item["cx"])
-                    cy = float(item["cy"])
-                    r = float(item["val1"])
+                # Preserve existing pipeline_config JSON if present; otherwise synthesize one
+                raw_cfg = item.get("pipeline_config")
+                if raw_cfg and isinstance(raw_cfg, str) and raw_cfg != "{}":
+                    pipeline_cfg = raw_cfg
+                else:
+                    cx = float(item.get("cx", 0.0))
+                    cy = float(item.get("cy", 0.0))
+                    r = float(item.get("val1", 50.0)) if zone_type == "CIRCLE" else 50.0
+                    bezel_h = float(item.get("bezel_height", item.get("val2", 14.0)))
+
                     pipeline_cfg = _build_default_pipeline_config(
-                        zone_type="CIRCLE",
+                        zone_type=zone_type,
                         move_camera=move_camera,
+                        priority=priority,
                         cx=cx,
                         cy=cy,
                         r=r,
+                        bezel_height=bezel_h,
                     )
+
+                if zone_type == "CIRCLE":
                     store.zones.create(
                         layout_id=layout_id,
                         scancode=str(scancode),
                         name=item.get("name", ""),
                         zone_type="CIRCLE",
-                        cx=cx,
-                        cy=cy,
-                        r=r,
-                        move_camera=move_camera,
-                        priority=priority,
+                        cx=float(item["cx"]),
+                        cy=float(item["cy"]),
+                        r=float(item["val1"]),
                         pipeline_config=pipeline_cfg,
                     )
                 elif zone_type == "BEZEL":
-                    bezel_h = float(item.get("bezel_height", item.get("val2", 14.0)))
-                    pipeline_cfg = _build_default_pipeline_config(
-                        zone_type="BEZEL",
-                        move_camera=False,
-                        bezel_height=bezel_h,
-                    )
                     store.zones.create(
                         layout_id=layout_id,
                         scancode=str(scancode),
                         name=item.get("name", "Bezel Notch"),
                         zone_type="BEZEL",
-                        priority=priority or 150,
-                        move_camera=False,
                         pipeline_config=pipeline_cfg,
                     )
                 else:  # RECTANGLE
-                    x1 = float(item["val1"])
-                    y1 = float(item["val2"])
-                    x2 = float(item["val3"])
-                    y2 = float(item["val4"])
-                    pipeline_cfg = _build_default_pipeline_config(
-                        zone_type="RECTANGLE",
-                        move_camera=move_camera,
-                        cx=(x1 + x2) / 2.0,
-                        cy=(y1 + y2) / 2.0,
-                    )
                     store.zones.create(
                         layout_id=layout_id,
                         scancode=str(scancode),
                         name=item.get("name", ""),
                         zone_type="RECTANGLE",
-                        x1=x1,
-                        y1=y1,
-                        x2=x2,
-                        y2=y2,
-                        move_camera=move_camera,
-                        priority=priority,
+                        x1=float(item["val1"]),
+                        y1=float(item["val2"]),
+                        x2=float(item["val3"]),
+                        y2=float(item["val4"]),
                         pipeline_config=pipeline_cfg,
                     )
                 imported += 1
@@ -314,11 +304,11 @@ def migrate_all(toml_path: Path | str = TOML_PATH) -> None:
         except Exception as e:
             logger.error("Could not read layout references from TOML: %s", e)
 
-    # 1. Migrate settings row
     migrate_toml_config(path)
 
-    # 2. Migrate layout file and set active
     if json_path:
         migrate_json_layout(json_path=json_path, image_path=image_path, set_active=True)
     else:
-        logger.info("No json_path configured in TOML; completed settings migration only.")
+        logger.info(
+            "No json_path configured in TOML; completed settings migration only."
+        )

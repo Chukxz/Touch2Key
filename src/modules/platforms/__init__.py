@@ -25,6 +25,7 @@ class PlatformModules(NamedTuple):
 
 def _check_single_instance_windows(instance_name: str) -> tuple[bool, int | None]:
     import ctypes
+
     mutex_name = f"Global\\{instance_name}"
     handle = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
     last_error = ctypes.windll.kernel32.GetLastError()
@@ -38,6 +39,7 @@ def _check_single_instance_windows(instance_name: str) -> tuple[bool, int | None
 
 def _check_single_instance_linux(instance_name: str) -> tuple[bool, object | None]:
     import fcntl
+
     lock_file = f"/tmp/{instance_name}.lock"
     try:
         handle = open(lock_file, "a")

@@ -100,7 +100,9 @@ class UInputBridge(AbstractBridge):
                 f"\n[BRIDGE] - UInput Dual Engine Started. K-PID: {self.k_proc.pid} | M-PID: {self.m_proc.pid}."
             )
 
-    def reload_devices(self, new_k_handle: int | None, new_m_handle: int | None) -> None:
+    def reload_devices(
+        self, new_k_handle: int | None, new_m_handle: int | None
+    ) -> None:
         """UInput virtual devices do not bind to specific physical indices."""
         pass
 
@@ -128,8 +130,8 @@ class UInputBridge(AbstractBridge):
             self.selective_release()
 
     def mouse_move_abs(self, x, y):
-        abs_x = int((x * 65535) / self.screen_w)
-        abs_y = int((y * 65535) / self.screen_h)
+        abs_x = max(0, min(65535, int((x / self.screen_w) * 65535)))
+        abs_y = max(0, min(65535, int((y / self.screen_h) * 65535)))
         try:
             self.m_pipe_write.send_bytes(
                 PACK_ABS.pack(TASK_ABS, int(abs_x), int(abs_y))
@@ -298,7 +300,9 @@ class UInputBridge(AbstractBridge):
                 except Exception:
                     pass
                 self.m_pipe_read, self.m_pipe_write = multiprocessing.Pipe(duplex=False)
-                self.mb_pipe_read, self.mb_pipe_write = multiprocessing.Pipe(duplex=False)
+                self.mb_pipe_read, self.mb_pipe_write = multiprocessing.Pipe(
+                    duplex=False
+                )
                 self.m_proc = multiprocessing.Process(
                     target=mouse_worker,
                     name="Mouse Worker",
@@ -353,7 +357,9 @@ class UInputBridge(AbstractBridge):
                 except OSError:
                     pass
 
-            self._mouse_left_down = self._mouse_right_down = self._mouse_middle_down = False
+            self._mouse_left_down = self._mouse_right_down = self._mouse_middle_down = (
+                False
+            )
 
     def release_all(self):
         print("\n[BRIDGE] - Emergency Release (UInput)...")
@@ -373,7 +379,9 @@ class UInputBridge(AbstractBridge):
                     self.mb_pipe_write.send_bytes(PACK_BUTTON.pack(TASK_BUTTON, btn_up))
                 except OSError:
                     pass
-            self._mouse_left_down = self._mouse_right_down = self._mouse_middle_down = False
+            self._mouse_left_down = self._mouse_right_down = self._mouse_middle_down = (
+                False
+            )
 
         print("[BRIDGE] - Release signals dispatched.")
 

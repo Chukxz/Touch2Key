@@ -71,7 +71,9 @@ class EngineSignalBridge(QObject):
 
     def unbind(self) -> None:
         """Unregisters all bound callbacks from the current dispatcher."""
-        if self.dispatcher is not None and hasattr(self.dispatcher, "unregister_callback"):
+        if self.dispatcher is not None and hasattr(
+            self.dispatcher, "unregister_callback"
+        ):
             for action, cb in self._registered_callbacks:
                 try:
                     self.dispatcher.unregister_callback(action, cb)

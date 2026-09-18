@@ -68,7 +68,9 @@ def capture_android_screen(custom_img_name: str | None = None, parent=None) -> P
     full_save_path = (IMAGES_FOLDER / filename).resolve()
     android_tmp = "/data/local/tmp/temp_cap.png"
 
-    _log_info(f"Capturing {width}x{height} screen (Orientation: {img_rotation})...", is_gui)
+    _log_info(
+        f"Capturing {width}x{height} screen (Orientation: {img_rotation})...", is_gui
+    )
 
     try:
         subprocess.run(

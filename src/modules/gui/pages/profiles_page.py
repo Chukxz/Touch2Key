@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -13,7 +14,6 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -48,7 +48,9 @@ class ProfilesPage(BasePage):
         self.content_layout().addWidget(self.profile_list)
 
         self.details_label = QLabel("Select a profile to view details.")
-        self.details_label.setStyleSheet("color: palette(placeholder-text); padding: 4px;")
+        self.details_label.setStyleSheet(
+            "color: palette(placeholder-text); padding: 4px;"
+        )
         self.content_layout().addWidget(self.details_label)
 
         # Action Buttons Layout - Row 1: Profile CRUD
@@ -133,12 +135,16 @@ class ProfilesPage(BasePage):
             self._on_selection_changed()
         except Exception as exc:
             logger.exception("Failed to load layout profiles from database")
-            QMessageBox.critical(self, "Database Error", f"Could not load profiles:\n{exc}")
+            QMessageBox.critical(
+                self, "Database Error", f"Could not load profiles:\n{exc}"
+            )
 
     def _get_selected_layout_id(self) -> int | None:
         selected = self.profile_list.selectedItems()
         if not selected:
-            QMessageBox.warning(self, "Selection Required", "Please select a profile from the list.")
+            QMessageBox.warning(
+                self, "Selection Required", "Please select a profile from the list."
+            )
             return None
         return selected[0].data(Qt.ItemDataRole.UserRole)
 
@@ -178,10 +184,14 @@ class ProfilesPage(BasePage):
             self.load_profiles()
             self._notify_reload()
             logger.info("Activated profile ID %s", layout_id)
-            QMessageBox.information(self, "Profile Activated", "Active profile updated and hot-reloaded.")
+            QMessageBox.information(
+                self, "Profile Activated", "Active profile updated and hot-reloaded."
+            )
         except Exception as exc:
             logger.exception("Failed to set active profile ID %s", layout_id)
-            QMessageBox.critical(self, "Database Error", f"Could not activate profile:\n{exc}")
+            QMessageBox.critical(
+                self, "Database Error", f"Could not activate profile:\n{exc}"
+            )
 
     def _on_new_profile(self) -> None:
         name, ok = QInputDialog.getText(self, "New Profile", "Enter profile name:")
@@ -191,7 +201,9 @@ class ProfilesPage(BasePage):
         name = name.strip()
         try:
             if store.layouts.get_by_name(name) is not None:
-                QMessageBox.warning(self, "Name Conflict", f"Profile '{name}' already exists.")
+                QMessageBox.warning(
+                    self, "Name Conflict", f"Profile '{name}' already exists."
+                )
                 return
 
             settings = store.settings.get()
@@ -207,7 +219,9 @@ class ProfilesPage(BasePage):
             logger.info("Created new profile '%s' (ID: %s)", name, new_layout.id)
         except Exception as exc:
             logger.exception("Failed to create new profile '%s'", name)
-            QMessageBox.critical(self, "Database Error", f"Could not create profile:\n{exc}")
+            QMessageBox.critical(
+                self, "Database Error", f"Could not create profile:\n{exc}"
+            )
 
     def _on_rename(self) -> None:
         layout_id = self._get_selected_layout_id()
@@ -227,7 +241,11 @@ class ProfilesPage(BasePage):
 
             target_name = new_name.strip()
             if store.layouts.get_by_name(target_name) is not None:
-                QMessageBox.warning(self, "Name Conflict", f"A profile named '{target_name}' already exists.")
+                QMessageBox.warning(
+                    self,
+                    "Name Conflict",
+                    f"A profile named '{target_name}' already exists.",
+                )
                 return
 
             store.layouts.update(layout_id, name=target_name)
@@ -249,19 +267,31 @@ class ProfilesPage(BasePage):
                 return
 
             new_name, ok = QInputDialog.getText(
-                self, "Duplicate Profile", "New profile name:", text=f"{source.name}_copy"
+                self,
+                "Duplicate Profile",
+                "New profile name:",
+                text=f"{source.name}_copy",
             )
             if not ok or not new_name.strip():
                 return
 
             target_name = new_name.strip()
             if store.layouts.get_by_name(target_name) is not None:
-                QMessageBox.warning(self, "Name Conflict", f"A profile named '{target_name}' already exists.")
+                QMessageBox.warning(
+                    self,
+                    "Name Conflict",
+                    f"A profile named '{target_name}' already exists.",
+                )
                 return
 
             new_layout = store.layouts.duplicate(layout_id, target_name)
             self.load_profiles()
-            logger.info("Duplicated profile ID %s to '%s' (ID: %s)", layout_id, target_name, new_layout.id)
+            logger.info(
+                "Duplicated profile ID %s to '%s' (ID: %s)",
+                layout_id,
+                target_name,
+                new_layout.id,
+            )
         except Exception as exc:
             logger.exception("Failed to duplicate profile ID %s", layout_id)
             QMessageBox.critical(self, "Error", f"Could not duplicate profile:\n{exc}")
@@ -348,7 +378,6 @@ class ProfilesPage(BasePage):
             return
 
         try:
-            # Set active temporarily to bind settings or use bundle directly
             t_file, j_file = export_bundle(Path(folder), profile_name=layout.name)
             logger.info("Exported bundle for %s", layout.name)
             QMessageBox.information(
@@ -379,7 +408,9 @@ class ProfilesPage(BasePage):
                 logger.info("Cleared all zones for profile ID %s", layout_id)
             except Exception as exc:
                 logger.exception("Failed to clear zones for profile ID %s", layout_id)
-                QMessageBox.critical(self, "Database Error", f"Could not clear zones:\n{exc}")
+                QMessageBox.critical(
+                    self, "Database Error", f"Could not clear zones:\n{exc}"
+                )
 
     def _on_delete(self) -> None:
         layout_id = self._get_selected_layout_id()
@@ -410,4 +441,6 @@ class ProfilesPage(BasePage):
             logger.info("Deleted profile ID %s", layout_id)
         except Exception as exc:
             logger.exception("Failed to delete profile ID %s", layout_id)
-            QMessageBox.critical(self, "Database Error", f"Could not delete profile:\n{exc}")
+            QMessageBox.critical(
+                self, "Database Error", f"Could not delete profile:\n{exc}"
+            )

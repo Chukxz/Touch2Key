@@ -57,7 +57,7 @@ class BridgeOutputSink(OutputSink):
         idx = int(round(dx))
         idy = int(round(dy))
         if idx != 0 or idy != 0:
-            self.bridge.mouse_move_rel(idx, idy)        
+            self.bridge.mouse_move_rel(idx, idy)
 
     @staticmethod
     def _resolve_scancode(key: str) -> int | None:

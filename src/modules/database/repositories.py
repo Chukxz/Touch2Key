@@ -1,27 +1,22 @@
-"""
-Typed repository classes over the sqlite schema in connection.py.
+"""Typed repository classes over the SQLite database schema.
 
-Every update()/create() validates field names against an explicit
-allow-list before building SQL. Values are always bound as query
-parameters (safe from injection by construction), but *column names*
-cannot be parameterized in sqlite3 -- an allow-list is what stands
-between a typo, a stale field name after a schema change, or a future
-GUI wiring bug (e.g. passing a raw dict keyed by Qt widget object
-names) and either a SQL error or a silently-wrong UPDATE against a
-similarly-named column.
+Validates field names against an explicit ALLOWED_FIELDS set before executing SQL.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, fields as dataclass_fields
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 from .connection import connection_manager
 
+if TYPE_CHECKING:
+    from . import AppSettings, Layout, LayoutZone
+
 
 class InvalidFieldError(ValueError):
-    """Raised when update()/create() receives a field name outside a
-    repository's ALLOWED_FIELDS."""
+    """Raised when update()/create() receives a field name outside ALLOWED_FIELDS."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,11 +35,15 @@ class AppSettings:
     sprint_key: Optional[str]
     adb_rate_cap: float
     pps_alert_threshold: float
+    typematic_enabled: bool
+    typematic_delay_ms: float
+    typematic_rate_hz: float
+    typematic_exclude_keys: Optional[str]
     active_layout_id: Optional[int]
     updated_at: str
 
     @classmethod
-    def from_row(cls, row) -> "AppSettings":
+    def from_row(cls, row) -> AppSettings:
         data = {f.name: row[f.name] for f in dataclass_fields(cls)}
         data["left_handed"] = bool(data["left_handed"])
         data["anchored_floating_joystick"] = bool(data["anchored_floating_joystick"])
@@ -66,7 +65,7 @@ class Layout:
     updated_at: str
 
     @classmethod
-    def from_row(cls, row) -> "Layout":
+    def from_row(cls, row) -> Layout:
         return cls(**{f.name: row[f.name] for f in dataclass_fields(cls)})
 
 
@@ -84,27 +83,39 @@ class LayoutZone:
     y1: Optional[float]
     x2: Optional[float]
     y2: Optional[float]
-    move_camera: bool
-    priority: int
     pipeline_config: str
 
+    @property
+    def priority(self) -> int:
+        """Extracts runtime priority from the unified pipeline_config JSON."""
+        try:
+            cfg = json.loads(self.pipeline_config)
+            return int(cfg.get("priority", 0))
+        except Exception:
+            return 0
+
+    @property
+    def move_camera(self) -> bool:
+        """Determines if this zone is configured for camera look/track-fire."""
+        try:
+            cfg = json.loads(self.pipeline_config)
+            return cfg.get("semantics", {}).get("mode") == "TRACK_FIRE"
+        except Exception:
+            return False
+
     @classmethod
-    def from_row(cls, row) -> "LayoutZone":
+    def from_row(cls, row) -> LayoutZone:
         data = {
-            f.name: row[f.name]
-            for f in dataclass_fields(cls)
-            if f.name not in ("move_camera", "priority", "pipeline_config")
+            f.name: row[f.name] for f in dataclass_fields(cls) if f.name in row.keys()
         }
-        data["move_camera"] = bool(row["move_camera"])
-        data["priority"] = int(row["priority"]) if "priority" in row.keys() else 0
-        data["pipeline_config"] = str(row["pipeline_config"]) if "pipeline_config" in row.keys() else "{}"
+        data["pipeline_config"] = (
+            str(row["pipeline_config"]) if "pipeline_config" in row.keys() else "{}"
+        )
         return cls(**data)
 
 
 class AppSettingsRepository:
-    """Single-row settings table (id=1). Mirrors the old TOML
-    [system]/[joystick]/[mouse] sections flattened into one row, since
-    there's only ever one active configuration at a time."""
+    """Single-row settings table (id=1)."""
 
     ALLOWED_FIELDS = {
         "left_handed",
@@ -121,6 +132,10 @@ class AppSettingsRepository:
         "adb_rate_cap",
         "pps_alert_threshold",
         "active_layout_id",
+        "typematic_enabled",
+        "typematic_delay_ms",
+        "typematic_rate_hz",
+        "typematic_exclude_keys",
     }
 
     def get(self) -> AppSettings:
@@ -146,8 +161,7 @@ class AppSettingsRepository:
         conn = connection_manager.get_connection()
         with conn:
             conn.execute(
-                f"UPDATE app_settings SET {set_clause}, updated_at = datetime('now') "
-                f"WHERE id = :id;",
+                f"UPDATE app_settings SET {set_clause}, updated_at = datetime('now') WHERE id = :id;",
                 params,
             )
         return self.get()
@@ -155,7 +169,9 @@ class AppSettingsRepository:
     def reset_to_defaults(self) -> AppSettings:
         conn = connection_manager.get_connection()
         with conn:
-            cursor = conn.execute("SELECT active_layout_id FROM app_settings WHERE id = 1;")
+            cursor = conn.execute(
+                "SELECT active_layout_id FROM app_settings WHERE id = 1;"
+            )
             row = cursor.fetchone()
             active_layout_id = row[0] if row else None
 
@@ -187,7 +203,6 @@ class LayoutsRepository:
     def get(self, layout_id: int | None) -> Optional[Layout]:
         if layout_id is None:
             return None
-
         conn = connection_manager.get_connection()
         row = conn.execute(
             "SELECT * FROM layouts WHERE id = ?;", (layout_id,)
@@ -241,8 +256,7 @@ class LayoutsRepository:
         conn = connection_manager.get_connection()
         with conn:
             conn.execute(
-                f"UPDATE layouts SET {set_clause}, updated_at = datetime('now') "
-                f"WHERE id = :id;",
+                f"UPDATE layouts SET {set_clause}, updated_at = datetime('now') WHERE id = :id;",
                 params,
             )
 
@@ -289,8 +303,6 @@ class LayoutsRepository:
                 y1=zone.y1,
                 x2=zone.x2,
                 y2=zone.y2,
-                move_camera=zone.move_camera,
-                priority=zone.priority,
                 pipeline_config=zone.pipeline_config,
             )
         return new_layout
@@ -309,8 +321,6 @@ class LayoutZonesRepository:
         "y1",
         "x2",
         "y2",
-        "move_camera",
-        "priority",
         "pipeline_config",
     }
 
@@ -327,7 +337,6 @@ class LayoutZonesRepository:
     def get(self, zone_id: int | None) -> Optional[LayoutZone]:
         if zone_id is None:
             return None
-
         conn = connection_manager.get_connection()
         row = conn.execute(
             "SELECT * FROM layout_zones WHERE id = ?;", (zone_id,)
@@ -345,10 +354,7 @@ class LayoutZonesRepository:
             raise ValueError(f"zone_type must be one of {self.VALID_ZONE_TYPES}")
 
         fields.setdefault("name", "")
-        fields.setdefault("move_camera", False)
-        fields.setdefault("priority", 0)
         fields.setdefault("pipeline_config", "{}")
-        fields["move_camera"] = int(bool(fields["move_camera"]))
 
         columns = ", ".join(fields)
         placeholders = ", ".join(f":{key}" for key in fields)
@@ -370,8 +376,6 @@ class LayoutZonesRepository:
             raise InvalidFieldError(f"Unknown layout_zones field(s): {sorted(unknown)}")
         if "zone_type" in fields and fields["zone_type"] not in self.VALID_ZONE_TYPES:
             raise ValueError(f"zone_type must be one of {self.VALID_ZONE_TYPES}")
-        if "move_camera" in fields:
-            fields["move_camera"] = int(bool(fields["move_camera"]))
         if not fields:
             existing = self.get(zone_id)
             if existing is None:

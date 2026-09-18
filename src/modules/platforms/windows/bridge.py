@@ -100,10 +100,14 @@ class InterceptionBridge(AbstractBridge):
                 f"\n[BRIDGE] - Interception Dual Engine Started. K-PID: {self.k_proc.pid} | M-PID: {self.m_proc.pid}."
             )
 
-    def reload_devices(self, new_k_handle: int | None, new_m_handle: int | None) -> None:
+    def reload_devices(
+        self, new_k_handle: int | None, new_m_handle: int | None
+    ) -> None:
         """Hot-reloads driver handles by safely cycling workers and IPC pipes."""
         with self.bridge_lock:
-            print(f"\n[BRIDGE] - Hot-Reloading Devices -> K:{new_k_handle}, M:{new_m_handle}")
+            print(
+                f"\n[BRIDGE] - Hot-Reloading Devices -> K:{new_k_handle}, M:{new_m_handle}"
+            )
             self.release_all()
 
             self.k_device_handle = new_k_handle
@@ -158,7 +162,9 @@ class InterceptionBridge(AbstractBridge):
             self.m_proc.start()
             self.system_config.set_high_priority(self.m_proc.pid, "Mouse")
 
-            print(f"[BRIDGE] - Workers Reloaded. K-PID: {self.k_proc.pid} | M-PID: {self.m_proc.pid}")
+            print(
+                f"[BRIDGE] - Workers Reloaded. K-PID: {self.k_proc.pid} | M-PID: {self.m_proc.pid}"
+            )
 
     def key_down(self, code):
         with self.bridge_lock:
@@ -184,8 +190,8 @@ class InterceptionBridge(AbstractBridge):
             self.selective_release()
 
     def mouse_move_abs(self, x, y):
-        abs_x = int((x * 65535) / self.screen_w)
-        abs_y = int((y * 65535) / self.screen_h)
+        abs_x = max(0, min(65535, int((x / self.screen_w) * 65535)))
+        abs_y = max(0, min(65535, int((y / self.screen_h) * 65535)))
         try:
             self.m_pipe_write.send_bytes(
                 PACK_ABS.pack(TASK_ABS, int(abs_x), int(abs_y))
@@ -354,7 +360,9 @@ class InterceptionBridge(AbstractBridge):
                 except Exception:
                     pass
                 self.m_pipe_read, self.m_pipe_write = multiprocessing.Pipe(duplex=False)
-                self.mb_pipe_read, self.mb_pipe_write = multiprocessing.Pipe(duplex=False)
+                self.mb_pipe_read, self.mb_pipe_write = multiprocessing.Pipe(
+                    duplex=False
+                )
                 self.m_proc = multiprocessing.Process(
                     target=mouse_worker,
                     name="Mouse Worker",
@@ -409,7 +417,9 @@ class InterceptionBridge(AbstractBridge):
                 except OSError:
                     pass
 
-            self._mouse_left_down = self._mouse_right_down = self._mouse_middle_down = False
+            self._mouse_left_down = self._mouse_right_down = self._mouse_middle_down = (
+                False
+            )
 
     def release_all(self):
         print("\n[BRIDGE] - Emergency Release (Interception)...")
@@ -429,7 +439,9 @@ class InterceptionBridge(AbstractBridge):
                     self.mb_pipe_write.send_bytes(PACK_BUTTON.pack(TASK_BUTTON, btn_up))
                 except OSError:
                     pass
-            self._mouse_left_down = self._mouse_right_down = self._mouse_middle_down = False
+            self._mouse_left_down = self._mouse_right_down = self._mouse_middle_down = (
+                False
+            )
 
         print("[BRIDGE] - Release signals dispatched.")
 

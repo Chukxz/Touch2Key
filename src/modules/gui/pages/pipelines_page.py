@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from modules.database import store
+from modules.database import reset_layout_zones_to_app_settings, store
 from modules.utils import MapperEvent
 from .base_page import BasePage
 
@@ -46,7 +46,9 @@ class PipelinesPage(BasePage):
 
         body_layout = QHBoxLayout()
 
-        # Left Column: Pipeline List & Presets
+        # -------------------------------------------------------------
+        # Left Column: Pipeline List, Presets & Global Actions
+        # -------------------------------------------------------------
         left_panel = QVBoxLayout()
 
         preset_row = QHBoxLayout()
@@ -82,9 +84,14 @@ class PipelinesPage(BasePage):
         list_btn_row.addWidget(self.delete_btn)
         left_panel.addLayout(list_btn_row)
 
+        self.reset_all_btn = QPushButton("Reset All Zones to App Defaults")
+        left_panel.addWidget(self.reset_all_btn)
+
         body_layout.addLayout(left_panel, stretch=1)
 
+        # -------------------------------------------------------------
         # Right Column: 5-Stage Pipeline Inspector
+        # -------------------------------------------------------------
         inspector = QVBoxLayout()
 
         meta_form = QFormLayout()
@@ -101,7 +108,9 @@ class PipelinesPage(BasePage):
         region_box = QGroupBox("1. Region (Activation)")
         region_layout = QVBoxLayout(region_box)
         self.region_type_combo = QComboBox()
-        self.region_type_combo.addItems(["Always", "Circular", "Rectangular", "Top Bezel Notch"])
+        self.region_type_combo.addItems(
+            ["Always", "Circular", "Rectangular", "Top Bezel Notch"]
+        )
         region_layout.addWidget(self.region_type_combo)
 
         self.region_stack = QStackedWidget()
@@ -119,7 +128,9 @@ class PipelinesPage(BasePage):
         self.reg_radius = QDoubleSpinBox()
         self.reg_radius.setRange(1, 2000)
         self.reg_radius.setValue(100)
-        circle_form.addRow("Center (X, Y):", self._pair_spins(self.reg_center_x, self.reg_center_y))
+        circle_form.addRow(
+            "Center (X, Y):", self._pair_spins(self.reg_center_x, self.reg_center_y)
+        )
         circle_form.addRow("Radius (px):", self.reg_radius)
         self.region_stack.addWidget(self.region_circle_page)
 
@@ -134,8 +145,12 @@ class PipelinesPage(BasePage):
         self.reg_x2.setRange(0, 10000)
         self.reg_y2 = QDoubleSpinBox()
         self.reg_y2.setRange(0, 10000)
-        rect_form.addRow("Top-Left (X1, Y1):", self._pair_spins(self.reg_x1, self.reg_y1))
-        rect_form.addRow("Bottom-Right (X2, Y2):", self._pair_spins(self.reg_x2, self.reg_y2))
+        rect_form.addRow(
+            "Top-Left (X1, Y1):", self._pair_spins(self.reg_x1, self.reg_y1)
+        )
+        rect_form.addRow(
+            "Bottom-Right (X2, Y2):", self._pair_spins(self.reg_x2, self.reg_y2)
+        )
         self.region_stack.addWidget(self.region_rect_page)
 
         self.region_bezel_page = QWidget()
@@ -178,7 +193,6 @@ class PipelinesPage(BasePage):
         self.orig_snap_radius.setSuffix(" px")
         self.orig_snap_radius.setEnabled(False)
         origin_layout.addRow("Snap Radius:", self.orig_snap_radius)
-
         inspector.addWidget(origin_box)
 
         # Stage 3: Constraint
@@ -343,13 +357,17 @@ class PipelinesPage(BasePage):
 
         self.is_mouse_btn_check = QCheckBox("Output is Mouse Button")
         semantic_form.addRow("", self.is_mouse_btn_check)
-
         inspector.addWidget(semantic_box)
 
+        # Action Buttons
+        btn_action_row = QHBoxLayout()
+        self.reset_defaults_btn = QPushButton("Reset Zone to App Defaults")
         self.save_pipeline_btn = QPushButton("Save Pipeline to Active Layout")
-        inspector.addWidget(self.save_pipeline_btn)
-        inspector.addStretch()
+        btn_action_row.addWidget(self.reset_defaults_btn)
+        btn_action_row.addWidget(self.save_pipeline_btn)
+        inspector.addLayout(btn_action_row)
 
+        inspector.addStretch()
         body_layout.addLayout(inspector, stretch=2)
         self.content_layout().addLayout(body_layout)
 
@@ -360,17 +378,29 @@ class PipelinesPage(BasePage):
         self.load_active_layout_zones()
 
     def _wire_internal_signals(self) -> None:
-        self.region_type_combo.currentIndexChanged.connect(self.region_stack.setCurrentIndex)
+        self.region_type_combo.currentIndexChanged.connect(
+            self.region_stack.setCurrentIndex
+        )
         self.origin_type_combo.currentIndexChanged.connect(self._on_origin_type_changed)
-        self.constraint_type_combo.currentIndexChanged.connect(self.constraint_stack.setCurrentIndex)
-        self.transform_type_combo.currentIndexChanged.connect(self.transform_stack.setCurrentIndex)
-        self.semantic_type_combo.currentIndexChanged.connect(self._on_semantic_type_changed)
+        self.constraint_type_combo.currentIndexChanged.connect(
+            self.constraint_stack.setCurrentIndex
+        )
+        self.transform_type_combo.currentIndexChanged.connect(
+            self.transform_stack.setCurrentIndex
+        )
+        self.semantic_type_combo.currentIndexChanged.connect(
+            self._on_semantic_type_changed
+        )
         self.preset_combo.currentIndexChanged.connect(self._apply_preset_fields)
 
         self.new_btn.clicked.connect(self._clear_inspector_for_new)
         self.duplicate_btn.clicked.connect(self._on_duplicate_zone)
         self.add_preset_btn.clicked.connect(self._apply_preset_fields_button)
         self.save_pipeline_btn.clicked.connect(self._on_save_pipeline)
+        self.reset_defaults_btn.clicked.connect(
+            self._reset_current_zone_to_app_settings
+        )
+        self.reset_all_btn.clicked.connect(self._on_reset_all_zones)
         self.delete_btn.clicked.connect(self._on_delete_zone)
         self.pipeline_list.itemSelectionChanged.connect(self._on_zone_selected)
 
@@ -379,11 +409,43 @@ class PipelinesPage(BasePage):
         try:
             zones = store.get_active_layout_zones()
             for zone in zones:
-                item = QListWidgetItem(f"{zone.name or 'Zone'} [{zone.scancode}] (Prio: {zone.priority})")
+                item = QListWidgetItem(
+                    f"{zone.name or 'Zone'} [{zone.scancode}] (Prio: {zone.priority})"
+                )
                 item.setData(Qt.ItemDataRole.UserRole, zone.id)
                 self.pipeline_list.addItem(item)
         except Exception:
             logger.exception("Failed to load active layout zones from database")
+
+    def _get_existing_singleton_zone_id(self, mode: str) -> int | None:
+        """Finds if a singleton zone already exists in the active layout,
+
+        checking semantics, transformations, and fallback codes.
+        """
+        for zone in store.get_active_layout_zones():
+            try:
+                cfg = json.loads(zone.pipeline_config or "{}")
+                if cfg.get("semantics", {}).get("mode") == mode:
+                    return zone.id
+                if (
+                    mode == "WASD"
+                    and cfg.get("transform", {}).get("type") == "JOYSTICK"
+                ):
+                    return zone.id
+            except Exception:
+                pass
+
+            if mode == "WASD" and (
+                zone.name == "MOUSE_WHEEL" or zone.scancode == "MOUSE_WHEEL"
+            ):
+                return zone.id
+            if mode == "POINTER" and (
+                zone.name in ("LOOK_AREA", "Relative Pointer")
+                or zone.scancode == "MOUSE_LOOK"
+            ):
+                return zone.id
+
+        return None
 
     def _get_pipeline_dict(self) -> dict:
         reg_idx = self.region_type_combo.currentIndex()
@@ -393,6 +455,7 @@ class PipelinesPage(BasePage):
         sem_idx = self.semantic_type_combo.currentIndex()
 
         return {
+            "priority": int(self.priority_spin.value()),
             "region": {
                 "type_idx": reg_idx,
                 "type": ["ALWAYS", "CIRCLE", "RECTANGLE", "BEZEL"][reg_idx],
@@ -415,7 +478,9 @@ class PipelinesPage(BasePage):
             },
             "transform": {
                 "type_idx": trans_idx,
-                "type": ["IDENTITY", "DELTA", "DIRECTIONAL", "JOYSTICK", "DOUBLE_TAP"][trans_idx],
+                "type": ["IDENTITY", "DELTA", "DIRECTIONAL", "JOYSTICK", "DOUBLE_TAP"][
+                    trans_idx
+                ],
                 "sens_x": self.trans_sens_x.value(),
                 "sens_y": self.trans_sens_y.value(),
                 "deadzone": self.trans_dir_deadzone.value(),
@@ -429,10 +494,62 @@ class PipelinesPage(BasePage):
             },
             "semantics": {
                 "type_idx": sem_idx,
-                "mode": ["BUTTON", "TOGGLE_KEY", "TOGGLE_MODE", "WASD", "POINTER", "TRACK_FIRE"][sem_idx],
+                "mode": [
+                    "BUTTON",
+                    "TOGGLE_KEY",
+                    "TOGGLE_MODE",
+                    "WASD",
+                    "POINTER",
+                    "TRACK_FIRE",
+                ][sem_idx],
                 "is_mouse_button": self.is_mouse_btn_check.isChecked(),
             },
         }
+
+    def _reset_current_zone_to_app_settings(self) -> None:
+        settings = store.settings.get()
+        active = store.get_active_layout()
+        inner_r = active.mouse_wheel_radius if active else 50.0
+        outer_r = active.sprint_distance if active else 100.0
+
+        sem_idx = self.semantic_type_combo.currentIndex()
+        if sem_idx == 3:  # WASD
+            self.origin_type_combo.setCurrentIndex(
+                2 if settings.anchored_floating_joystick else 1
+            )
+            self.orig_snap_radius.setValue(settings.joystick_snap_radius)
+            self.trans_joy_dz.setValue(settings.deadzone * inner_r)
+            self.trans_joy_walk.setValue(inner_r)
+            self.trans_joy_sprint.setValue(outer_r)
+            self.trans_joy_hysteresis.setValue(settings.hysteresis)
+        elif sem_idx in (4, 5):  # POINTER / TRACK_FIRE
+            self.trans_sens_x.setValue(settings.sensitivity)
+            self.trans_sens_y.setValue(settings.sensitivity)
+
+        QMessageBox.information(
+            self,
+            "Reset Applied",
+            "Inspector fields repopulated with active AppSettings. Click 'Save Pipeline' to commit.",
+        )
+
+    def _on_reset_all_zones(self) -> None:
+        active = store.get_active_layout()
+        if not active:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Reset All Zones",
+            f"Reset all zones in layout '{active.name}' to default AppSettings?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            count = reset_layout_zones_to_app_settings(active.id)
+            self.load_active_layout_zones()
+            if self.dispatcher:
+                self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+            QMessageBox.information(
+                self, "Success", f"Reset {count} zones to default AppSettings."
+            )
 
     def _clear_inspector_for_new(self) -> None:
         self.pipeline_list.clearSelection()
@@ -454,18 +571,39 @@ class PipelinesPage(BasePage):
         if not zone:
             return
 
+        try:
+            cfg = json.loads(zone.pipeline_config or "{}")
+            target_mode = cfg.get("semantics", {}).get("mode")
+            if target_mode in ("WASD", "POINTER"):
+                QMessageBox.warning(
+                    self,
+                    "Cannot Duplicate Singleton",
+                    f"Duplicating a {target_mode} singleton zone is forbidden.",
+                )
+                return
+        except Exception:
+            pass
+
+        if zone.name in ("MOUSE_WHEEL", "LOOK_AREA") or zone.scancode in (
+            "MOUSE_WHEEL",
+            "MOUSE_LOOK",
+        ):
+            QMessageBox.warning(
+                self,
+                "Cannot Duplicate Singleton",
+                "Duplicating a movement joystick or look area is forbidden.",
+            )
+            return
+
         active_layout = store.get_active_layout()
         if not active_layout:
             return
 
-        new_name = f"{zone.name or 'Zone'} (Copy)"
         store.zones.create(
             layout_id=active_layout.id,
-            name=new_name,
+            name=f"{zone.name or 'Zone'} (Copy)",
             scancode=zone.scancode,
             zone_type=zone.zone_type,
-            priority=zone.priority,
-            move_camera=zone.move_camera,
             cx=zone.cx,
             cy=zone.cy,
             r=zone.r,
@@ -473,7 +611,7 @@ class PipelinesPage(BasePage):
             y1=zone.y1,
             x2=zone.x2,
             y2=zone.y2,
-            pipeline_config=getattr(zone, "pipeline_config", "{}") or "{}",
+            pipeline_config=zone.pipeline_config,
         )
         self.load_active_layout_zones()
         if self.dispatcher:
@@ -489,9 +627,15 @@ class PipelinesPage(BasePage):
             if not zone:
                 return
 
+            cfg_raw = zone.pipeline_config or "{}"
+            try:
+                cfg = json.loads(cfg_raw)
+            except Exception:
+                cfg = {}
+
             self.name_edit.setText(zone.name or "")
-            self.priority_spin.setValue(zone.priority or 0)
             self.output_key_edit.setText(zone.scancode or "")
+            self.priority_spin.setValue(cfg.get("priority", 0))
 
             # Geometry defaults
             self.reg_center_x.setValue(zone.cx or 0.0)
@@ -502,13 +646,10 @@ class PipelinesPage(BasePage):
             self.reg_x2.setValue(zone.x2 or 0.0)
             self.reg_y2.setValue(zone.y2 or 0.0)
 
-            # Unpack JSON pipeline config with backward compatible fallbacks
-            cfg_raw = getattr(zone, "pipeline_config", "{}") or "{}"
-            try:
-                cfg = json.loads(cfg_raw)
-            except Exception:
-                cfg = {}
+            # Block internal handler to avoid trigger loops while loading inspector
+            self.semantic_type_combo.blockSignals(True)
 
+            # Unpack JSON pipeline config
             reg = cfg.get("region", {})
             default_reg_idx = 1 if zone.zone_type == "CIRCLE" else 2
             self.region_type_combo.setCurrentIndex(reg.get("type_idx", default_reg_idx))
@@ -542,8 +683,16 @@ class PipelinesPage(BasePage):
 
             sem = cfg.get("semantics", {})
             default_sem_idx = 5 if zone.move_camera else 0
-            self.semantic_type_combo.setCurrentIndex(sem.get("type_idx", default_sem_idx))
+            self.semantic_type_combo.setCurrentIndex(
+                sem.get("type_idx", default_sem_idx)
+            )
             self.is_mouse_btn_check.setChecked(sem.get("is_mouse_button", False))
+
+            self.semantic_type_combo.blockSignals(False)
+
+            is_mode_toggle = self.semantic_type_combo.currentIndex() == 2
+            self.output_key_edit.setEnabled(not is_mode_toggle)
+            self.is_mouse_btn_check.setEnabled(not is_mode_toggle)
 
         except Exception:
             logger.exception("Failed to retrieve zone ID %s metadata", zone_id)
@@ -552,8 +701,43 @@ class PipelinesPage(BasePage):
         try:
             active_layout = store.get_active_layout()
             if not active_layout:
-                QMessageBox.warning(self, "No Active Layout", "Please set an active layout before saving pipelines.")
+                QMessageBox.warning(
+                    self,
+                    "No Active Layout",
+                    "Please set an active layout before saving pipelines.",
+                )
                 return
+
+            sem_idx = self.semantic_type_combo.currentIndex()
+            target_mode = [
+                "BUTTON",
+                "TOGGLE_KEY",
+                "TOGGLE_MODE",
+                "WASD",
+                "POINTER",
+                "TRACK_FIRE",
+            ][sem_idx]
+
+            selected = self.pipeline_list.selectedItems()
+            current_zone_id = (
+                selected[0].data(Qt.ItemDataRole.UserRole) if selected else None
+            )
+
+            # Enforce single movement joystick and single mouse look zone
+            if target_mode in ("WASD", "POINTER"):
+                existing_id = self._get_existing_singleton_zone_id(target_mode)
+                if existing_id is not None and existing_id != current_zone_id:
+                    entity = (
+                        "directional joystick (WASD)"
+                        if target_mode == "WASD"
+                        else "look area (Mouse Pointer)"
+                    )
+                    QMessageBox.warning(
+                        self,
+                        "Singleton Rule Violation",
+                        f"A {entity} already exists in this layout.\nYou cannot create a second one.",
+                    )
+                    return
 
             reg_idx = self.region_type_combo.currentIndex()
             if reg_idx == 1:
@@ -570,8 +754,6 @@ class PipelinesPage(BasePage):
                 "name": self.name_edit.text().strip() or "Custom Pipeline",
                 "scancode": self.output_key_edit.text().strip() or "space",
                 "zone_type": z_type,
-                "priority": int(self.priority_spin.value()),
-                "move_camera": int(self.semantic_type_combo.currentIndex() == 5),
                 "cx": self.reg_center_x.value() if z_type == "CIRCLE" else None,
                 "cy": self.reg_center_y.value() if z_type == "CIRCLE" else None,
                 "r": self.reg_radius.value() if z_type == "CIRCLE" else None,
@@ -582,19 +764,27 @@ class PipelinesPage(BasePage):
                 "pipeline_config": serialized_config,
             }
 
-            selected = self.pipeline_list.selectedItems()
-            if selected:
-                zone_id = selected[0].data(Qt.ItemDataRole.UserRole)
-                store.zones.update(zone_id, **zone_fields)
-                logger.info("Updated pipeline zone ID %s ('%s')", zone_id, zone_fields["name"])
+            if current_zone_id:
+                store.zones.update(current_zone_id, **zone_fields)
+                logger.info(
+                    "Updated pipeline zone ID %s ('%s')",
+                    current_zone_id,
+                    zone_fields["name"],
+                )
             else:
                 new_zone = store.zones.create(**zone_fields)
-                logger.info("Created new pipeline zone ID %s ('%s')", new_zone.id, zone_fields["name"])
+                logger.info(
+                    "Created new pipeline zone ID %s ('%s')",
+                    new_zone.id,
+                    zone_fields["name"],
+                )
 
             self.load_active_layout_zones()
             if self.dispatcher:
                 self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
-            QMessageBox.information(self, "Saved", "Pipeline saved and synced to active layout.")
+            QMessageBox.information(
+                self, "Saved", "Pipeline saved and synced to active layout."
+            )
         except Exception as exc:
             logger.exception("Failed to save pipeline zone")
             QMessageBox.critical(self, "Error", f"Could not save pipeline:\n{exc}")
@@ -612,7 +802,9 @@ class PipelinesPage(BasePage):
                 self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
         except Exception as exc:
             logger.exception("Failed to delete zone ID %s", zone_id)
-            QMessageBox.critical(self, "Database Error", f"Could not delete zone:\n{exc}")
+            QMessageBox.critical(
+                self, "Database Error", f"Could not delete zone:\n{exc}"
+            )
 
     def _on_origin_type_changed(self, idx: int) -> None:
         is_fixed = idx == 1
@@ -621,14 +813,108 @@ class PipelinesPage(BasePage):
         self.orig_snap_radius.setEnabled(is_anchored)
 
     def _on_semantic_type_changed(self, idx: int) -> None:
+        target_mode = [
+            "BUTTON",
+            "TOGGLE_KEY",
+            "TOGGLE_MODE",
+            "WASD",
+            "POINTER",
+            "TRACK_FIRE",
+        ][idx]
+
         is_mode_toggle = idx == 2
+        is_track_fire = idx == 5
+
+        # Enable/disable output key editing
         self.output_key_edit.setEnabled(not is_mode_toggle)
-        self.is_mouse_btn_check.setEnabled(not is_mode_toggle)
+
+        # TrackFire exclusively drags the HUD button/reticle on the touch layer.
+        # It suppresses camera movement, so auxiliary camera/mouse toggles are disabled.
+        if is_track_fire:
+            self.is_mouse_btn_check.setChecked(False)
+            self.is_mouse_btn_check.setEnabled(False)
+        else:
+            self.is_mouse_btn_check.setEnabled(not is_mode_toggle)
+
+        # Intercept manual configuration if another zone holds the singleton
+        if target_mode in ("WASD", "POINTER"):
+            existing_id = self._get_existing_singleton_zone_id(target_mode)
+            selected = self.pipeline_list.selectedItems()
+            current_id = (
+                selected[0].data(Qt.ItemDataRole.UserRole) if selected else None
+            )
+
+            if existing_id is not None and existing_id != current_id:
+                entity = (
+                    "directional joystick (WASD)"
+                    if target_mode == "WASD"
+                    else "look area (Mouse Pointer)"
+                )
+                QMessageBox.warning(
+                    self,
+                    "Singleton Conflict",
+                    f"A {entity} already exists in this layout.\nRedirecting you to the existing zone.",
+                )
+                self._select_zone_by_id(existing_id)
+                self._on_zone_selected()
+                return
 
     def _apply_preset_fields_button(self) -> None:
         self._apply_preset_fields(self.preset_combo.currentIndex())
 
+    def _select_zone_by_id(self, zone_id: int) -> None:
+        """Selects the list item matching zone_id without triggering premature reload loops."""
+        for i in range(self.pipeline_list.count()):
+            item = self.pipeline_list.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == zone_id:
+                self.pipeline_list.blockSignals(True)
+                self.pipeline_list.setCurrentItem(item)
+                self.pipeline_list.blockSignals(False)
+                return
+
     def _apply_preset_fields(self, index: int) -> None:
+        if index == 0:  # Custom
+            return
+
+        settings = store.settings.get()
+        active = store.get_active_layout()
+        inner_r = active.mouse_wheel_radius if active else 50.0
+        outer_r = active.sprint_distance if active else 100.0
+
+        # Singleton enforcement: Redirect to existing zone instead of drafting a duplicate
+        if index in (3, 4, 5):  # Joysticks (WASD)
+            existing_id = self._get_existing_singleton_zone_id("WASD")
+            selected = self.pipeline_list.selectedItems()
+            current_id = (
+                selected[0].data(Qt.ItemDataRole.UserRole) if selected else None
+            )
+
+            if existing_id is not None and existing_id != current_id:
+                self._select_zone_by_id(existing_id)
+                QMessageBox.information(
+                    self,
+                    "Selected Existing Joystick",
+                    "A movement joystick already exists in this layout. Switched to editing the existing zone.",
+                )
+
+        elif index == 6:  # Relative Pointer (Look Area)
+            existing_id = self._get_existing_singleton_zone_id("POINTER")
+            selected = self.pipeline_list.selectedItems()
+            current_id = (
+                selected[0].data(Qt.ItemDataRole.UserRole) if selected else None
+            )
+
+            if existing_id is not None and existing_id != current_id:
+                self._select_zone_by_id(existing_id)
+                QMessageBox.information(
+                    self,
+                    "Selected Existing Look Area",
+                    "A Look Area already exists in this layout. Switched to editing the existing zone.",
+                )
+
+        # -------------------------------------------------------------
+        # Apply Preset Inspector Values
+        # -------------------------------------------------------------
         if index == 1:  # Button (Tap/Hold)
             self.name_edit.setText("Button Zone")
             self.region_type_combo.setCurrentIndex(1)
@@ -649,37 +935,45 @@ class PipelinesPage(BasePage):
 
         elif index == 3:  # Fixed Joystick
             self.name_edit.setText("Fixed Joystick")
+            self.output_key_edit.setText("WASD")
             self.region_type_combo.setCurrentIndex(1)
             self.origin_type_combo.setCurrentIndex(1)
             self.constraint_type_combo.setCurrentIndex(1)
             self.transform_type_combo.setCurrentIndex(3)
             self.semantic_type_combo.setCurrentIndex(3)
+            self.trans_joy_dz.setValue(settings.deadzone * inner_r)
+            self.trans_joy_walk.setValue(inner_r)
+            self.trans_joy_sprint.setValue(outer_r)
+            self.trans_joy_hysteresis.setValue(settings.hysteresis)
             self.priority_spin.setValue(0)
 
-        elif index == 4:  # Floating Joystick
-            self.name_edit.setText("Floating Joystick")
+        elif index in (4, 5):  # Floating / Anchored Joystick
+            is_anchored = index == 5
+            self.name_edit.setText(
+                "Anchored Floating Joystick" if is_anchored else "Floating Joystick"
+            )
+            self.output_key_edit.setText("WASD")
             self.region_type_combo.setCurrentIndex(2)
-            self.origin_type_combo.setCurrentIndex(0)
+            self.origin_type_combo.setCurrentIndex(2 if is_anchored else 0)
+            self.orig_snap_radius.setValue(settings.joystick_snap_radius)
             self.constraint_type_combo.setCurrentIndex(3)
             self.transform_type_combo.setCurrentIndex(3)
             self.semantic_type_combo.setCurrentIndex(3)
+            self.trans_joy_dz.setValue(settings.deadzone * inner_r)
+            self.trans_joy_walk.setValue(inner_r)
+            self.trans_joy_sprint.setValue(outer_r)
+            self.trans_joy_hysteresis.setValue(settings.hysteresis)
             self.priority_spin.setValue(0)
 
-        elif index == 5:  # Anchored Floating Joystick
-            self.name_edit.setText("Anchored Floating Joystick")
-            self.region_type_combo.setCurrentIndex(2)
-            self.origin_type_combo.setCurrentIndex(2)
-            self.constraint_type_combo.setCurrentIndex(3)
-            self.transform_type_combo.setCurrentIndex(3)
-            self.semantic_type_combo.setCurrentIndex(3)
-            self.priority_spin.setValue(0)
-
-        elif index == 6:  # Relative Pointer
+        elif index == 6:  # Relative Pointer (Look)
             self.name_edit.setText("Look Area")
+            self.output_key_edit.setText("MOUSE_LOOK")
             self.region_type_combo.setCurrentIndex(0)
             self.origin_type_combo.setCurrentIndex(0)
             self.constraint_type_combo.setCurrentIndex(0)
             self.transform_type_combo.setCurrentIndex(1)
+            self.trans_sens_x.setValue(settings.sensitivity)
+            self.trans_sens_y.setValue(settings.sensitivity)
             self.semantic_type_combo.setCurrentIndex(4)
             self.priority_spin.setValue(-100)
 
@@ -689,6 +983,8 @@ class PipelinesPage(BasePage):
             self.origin_type_combo.setCurrentIndex(0)
             self.constraint_type_combo.setCurrentIndex(0)
             self.transform_type_combo.setCurrentIndex(1)
+            self.trans_sens_x.setValue(settings.sensitivity)
+            self.trans_sens_y.setValue(settings.sensitivity)
             self.semantic_type_combo.setCurrentIndex(5)
             self.priority_spin.setValue(0)
 

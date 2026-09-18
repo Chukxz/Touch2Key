@@ -11,7 +11,7 @@ import threading
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Literal
+from typing import TYPE_CHECKING, Callable, Literal, Any
 
 # Task IDs
 TASK_BUTTON = 0
@@ -410,6 +410,7 @@ SCANCODES = {
     "NUM_DOT": 0x53,
     "F11": 0x57,
     "F12": 0x58,
+    # Extended keys (0xE0XX series)
     "E0_HOME": 0xE047,
     "E0_UP": 0xE048,
     "E0_PAGEUP": 0xE049,
@@ -422,9 +423,9 @@ SCANCODES = {
     "E0_DELETE": 0xE053,
     "RCTRL": 0xE01D,
     "RALT": 0xE038,
-    "E0_ENTER": 0xE01C,
-    "E0_SLASH": 0xE035,
     "E0_NUM_ENTER": 0xE01C,
+    "E0_SLASH": 0xE035,
+    # Internal Mouse Codes
     "MOUSE_LEFT": M_LEFT,
     "MOUSE_RIGHT": M_RIGHT,
     "MOUSE_MIDDLE": M_MIDDLE,
@@ -472,6 +473,7 @@ SPECIAL_MAP = {
 }
 
 SPECIAL_MAP_INV = {v: k for k, v in SPECIAL_MAP.items()}
+
 
 # Low-level worker constants
 MAX_COALESCE = 20
@@ -621,6 +623,7 @@ def rotate_resolution(x, y, rotation):
 
 def stop_process(process: Process):
     if process.is_alive():
+        print(f"[UTILITY] - Closing {process.name}...")
         process.terminate()
         time.sleep(1.0)
         if process.is_alive():
@@ -648,15 +651,19 @@ def get_hue_modified_alpha_from_hsv(color):
     return h, 1.0 - a**2
 
 
-def get_scancode_and_bridge_key_from_key(key):
-    mapped = SCANCODES.get(key) or SCANCODES.get(SPECIAL_MAP.get(key, ""))
-    return (
-        hex(mapped) if mapped is not None else None,
-        key if mapped is not None else None,
+def get_scancode_and_bridge_key_from_key(key: str):
+    mapped_key = key
+    val = SCANCODES.get(mapped_key)
+    if val is None:
+        mapped_key = SPECIAL_MAP.get(key)
+        if mapped_key:
+            val = SCANCODES.get(mapped_key)
+    return hex(val) if val is not None else None, (
+        mapped_key if val is not None else None
     )
 
 
-def get_key_from_scancode(scancode):
+def get_key_from_scancode(scancode: str | int):
     try:
         code_int = int(scancode, 16) if isinstance(scancode, str) else int(scancode)
     except (TypeError, ValueError):

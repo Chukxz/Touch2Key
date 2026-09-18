@@ -25,6 +25,7 @@ def _qualifies_stroke(stroke, is_keyboard: bool) -> bool:
 # CLI Headless Query Engine
 # ==========================================
 
+
 def _select_device_cli(
     context: Interception,
     device_range: range,
@@ -45,7 +46,9 @@ def _select_device_cli(
     if not found_any:
         print("    [!] No devices actively registered in this category.")
 
-    print("\n>> Press a physical key/button on the target device (or enter device # manually, 'q' to abort): ")
+    print(
+        "\n>> Press a physical key/button on the target device (or enter device # manually, 'q' to abort): "
+    )
 
     target_filter_fn = context.is_keyboard if is_keyboard else context.is_mouse
     other_filter_fn = context.is_mouse if is_keyboard else context.is_keyboard
@@ -115,6 +118,7 @@ def _select_devices_cli() -> Optional[tuple[int, int]]:
 # GUI Dialog Implementation
 # ==========================================
 
+
 def _create_gui_dialogs(context: Interception):
     from PySide6.QtCore import QAbstractItemModel, Qt, QThread, Signal
     from PySide6.QtGui import QFont
@@ -134,7 +138,9 @@ def _create_gui_dialogs(context: Interception):
         device_detected = Signal(int, str)
         error = Signal(str)
 
-        def __init__(self, ctx: Interception, dev_range: range, is_kb: bool, parent=None):
+        def __init__(
+            self, ctx: Interception, dev_range: range, is_kb: bool, parent=None
+        ):
             super().__init__(parent)
             self.ctx = ctx
             self.dev_range = dev_range
@@ -210,9 +216,15 @@ def _create_gui_dialogs(context: Interception):
             self.table = QTableWidget(self)
             self.table.setColumnCount(len(DEVICE_HEADERS))
             self.table.setHorizontalHeaderLabels(DEVICE_HEADERS)
-            self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-            self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            self.table.horizontalHeader().setSectionResizeMode(
+                0, QHeaderView.ResizeMode.ResizeToContents
+            )
+            self.table.horizontalHeader().setSectionResizeMode(
+                1, QHeaderView.ResizeMode.Stretch
+            )
+            self.table.setSelectionBehavior(
+                QAbstractItemView.SelectionBehavior.SelectRows
+            )
             self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
             self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
             self.table.verticalHeader().setVisible(False)
@@ -258,7 +270,9 @@ def _create_gui_dialogs(context: Interception):
         def _handle_confirm(self) -> None:
             row = self.table.currentRow()
             if row >= 0:
-                self.selected_device = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+                self.selected_device = self.table.item(row, 0).data(
+                    Qt.ItemDataRole.UserRole
+                )
                 self.selected_hwid = self.table.item(row, 1).text()
                 self.done(QDialog.DialogCode.Accepted)
 
@@ -312,6 +326,7 @@ def select_keyboard_then_mouse(parent=None) -> Optional[tuple[int, int]]:
     """Dual-mode device query. Automatically selects between CLI prompt and Qt Dialog."""
     try:
         from PySide6.QtWidgets import QApplication
+
         if QApplication.instance() is not None:
             return _select_devices_gui(parent=parent)
     except ImportError:

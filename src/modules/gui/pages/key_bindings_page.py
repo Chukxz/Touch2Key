@@ -93,8 +93,14 @@ class KeyBindingsPage(BasePage):
             logger.exception("Failed to load key bindings from database")
 
     def _begin_capture(self, target_field: str) -> None:
-        btn = self.toggle_key_btn if target_field == "toggle_key" else self.sprint_key_btn
-        lbl = self.toggle_key_label if target_field == "toggle_key" else self.sprint_key_label
+        btn = (
+            self.toggle_key_btn if target_field == "toggle_key" else self.sprint_key_btn
+        )
+        lbl = (
+            self.toggle_key_label
+            if target_field == "toggle_key"
+            else self.sprint_key_label
+        )
 
         lbl.setText("Press any key (Esc to cancel)...")
         btn.setEnabled(False)
@@ -111,8 +117,12 @@ class KeyBindingsPage(BasePage):
                         self.dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
                     logger.info("Bound %s to key '%s'", target_field, key_name)
                 except Exception as exc:
-                    logger.exception("Failed to update key binding for %s", target_field)
-                    QMessageBox.critical(self, "Error", f"Could not save key binding:\n{exc}")
+                    logger.exception(
+                        "Failed to update key binding for %s", target_field
+                    )
+                    QMessageBox.critical(
+                        self, "Error", f"Could not save key binding:\n{exc}"
+                    )
             self.load_bindings()
 
         self._active_filter = KeyCaptureFilter(on_captured, self)

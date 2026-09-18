@@ -88,7 +88,6 @@ class AppLogManager:
             stderr_handler.setLevel(logging.WARNING)
             root_logger.addHandler(stderr_handler)
 
-
         # 3. Intercept all global print() and sys.stderr outputs
         stdout_logger = logging.getLogger("STDOUT")
         stderr_logger = logging.getLogger("STDERR")

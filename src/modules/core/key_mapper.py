@@ -33,7 +33,9 @@ logger = logging.getLogger("modules.core.key_mapper")
 class KeyMapper:
     """Manages zone-mapped buttons and track-fire pipelines."""
 
-    def __init__(self, mapper: Mapper, on_toggle_mode: Callable[[], None] | None = None):
+    def __init__(
+        self, mapper: Mapper, on_toggle_mode: Callable[[], None] | None = None
+    ):
         self.mapper = mapper
         self.config = mapper.config
         self.bridge = mapper.bridge
@@ -46,8 +48,12 @@ class KeyMapper:
 
         self._build_pipelines()
 
-        self.mapper_event_dispatcher.register_callback("ON_LAYOUT_RELOAD", self._build_pipelines)
-        self.mapper_event_dispatcher.register_callback("ON_WORKER_RESPAWN", self._on_worker_respawn)
+        self.mapper_event_dispatcher.register_callback(
+            "ON_LAYOUT_RELOAD", self._build_pipelines
+        )
+        self.mapper_event_dispatcher.register_callback(
+            "ON_WORKER_RESPAWN", self._on_worker_respawn
+        )
 
     def _build_pipelines(self) -> None:
         raw_zones = self.mapper.layout_loader.json_data.copy()
@@ -81,18 +87,17 @@ class KeyMapper:
                 continue
 
             # 2. Check if this is the explicit Toggle Zone
-            is_toggle_zone = (
-                toggle_scancode is not None
-                and (
-                    scancode == toggle_scancode
-                    or str(scancode) == str(toggle_scancode)
-                    or name == self.mapper.emulator.get("toggle_key")
-                )
+            is_toggle_zone = toggle_scancode is not None and (
+                scancode == toggle_scancode
+                or str(scancode) == str(toggle_scancode)
+                or name == self.mapper.emulator.get("toggle_key")
             )
 
             if is_toggle_zone:
                 # Mode-Aware: Only intercepts touch when cursor is hidden
-                region = ModeAwareRegion(base_region=base_region, engine_ref=self.mapper.engine_ref)
+                region = ModeAwareRegion(
+                    base_region=base_region, engine_ref=self.mapper.engine_ref
+                )
             else:
                 region = base_region
 

@@ -7,6 +7,7 @@ from .performance_page import PerformancePage
 from .pipelines_page import PipelinesPage
 from .profiles_page import ProfilesPage
 from .settings_page import SettingsPage
+from .typematic_page import TypematicPage
 
 __all__ = [
     "BasePage",
@@ -18,4 +19,5 @@ __all__ = [
     "PipelinesPage",
     "ProfilesPage",
     "SettingsPage",
+    "TypematicPage",
 ]

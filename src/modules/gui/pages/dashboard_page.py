@@ -48,7 +48,9 @@ class DashboardPage(BasePage):
     def on_page_shown(self) -> None:
         active_layout = store.get_active_layout()
         if active_layout:
-            self.active_profile_label.setText(f"Active Profile: {active_layout.name} (ID: {active_layout.id})")
+            self.active_profile_label.setText(
+                f"Active Profile: {active_layout.name} (ID: {active_layout.id})"
+            )
         else:
             self.active_profile_label.setText("Active Profile: None")
 

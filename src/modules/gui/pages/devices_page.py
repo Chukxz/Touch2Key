@@ -65,8 +65,12 @@ class DevicesPage(QWidget):
         if SYSTEM == "Windows":
             k_id = store.get("windows_keyboard_device", default=None)
             m_id = store.get("windows_mouse_device", default=None)
-            self.k_label.setText(f"Configured Keyboard ID: {k_id if k_id is not None else 'Unassigned'}")
-            self.m_label.setText(f"Configured Mouse ID:    {m_id if m_id is not None else 'Unassigned'}")
+            self.k_label.setText(
+                f"Configured Keyboard ID: {k_id if k_id is not None else 'Unassigned'}"
+            )
+            self.m_label.setText(
+                f"Configured Mouse ID:    {m_id if m_id is not None else 'Unassigned'}"
+            )
             self.rebind_btn.setEnabled(True)
         else:
             self.k_label.setText("Virtual UInput subsystem active (Kernel-managed).")
@@ -77,7 +81,9 @@ class DevicesPage(QWidget):
         if SYSTEM != "Windows":
             return
 
-        from modules.platforms.windows.query_interception_device import select_keyboard_then_mouse
+        from modules.platforms.windows.query_interception_device import (
+            select_keyboard_then_mouse,
+        )
 
         devices = select_keyboard_then_mouse(parent=self)
         if not devices:

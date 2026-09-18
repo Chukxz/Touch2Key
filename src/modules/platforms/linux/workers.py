@@ -7,6 +7,7 @@ from time import sleep as _sleep, perf_counter_ns as _perf_counter_ns
 from random import uniform as _uniform
 
 from modules.utils import KEY_PING, BUTTON_PING, CONSTANT_DWELL
+from .ecodes_map import LINUX_KEY_MAP, KEYBOARD_CAP, MOUSE_CAP, BTN_MAP
 
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection
@@ -51,112 +52,7 @@ def keyboard_worker(k_pipe_read: Connection):
         NON_SPAMMING_KEYS,
     )
 
-    cap = {ecodes.EV_KEY: list(range(1, 256))}
-    ui_device = UInput(cap, name="Touch2Key-Keyboard")
-
-    # Maps Windows/DOS Scancodes to Linux evdev ecodes
-    LINUX_KEY_MAP = {
-        0x01: ecodes.KEY_ESC,
-        0x02: ecodes.KEY_1,
-        0x03: ecodes.KEY_2,
-        0x04: ecodes.KEY_3,
-        0x05: ecodes.KEY_4,
-        0x06: ecodes.KEY_5,
-        0x07: ecodes.KEY_6,
-        0x08: ecodes.KEY_7,
-        0x09: ecodes.KEY_8,
-        0x0A: ecodes.KEY_9,
-        0x0B: ecodes.KEY_0,
-        0x0C: ecodes.KEY_MINUS,
-        0x0D: ecodes.KEY_EQUAL,
-        0x0E: ecodes.KEY_BACKSPACE,
-        0x0F: ecodes.KEY_TAB,
-        0x10: ecodes.KEY_Q,
-        0x11: ecodes.KEY_W,
-        0x12: ecodes.KEY_E,
-        0x13: ecodes.KEY_R,
-        0x14: ecodes.KEY_T,
-        0x15: ecodes.KEY_Y,
-        0x16: ecodes.KEY_U,
-        0x17: ecodes.KEY_I,
-        0x18: ecodes.KEY_O,
-        0x19: ecodes.KEY_P,
-        0x1A: ecodes.KEY_LEFTBRACE,  # LEFT_BRACKET
-        0x1B: ecodes.KEY_RIGHTBRACE,  # RIGHT_BRACKET
-        0x1C: ecodes.KEY_ENTER,
-        0x1D: ecodes.KEY_LEFTCTRL,
-        0x1E: ecodes.KEY_A,
-        0x1F: ecodes.KEY_S,
-        0x20: ecodes.KEY_D,
-        0x21: ecodes.KEY_F,
-        0x22: ecodes.KEY_G,
-        0x23: ecodes.KEY_H,
-        0x24: ecodes.KEY_J,
-        0x25: ecodes.KEY_K,
-        0x26: ecodes.KEY_L,
-        0x27: ecodes.KEY_SEMICOLON,
-        0x28: ecodes.KEY_APOSTROPHE,
-        0x29: ecodes.KEY_GRAVE,
-        0x2A: ecodes.KEY_LEFTSHIFT,
-        0x2B: ecodes.KEY_BACKSLASH,
-        0x2C: ecodes.KEY_Z,
-        0x2D: ecodes.KEY_X,
-        0x2E: ecodes.KEY_C,
-        0x2F: ecodes.KEY_V,
-        0x30: ecodes.KEY_B,
-        0x31: ecodes.KEY_N,
-        0x32: ecodes.KEY_M,
-        0x33: ecodes.KEY_COMMA,
-        0x34: ecodes.KEY_DOT,
-        0x35: ecodes.KEY_SLASH,
-        0x36: ecodes.KEY_RIGHTSHIFT,
-        0x37: ecodes.KEY_KPASTERISK,  # NUM_MULTIPLY
-        0x38: ecodes.KEY_LEFTALT,
-        0x39: ecodes.KEY_SPACE,
-        0x3A: ecodes.KEY_CAPSLOCK,
-        0x3B: ecodes.KEY_F1,
-        0x3C: ecodes.KEY_F2,
-        0x3D: ecodes.KEY_F3,
-        0x3E: ecodes.KEY_F4,
-        0x3F: ecodes.KEY_F5,
-        0x40: ecodes.KEY_F6,
-        0x41: ecodes.KEY_F7,
-        0x42: ecodes.KEY_F8,
-        0x43: ecodes.KEY_F9,
-        0x44: ecodes.KEY_F10,
-        0x45: ecodes.KEY_NUMLOCK,
-        0x46: ecodes.KEY_SCROLLLOCK,
-        0x47: ecodes.KEY_KP7,
-        0x48: ecodes.KEY_KP8,
-        0x49: ecodes.KEY_KP9,
-        0x4A: ecodes.KEY_KPMINUS,
-        0x4B: ecodes.KEY_KP4,
-        0x4C: ecodes.KEY_KP5,
-        0x4D: ecodes.KEY_KP6,
-        0x4E: ecodes.KEY_KPPLUS,
-        0x4F: ecodes.KEY_KP1,
-        0x50: ecodes.KEY_KP2,
-        0x51: ecodes.KEY_KP3,
-        0x52: ecodes.KEY_KP0,
-        0x53: ecodes.KEY_KPDOT,
-        0x57: ecodes.KEY_F11,
-        0x58: ecodes.KEY_F12,
-        # Extended keys (0xE0XX series)
-        0xE047: ecodes.KEY_HOME,
-        0xE048: ecodes.KEY_UP,
-        0xE049: ecodes.KEY_PAGEUP,
-        0xE051: ecodes.KEY_PAGEDOWN,
-        0xE04B: ecodes.KEY_LEFT,
-        0xE04D: ecodes.KEY_RIGHT,
-        0xE04F: ecodes.KEY_END,
-        0xE050: ecodes.KEY_DOWN,
-        0xE052: ecodes.KEY_INSERT,
-        0xE053: ecodes.KEY_DELETE,
-        0xE01D: ecodes.KEY_RIGHTCTRL,
-        0xE038: ecodes.KEY_RIGHTALT,
-        0xE01C: ecodes.KEY_KPENTER,  # Numpad Enter
-        0xE035: ecodes.KEY_KPSLASH,  # Numpad Slash
-    }
+    ui_device = UInput(KEYBOARD_CAP, name="Touch2Key-Keyboard")
 
     pressed_keys = set()
     state = {"running": True}
@@ -290,7 +186,7 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection):
     never block camera-movement delivery. Both share one UInput device
     behind `send_lock`, which wraps only write()/syn(), not sleeps."""
 
-    from evdev import UInput, ecodes, AbsInfo
+    from evdev import UInput, ecodes
     from modules.utils import (
         TASK_REL,
         TASK_ABS,
@@ -311,30 +207,7 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection):
         MAX_MOUSE_DWELL,
     )
 
-    cap = {
-        ecodes.EV_KEY: [ecodes.BTN_LEFT, ecodes.BTN_RIGHT, ecodes.BTN_MIDDLE],
-        ecodes.EV_REL: [ecodes.REL_X, ecodes.REL_Y, ecodes.REL_WHEEL],
-        ecodes.EV_ABS: [
-            (
-                ecodes.ABS_X,
-                AbsInfo(value=0, min=0, max=65535, fuzz=0, flat=0, resolution=0),
-            ),
-            (
-                ecodes.ABS_Y,
-                AbsInfo(value=0, min=0, max=65535, fuzz=0, flat=0, resolution=0),
-            ),
-        ],
-    }
-    ui_device = UInput(cap, name="Touch2Key-Mouse")
-
-    BTN_MAP = {
-        LEFT_BUTTON_DOWN: (ecodes.BTN_LEFT, 1),
-        LEFT_BUTTON_UP: (ecodes.BTN_LEFT, 0),
-        RIGHT_BUTTON_DOWN: (ecodes.BTN_RIGHT, 1),
-        RIGHT_BUTTON_UP: (ecodes.BTN_RIGHT, 0),
-        MIDDLE_BUTTON_DOWN: (ecodes.BTN_MIDDLE, 1),
-        MIDDLE_BUTTON_UP: (ecodes.BTN_MIDDLE, 0),
-    }
+    ui_device = UInput(MOUSE_CAP, name="Touch2Key-Mouse")
 
     send_lock = threading.Lock()
     state = {"running": True}

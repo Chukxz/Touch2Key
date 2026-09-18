@@ -41,7 +41,9 @@ class AppConfig:
     def set_anchored_floating(self, enabled: bool) -> bool:
         """Toggles anchored floating mode and dispatches reload."""
         with self.config_lock:
-            self.settings = store.settings.update(anchored_floating_joystick=int(enabled))
+            self.settings = store.settings.update(
+                anchored_floating_joystick=int(enabled)
+            )
         self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
         return self.settings.anchored_floating_joystick
 
@@ -75,8 +77,12 @@ class AppConfig:
                 "hysteresis": s.hysteresis,
                 "anchored_floating_joystick": s.anchored_floating_joystick,
                 "joystick_snap_radius": s.joystick_snap_radius,
-                "mouse_wheel_radius": active_layout.mouse_wheel_radius if active_layout else 50.0,
-                "sprint_distance": active_layout.sprint_distance if active_layout else 10.0,
+                "mouse_wheel_radius": (
+                    active_layout.mouse_wheel_radius if active_layout else 50.0
+                ),
+                "sprint_distance": (
+                    active_layout.sprint_distance if active_layout else 10.0
+                ),
             }
         elif section == "mouse":
             return {
