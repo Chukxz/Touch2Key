@@ -35,6 +35,7 @@ __all__ = [
     "LayoutZonesRepository",
     "InvalidFieldError",
     "reset_layout_zones_to_app_settings",
+    "ensure_system_bezels",
 ]
 
 logger = logging.getLogger("modules.database")
@@ -105,6 +106,9 @@ def reset_layout_zones_to_app_settings(layout_id: int) -> int:
     updated_count = 0
 
     for zone in zones:
+        if zone.zone_type == "BEZEL":
+            continue # CRITICAL: Leave system hardware boundary strips untouched
+
         try:
             cfg = json.loads(zone.pipeline_config or "{}")
         except Exception:
@@ -167,3 +171,41 @@ def reset_layout_zones_to_app_settings(layout_id: int) -> int:
         "Reset %d zones in layout ID %d to AppSettings.", updated_count, layout_id
     )
     return updated_count
+
+
+def ensure_system_bezels(layout_id: int) -> None:
+    """Verifies a layout has both system bezels (Top/Mode, Bottom/VKB) and creates them if missing."""
+    layout = store.layouts.get(layout_id)
+    if not layout:
+        return
+
+    zones = store.zones.list_for_layout(layout_id)
+    bezel_zones = [z for z in zones if z.zone_type == "BEZEL"]
+
+    # Check if they exist by inspecting the payload intent
+    has_top = any("TOGGLE_MODE" in z.pipeline_config or z.scancode == "BEZEL_TOP" for z in bezel_zones)
+    has_bottom = any("TOGGLE_VKB" in z.pipeline_config or z.scancode == "BEZEL_BOTTOM" for z in bezel_zones)
+
+    w, h = float(layout.width), float(layout.height)
+
+    if not has_top:
+        store.zones.create(
+            layout_id=layout.id,
+            scancode="BEZEL_TOP",
+            name="Top Bezel",
+            zone_type="BEZEL",
+            x1=0.0, y1=0.0, x2=w, y2=50.0,
+            pipeline_config='{"priority": 100, "semantics": {"action": "TOGGLE_MODE"}}'
+        )
+        logger.info("Auto-healed missing Top Bezel for layout ID %d", layout.id)
+
+    if not has_bottom:
+        store.zones.create(
+            layout_id=layout.id,
+            scancode="BEZEL_BOTTOM",
+            name="Bottom Bezel",
+            zone_type="BEZEL",
+            x1=0.0, y1=h - 50.0, x2=w, y2=h,
+            pipeline_config='{"priority": 100, "semantics": {"action": "TOGGLE_VKB"}}'
+        )
+        logger.info("Auto-healed missing Bottom Bezel for layout ID %d", layout.id)
