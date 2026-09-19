@@ -85,7 +85,7 @@ def get_specific_mt_key(event) -> str:
         return str(event.key)
 
     scan_code = gui_event.nativeScanCode()
-    mapped_key = get_platform().Mapping().get_key_from_scancode(scan_code)
+    mapped_key = get_platform().Mapping().get_key_name_from_code(scan_code)
     return mapped_key if mapped_key else str(event.key)
 
 
@@ -95,7 +95,7 @@ def get_specific_qt_key(event) -> str:
         return getattr(event, "text", lambda: "")()
 
     scan_code = event.nativeScanCode()
-    mapped_key = get_platform().Mapping().get_key_from_scancode(scan_code)
+    mapped_key = get_platform().Mapping().get_key_name_from_code(scan_code)
     return mapped_key if mapped_key else event.text()
 
 

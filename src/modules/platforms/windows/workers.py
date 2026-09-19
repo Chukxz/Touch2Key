@@ -1,25 +1,43 @@
 from __future__ import annotations
+
+import ctypes
+import queue
+import struct
+import threading
+from random import uniform as _uniform
+from time import perf_counter_ns as _perf_counter_ns, sleep as _sleep
 from typing import TYPE_CHECKING
 
-import queue
-import threading
-from time import sleep as _sleep, perf_counter_ns as _perf_counter_ns
-from random import uniform as _uniform
-
 from modules.utils import (
-    MOUSE_MOVE_RELATIVE,
-    MOUSE_MOVE_ABSOLUTE,
-    MOUSE_VIRTUAL_DESKTOP,
-    LEFT_BUTTON_DOWN,
-    LEFT_BUTTON_UP,
-    RIGHT_BUTTON_DOWN,
-    RIGHT_BUTTON_UP,
-    MIDDLE_BUTTON_DOWN,
-    MIDDLE_BUTTON_UP,
-    NT_TIMER_RES,
-    KEY_PING,
     BUTTON_PING,
     CONSTANT_DWELL,
+    DOWN_TUPLE,
+    KEY_CONFIG,
+    KEY_PING,
+    LEFT_BUTTON_DOWN,
+    LEFT_BUTTON_UP,
+    MAX_BUTTON_DWELL,
+    MAX_COALESCE,
+    MAX_KEY_DWELL,
+    MAX_MOUSE_DWELL,
+    MIDDLE_BUTTON_DOWN,
+    MIDDLE_BUTTON_UP,
+    MIN_BUTTON_DWELL,
+    MIN_KEY_DWELL,
+    MIN_MOUSE_DWELL,
+    MOUSE_MOVE_ABSOLUTE,
+    MOUSE_MOVE_RELATIVE,
+    MOUSE_VIRTUAL_DESKTOP,
+    NT_TIMER_RES,
+    PACK_ABS,
+    PACK_BUTTON,
+    PACK_KEY,
+    PACK_REL,
+    PACK_TYPEMATIC_HEADER,
+    RIGHT_BUTTON_DOWN,
+    RIGHT_BUTTON_UP,
+    TASK_ABS,
+    TASK_REL,
 )
 
 if TYPE_CHECKING:
@@ -32,14 +50,13 @@ def _release_all_keys(k_ctx, k_handle, K_Stroke, keys_set, reason=""):
         print(f"\n[WORKER] - Releasing {len(keys_set)} keys.")
         for win_code in list(keys_set):
             k_state = 1
-
-            # Handle extended keys: Interception driver uses a single byte for the key code, so we need to set the extended bit for non-ASCII keys.
-            # E0_UP = 3
             if win_code > 0xFF:
-                k_state = 3  # set extended bit for non-ASCII keys
-                win_code &= 0xFF  # strip extended bit for Interception driver
-
-            k_ctx.send(k_handle, K_Stroke(win_code, k_state))  # KEY UP
+                k_state = 3
+                win_code &= 0xFF
+            try:
+                k_ctx.send(k_handle, K_Stroke(win_code, k_state))
+            except Exception:
+                pass
         keys_set.clear()
 
 
@@ -53,114 +70,85 @@ def _release_all_buttons(
         if left_down:
             m_ctx.send(m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, LEFT_BUTTON_UP, 0, 0, 0))
         if right_down:
-            m_ctx.send(
-                m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, RIGHT_BUTTON_UP, 0, 0, 0)
-            )
+            m_ctx.send(m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, RIGHT_BUTTON_UP, 0, 0, 0))
         if middle_down:
-            m_ctx.send(
-                m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, MIDDLE_BUTTON_UP, 0, 0, 0)
-            )
+            m_ctx.send(m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, MIDDLE_BUTTON_UP, 0, 0, 0))
 
 
 def keyboard_worker(k_pipe_read: Connection, k_device_handle: int | None):
     """Dedicated process for Windows Interception driver keyboard events."""
-
     if k_device_handle is None:
-        print(
-            f"\n[WORKER] - Keyboard worker has an invalid Interception keyboard handle."
-        )
+        print("\n[WORKER] - Keyboard worker has an invalid Interception keyboard handle.")
         return
 
     from interception.interception import Interception
     from interception.strokes import KeyStroke
-    from modules.utils import (
-        PACK_KEY,
-        MIN_KEY_DWELL,
-        MAX_KEY_DWELL,
-        INITIAL_DELAY_NS,
-        REPEAT_RATE,
-        NON_SPAMMING_KEYS,
-    )
 
     k_ctx = Interception()
     pressed_keys = set()
     state = {"running": True}
 
-    # Thread-safe queue to pass keys from the pipe reader to the injector
+    # Typematic state: initialized empty and populated dynamically via KEY_CONFIG
+    typematic_cfg = {
+        "enabled": True,
+        "delay_ns": 250_000_000,
+        "repeat_rate": 0.0333,
+        "non_spamming": set(),
+    }
+
     key_queue = queue.Queue()
 
     def key_injection_loop():
-        """
-        Dedicated thread for executing keystrokes with strict Typematic auto-repeat.
-        - Supports True Diagonal WASD movement (no artificial KEY_UPs).
-        - Correctly filters Modifier and Lock keys (no spamming).
-        - Accurately steals typematic focus on new key presses.
-        """
-
-        WINDOWS_NON_SPAMMING_KEYS = {code & 0xFF for code in NON_SPAMMING_KEYS}
         active_keys = {}
-
-        # Typematic state tracking
         repeat_key = None
         repeat_start_time = 0.0
 
         while state["running"]:
-            # Process all immediate state changes (Physical down/up from the bridge)
             while not key_queue.empty():
                 try:
                     win_code, k_state = key_queue.get_nowait()
 
-                    if k_state in (0, 2):  # KEY DOWN / E0_KEY DOWN
+                    if k_state in (0, 2):  # KEY DOWN / E0_DOWN
                         if win_code not in active_keys:
                             active_keys[win_code] = k_state
 
-                            # TRUE HARDWARE LOGIC: Normal keys steal focus WITHOUT sending KEY_UP to the old key.
-                            # This allows WASD diagonal movement to function flawlessly.
-                            if win_code in WINDOWS_NON_SPAMMING_KEYS:
+                            if (
+                                not typematic_cfg["enabled"]
+                                or win_code in typematic_cfg["non_spamming"]
+                            ):
                                 repeat_key = None
                             else:
                                 repeat_key = win_code
 
                             repeat_start_time = _perf_counter_ns()
-
-                            # Send the actual physical press to the OS (Interception)
                             k_ctx.send(k_device_handle, KeyStroke(win_code, k_state))
                             _sleep(_uniform(MIN_KEY_DWELL, MAX_KEY_DWELL))
 
-                    elif k_state in (1, 3):  # KEY UP / E0_KEY UP
+                    elif k_state in (1, 3):  # KEY UP / E0_UP
                         if win_code in active_keys:
                             del active_keys[win_code]
-
-                            # If the currently repeating key is released, clear focus
                             if repeat_key == win_code:
                                 repeat_key = None
 
-                            # Send the actual physical release to the OS (Interception)
                             k_ctx.send(k_device_handle, KeyStroke(win_code, k_state))
                             _sleep(CONSTANT_DWELL)
 
                     key_queue.task_done()
                 except Exception as e:
-                    print(f"\n[WORKER] - Key Injection Error (Queue): {e}.")
+                    print(f"\n[WORKER] - Key Injection Error: {e}.")
 
-            # Process Auto-Repeat for the SINGLE active repeat key
-            if repeat_key is not None:
-                # Double-check it's not a modifier/lock key just to be absolutely safe
-                if repeat_key not in WINDOWS_NON_SPAMMING_KEYS:
+            if typematic_cfg["enabled"] and repeat_key is not None:
+                if repeat_key not in typematic_cfg["non_spamming"]:
                     current_time = _perf_counter_ns()
-                    if (current_time - repeat_start_time) >= INITIAL_DELAY_NS:
+                    if (current_time - repeat_start_time) >= typematic_cfg["delay_ns"]:
                         k_state = active_keys[repeat_key]
                         try:
-                            k_ctx.send(
-                                k_device_handle, KeyStroke(repeat_key, k_state)
-                            )  # KEY DOWN / E0_KEY DOWN
+                            k_ctx.send(k_device_handle, KeyStroke(repeat_key, k_state))
                         except Exception:
                             pass
 
-            # Sleep at the repeat rate to prevent overwhelming the CPU and pipe
-            _sleep(REPEAT_RATE)
+            _sleep(typematic_cfg["repeat_rate"])
 
-    # Start the injection thread
     injector_thread = threading.Thread(
         target=key_injection_loop, name="Keyboard-Injection-Loop", daemon=True
     )
@@ -170,42 +158,49 @@ def keyboard_worker(k_pipe_read: Connection, k_device_handle: int | None):
         try:
             if k_pipe_read.poll(15.0):
                 payload = k_pipe_read.recv_bytes()
-                win_code, k_state = PACK_KEY.unpack(payload)
 
-                if k_state == KEY_PING:
-                    continue  # keepalive only: resets poll() timer, no driver write
+                if len(payload) == 3:
+                    win_code, k_state = PACK_KEY.unpack(payload)
+                    if k_state == KEY_PING:
+                        continue
+                    if k_state == 0:
+                        pressed_keys.add(win_code)
+                    elif k_state == 1:
+                        pressed_keys.discard(win_code)
 
-                # Windows logic sends state=0 for down, state=1 for up.
-                if k_state == 0:
-                    pressed_keys.add(win_code)
-                elif k_state == 1:
-                    pressed_keys.discard(win_code)
+                    if win_code > 0xFF:
+                        k_state |= 2
+                        win_code &= 0xFF
 
-                # Handle extended keys: Interception driver uses a single byte for the key code, so we need to set the extended bit for non-ASCII keys.
-                # E0_DOWN = 2, E0_UP = 3
-                if win_code > 0xFF:
-                    k_state |= 2  # set extended bit for non-ASCII keys
-                    win_code &= 0xFF  # strip extended bit for Interception driver
+                    key_queue.put((win_code, k_state))
+                    continue
 
-                # Instantly offload the event to the injection thread
-                key_queue.put((win_code, k_state))
+                if payload and payload[0] == KEY_CONFIG:
+                    _, enabled, delay_ns, rate_sec, count = PACK_TYPEMATIC_HEADER.unpack_from(payload, 0)
+                    offset = PACK_TYPEMATIC_HEADER.size
+                    excludes = set()
+                    for _ in range(count):
+                        (sc,) = struct.unpack_from("<H", payload, offset)
+                        excludes.add(sc & 0xFF)
+                        offset += 2
+
+                    typematic_cfg["enabled"] = enabled
+                    typematic_cfg["delay_ns"] = delay_ns
+                    typematic_cfg["repeat_rate"] = rate_sec
+                    typematic_cfg["non_spamming"] = excludes
+                    continue
 
             else:
                 _release_all_keys(
                     k_ctx, k_device_handle, KeyStroke, pressed_keys, "Keyboard Timeout"
                 )
                 pressed_keys.clear()
-                continue
-
         except EOFError:
-            print("\n[WORKER] - Keyboard Pipe closed by parent.")
             state["running"] = False
-
         except Exception as e:
             print(f"\n[WORKER] - Keyboard Worker crashed: {e}.")
             state["running"] = False
 
-    # Cleanup
     state["running"] = False
     injector_thread.join(timeout=2.0)
 
@@ -213,16 +208,10 @@ def keyboard_worker(k_pipe_read: Connection, k_device_handle: int | None):
 def mouse_worker(
     m_pipe_read: Connection, mb_pipe_read: Connection, m_device_handle: int | None
 ):
-    """Movement (REL/ABS) runs on this function's main loop. Buttons run on
-    a separate thread with their own pipe, so a button's dwell sleep can
-    never block camera-movement delivery. Both share one Interception mouse
-    handle behind `send_lock`, which wraps only the send() call, not sleeps."""
-
+    """Movement (REL/ABS) and Button worker for Windows Interception driver."""
     if m_device_handle is None:
-        print(f"\n[WORKER] - Mouse worker has an invalid Interception mouse handle.")
+        print("\n[WORKER] - Mouse worker has an invalid Interception mouse handle.")
         return
-
-    import ctypes
 
     ctypes.windll.ntdll.NtSetTimerResolution(
         NT_TIMER_RES, 1, ctypes.byref(ctypes.c_ulong())
@@ -230,19 +219,6 @@ def mouse_worker(
 
     from interception.interception import Interception
     from interception.strokes import MouseStroke
-    from modules.utils import (
-        TASK_REL,
-        TASK_ABS,
-        PACK_BUTTON,
-        PACK_REL,
-        PACK_ABS,
-        MAX_COALESCE,
-        DOWN_TUPLE,
-        MIN_BUTTON_DWELL,
-        MAX_BUTTON_DWELL,
-        MIN_MOUSE_DWELL,
-        MAX_MOUSE_DWELL,
-    )
 
     m_ctx = Interception()
     send_lock = threading.Lock()
@@ -297,9 +273,7 @@ def mouse_worker(
                     left_down = right_down = middle_down = False
 
             except EOFError:
-                print("\n[WORKER] - Mouse Button Pipe closed by parent.")
                 state["running"] = False
-
             except Exception as e:
                 print(f"\n[WORKER] - Mouse Button Worker crashed: {e}.")
                 state["running"] = False
@@ -370,12 +344,10 @@ def mouse_worker(
                 _sleep(CONSTANT_DWELL)
 
         except EOFError:
-            print("\n[WORKER] - Mouse Movement Pipe closed by parent.")
             state["running"] = False
-
         except Exception as e:
             print(f"\n[WORKER] - Mouse Movement Worker crashed: {e}.")
             state["running"] = False
 
-    state["running"] = False  # no-op if already False; covers normal loop exit too
+    state["running"] = False
     button_thread.join(timeout=16.0)

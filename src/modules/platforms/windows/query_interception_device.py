@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import sys
 from typing import Optional
-
 from interception.constants import FilterKeyFlag, FilterMouseButtonFlag, KeyFlag
 from interception.interception import Interception
 

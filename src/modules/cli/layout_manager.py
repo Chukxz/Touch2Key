@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""
-CLI Layout & Profile Manager.
+"""CLI Layout & Profile Manager.
 
 Provides terminal-based profile switching, duplication, renaming,
 zone/pipeline inspection, JSON layout import/export, TOML app_settings
-import/export, schema reset, and bulk synchronization of zones to AppSettings.
+import/export, schema reset, bulk synchronization of zones to AppSettings,
+and typematic (keyboard repeat) configuration and reset routines.
 """
 
 from __future__ import annotations
@@ -177,6 +177,71 @@ def clear_zones(layout_id: int) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Typematic Inspection & Configuration
+# ---------------------------------------------------------------------------
+
+
+def show_typematic() -> None:
+    """Prints current typematic / auto-repeat configuration."""
+    s = store.settings.get()
+    print("\n--- Typematic (Key Repeat) Settings ---")
+    print(f"  Enabled:       {'Yes' if s.typematic_enabled else 'No'}")
+    print(f"  Initial Delay: {s.typematic_delay_ms:.1f} ms")
+    print(f"  Repeat Rate:   {s.typematic_rate_hz:.1f} Hz (events/sec)")
+    print(f"  Excluded Keys: {s.typematic_exclude_keys or 'None'}")
+    print()
+
+
+def configure_typematic_interactive() -> None:
+    """Prompts for typematic fields interactively."""
+    s = store.settings.get()
+    show_typematic()
+
+    en_in = (
+        input(
+            f"Enable typematic? (y/n, current: {'y' if s.typematic_enabled else 'n'}): "
+        )
+        .strip()
+        .lower()
+    )
+    enabled = s.typematic_enabled if not en_in else (en_in == "y")
+
+    delay_in = input(
+        f"Initial repeat delay ms (current: {s.typematic_delay_ms:.1f}): "
+    ).strip()
+    delay = float(delay_in) if delay_in else s.typematic_delay_ms
+
+    rate_in = input(f"Repeat rate Hz (current: {s.typematic_rate_hz:.1f}): ").strip()
+    rate = float(rate_in) if rate_in else s.typematic_rate_hz
+
+    ex_in = input(
+        f"Excluded keys comma-separated (current: {s.typematic_exclude_keys or ''}): "
+    ).strip()
+    excludes = s.typematic_exclude_keys if not ex_in else ex_in
+
+    store.settings.update(
+        typematic_enabled=int(enabled),
+        typematic_delay_ms=delay,
+        typematic_rate_hz=rate,
+        typematic_exclude_keys=excludes,
+    )
+    print("Typematic settings updated successfully.")
+    show_typematic()
+
+
+def reset_typematic_defaults() -> None:
+    """Resets only typematic timing and exclusion keys to factory defaults."""
+    store.settings.update(
+        typematic_enabled=1,
+        typematic_delay_ms=250.0,
+        typematic_rate_hz=30.0,
+        typematic_exclude_keys="w,a,s,d,shift,ctrl,alt",
+    )
+    print("Typematic settings reset to factory defaults.")
+    show_typematic()
+
+
+# ---------------------------------------------------------------------------
 # Import & Export Pipelines
 # ---------------------------------------------------------------------------
 
@@ -224,21 +289,23 @@ def interactive_menu() -> None:
     while True:
         list_profiles()
         print("Commands:")
-        print("  [s]   Select / Switch Active Profile")
-        print("  [lz]  List Zones / Pipelines for Profile")
-        print("  [cp]  Duplicate Profile")
-        print("  [rn]  Rename Profile")
-        print("  [cz]  Clear Zones for Profile")
-        print("  [rz]  Reset All Zones in Layout to App Settings")
-        print("  [d]   Delete Profile")
-        print("  [i]   Import Layout from JSON")
-        print("  [e]   Export Profile to JSON")
-        print("  [st]  Export App Settings to settings.toml")
-        print("  [lt]  Import App Settings from settings.toml")
-        print("  [eb]  Export Full Bundle to data/profiles/")
-        print("  [ib]  Import Any Config (.toml, .json, or Bundle Directory)")
-        print("  [r]   Reset App Settings to Defaults")
-        print("  [q]   Quit")
+        print("  [s]    Select / Switch Active Profile")
+        print("  [lz]   List Zones / Pipelines for Profile")
+        print("  [cp]   Duplicate Profile")
+        print("  [rn]   Rename Profile")
+        print("  [cz]   Clear Zones for Profile")
+        print("  [rz]   Reset All Zones in Layout to App Settings")
+        print("  [d]    Delete Profile")
+        print("  [ty]   View / Configure Typematic (Auto-Repeat) Settings")
+        print("  [rty]  Reset Typematic Settings to Defaults")
+        print("  [i]    Import Layout from JSON")
+        print("  [e]    Export Profile to JSON")
+        print("  [st]   Export App Settings to settings.toml")
+        print("  [lt]   Import App Settings from settings.toml")
+        print("  [eb]   Export Full Bundle to data/profiles/")
+        print("  [ib]   Import Any Config (.toml, .json, or Bundle Directory)")
+        print("  [r]    Reset All App Settings to Defaults")
+        print("  [q]    Quit")
 
         choice = input("\nEnter command: ").strip().lower()
 
@@ -316,6 +383,16 @@ def interactive_menu() -> None:
                 )
                 if confirm == "y":
                     delete_profile(target_id)
+
+        elif choice == "ty":
+            configure_typematic_interactive()
+
+        elif choice == "rty":
+            confirm = (
+                input("Reset typematic settings to defaults? (y/N): ").strip().lower()
+            )
+            if confirm == "y":
+                reset_typematic_defaults()
 
         elif choice == "i":
             raw_path = (
@@ -432,6 +509,41 @@ def run() -> None:
         help="Reset layout zones to AppSettings",
     )
 
+    # Typematic CLI flags
+    parser.add_argument(
+        "--show-typematic",
+        action="store_true",
+        help="Display typematic / repeat settings",
+    )
+    parser.add_argument(
+        "--set-typematic",
+        choices=["on", "off"],
+        help="Enable or disable typematic auto-repeat",
+    )
+    parser.add_argument(
+        "--typematic-delay",
+        type=float,
+        metavar="MS",
+        help="Set typematic initial repeat delay in milliseconds",
+    )
+    parser.add_argument(
+        "--typematic-rate",
+        type=float,
+        metavar="HZ",
+        help="Set typematic repeat rate in Hz (events/sec)",
+    )
+    parser.add_argument(
+        "--typematic-excludes",
+        type=str,
+        metavar="KEYS",
+        help="Set comma-separated excluded/non-spamming keys (e.g. 'w,a,s,d,shift')",
+    )
+    parser.add_argument(
+        "--reset-typematic",
+        action="store_true",
+        help="Reset only typematic/auto-repeat settings to factory defaults",
+    )
+
     parser.add_argument(
         "-i",
         "--import-json",
@@ -492,13 +604,38 @@ def run() -> None:
         help="Import any config file (.json, .toml, or directory)",
     )
     parser.add_argument(
-        "--reset-settings", action="store_true", help="Reset app settings to defaults"
+        "--reset-settings",
+        action="store_true",
+        help="Reset all app settings to defaults",
     )
 
     args = parser.parse_args()
 
     try:
-        if args.list:
+        # Check typematic mutation flags
+        typematic_updates = {}
+        if args.set_typematic is not None:
+            typematic_updates["typematic_enabled"] = (
+                1 if args.set_typematic == "on" else 0
+            )
+        if args.typematic_delay is not None:
+            typematic_updates["typematic_delay_ms"] = args.typematic_delay
+        if args.typematic_rate is not None:
+            typematic_updates["typematic_rate_hz"] = args.typematic_rate
+        if args.typematic_excludes is not None:
+            typematic_updates["typematic_exclude_keys"] = args.typematic_excludes
+
+        if typematic_updates:
+            store.settings.update(**typematic_updates)
+            print("Typematic settings updated successfully.")
+            show_typematic()
+            return
+
+        if args.reset_typematic:
+            reset_typematic_defaults()
+        elif args.show_typematic:
+            show_typematic()
+        elif args.list:
             list_profiles()
         elif args.set_active is not None:
             set_active_profile(args.set_active)

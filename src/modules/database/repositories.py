@@ -48,6 +48,14 @@ class AppSettings:
         data["left_handed"] = bool(data["left_handed"])
         data["anchored_floating_joystick"] = bool(data["anchored_floating_joystick"])
         data["joystick_snap_radius"] = float(data.get("joystick_snap_radius", 80.0))
+        
+        # Typematic type coercions & safe null handling
+        data["typematic_enabled"] = bool(data.get("typematic_enabled", 1))
+        data["typematic_delay_ms"] = float(data.get("typematic_delay_ms", 250.0))
+        data["typematic_rate_hz"] = float(data.get("typematic_rate_hz", 30.0))
+        raw_excludes = data.get("typematic_exclude_keys")
+        data["typematic_exclude_keys"] = str(raw_excludes) if raw_excludes is not None else None
+        
         return cls(**data)
 
 
@@ -177,7 +185,8 @@ class AppSettingsRepository:
 
             conn.execute("DELETE FROM app_settings WHERE id = 1;")
             conn.execute(
-                "INSERT INTO app_settings (id, active_layout_id) VALUES (1, ?);",
+                "INSERT INTO app_settings (id, active_layout_id, typematic_exclude_keys) "
+                "VALUES (1, ?, 'w,a,s,d,shift,ctrl,alt');",
                 (active_layout_id,),
             )
         return self.get()

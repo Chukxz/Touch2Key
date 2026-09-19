@@ -1,8 +1,9 @@
+from __future__ import annotations
+
 import json
 import logging
 from pathlib import Path
 from typing import Optional
-
 import tomlkit
 
 from modules.database import store
@@ -113,6 +114,14 @@ def export_settings_toml(
     keys.add("toggle_key", s.toggle_key or "")
     keys.add("sprint_key", s.sprint_key or "")
     doc.add("keys", keys)
+
+    # Typematic Section
+    typematic = tomlkit.table()
+    typematic.add("enabled", bool(s.typematic_enabled))
+    typematic.add("delay_ms", float(s.typematic_delay_ms))
+    typematic.add("rate_hz", float(s.typematic_rate_hz))
+    typematic.add("exclude_keys", s.typematic_exclude_keys or "w,a,s,d,shift,ctrl,alt")
+    doc.add("typematic", typematic)
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
     with open(target_path, "w", encoding="utf-8") as f:

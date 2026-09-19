@@ -112,6 +112,8 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
     joystick = doc.get("joystick", {})
     mouse = doc.get("mouse", {})
     performance = doc.get("performance", {})
+    keys_table = doc.get("keys", {})
+    typematic_table = doc.get("typematic", {})
     toggle_key, sprint_key = _read_keys(doc)
 
     width, height = system.get(
@@ -120,6 +122,21 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
             system.get("json_dev_width", 360),
             system.get("json_dev_height", 800),
         ],
+    )
+
+    # Read typematic values from [typematic] or fall back to legacy [keys] definitions
+    typ_enabled = typematic_table.get(
+        "enabled", keys_table.get("typematic_enabled", True)
+    )
+    typ_delay = typematic_table.get(
+        "delay_ms", keys_table.get("typematic_delay_ms", 250.0)
+    )
+    typ_rate = typematic_table.get(
+        "rate_hz", keys_table.get("typematic_rate_hz", 30.0)
+    )
+    typ_excludes = typematic_table.get(
+        "exclude_keys",
+        keys_table.get("typematic_exclude_keys", "w,a,s,d,shift,ctrl,alt"),
     )
 
     fields: dict[str, Any] = {
@@ -138,6 +155,10 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
         "sprint_key": str(sprint_key) if sprint_key else "",
         "adb_rate_cap": float(performance.get("adb_rate_cap", 250.0)),
         "pps_alert_threshold": float(performance.get("pps_alert_threshold", 60.0)),
+        "typematic_enabled": int(bool(typ_enabled)),
+        "typematic_delay_ms": float(typ_delay),
+        "typematic_rate_hz": float(typ_rate),
+        "typematic_exclude_keys": str(typ_excludes) if typ_excludes is not None else None,
     }
 
     store.settings.update(**fields)
@@ -217,7 +238,6 @@ def migrate_json_layout(
                 priority = int(item.get("priority", 0))
                 move_camera = bool(item.get("move_camera", False))
 
-                # Preserve existing pipeline_config JSON if present; otherwise synthesize one
                 raw_cfg = item.get("pipeline_config")
                 if raw_cfg and isinstance(raw_cfg, str) and raw_cfg != "{}":
                     pipeline_cfg = raw_cfg

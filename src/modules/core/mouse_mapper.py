@@ -85,13 +85,28 @@ class MouseMapper:
         if custom_look_zone:
             zone, cfg = custom_look_zone
             reg_type = zone.zone_type.upper()
+
+            # Helper to safely scale normalized (0-1) coordinates up to device dimensions
+            def _scale_x(val: float | None) -> float:
+                if val is None:
+                    return 0.0
+                return val * dev_w if val <= 1.0 else val
+
+            def _scale_y(val: float | None) -> float:
+                if val is None:
+                    return 0.0
+                return val * dev_h if val <= 1.0 else val
+
             if (
                 reg_type == "CIRCLE"
                 and zone.cx is not None
                 and zone.cy is not None
                 and zone.r
             ):
-                look_region = CircularRegion(Point(zone.cx, zone.cy), zone.r)
+                look_region = CircularRegion(
+                    Point(_scale_x(zone.cx), _scale_y(zone.cy)),
+                    _scale_x(zone.r),
+                )
             elif (
                 reg_type == "RECTANGLE"
                 and zone.x1 is not None
@@ -100,7 +115,8 @@ class MouseMapper:
                 and zone.y2 is not None
             ):
                 look_region = RectangularRegion(
-                    Point(zone.x1, zone.y1), Point(zone.x2, zone.y2)
+                    Point(_scale_x(zone.x1), _scale_y(zone.y1)),
+                    Point(_scale_x(zone.x2), _scale_y(zone.y2)),
                 )
             else:
                 look_region = AlwaysRegion()
@@ -156,12 +172,10 @@ class MouseMapper:
 
         that forbids camera/mouse look tracking.
         """
-        # Query active zone bound to this touch slot from key_mapper or layout_loader
         key_mapper = getattr(self.mapper, "key_mapper", None)
         if not key_mapper:
             return False
 
-        # Look up active slot state in key_mapper
         slot_id = getattr(touch_event, "slot", None) or getattr(
             touch_event, "tracking_id", None
         )
@@ -175,11 +189,11 @@ class MouseMapper:
             # If the touch is driving a TrackFire button, NEVER let camera look consume it
             cfg = getattr(active_zone, "parsed_pipeline_config", {})
             sem_mode = cfg.get("semantics", {}).get("mode", "")
-            if sem_mode == "TRACK_FIRE":
+            if sem_mode == "TRACK_FIRE" or active_zone.__class__.__name__ == "TrackFire":
                 return True
 
             # Standard buttons only pass motion to camera if move_camera is True
-            if not active_zone.move_camera:
+            if not getattr(active_zone, "move_camera", False):
                 return True
 
         return False
@@ -190,7 +204,7 @@ class MouseMapper:
             gx, gy = self.mapper.device_to_game_abs(
                 touch_event.position.x, touch_event.position.y
             )
-            self.bridge.mouse_move_abs(int(gx), int(gy))
+            self.bridge.mouse_move_abs(int(round(gx)), int(round(gy)))
 
             if touch_event.phase is TouchPhase.DOWN:
                 self.bridge.left_click_down()

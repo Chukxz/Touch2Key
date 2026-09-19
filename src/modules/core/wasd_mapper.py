@@ -60,11 +60,14 @@ class WASDMapper:
         # Check if the layout defines an explicit fixed HUD joystick zone
         fixed_zone = None
         for scancode, z_dict in raw_zones:
-            if z_dict.get("name") == MOUSE_WHEEL_CODE and z_dict.get("type") == CIRCLE:
+            if (
+                z_dict.get("name") == MOUSE_WHEEL_CODE
+                or str(scancode) == MOUSE_WHEEL_CODE
+            ) and z_dict.get("type") == CIRCLE:
                 fixed_zone = z_dict
                 break
 
-        # Determine movement half-screen partition based on handedness
+        # Movement half-screen partition based on handedness
         if s.left_handed:
             half_screen_region = RectangularRegion(Point(w / 2.0, 0.0), Point(w, h))
         else:
@@ -72,15 +75,24 @@ class WASDMapper:
 
         anchored_enabled = getattr(s, "anchored_floating_joystick", False)
 
+        def _scale_coord(val: float | None, base: float) -> float:
+            if val is None:
+                return 0.0
+            return val * base if val <= 1.0 else val
+
         if fixed_zone is not None and anchored_enabled:
             # -------------------------------------------------------------
             # 1. Anchored Floating Joystick (Hybrid)
             # -------------------------------------------------------------
             self.mapper.is_floating_joystick = True
-            anchor_pt = Point(fixed_zone["cx"] * w, fixed_zone["cy"] * h)
+            anchor_pt = Point(
+                _scale_coord(fixed_zone["cx"], w),
+                _scale_coord(fixed_zone["cy"], h),
+            )
+            raw_r = fixed_zone.get("r", fixed_zone.get("val1"))
             snap_r = (
-                fixed_zone["r"] * w
-                if fixed_zone.get("r")
+                _scale_coord(raw_r, w)
+                if raw_r is not None
                 else getattr(s, "joystick_snap_radius", 80.0)
             )
 
@@ -111,8 +123,12 @@ class WASDMapper:
             # 2. Pure Fixed Joystick
             # -------------------------------------------------------------
             self.mapper.is_floating_joystick = False
-            center = Point(fixed_zone["cx"] * w, fixed_zone["cy"] * h)
-            touch_radius = fixed_zone["r"] * w
+            center = Point(
+                _scale_coord(fixed_zone["cx"], w),
+                _scale_coord(fixed_zone["cy"], h),
+            )
+            raw_r = fixed_zone.get("r", fixed_zone.get("val1", 50.0))
+            touch_radius = _scale_coord(raw_r, w)
 
             pipeline = FixedJoystick(
                 center=center,

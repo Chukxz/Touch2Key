@@ -33,7 +33,7 @@ from modules.core.pipeline import BezelReturnToggle, Pipeline
 from modules.scripts.pre_flight import run as pre_flight_run
 from modules.core.gestures import TwoFingerTapTracker
 from modules.cli.list_windows import select_window
-from modules.cli.key_capture import capture_keys, capture_performance_settings
+from modules.gui.dialogs.capture_dialogs import capture_keys, capture_performance_settings
 
 NAME = "Touch2Key_Engine"
 cli_profiler: Profile | None = None
@@ -238,24 +238,22 @@ class Engine:
         pps: float = 60.0,
         toggle_key: str | None = None,
         sprint_key: str | None = None,
+        typematic_enabled: bool = True,
+        typematic_delay_ms: float = 250.0,
+        typematic_rate_hz: float = 30.0,
+        typematic_exclude_keys: str | None = None,
     ) -> None:
         k_device_handle: int | None = None
         m_device_handle: int | None = None
 
         if SYSTEM == "Windows":
-            k_device_handle = store.get("windows_keyboard_device", default=None)
-            m_device_handle = store.get("windows_mouse_device", default=None)
+            from modules.platforms.windows.query_interception_device import (
+                select_keyboard_then_mouse,
+            )
 
-            if k_device_handle is None or m_device_handle is None:
-                from modules.platforms.windows.query_interception_device import (
-                    select_keyboard_then_mouse,
-                )
-
-                res = select_keyboard_then_mouse()
-                if res:
-                    k_device_handle, m_device_handle = res
-                    store.set("windows_keyboard_device", k_device_handle)
-                    store.set("windows_mouse_device", m_device_handle)
+            res = select_keyboard_then_mouse()
+            if res:
+                k_device_handle, m_device_handle = res
 
         config = AppConfig(self.mapper_event_dispatcher)
         self.layout_loader = LayoutLoader(
@@ -283,7 +281,14 @@ class Engine:
         )
 
         self.mouse_mapper = MouseMapper(self.mapper)
-        self.key_mapper = KeyMapper(self.mapper, on_toggle_mode=self.toggle_mode)
+        self.key_mapper = KeyMapper(
+            self.mapper,
+            on_toggle_mode=self.toggle_mode,
+            typematic_enabled=typematic_enabled,
+            typematic_delay_ms=typematic_delay_ms,
+            typematic_rate_hz=typematic_rate_hz,
+            typematic_exclude_keys=typematic_exclude_keys,
+        )
         self.wasd_mapper = WASDMapper(self.mapper)
 
         self.touch_reader.bind_touch_event(self._process_touch_event)
@@ -318,12 +323,18 @@ class Engine:
         if rate_cap is None or pps is None:
             return
 
+        settings = store.settings.get()
+
         self.start_headless(
             window_id=selected_window_id,
             rate_cap=rate_cap,
             pps=pps,
             toggle_key=toggle_key,
             sprint_key=sprint_key,
+            typematic_enabled=settings.typematic_enabled,
+            typematic_delay_ms=settings.typematic_delay_ms,
+            typematic_rate_hz=settings.typematic_rate_hz,
+            typematic_exclude_keys=settings.typematic_exclude_keys,
         )
 
         if not self.headless:
@@ -339,7 +350,6 @@ class Engine:
             return
         self.is_shutting_down = True
 
-        # Flushes every callback across the entire engine and child mappers
         self.mapper_event_dispatcher.unregister_all()
 
         if not self.headless:
@@ -439,6 +449,11 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     if not success:
         profiler_cleanup(cli_profiler)
         sys.exit(0)
+
+    # Initialize QApplication if running CLI dialogs
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication(sys.argv)
 
     engine = Engine(headless=False)
     try:

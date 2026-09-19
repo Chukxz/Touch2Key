@@ -5,6 +5,7 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
+from modules.database import store
 from modules.platforms import get_platform
 from modules.utils import (
     DEF_DPI,
@@ -51,6 +52,7 @@ class Mapper:
         self.screen_w, self.screen_h = self.window_manager.get_screen_dimensions()
         self.lock = threading.Lock()
         self.agg_lock = threading.Lock()
+        self.stop_event = threading.Event()
         self.last_cursor_state = True
         self.last_cursor_check_time = 0
         self.window_update_interval = WINDOW_UPDATE_INTERVAL
@@ -90,7 +92,6 @@ class Mapper:
         self.mapper_event_dispatcher.register_callback(
             "ON_CONFIG_RELOAD", self._update_config
         )
-
         self.mapper_event_dispatcher.register_callback(
             "ON_TARGET_WINDOW_CHANGE", self.rebind_target_window
         )
@@ -120,15 +121,25 @@ class Mapper:
             self.device_height = self.layout_loader.height
             self.dpi = self.layout_loader.dpi
 
-            # Hot-reload PPS warning threshold
-            s = self.config.settings
-            if hasattr(s, "pps_alert_threshold") and s.pps_alert_threshold > 0:
-                self.pps = float(s.pps_alert_threshold)
-
-            # Hot-reload Menu Toggle Key
-            if hasattr(s, "toggle_key") and s.toggle_key:
-                self.emulator["toggle_key"] = s.toggle_key
-                self.toggle_key_scancode = SCANCODES.get(s.toggle_key)
+            # Synchronize floating joystick mode from global settings
+            try:
+                s = store.settings.get()
+                self.is_floating_joystick = bool(s.anchored_floating_joystick)
+                if s.pps_alert_threshold > 0:
+                    self.pps = float(s.pps_alert_threshold)
+                if s.toggle_key:
+                    self.emulator["toggle_key"] = s.toggle_key
+                    self.toggle_key_scancode = SCANCODES.get(s.toggle_key)
+            except Exception:
+                # Fallback to local config if database read is mid-transaction
+                s = getattr(self.config, "settings", None)
+                if s:
+                    self.is_floating_joystick = getattr(s, "anchored_floating_joystick", True)
+                    if hasattr(s, "pps_alert_threshold") and s.pps_alert_threshold > 0:
+                        self.pps = float(s.pps_alert_threshold)
+                    if hasattr(s, "toggle_key") and s.toggle_key:
+                        self.emulator["toggle_key"] = s.toggle_key
+                        self.toggle_key_scancode = SCANCODES.get(s.toggle_key)
 
     def rebind_target_window(self, new_window_id: int | None) -> None:
         """Updates the target HWND / Window ID dynamically on the active engine."""
@@ -185,7 +196,7 @@ class Mapper:
         }
 
     def _update_game_window_info(self) -> None:
-        while self.running:
+        while self.running and not self.stop_event.is_set():
             try:
                 current_window_id = None
                 with self.lock:
@@ -218,7 +229,8 @@ class Mapper:
             except Exception as e:
                 logger.debug("Window tracking exception: %s", e)
 
-            time.sleep(LONG_DELAY if self.window_lost else self.window_update_interval)
+            sleep_duration = LONG_DELAY if self.window_lost else self.window_update_interval
+            self.stop_event.wait(sleep_duration)
 
     def _get_game_window_info(self) -> dict:
         window_ids = self.window_manager.find_window_ids_by_class(
@@ -244,11 +256,31 @@ class Mapper:
         return target_info
 
     def device_to_game_abs(self, x: float, y: float) -> tuple[float, float]:
+        """Maps incoming touch coordinates from device orientation space into
+
+        absolute coordinates bounded to the target game window on screen.
+        """
         rot = self.touch_reader.get_rotation()
         rot_dev_w, rot_dev_h = rotate_resolution(
             self.device_width, self.device_height, rot
         )
-        return (x / rot_dev_w) * self.screen_w, (y / rot_dev_h) * self.screen_h
+        rot_dev_w = max(1.0, float(rot_dev_w))
+        rot_dev_h = max(1.0, float(rot_dev_h))
+
+        norm_x = x / rot_dev_w
+        norm_y = y / rot_dev_h
+
+        with self.lock:
+            win = self.game_window_info
+
+        if win:
+            target_x = win["left"] + norm_x * win["width"]
+            target_y = win["top"] + norm_y * win["height"]
+        else:
+            target_x = norm_x * self.screen_w
+            target_y = norm_y * self.screen_h
+
+        return target_x, target_y
 
     def _pulse_status(self) -> None:
         now = time.perf_counter()
@@ -269,7 +301,7 @@ class Mapper:
             )
 
     def _aggregate_mouse_moves(self) -> None:
-        while self.running:
+        while self.running and not self.stop_event.is_set():
             start_time = time.perf_counter()
             if self.touch_reader.active_touches > 0:
                 with self.agg_lock:
@@ -293,9 +325,14 @@ class Mapper:
 
             elapsed = time.perf_counter() - start_time
             sleep_duration = max(0.0, self.touch_reader.move_interval - elapsed)
-            time.sleep(sleep_duration)
+            self.stop_event.wait(sleep_duration)
 
     def _on_worker_respawn(self, worker_type: str) -> None:
         self.mapper_event_dispatcher.dispatch(
             MapperEvent(action="ON_WORKER_RESPAWN", worker_type=worker_type)
         )
+
+    def stop(self) -> None:
+        """Signals background threads to terminate immediately."""
+        self.running = False
+        self.stop_event.set()

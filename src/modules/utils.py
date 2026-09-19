@@ -13,6 +13,9 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Literal, Any
 
+
+# NON_SPAMMING_KEYS = {0x2A, 0x36, 0x1D, 0xE01D, 0x38, 0xE038, 0x3A, 0x45, 0x46}
+
 # Task IDs
 TASK_BUTTON = 0
 TASK_REL = 1
@@ -24,8 +27,14 @@ PACK_REL = struct.Struct("<Bhh")
 PACK_ABS = struct.Struct("<Bii")
 PACK_KEY = struct.Struct("<HB")
 
-# Sentinel values
+# Sentinel values for IPC Key and Mouse streams
 KEY_PING = 2
+KEY_CONFIG = 3  # Configuration payload for typematic timing & exclusions
+
+# Structure: <B (Task ID = 3) ? (enabled) I (initial_delay_ns) f (repeat_rate_sec) H (excluded_count)
+# Followed by array of H (unsigned short scancodes)
+PACK_TYPEMATIC_HEADER = struct.Struct("<B?IfH")
+
 BUTTON_PING = 0x0000
 KEEPALIVE_INTERVAL = 5.0
 

@@ -4,7 +4,7 @@ import math
 import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Generic, Protocol, TypeVar, Any
+from typing import Generic, TypeVar, Any
 
 from modules.utils import Point, Vector, TouchEvent, TouchPhase
 
