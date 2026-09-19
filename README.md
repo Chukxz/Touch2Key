@@ -8,7 +8,7 @@
 **Touch2Key** is a high-performance, cross-platform input mapper designed to seamlessly translate touch interactions (via Android/ADB) into zero-latency keyboard and mouse inputs on your PC.
 
 This is the Second Touch2Key Published Implementation with full GUI and CLI support.
-The first version with only CLI support + Basic GUI windows, can be accessed [here.]("https://github.com/Chukxz/touch2key")
+The first version with only CLI support + Basic GUI windows, can be accessed [here](https://github.com/Chukxz/touch2key).
 
 Enable **Developer Options** and **Wireless Debugging** (5 GHz Wi-Fi recommended) on your Android device and accept the authorization prompt when connecting.
 
@@ -27,6 +27,11 @@ Touch2Key can be paired with game streamers like **Sunshine/Moonlight** or **Apo
   2. **Type Precedence** (`Button: 2` > `Joystick: 1` > `Mouse: 0`)
   3. **Hitbox Specificity** (Smaller bounding areas evaluate before broad/full-screen zones)
   4. **Creation Order** (Deterministic tie-breaker)
+
+* **Hardware-Accurate Typematic Engine (Key Auto-Repeat):**
+  * **Dedicated Low-Level Repeat Loop:** Hardware-accurate repeat pulses execute directly inside driver worker processes without pipe saturation or IPC latency.
+  * **Focus-Stealing for Diagonal WASD:** Pressing a new key steals typematic repeat focus without sending artificial `KEY_UP` releases to currently held keys, allowing diagonal movement to hold cleanly while spamming action keys.
+  * **Dynamic IPC Hot-Reloading:** Delay, rate, and exclusion sets can be altered live via the GUI or CLI without restarting the worker processes.
 
 * **Defensive Input Ownership & Multi-Claim:**
   * **Simultaneous Firing:** Overlapping buttons sharing the same priority tier claim contacts concurrently, enabling multi-key combos from a single touch.
@@ -64,7 +69,7 @@ On startup, the engine launches an interactive Window Selector dialog that lists
 ## Key Customization & Storage
 
 * **Startup Capture Dialog:** Binds core control keys (such as **Toggle** and **Sprint**) and configures performance limits (Rate Cap and Polls Per Second).
-* **SQLite & TOML Storage:** Layout zones, priorities, and hitbox coordinates are stored persistently in SQLite tables with foreign-key cascade protection, while runtime defaults are managed via `settings.toml`.
+* **SQLite & TOML Storage:** Layout zones, priorities, and hitbox coordinates are stored persistently in SQLite tables (`touch2key.db`) with foreign-key cascade protection, while runtime defaults are managed via `settings.toml`.
 
 ---
 
@@ -84,13 +89,23 @@ On startup, the engine launches an interactive Window Selector dialog that lists
 * Linux users: X11 session with `sudo` access for `uinput`/`udev` rules
 
 ### Setup
-* **Install: Remember to create a virtual environment on your machine by using the appropiate `venv` command and activating it (depending on your OS), after navigating to the `Touch2Key` directory on your machine before running the `pip install .` command as it is the standard python practice to avoid package conflicts and ensure isolation.**
+* **Install:** Remember to create a virtual environment on your machine by using the appropriate `venv` command and activating it (depending on your OS), after navigating to the `Touch2Key` directory on your machine before running the `pip install .` command as it is the standard python practice to avoid package conflicts and ensure isolation.
 
    ```bash
-   git clone https://github.com/Chukxz/Touch2Key.git
+   git clone [https://github.com/Chukxz/Touch2Key.git](https://github.com/Chukxz/Touch2Key.git)
    cd Touch2Key
+   python -m venv .venv
+   
+   # Windows: .venv\Scripts\activate
+   # Linux: source .venv/bin/activate
+   
    pip install .
+   ```
+
 * **Setup:** Run setup (Usually requires an internet connection).
+   ```bash
+   touch2key-setup
+   ```
 
 *(Note: Windows requires a system reboot after installation to fully load the driver).*
 
@@ -114,15 +129,16 @@ Because Touch2Key installs system-level drivers and kernel rules, **simply runni
 ---
 
 ## Command Line Interface (CLI)
+
 | Command | Description |
 | :--- | :--- |
 | `touch2key` | Launches the CLI engine. |
 | `touch2key --profile` | Launches the CLI engine and also runs profiling. |
-| `touch2key-adb` | Displays full ADB executable path if found.|
+| `touch2key-adb` | Displays full ADB executable path if found. |
 | `touch2key-capture` | ADB screen capture. |
 | `touch2key-gui` | Launches the GUI engine. |
 | `touch2key-gui --profile` | Launches the GUI engine and also runs profiling. |
-| `touch2key-manage` | Layout Manager.|
+| `touch2key-manage` | Interactive Layout, Profile, and Typematic Manager. |
 | `touch2key-plot` | Mapping visualizer. |
 | `touch2key-preflight` | Diagnostic checks. |
 | `touch2key-setup` | OS configuration wizard. |
@@ -130,6 +146,15 @@ Because Touch2Key installs system-level drivers and kernel rules, **simply runni
 | `touch2key-uninstall --purge` | Uninstalls and removes jsons/images and the settings toml file. |
 | `touch2key-uninstall --purge-all` | Purges and removes the profiling (.prof) file. |
 | `touch2key-wireless` | Forces ADB wireless connection. |
+
+### Typematic Commands (via Layout Manager)
+You can directly configure the hardware auto-repeat settings via `touch2key-manage`:
+```bash
+touch2key-manage --show-typematic
+touch2key-manage --set-typematic on --typematic-delay 200 --typematic-rate 35
+touch2key-manage --typematic-excludes "w,a,s,d,shift,ctrl,alt"
+touch2key-manage --reset-typematic
+```
 
 ---
 

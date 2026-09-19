@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import math
-from typing import Any
+from typing import Any, cast
 
 from modules.core.pipeline import (
     AlwaysRegion,
@@ -22,6 +22,7 @@ from modules.core.pipeline import (
     PointerMoveSemantic,
     DirectionalKeySemantic,
     Pipeline,
+    Transformation,
 )
 from modules.utils import Point
 
@@ -31,7 +32,7 @@ def create_pipeline_from_zone(
     screen_width: float,
     screen_height: float,
     toggle_mode_callback: Any | None = None,
-) -> Pipeline | None:
+) -> Pipeline[Any] | None:
     """Builds a typed 5-stage Pipeline instance from database zone metadata."""
     cfg_raw = getattr(zone, "pipeline_config", "{}") or "{}"
     try:
@@ -91,6 +92,8 @@ def create_pipeline_from_zone(
     # Stage 4: Transformation Selection
     trans_cfg = cfg.get("transform", {})
     trans_type = trans_cfg.get("type", "IDENTITY")
+
+    transformation: Transformation[Any]
     if trans_type == "DELTA":
         sx = float(trans_cfg.get("sens_x", 1.0))
         sy = float(trans_cfg.get("sens_y", 1.0))
@@ -103,7 +106,8 @@ def create_pipeline_from_zone(
             hysteresis_rad=math.radians(float(trans_cfg.get("joy_hysteresis", 5.0))),
         )
     else:
-        transformation = IdentityTransform()
+        # Cast to Transformation[Any] to prevent invariance conflict with Transformation[Unit]
+        transformation = cast(Transformation[Any], IdentityTransform())
 
     # Stage 5: Semantics Selection
     sem_cfg = cfg.get("semantics", {})
@@ -142,7 +146,7 @@ def create_pipeline_from_zone(
 
     priority = int(zone.priority if zone.priority is not None else 0)
 
-    return Pipeline(
+    return Pipeline[Any](
         region=region,
         origin=origin,
         constraint=constraint,

@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from modules.database import store
 from modules.platforms import get_platform
 from modules.utils import (
-    DEF_DPI,
     LONG_DELAY,
     WINDOW_UPDATE_INTERVAL,
     SCANCODES,

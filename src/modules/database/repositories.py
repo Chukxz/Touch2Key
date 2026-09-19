@@ -9,6 +9,7 @@ import json
 from dataclasses import dataclass, fields as dataclass_fields
 from typing import Any, Optional, TYPE_CHECKING
 
+from modules.utils import EXCLUDE_KEYS
 from .connection import connection_manager
 
 if TYPE_CHECKING:
@@ -186,7 +187,7 @@ class AppSettingsRepository:
             conn.execute("DELETE FROM app_settings WHERE id = 1;")
             conn.execute(
                 "INSERT INTO app_settings (id, active_layout_id, typematic_exclude_keys) "
-                "VALUES (1, ?, 'esc,tab,shift,ctrl,alt,caps_lock,num_lock,scroll_lock,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12');",
+                f"VALUES (1, ?, {EXCLUDE_KEYS});",
                 (active_layout_id,),
             )
         return self.get()

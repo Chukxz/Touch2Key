@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import colorsys
-import platform
+import sys
 import random
 import re
 import struct
@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Literal, Any
-
 
 # NON_SPAMMING_KEYS = {0x2A, 0x36, 0x1D, 0xE01D, 0x38, 0xE038, 0x3A, 0x45, 0x46}
 
@@ -47,11 +46,10 @@ if TYPE_CHECKING:
 CURRENT_DIR = Path(__file__).resolve().parent
 SRC_DIR = CURRENT_DIR.parent
 PROJECT_ROOT = SRC_DIR.parent
-SYSTEM = platform.system()
 
 # Binaries & Driver Rules
 BIN_FOLDER = PROJECT_ROOT / "bin"
-ADB_NAME = "adb.exe" if SYSTEM == "Windows" else "adb"
+ADB_NAME = "adb.exe" if sys.platform == "win32" else "adb"
 ADB = BIN_FOLDER / "platform-tools" / ADB_NAME
 UDEV_RULE_PATH = Path("/etc/udev/rules.d/99-touch2key.rules")
 
@@ -495,9 +493,10 @@ MAX_MOUSE_DWELL = 0.0012
 MIN_KEY_DWELL = 0.040
 MAX_KEY_DWELL = 0.070
 
+# TYPEMATIC DEFAULTS
 INITIAL_DELAY_NS = 500_000_000
 REPEAT_RATE = 0.0333
-NON_SPAMMING_KEYS = {0x2A, 0x36, 0x1D, 0xE01D, 0x38, 0xE038, 0x3A, 0x45, 0x46}
+EXCLUDE_KEYS = "esc,tab,shift,ctrl,alt,caps_lock,num_lock,scroll_lock,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12"
 
 
 def get_adb_device():

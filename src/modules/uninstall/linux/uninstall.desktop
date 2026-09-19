@@ -1,0 +1,8 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Uninstall Touch2Key
+Comment=Safely remove Touch2Key drivers and files
+Exec=pkexec touch2key-uninstall
+Terminal=true
+Categories=Utility;

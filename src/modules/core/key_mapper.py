@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Any
 
 from modules.core.pipeline import (
     Button,
@@ -60,7 +60,7 @@ class KeyMapper:
         self.typematic_exclude_keys = typematic_exclude_keys
 
         # Tracks touch slot assignments for camera look suppression
-        self.slot_zone_map: dict[int, any] = {}
+        self.slot_zone_map: dict[int, Any] = {}
         self.lock = threading.Lock()
         self.pipelines = []
         self.ignored_keys = {MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE}

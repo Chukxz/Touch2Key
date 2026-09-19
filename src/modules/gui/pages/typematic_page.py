@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
@@ -22,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from modules.database import store
-from modules.utils import MapperEvent
+from modules.utils import MapperEvent, EXCLUDE_KEYS
 from .base_page import BasePage
 
 if TYPE_CHECKING:
@@ -114,11 +113,9 @@ class TypematicPage(BasePage):
         # Quick preset buttons for common exclusions
         preset_row = QHBoxLayout()
         self.add_wasd_preset_btn = QPushButton("+ WASD Movement")
-        self.add_modifiers_preset_btn = QPushButton("+ Standard Modifiers")
         self.clear_all_btn = QPushButton("Clear List")
 
         preset_row.addWidget(self.add_wasd_preset_btn)
-        preset_row.addWidget(self.add_modifiers_preset_btn)
         preset_row.addStretch()
         preset_row.addWidget(self.clear_all_btn)
         filter_layout.addLayout(preset_row)
@@ -158,9 +155,6 @@ class TypematicPage(BasePage):
         self.add_wasd_preset_btn.clicked.connect(
             lambda: self._add_tokens(["w", "a", "s", "d"])
         )
-        self.add_modifiers_preset_btn.clicked.connect(
-            lambda: self._add_tokens(["shift", "ctrl", "alt", "caps_lock", "tab"])
-        )
         self.clear_all_btn.clicked.connect(self.exclude_list.clear)
 
         self.reset_defaults_btn.clicked.connect(self._on_reset_defaults)
@@ -178,7 +172,7 @@ class TypematicPage(BasePage):
             delay = int(getattr(s, "typematic_delay_ms", 250.0))
             rate = float(getattr(s, "typematic_rate_hz", 30.0))
             raw_excludes = str(
-                getattr(s, "typematic_exclude_keys", "w,a,s,d,shift,ctrl,alt")
+                getattr(s, "typematic_exclude_keys", f"{EXCLUDE_KEYS}")
             )
 
             self.enable_check.setChecked(enabled)
@@ -196,7 +190,7 @@ class TypematicPage(BasePage):
             logger.exception("Failed to load typematic settings")
             QMessageBox.critical(self, "Error", f"Failed to load settings:\n{exc}")
 
-    def _add_tokens(self, tokens: list[str]) -> None:
+    def _add_tokens(self, tokens: Sequence[str]) -> None:
         existing = {
             self.exclude_list.item(i).text().lower()
             for i in range(self.exclude_list.count())
@@ -227,7 +221,7 @@ class TypematicPage(BasePage):
         self.rate_spin.setValue(30.0)
         self._on_enable_toggled(True)
         self.exclude_list.clear()
-        self._add_tokens(["w", "a", "s", "d", "shift", "ctrl", "alt"])
+        self._add_tokens(EXCLUDE_KEYS.split(","))
         QMessageBox.information(
             self,
             "Defaults",

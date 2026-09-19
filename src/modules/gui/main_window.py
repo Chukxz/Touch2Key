@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import sys
 import logging
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QCoreApplication
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDockWidget,
@@ -269,6 +271,70 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(
             self, "Engine Error", f"Mapping engine encountered an error:\n{err_msg}"
         )
+
+    def _setup_driver_menu(self):
+        """Creates a 'Tools' menu for system-level driver actions."""
+        menubar = self.menuBar()
+        tools_menu = menubar.addMenu("Tools")
+
+        # 1. Setup / Repair Action
+        setup_action = QAction("Install / Repair Drivers...", self)
+        setup_action.triggered.connect(self._on_run_setup)
+        tools_menu.addAction(setup_action)
+
+        tools_menu.addSeparator()
+
+        # 2. Uninstall Action
+        uninstall_action = QAction("Uninstall Touch2Key...", self)
+        # Optional: Make the text red in the menu using a stylesheet or icon
+        uninstall_action.triggered.connect(self._on_run_uninstall)
+        tools_menu.addAction(uninstall_action)
+
+    def _on_run_setup(self):
+        """Triggers the setup script with Admin privileges (UAC prompt)."""
+        reply = QMessageBox.question(
+            self, 
+            "Driver Setup",
+            "This will install or repair the necessary system drivers.\n\n"
+            "Your OS will prompt you for Administrator permissions. Continue?",
+            QMessageBox.standardButton.Yes | QMessageBox.standardButton.No
+        )
+        
+        if reply == QMessageBox.standardButton.Yes:
+            if sys.platform == "win32":
+                import ctypes
+                # "runas" forces the Windows UAC Admin prompt
+                ctypes.windll.shell32.ShellExecuteW(
+                    None, "runas", sys.executable, "-m modules.scripts.setup", None, 1
+                )
+            else:
+                import subprocess
+                # Linux GUI Admin prompt
+                subprocess.Popen(["pkexec", sys.executable, "-m", "modules.scripts.setup"])
+
+    def _on_run_uninstall(self):
+        """Triggers the uninstaller as Admin and closes the app to release file locks."""
+        reply = QMessageBox.warning(
+            self, 
+            "Uninstall Touch2Key",
+            "This will remove the system drivers and completely close the application.\n\n"
+            "Your OS will prompt you for Administrator permissions. Continue?",
+            QMessageBox.standardButton.Yes | QMessageBox.standardButton.No
+        )
+        
+        if reply == QMessageBox.standardButton.Yes:
+            if sys.platform == "win32":
+                import ctypes
+                # Launch uninstaller as Admin in a detached process
+                ctypes.windll.shell32.ShellExecuteW(
+                    None, "runas", sys.executable, "-m modules.scripts.uninstall", None, 1
+                )
+            else:
+                import subprocess
+                subprocess.Popen(["pkexec", sys.executable, "-m", "modules.scripts.uninstall"])
+                
+            # CRITICAL: Kill the GUI immediately so the SQLite DB and files unlock!
+            QCoreApplication.quit()
 
     def closeEvent(self, event) -> None:
         if self.engine_worker.isRunning():

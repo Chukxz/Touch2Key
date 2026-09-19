@@ -9,6 +9,9 @@ from typing import Generic, TypeVar, Any
 from modules.utils import Point, Vector, TouchEvent, TouchPhase
 
 
+# Pipeline: Region ⟶ Origin ⟶ Constraint ⟶ Transformation ⟶ Semantic
+
+
 class OutputSink(ABC):
     @abstractmethod
     def key_down(self, key: str) -> None: ...

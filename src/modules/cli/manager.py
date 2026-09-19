@@ -24,7 +24,7 @@ from modules.database.legacy_migration import (
     migrate_json_layout,
     migrate_toml_config,
 )
-from modules.utils import JSONS_FOLDER, PROFILES_FOLDER, TOML_PATH
+from modules.utils import JSONS_FOLDER, PROFILES_FOLDER, TOML_PATH, EXCLUDE_KEYS
 
 # ---------------------------------------------------------------------------
 # Profile Inspection & Management
@@ -73,11 +73,8 @@ def list_layout_zones(layout_id: int) -> None:
             coords = f"Center=({z.cx}, {z.cy}), R={z.r}"
         elif z.zone_type == "RECTANGLE":
             coords = f"Rect=({z.x1}, {z.y1}) -> ({z.x2}, {z.y2})"
-        elif z.zone_type == "BEZEL":
-            coords = f"System Bezel=({z.x1}, {z.y1}) -> ({z.x2}, {z.y2})"
         else:
-            coords = "Unknown Bounds"
-            
+            coords = "Bezel Notch"
         cam_flag = " [MoveCam/TrackFire]" if z.move_camera else ""
         print(
             f"  [{z.id}] {z.name or 'Unnamed'} | Key: {z.scancode} | "
@@ -238,7 +235,7 @@ def reset_typematic_defaults() -> None:
         typematic_enabled=1,
         typematic_delay_ms=250.0,
         typematic_rate_hz=30.0,
-        typematic_exclude_keys="w,a,s,d,shift,ctrl,alt",
+        typematic_exclude_keys=EXCLUDE_KEYS,
     )
     print("Typematic settings reset to factory defaults.")
     show_typematic()

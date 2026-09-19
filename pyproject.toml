@@ -41,24 +41,31 @@ Homepage = "https://github.com/Chukxz/Touch2Key"
 # Install these by running: pip install -e .[dev]
 [project.optional-dependencies]
 dev = [
-    "black>=23.7.0",
-    "flake8>=6.1.0",
-    "pytest>=7.4.0",
-    "snakeviz>=2.2.2",
-    "build>=1.5.0"
+  "black>=23.7.0",
+  "flake8>=6.1.0",
+  "pytest>=7.4.0",
+  "snakeviz>=2.2.2",
+  "build>=1.5.0"
 ]
 
 [project.scripts]
+# Primary Entry Points
 touch2key = "modules.main:run"
+touch2key-gui = "modules.gui.app:run"
+
+# CLI Profile, Layout & Typematic Management
+touch2key-manage = "modules.cli.manager:run"
+touch2key-plot = "modules.cli.layout_plotter:run"
+
+# Device & Network Tools
 touch2key-adb = "modules.scripts.show_adb_path:run"
 touch2key-capture = "modules.scripts.adb_screen_capture:run"
-touch2key-gui = "modules.gui.app:run"
-touch2key-manage = "modules.cli.layout_manager:run"
-touch2key-plot = "modules.cli.layout_plotter:run"
+touch2key-wireless = "modules.cli.wireless_connect:run"
+
+# Lifecycle & Diagnostic Scripts
 touch2key-preflight = "modules.scripts.pre_flight:run"
 touch2key-setup = "modules.scripts.setup:run"
 touch2key-uninstall = "modules.scripts.uninstall:run"
-touch2key-wireless = "modules.cli.wireless_connect:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]

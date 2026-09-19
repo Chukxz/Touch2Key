@@ -1,8 +1,7 @@
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING, NamedTuple
-
-from modules.utils import SYSTEM
 
 if TYPE_CHECKING:
     from .windows.bridge import InterceptionBridge
@@ -24,41 +23,48 @@ class PlatformModules(NamedTuple):
 
 
 def _check_single_instance_windows(instance_name: str) -> tuple[bool, int | None]:
-    import ctypes
+    if sys.platform == "win32":
+        import ctypes
 
-    mutex_name = f"Global\\{instance_name}"
-    handle = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
-    last_error = ctypes.windll.kernel32.GetLastError()
-    if last_error == 183:  # ERROR_ALREADY_EXISTS
-        return False, None
-    if not handle:
-        print(f"[UTILITY] - Mutex creation failed (error {last_error}).")
-        return False, None
-    return True, handle
+        mutex_name = f"Global\\{instance_name}"
+        handle = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
+        last_error = ctypes.windll.kernel32.GetLastError()
+        if last_error == 183:  # ERROR_ALREADY_EXISTS
+            return False, None
+        if not handle:
+            print(f"[UTILITY] - Mutex creation failed (error {last_error}).")
+            return False, None
+        return True, handle
+    
+    raise RuntimeError(f"Unsupported platform: {sys.platform}")
 
 
 def _check_single_instance_linux(instance_name: str) -> tuple[bool, object | None]:
-    import fcntl
+    if sys.platform == "linux":
+        import fcntl
 
-    lock_file = f"/tmp/{instance_name}.lock"
-    try:
-        handle = open(lock_file, "a")
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return True, handle
-    except (IOError, OSError):
-        return False, None
+        lock_file = f"/tmp/{instance_name}.lock"
+        try:
+            handle = open(lock_file, "a")
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True, handle
+        except (IOError, OSError):
+            return False, None
+    
+    raise RuntimeError(f"Unsupported platform: {sys.platform}")
 
 
 def check_single_instance(instance_name: str) -> tuple[bool, object | None]:
-    if SYSTEM == "Windows":
+    if sys.platform == "win32":
         return _check_single_instance_windows(instance_name)
-    elif SYSTEM == "Linux":
+    elif sys.platform == "linux":
         return _check_single_instance_linux(instance_name)
-    raise RuntimeError(f"Unsupported platform: {SYSTEM}")
+    
+    raise RuntimeError(f"Unsupported platform: {sys.platform}")
 
 
 def get_platform() -> PlatformModules:
-    if SYSTEM == "Windows":
+    if sys.platform == "win32":
         from .windows.bridge import InterceptionBridge as Bridge
         from .windows.window import WindowManager
         from .windows.system import SystemConfig
@@ -66,7 +72,7 @@ def get_platform() -> PlatformModules:
 
         return PlatformModules(Bridge, WindowManager, SystemConfig, Mapping)
 
-    elif SYSTEM == "Linux":
+    elif sys.platform == "linux":
         from .linux.bridge import UInputBridge as Bridge
         from .linux.window import WindowManager
         from .linux.system import SystemConfig

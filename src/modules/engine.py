@@ -13,9 +13,6 @@ from PySide6.QtWidgets import QApplication
 from modules.database import store
 from modules.platforms import check_single_instance, get_platform
 from modules.utils import (
-    ADB,
-    SHORT_DELAY,
-    SYSTEM,
     DIAGNOSTICS_FOLDER,
     MapperEvent,
     MapperEventDispatcher,
@@ -34,7 +31,7 @@ from modules.core.pipeline import Pipeline
 from modules.scripts.pre_flight import run as pre_flight_run
 from modules.core.gestures import TwoFingerTapTracker
 from modules.cli.list_windows import select_window
-from modules.gui.dialogs.capture_dialogs import capture_keys, capture_performance_settings
+from modules.cli.key_capture import capture_keys, capture_performance_settings
 
 NAME = "Touch2Key_Engine"
 cli_profiler: Profile | None = None
@@ -73,11 +70,16 @@ class Engine:
         self.two_finger_tap_tracker = TwoFingerTapTracker()
 
         self.vkb_process = None
-        self.vkb_pipe_name = r"\\.\pipe\touch2key_vkb" if SYSTEM == "Windows" else "/tmp/touch2key_vkb"
+        self.vkb_pipe_name = (
+            r"\\.\pipe\touch2key_vkb"
+            if sys.platform == "win32"
+            else "/tmp/touch2key_vkb"
+        )
 
         if not self.headless:
             try:
                 import keyboard
+
                 keyboard.add_hotkey("esc", self._shutdown)
             except Exception:
                 pass
@@ -117,12 +119,17 @@ class Engine:
                 self.vkb_process.kill()
             self.vkb_process = None
         else:
-            self.vkb_process = subprocess.Popen([
-                sys.executable,
-                "-m", "modules.gui.virtual_keyboard",
-                "--pipe", self.vkb_pipe_name,
-                "--pid", str(os.getpid())
-            ])
+            self.vkb_process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "modules.gui.virtual_keyboard",
+                    "--pipe",
+                    self.vkb_pipe_name,
+                    "--pid",
+                    str(os.getpid()),
+                ]
+            )
 
     def _set_is_visible(self, is_visible: bool = True) -> None:
         with self.lock:
@@ -177,7 +184,9 @@ class Engine:
         return tiers
 
     def _process_touch_event(self, touch_event: TouchEvent) -> None:
-        if not (self.mouse_mapper and self.key_mapper and self.wasd_mapper and self.mapper):
+        if not (
+            self.mouse_mapper and self.key_mapper and self.wasd_mapper and self.mapper
+        ):
             return
 
         self.mapper.event_count += 1
@@ -196,7 +205,10 @@ class Engine:
                         p.process(touch_event, sink)
                         return
 
-            if touch_event.contact_id == 0 and not self.two_finger_tap_tracker._contacts:
+            if (
+                touch_event.contact_id == 0
+                and not self.two_finger_tap_tracker._contacts
+            ):
                 gx, gy = self.mapper.device_to_game_abs(
                     touch_event.position.x, touch_event.position.y
                 )
@@ -247,8 +259,11 @@ class Engine:
         k_device_handle: int | None = None
         m_device_handle: int | None = None
 
-        if SYSTEM == "Windows":
-            from modules.platforms.windows.query_interception_device import select_keyboard_then_mouse
+        if sys.platform == "win32":
+            from modules.platforms.windows.query_interception_device import (
+                select_keyboard_then_mouse,
+            )
+
             res = select_keyboard_then_mouse()
             if res:
                 k_device_handle, m_device_handle = res
@@ -332,6 +347,7 @@ class Engine:
         if not self.headless:
             try:
                 import keyboard
+
                 keyboard.wait()
             except Exception:
                 pass
@@ -346,6 +362,7 @@ class Engine:
         if not self.headless:
             try:
                 import keyboard
+
                 keyboard.unhook_all_hotkeys()
             except Exception:
                 pass
@@ -354,7 +371,7 @@ class Engine:
             if self.vkb_process and self.vkb_process.poll() is None:
                 self.vkb_process.terminate()
                 self.vkb_process.wait(timeout=1.0)
-            
+
             if self.touch_reader is not None:
                 self.touch_reader.stop()
             if self.mapper is not None:
@@ -421,13 +438,13 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         cli_profiler = cProfile.Profile()
         cli_profiler.enable()
 
-    if SYSTEM == "Linux":
+    if sys.platform == "linux":
         from modules.platforms.linux import check_display_protocol
 
         if not check_display_protocol():
             sys.exit(1)
-    elif SYSTEM != "Windows":
-        print(f"[!] Unsupported OS: {SYSTEM}")
+    elif sys.platform != "win32":
+        print(f"[!] Unsupported OS: {sys.platform}")
         sys.exit(1)
 
     if not pre_flight_run():
