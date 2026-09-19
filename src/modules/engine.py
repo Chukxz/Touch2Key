@@ -4,6 +4,7 @@ import argparse
 import multiprocessing
 import os
 import sys
+import subprocess
 import threading
 from typing import TYPE_CHECKING
 
@@ -29,7 +30,7 @@ from modules.core.mapper import Mapper
 from modules.core.mouse_mapper import MouseMapper
 from modules.core.key_mapper import KeyMapper
 from modules.core.wasd_mapper import WASDMapper
-from modules.core.pipeline import BezelReturnToggle, Pipeline
+from modules.core.pipeline import Pipeline
 from modules.scripts.pre_flight import run as pre_flight_run
 from modules.core.gestures import TwoFingerTapTracker
 from modules.cli.list_windows import select_window
@@ -64,7 +65,6 @@ class Engine:
         self.mouse_mapper: MouseMapper | None = None
         self.key_mapper: KeyMapper | None = None
         self.wasd_mapper: WASDMapper | None = None
-        self.bezel_pipeline: Pipeline | None = None
 
         self.is_visible = False
         self.lock = threading.Lock()
@@ -72,16 +72,17 @@ class Engine:
         self.mapper_event_dispatcher = dispatcher or MapperEventDispatcher()
         self.two_finger_tap_tracker = TwoFingerTapTracker()
 
+        self.vkb_process = None
+        self.vkb_pipe_name = r"\\.\pipe\touch2key_vkb" if SYSTEM == "Windows" else "/tmp/touch2key_vkb"
+
         if not self.headless:
             try:
                 import keyboard
-
                 keyboard.add_hotkey("esc", self._shutdown)
             except Exception:
                 pass
 
     def _on_devices_changed(self, event: MapperEvent) -> None:
-        """Handles hot-reloading worker processes without restarting the main app."""
         if not self.bridge_class or self.bridge_class.k_proc is None:
             return
         payload = getattr(event, "payload", {}) or {}
@@ -90,7 +91,6 @@ class Engine:
         self.bridge_class.reload_devices(k_id, m_id)
 
     def toggle_mode(self) -> None:
-        """Toggles between Game Mode and Menu/Cursor Mode."""
         with self.lock:
             self.is_visible = not self.is_visible
             new_state = self.is_visible
@@ -108,6 +108,22 @@ class Engine:
             MapperEvent(action="ON_MENU_MODE_TOGGLE", is_visible=new_state)
         )
 
+    def toggle_virtual_keyboard(self) -> None:
+        if self.vkb_process and self.vkb_process.poll() is None:
+            try:
+                self.vkb_process.terminate()
+                self.vkb_process.wait(timeout=0.5)
+            except (subprocess.TimeoutExpired, ProcessLookupError, Exception):
+                self.vkb_process.kill()
+            self.vkb_process = None
+        else:
+            self.vkb_process = subprocess.Popen([
+                sys.executable,
+                "-m", "modules.gui.virtual_keyboard",
+                "--pipe", self.vkb_pipe_name,
+                "--pid", str(os.getpid())
+            ])
+
     def _set_is_visible(self, is_visible: bool = True) -> None:
         with self.lock:
             self.is_visible = is_visible
@@ -122,17 +138,10 @@ class Engine:
     def _on_layout_reload(self) -> None:
         if self.layout_loader is not None:
             self.layout_loader.reload()
-            dev_w = float(self.layout_loader.width)
-            bezel_h = float(self.layout_loader.bezel_height)
-            self.bezel_pipeline = BezelReturnToggle(
-                screen_width=dev_w, bezel_height=bezel_h
-            )
 
     def _build_pipeline_tiers(self) -> list[list[Pipeline]]:
         all_pipelines: list[Pipeline] = []
 
-        if self.bezel_pipeline:
-            all_pipelines.append(self.bezel_pipeline)
         if self.key_mapper:
             all_pipelines.extend(self.key_mapper.pipelines)
         if self.wasd_mapper and self.wasd_mapper.pipeline:
@@ -168,25 +177,26 @@ class Engine:
         return tiers
 
     def _process_touch_event(self, touch_event: TouchEvent) -> None:
-        if not (
-            self.mouse_mapper and self.key_mapper and self.wasd_mapper and self.mapper
-        ):
+        if not (self.mouse_mapper and self.key_mapper and self.wasd_mapper and self.mapper):
             return
+
+        self.mapper.event_count += 1
+        tiers = self._build_pipeline_tiers()
+        sink = self.key_mapper.output_sink
 
         if self.is_visible:
             if self.two_finger_tap_tracker.process(touch_event):
                 self.toggle_mode()
                 return
 
-            if self.bezel_pipeline and self.bezel_pipeline.claims(touch_event):
-                self.two_finger_tap_tracker.reset()
-                self.toggle_mode()
-                return
+            # Allow system pipelines (Bezels) to intercept touches even in Menu mode
+            for tier in tiers:
+                for p in tier:
+                    if getattr(p, "is_system", False) and p.claims(touch_event):
+                        p.process(touch_event, sink)
+                        return
 
-            if (
-                touch_event.contact_id == 0
-                and not self.two_finger_tap_tracker._contacts
-            ):
+            if touch_event.contact_id == 0 and not self.two_finger_tap_tracker._contacts:
                 gx, gy = self.mapper.device_to_game_abs(
                     touch_event.position.x, touch_event.position.y
                 )
@@ -199,10 +209,7 @@ class Engine:
                     self.bridge_class.left_click_up()
             return
 
-        self.mapper.event_count += 1
-        tiers = self._build_pipeline_tiers()
-        sink = self.key_mapper.output_sink
-
+        # --- Game Mode Pipeline Dispatch ---
         claimed_existing = False
         for tier in tiers:
             for p in tier:
@@ -218,16 +225,10 @@ class Engine:
                 tier_claimed = False
                 for p in tier:
                     if p.claims(touch_event):
-                        if p == self.bezel_pipeline:
-                            self.toggle_mode()
-                            return
-
                         p.process(touch_event, sink)
                         tier_claimed = True
-
                         if not p.allow_multi_claim:
                             return
-
                 if tier_claimed:
                     return
 
@@ -247,10 +248,7 @@ class Engine:
         m_device_handle: int | None = None
 
         if SYSTEM == "Windows":
-            from modules.platforms.windows.query_interception_device import (
-                select_keyboard_then_mouse,
-            )
-
+            from modules.platforms.windows.query_interception_device import select_keyboard_then_mouse
             res = select_keyboard_then_mouse()
             if res:
                 k_device_handle, m_device_handle = res
@@ -272,12 +270,6 @@ class Engine:
             emulator_map,
             window_id,
             self,
-        )
-
-        dev_w = float(self.layout_loader.width)
-        bezel_h = float(self.layout_loader.bezel_height)
-        self.bezel_pipeline = BezelReturnToggle(
-            screen_width=dev_w, bezel_height=bezel_h
         )
 
         self.mouse_mapper = MouseMapper(self.mapper)
@@ -340,7 +332,6 @@ class Engine:
         if not self.headless:
             try:
                 import keyboard
-
                 keyboard.wait()
             except Exception:
                 pass
@@ -355,12 +346,15 @@ class Engine:
         if not self.headless:
             try:
                 import keyboard
-
                 keyboard.unhook_all_hotkeys()
             except Exception:
                 pass
 
         try:
+            if self.vkb_process and self.vkb_process.poll() is None:
+                self.vkb_process.terminate()
+                self.vkb_process.wait(timeout=1.0)
+            
             if self.touch_reader is not None:
                 self.touch_reader.stop()
             if self.mapper is not None:
@@ -450,7 +444,6 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         profiler_cleanup(cli_profiler)
         sys.exit(0)
 
-    # Initialize QApplication if running CLI dialogs
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
