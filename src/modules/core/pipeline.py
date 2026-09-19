@@ -28,6 +28,9 @@ class OutputSink(ABC):
     @abstractmethod
     def toggle_menu_mode(self) -> None: ...
 
+    @abstractmethod
+    def toggle_virtual_keyboard(self) -> None: ...
+
 
 class Region(ABC):
     @abstractmethod
@@ -81,9 +84,8 @@ class RectangularRegion(Region):
 
 
 # ---------------------------------------------------------------------------
-# Constraints, Origins, Transforms, Semantics (Standard Definition)
+# Constraints, Origins, Transforms, Semantics 
 # ---------------------------------------------------------------------------
-
 
 class Constraint(ABC):
     @abstractmethod
@@ -172,13 +174,6 @@ class DynamicOrigin(Origin):
 
 @dataclass(slots=True)
 class AnchoredDynamicOrigin(Origin):
-    """
-    Starts anchored to a default fixed HUD position (default_anchor).
-    If touch-down occurs within snap_radius of the anchor, it locks to default_anchor.
-    If touched outside snap_radius, it re-anchors to the touch position (floating).
-    In both cases, LeashConstraint can pull the origin once dragged far enough.
-    """
-
     default_anchor: Point
     snap_radius: float = 80.0
     _position: Point | None = field(init=False, default=None)
@@ -186,10 +181,8 @@ class AnchoredDynamicOrigin(Origin):
     def begin(self, position: Point) -> None:
         delta = position - self.default_anchor
         if delta.magnitude_squared <= (self.snap_radius * self.snap_radius):
-            # Touch landed near the HUD graphic: lock to fixed center
             self._position = self.default_anchor
         else:
-            # Touch landed elsewhere on the movement side: float to finger
             self._position = position
 
     def get(self) -> Point:
@@ -214,12 +207,6 @@ class AnchoredDynamicOrigin(Origin):
 
 @dataclass(slots=True)
 class ModeAwareRegion(Region):
-    """
-    Wraps any standard region (Circular/Rectangular) so that it only activates
-    when the engine is in Game Mode (cursor hidden). In Menu Mode, it rejects
-    activations to allow clean single-touch UI clicks underneath.
-    """
-
     base_region: Region
     engine_ref: Any
 
@@ -231,47 +218,6 @@ class ModeAwareRegion(Region):
     @property
     def area(self) -> float:
         return self.base_region.area
-
-
-@dataclass(slots=True)
-class TopBezelRegion(Region):
-    """
-    An ultra-thin horizontal dead-band along the extreme top edge of the display.
-    Always active in both Game and Menu modes to provide a reliable return gate.
-    """
-
-    screen_width: float
-    bezel_height: float = 14.0  # 14px notch strip
-
-    def activates(self, event: TouchEvent) -> bool:
-        return (
-            0.0 <= event.position.y <= self.bezel_height
-            and 0.0 <= event.position.x <= self.screen_width
-        )
-
-    @property
-    def area(self) -> float:
-        return self.screen_width * self.bezel_height
-
-
-def BezelReturnToggle(
-    screen_width: float,
-    bezel_height: float = 14.0,
-    priority: int = 150,  # Higher than standard buttons
-    creation_id: int = 0,
-) -> Pipeline[Unit]:
-    """Top bezel notch pipeline that emits a mode toggle when tapped."""
-    return Pipeline(
-        region=TopBezelRegion(screen_width=screen_width, bezel_height=bezel_height),
-        origin=FixedOrigin(Point(0.0, 0.0)),
-        constraint=NoConstraint(),
-        transformation=IdentityTransform(),
-        semantics=[ToggleSemantic(output="toggle_mode")],
-        priority=priority,
-        type_precedence=2,
-        creation_id=creation_id,
-        allow_multi_claim=False,
-    )
 
 
 @dataclass(slots=True, frozen=True)
@@ -425,15 +371,8 @@ class PointerMoveSemantic(Semantic[Vector]):
 @dataclass(slots=True)
 class ToggleSemantic(Semantic[Unit]):
     """
-    Stage 5: Semantic.
-    Executes a toggle command on touch DOWN.
-
-    - If output is 'toggle_mode', it notifies the engine/dispatcher to flip
-      between Game Mode and Menu/Cursor Mode.
-    - If output is a key scancode/name, it pulses the hardware key
-      (key_down -> key_up) to trigger the game's in-engine menu toggle.
+    Executes a system toggle command on touch DOWN. Routes to the OutputSink.
     """
-
     output: str
     is_mode_switch: bool = False
 
@@ -443,11 +382,11 @@ class ToggleSemantic(Semantic[Unit]):
         if context.event.phase is not TouchPhase.DOWN:
             return
 
-        if self.output == "toggle_mode" or self.is_mode_switch:
-            # Delegate to the OutputSink / Dispatcher to flip cursor visibility
+        if self.output == "TOGGLE_MODE" or self.is_mode_switch:
             output.toggle_menu_mode()
+        elif self.output == "TOGGLE_VKB":
+            output.toggle_virtual_keyboard()
         else:
-            # Hardware pulse: down then up
             output.key_down(self.output)
             output.key_up(self.output)
 
@@ -455,7 +394,6 @@ class ToggleSemantic(Semantic[Unit]):
 # ---------------------------------------------------------------------------
 # Pipeline with Touch Ownership & Priority Contract
 # ---------------------------------------------------------------------------
-
 
 @dataclass
 class Pipeline(Generic[T]):
@@ -465,9 +403,10 @@ class Pipeline(Generic[T]):
     transformation: Transformation[T]
     semantics: list[Semantic[T]]
     priority: int = 0
-    type_precedence: int = 0  # 2: Button, 1: Joystick, 0: Mouse
+    type_precedence: int = 0  
     creation_id: int = 0
-    allow_multi_claim: bool = False  # True ONLY for Button types
+    allow_multi_claim: bool = False  
+    is_system: bool = False  # Allows pipeline to intercept touches even in Menu Mode
 
     _owned_contact: int | None = field(init=False, default=None)
     _prev_position: Point | None = field(init=False, default=None)
@@ -487,7 +426,6 @@ class Pipeline(Generic[T]):
         self._prev_position = None
 
     def process(self, event: TouchEvent, output: OutputSink) -> bool:
-        """Processes the touch event. Returns True if this pipeline owns/claims the touch."""
         if event.phase is TouchPhase.DOWN:
             if self._owned_contact is not None:
                 return False
@@ -530,8 +468,28 @@ class Pipeline(Generic[T]):
 
 
 # ---------------------------------------------------------------------------
-# Factory Constructors with Priority Contracts
+# Factory Constructors 
 # ---------------------------------------------------------------------------
+
+def SystemToggle(
+    output: str,
+    region: Region,
+    priority: int = 100,
+    creation_id: int = 0,
+) -> Pipeline[Unit]:
+    """Factory for standardizing Bezel/System boundary zones defined in the layout."""
+    return Pipeline(
+        region=region,
+        origin=FixedOrigin(Point(0.0, 0.0)),
+        constraint=NoConstraint(),
+        transformation=IdentityTransform(),
+        semantics=[ToggleSemantic(output=output)],
+        priority=priority,
+        type_precedence=2,
+        creation_id=creation_id,
+        allow_multi_claim=False,
+        is_system=True, 
+    )
 
 
 def Button(
