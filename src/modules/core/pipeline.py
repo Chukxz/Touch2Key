@@ -371,24 +371,56 @@ class PointerMoveSemantic(Semantic[Vector]):
 @dataclass(slots=True)
 class ToggleSemantic(Semantic[Unit]):
     """
-    Executes a system toggle command on touch DOWN. Routes to the OutputSink.
+    Executes a system toggle command on touch UP, strictly enforcing tap constraints
+    to prevent accidental triggers from Android system edge swipes or long presses.
     """
     output: str
     is_mode_switch: bool = False
+    
+    # Tap constraint parameters
+    max_duration_s: float = 0.3
+    max_drift_px: float = 30.0
+
+    _start_time: float | None = field(init=False, default=None)
+    _start_pos: Point | None = field(init=False, default=None)
 
     def process(
         self, context: PipelineContext, value: Unit, output: OutputSink
     ) -> None:
-        if context.event.phase is not TouchPhase.DOWN:
+        phase = context.event.phase
+
+        # 1. Record initial contact
+        if phase is TouchPhase.DOWN:
+            self._start_time = context.event.timestamp
+            self._start_pos = context.event.position
             return
 
-        if self.output == "TOGGLE_MODE" or self.is_mode_switch:
-            output.toggle_menu_mode()
-        elif self.output == "TOGGLE_VKB":
-            output.toggle_virtual_keyboard()
-        else:
-            output.key_down(self.output)
-            output.key_up(self.output)
+        # 2. Evaluate on release
+        if phase is TouchPhase.UP:
+            if self._start_time is None or self._start_pos is None:
+                return
+
+            duration = context.event.timestamp - self._start_time
+            drift = (context.event.position - self._start_pos).magnitude
+
+            # Reset state for next interaction
+            self._start_time = None
+            self._start_pos = None
+
+            # 3. Fire only if it passes the strict tap constraint
+            if duration <= self.max_duration_s and drift <= self.max_drift_px:
+                if self.output == "TOGGLE_MODE" or self.is_mode_switch:
+                    output.toggle_menu_mode()
+                elif self.output == "TOGGLE_VKB":
+                    output.toggle_virtual_keyboard()
+                else:
+                    output.key_down(self.output)
+                    output.key_up(self.output)
+
+    def reset(self, output: OutputSink) -> None:
+        self._start_time = None
+        self._start_pos = None
+
 
 
 # ---------------------------------------------------------------------------
