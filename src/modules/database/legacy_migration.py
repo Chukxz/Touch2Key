@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 import tomlkit
 
-from modules.database import store
+from modules.database import store, ensure_system_bezels
 from modules.utils import JSONS_FOLDER, TOML_PATH
 
 logger = logging.getLogger("modules.database.legacy_migration")
@@ -209,6 +209,7 @@ def migrate_json_layout(
         layout_id = existing.id
     else:
         layout = store.layouts.create(
+            auto_seed_bezels=False, # We are importing zones, do not seed defaults
             name=target_name,
             width=int(metadata["width"]),
             height=int(metadata["height"]),
@@ -272,8 +273,12 @@ def migrate_json_layout(
                     store.zones.create(
                         layout_id=layout_id,
                         scancode=str(scancode),
-                        name=item.get("name", "Bezel Notch"),
+                        name=item.get("name", "Top Bezel"),
                         zone_type="BEZEL",
+                        x1=0.0,
+                        y1=0.0,
+                        x2=float(metadata["width"]),
+                        y2=bezel_h,
                         pipeline_config=pipeline_cfg,
                     )
                 else:  # RECTANGLE
@@ -300,6 +305,10 @@ def migrate_json_layout(
             imported,
             len(content),
         )
+
+        # CRITICAL: Verify the imported data. If it was a legacy file missing the new 
+        # Virtual Keyboard bottom bezel, this will seamlessly inject it.
+        ensure_system_bezels(layout_id)
 
     if set_active:
         store.settings.update(active_layout_id=layout_id)
