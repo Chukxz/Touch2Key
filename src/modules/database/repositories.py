@@ -44,18 +44,18 @@ class AppSettings:
 
     @classmethod
     def from_row(cls, row) -> AppSettings:
-        data = {f.name: row[f.name] for f in dataclass_fields(cls)}
-        data["left_handed"] = bool(data["left_handed"])
-        data["anchored_floating_joystick"] = bool(data["anchored_floating_joystick"])
+        data = {f.name: row[f.name] for f in dataclass_fields(cls) if f.name in row.keys()}
+        data["left_handed"] = bool(data.get("left_handed", 0))
+        data["anchored_floating_joystick"] = bool(data.get("anchored_floating_joystick", 0))
         data["joystick_snap_radius"] = float(data.get("joystick_snap_radius", 80.0))
-        
+
         # Typematic type coercions & safe null handling
         data["typematic_enabled"] = bool(data.get("typematic_enabled", 1))
         data["typematic_delay_ms"] = float(data.get("typematic_delay_ms", 250.0))
         data["typematic_rate_hz"] = float(data.get("typematic_rate_hz", 30.0))
         raw_excludes = data.get("typematic_exclude_keys")
         data["typematic_exclude_keys"] = str(raw_excludes) if raw_excludes is not None else None
-        
+
         return cls(**data)
 
 
@@ -186,7 +186,7 @@ class AppSettingsRepository:
             conn.execute("DELETE FROM app_settings WHERE id = 1;")
             conn.execute(
                 "INSERT INTO app_settings (id, active_layout_id, typematic_exclude_keys) "
-                "VALUES (1, ?, 'w,a,s,d,shift,ctrl,alt');",
+                "VALUES (1, ?, 'esc,tab,shift,ctrl,alt,caps_lock,num_lock,scroll_lock,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12');",
                 (active_layout_id,),
             )
         return self.get()
@@ -223,7 +223,7 @@ class LayoutsRepository:
         row = conn.execute("SELECT * FROM layouts WHERE name = ?;", (name,)).fetchone()
         return Layout.from_row(row) if row is not None else None
 
-    def create(self, **fields: Any) -> Layout:
+    def create(self, auto_seed_bezels: bool = True, **fields: Any) -> Layout:
         unknown = set(fields) - self.ALLOWED_FIELDS
         if unknown:
             raise InvalidFieldError(f"Unknown layouts field(s): {sorted(unknown)}")
@@ -246,6 +246,30 @@ class LayoutsRepository:
 
         layout = self.get(new_id)
         assert layout is not None
+
+        # --- Auto-Seed System Bezels for fresh layouts ---
+        if auto_seed_bezels:
+            zones_repo = LayoutZonesRepository()
+            w, h = float(layout.width), float(layout.height)
+            
+            zones_repo.create(
+                layout_id=layout.id,
+                scancode="BEZEL_TOP",
+                name="Top Bezel",
+                zone_type="BEZEL",
+                x1=0.0, y1=0.0, x2=w, y2=50.0,
+                pipeline_config='{"priority": 100, "semantics": {"action": "TOGGLE_MODE"}}'
+            )
+            
+            zones_repo.create(
+                layout_id=layout.id,
+                scancode="BEZEL_BOTTOM",
+                name="Bottom Bezel",
+                zone_type="BEZEL",
+                x1=0.0, y1=h - 50.0, x2=w, y2=h,
+                pipeline_config='{"priority": 100, "semantics": {"action": "TOGGLE_VKB"}}'
+            )
+
         return layout
 
     def update(self, layout_id: int, **fields: Any) -> Layout:
@@ -290,6 +314,7 @@ class LayoutsRepository:
             raise KeyError(f"No layout with id={layout_id}")
 
         new_layout = self.create(
+            auto_seed_bezels=False, # Prevent double-seeding, we will copy them below
             name=new_name,
             width=source.width,
             height=source.height,
