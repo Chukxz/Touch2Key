@@ -41,15 +41,14 @@ def create_pipeline_from_zone(
 
     reg_cfg = cfg.get("region", {})
     reg_type = reg_cfg.get("type", zone.zone_type)
-
-    # Master Bezel Return is managed at the root Engine level
-    if reg_type == "BEZEL" or zone.zone_type == "BEZEL":
-        return None
+    
+    # Flag to allow this pipeline to intercept touches even in Menu Mode
+    is_system = (reg_type == "BEZEL" or zone.zone_type == "BEZEL")
 
     # Stage 1: Region Selection
     if reg_type == "ALWAYS":
         region = AlwaysRegion()
-    elif reg_type == "RECTANGLE":
+    elif reg_type == "RECTANGLE" or reg_type == "BEZEL":
         x1 = float(zone.x1 if zone.x1 is not None else 0.0)
         y1 = float(zone.y1 if zone.y1 is not None else 0.0)
         x2 = float(zone.x2 if zone.x2 is not None else screen_width)
@@ -109,6 +108,7 @@ def create_pipeline_from_zone(
     # Stage 5: Semantics Selection
     sem_cfg = cfg.get("semantics", {})
     sem_mode = sem_cfg.get("mode", "BUTTON")
+    action = sem_cfg.get("action")
     is_mouse_button = bool(sem_cfg.get("is_mouse_button", False))
     target_key = str(zone.scancode or "space")
 
@@ -116,8 +116,10 @@ def create_pipeline_from_zone(
     allow_multi_claim = False
     type_precedence = 2
 
-    if sem_mode == "TOGGLE_MODE":
-        semantics.append(ToggleSemantic(output="toggle_mode", is_mode_switch=True))
+    if action == "TOGGLE_MODE" or sem_mode == "TOGGLE_MODE":
+        semantics.append(ToggleSemantic(output="TOGGLE_MODE", is_mode_switch=True))
+    elif action == "TOGGLE_VKB" or sem_mode == "TOGGLE_VKB":
+        semantics.append(ToggleSemantic(output="TOGGLE_VKB"))
     elif sem_mode == "TOGGLE_KEY":
         semantics.append(ToggleSemantic(output=target_key, is_mode_switch=False))
     elif sem_mode == "WASD":
@@ -150,4 +152,5 @@ def create_pipeline_from_zone(
         type_precedence=type_precedence,
         creation_id=int(zone.id or 0),
         allow_multi_claim=allow_multi_claim,
+        is_system=is_system,  # Passes the system flag
     )
