@@ -6,7 +6,7 @@ import threading
 from typing import TYPE_CHECKING, Any
 
 from modules.core.pipeline_factory import create_pipeline_from_zone
-from modules.database import Layout, LayoutZone, store
+from modules.database import Layout, LayoutZone, store, ensure_system_bezels
 from modules.utils import CIRCLE, RECTANGLE, MapperEvent
 
 if TYPE_CHECKING:
@@ -41,7 +41,7 @@ class LayoutLoader:
         self.dpi: int = 160
         self.mouse_wheel_radius: float = 50.0
         self.sprint_distance: float = 10.0
-        self.bezel_height: float = 14.0
+        self.bezel_height: float = 14.0  # Kept strictly for backward compatibility if plugins expect it
 
         self.json_data: list[tuple[str, dict[str, Any]]] = []
         self.custom_pipelines: list[Pipeline] = []
@@ -58,7 +58,7 @@ class LayoutLoader:
             return self.mouse_wheel_radius, self.sprint_distance
 
     def _load_layout(self) -> None:
-        """Loads metadata, parses custom pipelines, and extracts bezel height."""
+        """Loads metadata and parses custom pipelines."""
         layout = store.get_active_layout()
         if layout is None:
             logger.warning("No active layout found in SQLite database.")
@@ -69,9 +69,14 @@ class LayoutLoader:
                 self.dpi = settings.json_dev_dpi or 160
                 self.custom_pipelines = []
                 self.json_data = []
-                self.bezel_height = 14.0
             return
 
+        # --- Self-Heal ---
+        # Ensures existing SQLite databases automatically get the Virtual Keyboard 
+        # and Mode Switch bezels injected before we compile pipelines.
+        ensure_system_bezels(layout.id)
+
+        # Fetch zones AFTER auto-healing ensures bezels exist
         zones = store.get_active_layout_zones()
 
         with self.layout_lock:
@@ -84,19 +89,10 @@ class LayoutLoader:
             self.sprint_distance = layout.sprint_distance
 
             compiled_pipelines: list[Pipeline] = []
-            extracted_bezel_height = 14.0
 
             for z in zones:
-                cfg_raw = getattr(z, "pipeline_config", "{}") or "{}"
-                try:
-                    cfg = json.loads(cfg_raw)
-                    reg = cfg.get("region", {})
-                    if reg.get("type") == "BEZEL" or z.zone_type == "BEZEL":
-                        extracted_bezel_height = float(reg.get("bezel_height", 14.0))
-                        continue
-                except Exception:
-                    pass
-
+                # We no longer skip BEZEL types! They are compiled into SystemToggle 
+                # pipelines and routed straight to the Engine.
                 pipeline = create_pipeline_from_zone(
                     zone=z,
                     screen_width=float(self.width),
@@ -107,8 +103,10 @@ class LayoutLoader:
                     compiled_pipelines.append(pipeline)
 
             self.custom_pipelines = compiled_pipelines
-            self.bezel_height = extracted_bezel_height
 
+            # Normalize touch coordinates for the Android/Mobile payload.
+            # We still skip BEZELs here because the mobile screen doesn't need to 
+            # render bounding boxes for invisible system edge triggers.
             normalized: list[tuple[str, dict[str, Any]]] = []
             for z in zones:
                 if z.zone_type == "BEZEL":
@@ -137,13 +135,12 @@ class LayoutLoader:
             self.json_data = normalized
 
             logger.info(
-                "Active layout '%s' loaded. (%dx%d, %d zones, %d pipelines, bezel: %.1fpx)",
+                "Active layout '%s' loaded. (%dx%d, %d zones, %d compiled pipelines)",
                 self.active_layout.name,
                 self.width,
                 self.height,
                 len(self.zones),
                 len(self.custom_pipelines),
-                self.bezel_height,
             )
 
     def _on_dispatcher_reload(self) -> None:
