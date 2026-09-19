@@ -73,8 +73,11 @@ def list_layout_zones(layout_id: int) -> None:
             coords = f"Center=({z.cx}, {z.cy}), R={z.r}"
         elif z.zone_type == "RECTANGLE":
             coords = f"Rect=({z.x1}, {z.y1}) -> ({z.x2}, {z.y2})"
+        elif z.zone_type == "BEZEL":
+            coords = f"System Bezel=({z.x1}, {z.y1}) -> ({z.x2}, {z.y2})"
         else:
-            coords = "Bezel Notch"
+            coords = "Unknown Bounds"
+            
         cam_flag = " [MoveCam/TrackFire]" if z.move_camera else ""
         print(
             f"  [{z.id}] {z.name or 'Unnamed'} | Key: {z.scancode} | "
