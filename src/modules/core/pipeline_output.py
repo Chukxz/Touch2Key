@@ -6,7 +6,6 @@ from modules.utils import M_LEFT, M_RIGHT, M_MIDDLE, SCANCODES
 
 if TYPE_CHECKING:
     from modules.platforms.base import AbstractBridge
-    from modules.utils import MapperEventDispatcher
 
 
 class BridgeOutputSink(OutputSink):
@@ -16,14 +15,21 @@ class BridgeOutputSink(OutputSink):
         self,
         bridge: AbstractBridge,
         on_toggle_mode: Callable[[], None] | None = None,
+        on_toggle_vkb: Callable[[], None] | None = None,
     ) -> None:
         self.bridge = bridge
         self.on_toggle_mode = on_toggle_mode
+        self.on_toggle_vkb = on_toggle_vkb
 
     def toggle_menu_mode(self) -> None:
         """Invokes Engine.toggle_mode directly."""
         if self.on_toggle_mode is not None:
             self.on_toggle_mode()
+
+    def toggle_virtual_keyboard(self) -> None:
+        """Invokes Engine.toggle_virtual_keyboard directly."""
+        if self.on_toggle_vkb is not None:
+            self.on_toggle_vkb()
 
     def key_down(self, key: str) -> None:
         scancode = self._resolve_scancode(key)
