@@ -5,7 +5,6 @@ import threading
 from typing import TYPE_CHECKING
 
 from modules.core.pipeline import (
-    CircularRegion,
     FixedJoystick,
     FloatingJoystick,
     AnchoredFloatingJoystick,
@@ -73,6 +72,7 @@ class WASDMapper:
         else:
             half_screen_region = RectangularRegion(Point(0.0, 0.0), Point(w / 2.0, h))
 
+        floating_enabled = getattr(s, "floating_joystick", False)
         anchored_enabled = getattr(s, "anchored_floating_joystick", False)
 
         def _scale_coord(val: float | None, base: float) -> float:
@@ -80,99 +80,107 @@ class WASDMapper:
                 return 0.0
             return val * base if val <= 1.0 else val
 
-        if fixed_zone is not None and anchored_enabled:
-            # -------------------------------------------------------------
-            # 1. Anchored Floating Joystick (Hybrid)
-            # -------------------------------------------------------------
-            self.mapper.is_floating_joystick = True
-            anchor_pt = Point(
-                _scale_coord(fixed_zone["cx"], w),
-                _scale_coord(fixed_zone["cy"], h),
-            )
-            raw_r = fixed_zone.get("r", fixed_zone.get("val1"))
-            snap_r = (
-                _scale_coord(raw_r, w)
-                if raw_r is not None
-                else getattr(s, "joystick_snap_radius", 80.0)
-            )
+        if fixed_zone is not None:
+            if floating_enabled:
 
-            pipeline = AnchoredFloatingJoystick(
-                default_anchor=anchor_pt,
-                region=half_screen_region,
-                dead_zone=s.deadzone * inner_r,
-                walk_radius=inner_r,
-                sprint_radius=outer_r,
-                leash_radius=outer_r,
-                snap_radius=snap_r,
-                hysteresis_deg=s.hysteresis,
-                up="w",
-                down="s",
-                left="a",
-                right="d",
-                sprint_key=s.sprint_key or "shift",
-            )
-            logger.info(
-                "Configured Anchored Floating Joystick at anchor=(%0.1f, %0.1f) snap_radius=%0.1f",
-                anchor_pt.x,
-                anchor_pt.y,
-                snap_r,
-            )
+                if anchored_enabled:
+                    # -------------------------------------------------------------
+                    # 1. Anchored Floating Joystick (Hybrid)
+                    # -------------------------------------------------------------
+                    self.mapper.is_floating_joystick = True
+                    self.mapper.is_anchored_floating_joystick = True
 
-        elif fixed_zone is not None:
-            # -------------------------------------------------------------
-            # 2. Pure Fixed Joystick
-            # -------------------------------------------------------------
-            self.mapper.is_floating_joystick = False
-            center = Point(
-                _scale_coord(fixed_zone["cx"], w),
-                _scale_coord(fixed_zone["cy"], h),
-            )
-            raw_r = fixed_zone.get("r", fixed_zone.get("val1", 50.0))
-            touch_radius = _scale_coord(raw_r, w)
+                    anchor_pt = Point(
+                        _scale_coord(fixed_zone["cx"], w),
+                        _scale_coord(fixed_zone["cy"], h),
+                    )
+                    raw_r = fixed_zone.get("r", fixed_zone.get("val1"))
+                    snap_r = (
+                        _scale_coord(raw_r, w)
+                        if raw_r is not None
+                        else getattr(s, "joystick_snap_radius", 80.0)
+                    )
 
-            pipeline = FixedJoystick(
-                center=center,
-                touch_radius=touch_radius,
-                dead_zone=s.deadzone * inner_r,
-                walk_radius=inner_r,
-                sprint_radius=outer_r,
-                hysteresis_deg=s.hysteresis,
-                up="w",
-                down="s",
-                left="a",
-                right="d",
-                sprint_key=s.sprint_key or "shift",
-            )
-            logger.info(
-                "Configured Fixed Joystick at (%0.1f, %0.1f) radius=%0.1f",
-                center.x,
-                center.y,
-                touch_radius,
-            )
+                    pipeline = AnchoredFloatingJoystick(
+                        default_anchor=anchor_pt,
+                        region=half_screen_region,
+                        dead_zone=s.deadzone * inner_r,
+                        walk_radius=inner_r,
+                        sprint_radius=outer_r,
+                        leash_radius=outer_r,
+                        snap_radius=snap_r,
+                        hysteresis_deg=s.hysteresis,
+                        up="w",
+                        down="s",
+                        left="a",
+                        right="d",
+                        sprint_key=s.sprint_key or "shift",
+                    )
+                    logger.info(
+                        "Configured Anchored Floating Joystick at anchor=(%0.1f, %0.1f) snap_radius=%0.1f",
+                        anchor_pt.x,
+                        anchor_pt.y,
+                        snap_r,
+                    )
 
-        else:
-            # -------------------------------------------------------------
-            # 3. Pure Floating Joystick
-            # -------------------------------------------------------------
-            self.mapper.is_floating_joystick = True
+                else:
+                    # -------------------------------------------------------------
+                    # 2. Pure Floating Joystick
+                    # -------------------------------------------------------------
+                    self.mapper.is_floating_joystick = True
+                    self.mapper.is_anchored_floating_joystick = False
 
-            pipeline = FloatingJoystick(
-                region=half_screen_region,
-                dead_zone=s.deadzone * inner_r,
-                walk_radius=inner_r,
-                sprint_radius=outer_r,
-                leash_radius=outer_r,
-                hysteresis_deg=s.hysteresis,
-                up="w",
-                down="s",
-                left="a",
-                right="d",
-                sprint_key=s.sprint_key or "shift",
-            )
-            logger.info(
-                "Configured Floating Joystick (Handedness: %s)",
-                "Left" if s.left_handed else "Right",
-            )
+                    pipeline = FloatingJoystick(
+                        region=half_screen_region,
+                        dead_zone=s.deadzone * inner_r,
+                        walk_radius=inner_r,
+                        sprint_radius=outer_r,
+                        leash_radius=outer_r,
+                        hysteresis_deg=s.hysteresis,
+                        up="w",
+                        down="s",
+                        left="a",
+                        right="d",
+                        sprint_key=s.sprint_key or "shift",
+                    )
+                    logger.info(
+                        "Configured Floating Joystick (Handedness: %s)",
+                        "Left" if s.left_handed else "Right",
+                    )
+
+            else:
+                # -------------------------------------------------------------
+                # 3. Pure Fixed Joystick
+                # -------------------------------------------------------------
+                self.mapper.is_floating_joystick = False
+                self.mapper.is_anchored_floating_joystick = False
+
+                center = Point(
+                    _scale_coord(fixed_zone["cx"], w),
+                    _scale_coord(fixed_zone["cy"], h),
+                )
+                raw_r = fixed_zone.get("r", fixed_zone.get("val1", 50.0))
+                touch_radius = _scale_coord(raw_r, w)
+
+                pipeline = FixedJoystick(
+                    center=center,
+                    touch_radius=touch_radius,
+                    dead_zone=s.deadzone * inner_r,
+                    walk_radius=inner_r,
+                    sprint_radius=outer_r,
+                    hysteresis_deg=s.hysteresis,
+                    up="w",
+                    down="s",
+                    left="a",
+                    right="d",
+                    sprint_key=s.sprint_key or "shift",
+                )
+                logger.info(
+                    "Configured Fixed Joystick at (%0.1f, %0.1f) radius=%0.1f",
+                    center.x,
+                    center.y,
+                    touch_radius,
+                )
 
         with self.lock:
             # Release any active keys held by the previous pipeline before swapping

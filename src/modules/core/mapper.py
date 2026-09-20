@@ -45,7 +45,8 @@ class Mapper:
         self.event_count = 0
         self.last_pulse_time = time.perf_counter()
         self.engine_ref = ref
-        self.is_floating_joystick: bool = True
+        self.is_floating_joystick: bool = False
+        self.is_anchored_floating_joystick: bool = False
 
         self.window_manager = get_platform().WindowManager()
         self.screen_w, self.screen_h = self.window_manager.get_screen_dimensions()
@@ -123,7 +124,8 @@ class Mapper:
             # Synchronize floating joystick mode from global settings
             try:
                 s = store.settings.get()
-                self.is_floating_joystick = bool(s.anchored_floating_joystick)
+                self.is_floating_joystick = bool(s.floating_joystick)
+                self.is_anchored_floating_joystick = bool(s.anchored_floating_joystick)
                 if s.pps_alert_threshold > 0:
                     self.pps = float(s.pps_alert_threshold)
                 if s.toggle_key:
@@ -133,7 +135,8 @@ class Mapper:
                 # Fallback to local config if database read is mid-transaction
                 s = getattr(self.config, "settings", None)
                 if s:
-                    self.is_floating_joystick = getattr(s, "anchored_floating_joystick", True)
+                    self.is_floating_joystick = getattr(s, "floating_joystick", False)
+                    self.is_anchored_floating_joystick = getattr(s, "anchored_floating_joystick", False)
                     if hasattr(s, "pps_alert_threshold") and s.pps_alert_threshold > 0:
                         self.pps = float(s.pps_alert_threshold)
                     if hasattr(s, "toggle_key") and s.toggle_key:

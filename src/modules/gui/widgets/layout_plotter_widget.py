@@ -11,6 +11,7 @@ from modules.platforms import get_platform, get_specific_mt_key
 get_platform().SystemConfig().set_dpi_awareness()
 
 from modules.utils import (
+    BEZEL,
     CIRCLE,
     RECTANGLE,
     DEF_DPI,
@@ -18,7 +19,8 @@ from modules.utils import (
     MOUSE_WHEEL_CODE,
     SPRINT_DISTANCE_CODE,
     IDLE,
-    SYSTEM,
+    TOP_BEZEL_ID,
+    BOTTOM_BEZEL_ID,
     get_scancode_and_bridge_key_from_key,
     get_key_from_scancode,
     rotate_resolution,
@@ -28,7 +30,7 @@ from modules.utils import (
 )
 from modules.database import store
 
-if SYSTEM == "Windows":
+if sys.platform == "win32":
     os.environ["QT_LOGGING_RULES"] = "qt.qpa.window=false"
 
 import matplotlib
@@ -943,7 +945,7 @@ class _DraggableRectangle(_DraggableShape):
 
         if any(rectangle_changed):
             raw_bb = (x, y), (x + w, y + h)
-            cx, cy, _, bb = self.plotter.calculate_raw_rect(raw_bb)
+            cx, cy, _, bb = calculate_raw_rect(raw_bb)
             self.plotter.shapes[self.entry_id]["cx"] = cx
             self.plotter.shapes[self.entry_id]["cy"] = cy
             self.plotter.shapes[self.entry_id]["bb"] = bb
@@ -1328,6 +1330,10 @@ class LayoutPlotterWidget(QWidget):
                 pass
 
             key_name = get_key_from_scancode(zone.scancode)
+            if key_name is None:
+                print(f"\n[!] No key name found for '{zone.scancode}'.")
+                continue
+
             _, bridge_key = get_scancode_and_bridge_key_from_key(key_name)
             self.mode = zone.zone_type
             cx = int(round((zone.cx or 0.0) * scale_x))
@@ -1935,7 +1941,7 @@ class LayoutPlotterWidget(QWidget):
                 cfg["semantics"] = {}
 
             if data["move_camera"]:
-                cfg["semantics"]["mode"] = "TRACK_FIRE"
+                cfg["semantics"]["mode"] = "BUTTON"
             elif cfg["semantics"].get("mode") == "TRACK_FIRE":
                 cfg["semantics"]["mode"] = "BUTTON"
 
@@ -2020,7 +2026,7 @@ class LayoutPlotterWidget(QWidget):
                     layout_id=layout_id,
                     scancode=str(item["scancode"]),
                     name=item["name"],
-                    zone_type="CIRCLE",
+                    zone_type=CIRCLE,
                     cx=float(item["cx"]),
                     cy=float(item["cy"]),
                     r=float(item["val1"]),
@@ -2031,7 +2037,7 @@ class LayoutPlotterWidget(QWidget):
                     layout_id=layout_id,
                     scancode=str(item["scancode"]),
                     name=item["name"],
-                    zone_type="RECTANGLE",
+                    zone_type=RECTANGLE,
                     x1=float(item["val1"]),
                     y1=float(item["val2"]),
                     x2=float(item["val3"]),
@@ -2189,18 +2195,6 @@ class LayoutPlotterWidget(QWidget):
             ((min(xs), min(ys)), (max(xs), max(ys))),
         )
 
-    def calculate_raw_rect(self, values):
-        if len(values) < 2:
-            return None, None, None, None
-        xs = [v[0] for v in values]
-        ys = [v[1] for v in values]
-        return (
-            int(round(sum(xs) / 2)),
-            int(round(sum(ys) / 2)),
-            None,
-            ((min(xs), min(ys)), (max(xs), max(ys))),
-        )
-
     def euclidean_distance(self, x1, y1, x2, y2):
         return math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
 
@@ -2260,3 +2254,62 @@ class LayoutPlotterWidget(QWidget):
 
         candidates.sort(key=lambda c: (round(c["diff"], 5), c["y"]))
         return candidates[0]["pt"]
+
+
+def calculate_raw_rect(values):
+    if len(values) < 2:
+        return None, None, None, None
+    xs = [v[0] for v in values]
+    ys = [v[1] for v in values]
+    return (
+        int(round(sum(xs) / 2)),
+        int(round(sum(ys) / 2)),
+        None,
+        ((min(xs), min(ys)), (max(xs), max(ys))),
+    )
+
+
+def ensure_bezels(
+    layout_id: int, w: int, h: int, top_bezel_height: int, bottom_bezel_height: int
+):
+    # Top Bezel
+    top_bezel_bb = (0, h - top_bezel_height), (w, h)
+    top_cx, top_cy, _, top_bb = calculate_raw_rect(top_bezel_bb)
+
+    if top_bb is not None:
+        (top_x_min, top_y_min), (top_x_max, top_y_max) = top_bb
+
+        top_pipeline_config = {}
+
+        store.zones.create(
+            layout_id=layout_id,
+            scancode=str(TOP_BEZEL_ID),
+            name="TOP_BEZEL",
+            zone_type="RECTANGLE",
+            x1=top_x_min,
+            y1=top_y_min,
+            x2=top_x_max,
+            y2=top_y_max,
+            pipeline_config=top_pipeline_config,
+        )
+
+    # Bottom Bezel
+    bottom_bezel_bb = (0, 0), (w, bottom_bezel_height)
+    bottom_cx, bottom_cy, _, bottom_bb = calculate_raw_rect(bottom_bezel_height)
+
+    if bottom_bb is not None:
+        (bottom_x_min, bottom_y_min), (bottom_x_max, bottom_y_max) = bottom_bb
+
+        bottom_pipeline_config = {}
+
+        store.zones.create(
+            layout_id=layout_id,
+            scancode=str(BOTTOM_BEZEL_ID),
+            name="BOTTOM_BEZEL",
+            zone_type=BEZEL,
+            x1=bottom_x_min,
+            y1=bottom_y_min,
+            x2=bottom_x_max,
+            y2=bottom_y_max,
+            pipeline_config=bottom_pipeline_config,
+        )

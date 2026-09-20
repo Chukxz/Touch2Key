@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import logging
 from typing import Optional
 from interception.constants import FilterKeyFlag, FilterMouseButtonFlag, KeyFlag
 from interception.interception import Interception
+from modules.utils import MODIFIER_KEYS, get_scancode_from_key
+
+logger = logging.getLogger("modules.platforms.windows.query_interception_device")
 
 DEVICE_HEADERS = ["Device #", "Hardware ID"]
 KEYBOARD_RANGE = range(0, 10)
 MOUSE_RANGE = range(10, 20)
-_MODIFIER_SCANCODES = {0x1D, 0x2A, 0x36, 0x38}
+_MODIFIER_SCANCODES = [
+    code for key in MODIFIER_KEYS if (code := get_scancode_from_key(key)) is not None
+]
 
 
 def _qualifies_stroke(stroke, is_keyboard: bool) -> bool:
@@ -76,7 +82,7 @@ def _select_device_cli(
                         print(f"[+] Hardware detected: Device {dev} ({clean})")
                         return dev
     except KeyboardInterrupt:
-        print("\n[!] Input capture cancelled.")
+        logger.info("\n[!] Input capture cancelled.")
         return None
     finally:
         try:
@@ -260,7 +266,8 @@ def _create_gui_dialogs(context: Interception):
 
         def _on_detected(self, dev: int, hwid: str) -> None:
             for r in range(self.table.rowCount()):
-                if self.table.item(r, 0).data(Qt.ItemDataRole.UserRole) == dev:
+                item = self.table.item(r, 0)
+                if item is not None and item.data(Qt.ItemDataRole.UserRole) == dev:
                     self.table.selectRow(r)
                     break
             self.status_label.setText(f"Detected: Device #{dev} ({hwid[:35]}...)")
@@ -268,10 +275,21 @@ def _create_gui_dialogs(context: Interception):
         def _handle_confirm(self) -> None:
             row = self.table.currentRow()
             if row >= 0:
-                self.selected_device = self.table.item(row, 0).data(
-                    Qt.ItemDataRole.UserRole
-                )
-                self.selected_hwid = self.table.item(row, 1).text()
+                device_item = self.table.item(row, 0)
+                hwid_item = self.table.item(row, 1)
+
+                if device_item is not None:
+                    self.selected_device = device_item.data(Qt.ItemDataRole.UserRole)
+                else:
+                    self.selected_device = None
+                    logger.info("\n[!] Device could not be gotten.")
+
+                if hwid_item is not None:
+                    self.selected_hwid = hwid_item.text()
+                else:
+                    self.selected_hwid = ""
+                    logger.info("\n[!] HWID could not be gotten.")
+
                 self.done(QDialog.DialogCode.Accepted)
 
         def closeEvent(self, event) -> None:

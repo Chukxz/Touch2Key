@@ -87,13 +87,13 @@ class KeyCaptureDialog(QDialog):
             return
 
         precise_key = get_specific_qt_key(event)
-        _, key_name = get_scancode_and_bridge_key_from_key(precise_key)
+        _, bridge_key = get_scancode_and_bridge_key_from_key(precise_key)
 
-        if key_name is None:
+        if bridge_key is None:
             return
 
-        self.captured_key = key_name
-        self.key_label.setText(f"Captured: {key_name}")
+        self.captured_key = bridge_key
+        self.key_label.setText(f"Captured: {bridge_key}")
         self._listening = False
         self.retry_btn.setEnabled(True)
         self.confirm_btn.setEnabled(True)

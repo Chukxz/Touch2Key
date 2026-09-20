@@ -9,7 +9,6 @@ class Mapping(AbstractMapping):
     """Windows-specific keycode mapping implementation for Qt/Matplotlib native scancodes."""
 
     _MODIFIER_MAP: ClassVar[dict[int, str]] = {
-        0: "",
         0x38: "lalt",
         0xE038: "ralt",
         0x1D: "lctrl",
@@ -22,7 +21,7 @@ class Mapping(AbstractMapping):
         v: k for k, v in _MODIFIER_MAP.items() if v
     }
 
-    def get_key_name_from_code(self, key_code: int) -> str:
+    def get_key_name_from_code(self, key_code: int) -> str | None:
         """Translates a Windows native scancode (from Qt or Matplotlib) to a canonical key token."""
         if not key_code:
             return ""
@@ -47,9 +46,9 @@ class Mapping(AbstractMapping):
             if ext_name:
                 return SPECIAL_MAP_INV.get(ext_name, ext_name).lower()
 
-        return ""
+        return None
 
-    def get_key_code_from_name(self, key_name: str) -> int:
+    def get_key_code_from_name(self, key_name: str) -> int | None:
         """Translates a standard key string token to a Windows native scancode."""
         clean = key_name.strip().lower()
         if clean in self._MODIFIER_MAP_INV:
@@ -63,4 +62,4 @@ class Mapping(AbstractMapping):
         if canonical and canonical in SCANCODES:
             return SCANCODES[canonical]
 
-        return 0
+        return None

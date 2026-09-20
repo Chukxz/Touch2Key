@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS layouts (
 CREATE TABLE IF NOT EXISTS app_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     left_handed INTEGER NOT NULL DEFAULT 0,
+    floating_joystick INTEGER NOT NULL DEFAULT 0
     anchored_floating_joystick INTEGER NOT NULL DEFAULT 0,
     joystick_snap_radius REAL NOT NULL DEFAULT 80.0,
     json_dev_width INTEGER NOT NULL DEFAULT 360,
@@ -47,6 +48,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
     typematic_enabled INTEGER NOT NULL DEFAULT 1,
     typematic_delay_ms REAL NOT NULL DEFAULT 250.0,
     typematic_rate_hz REAL NOT NULL DEFAULT 30.0,
+    windows_keyboard_device INTEGER,
+    windows_mouse_device INTEGER,
     typematic_exclude_keys TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

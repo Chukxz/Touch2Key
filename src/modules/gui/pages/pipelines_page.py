@@ -573,14 +573,24 @@ class PipelinesPage(BasePage):
 
         try:
             cfg = json.loads(zone.pipeline_config or "{}")
-            target_mode = cfg.get("semantics", {}).get("mode")
-            if target_mode in ("WASD", "POINTER"):
+
+            target_region = cfg.get("region", {}).get("type")
+            if target_region in ("BEZEL"):
+                QMessageBox.warning(
+                    self,
+                    "Cannot Duplicate Doubleton",
+                    f"Duplicating a {target_region} doubleton zone region type is forbidden.",
+                )
+
+            target_semantic = cfg.get("semantics", {}).get("mode")
+            if target_semantic in ("WASD", "POINTER"):
                 QMessageBox.warning(
                     self,
                     "Cannot Duplicate Singleton",
-                    f"Duplicating a {target_mode} singleton zone is forbidden.",
+                    f"Duplicating a {target_semantic} singleton zone semantic mode is forbidden.",
                 )
                 return
+
         except Exception:
             pass
 
@@ -682,10 +692,7 @@ class PipelinesPage(BasePage):
             self.trans_dt_dist.setValue(trans.get("dt_dist", 35.0))
 
             sem = cfg.get("semantics", {})
-            default_sem_idx = 5 if zone.move_camera else 0
-            self.semantic_type_combo.setCurrentIndex(
-                sem.get("type_idx", default_sem_idx)
-            )
+            self.semantic_type_combo.setCurrentIndex(sem.get("type_idx", 0))
             self.is_mouse_btn_check.setChecked(sem.get("is_mouse_button", False))
 
             self.semantic_type_combo.blockSignals(False)
@@ -794,12 +801,29 @@ class PipelinesPage(BasePage):
         if not selected:
             return
         zone_id = selected[0].data(Qt.ItemDataRole.UserRole)
+
+        zone = store.zones.get(zone_id)
+        if not zone:
+            return
+
         try:
-            store.zones.delete(zone_id)
-            logger.info("Deleted pipeline zone ID %s", zone_id)
-            self.load_active_layout_zones()
-            if self.dispatcher:
-                self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+            cfg = json.loads(zone.pipeline_config or "{}")
+            target_region = cfg.get("region", {}).get("type")
+            
+            if target_region in ("BEZEL"):
+                QMessageBox.warning(
+                    self,
+                    "Cannot Delete a Doubleton",
+                    f"Deleting a {target_region} doubleton zone region type is forbidden.",
+                )
+
+            else:
+                store.zones.delete(zone_id)
+                logger.info("Deleted pipeline zone ID %s", zone_id)
+                self.load_active_layout_zones()
+                if self.dispatcher:
+                    self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+
         except Exception as exc:
             logger.exception("Failed to delete zone ID %s", zone_id)
             QMessageBox.critical(

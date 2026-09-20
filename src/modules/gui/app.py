@@ -17,7 +17,7 @@ from modules.database import store
 from modules.gui.main_window import MainWindow
 from modules.platforms import check_single_instance
 from modules.scripts.pre_flight import run as pre_flight_run
-from modules.utils import DIAGNOSTICS_FOLDER, SYSTEM
+from modules.utils import DIAGNOSTICS_FOLDER
 from modules.log_manager import AppLogManager
 
 if TYPE_CHECKING:
@@ -44,20 +44,20 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     # -----------------------------------------------------------------------
     # 0. OS & Environment Validation
     # -----------------------------------------------------------------------
-    if SYSTEM == "Linux":
+    if sys.platform == "linux":
         from modules.platforms.linux import check_display_protocol
 
         if not check_display_protocol():
             sys.exit(1)
-    elif SYSTEM != "Windows":
-        print(f"[!] Unsupported OS: {SYSTEM}")
+    elif sys.platform != "win32":
+        print(f"[!] Unsupported OS: {sys.platform}")
         sys.exit(1)
 
     # Initialize GUI logging (no terminal spam + buffers file output)
     AppLogManager.setup_logging(is_gui=True, log_prefix="touch2key_gui")
 
     # -----------------------------------------------------------------------
-    # 1. CLI Argument Parsing
+    # 1. GUI Argument Parsing
     # -----------------------------------------------------------------------
     if parser is None:
         parser = argparse.ArgumentParser(description="Touch2Key GUI Application")
@@ -78,15 +78,15 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     # -----------------------------------------------------------------------
     # 2. Boot Sequence
     # -----------------------------------------------------------------------
-    try:
-        multiprocessing.set_start_method("spawn", force=True)
-    except RuntimeError:
-        pass
-
     if not pre_flight_run():
         profiler_cleanup(gui_profiler)
         sys.exit(1)
 
+    try:
+        multiprocessing.set_start_method("spawn", force=True)
+    except RuntimeError:
+        pass
+    
     success, _ = check_single_instance(GUI_APP_NAME)
     if not success:
         profiler_cleanup(gui_profiler)

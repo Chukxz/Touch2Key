@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from modules.database import store
 from modules.engine import Engine
+from modules.gui.pages import BasePage
 from modules.gui.pages.dashboard_page import DashboardPage
 from modules.gui.pages.devices_page import DevicesPage
 from modules.gui.pages.key_bindings_page import KeyBindingsPage
@@ -86,8 +87,7 @@ class EngineWorker(QThread):
 
     def run(self) -> None:
         try:
-            self.engine = Engine(headless=True)
-            self.engine.mapper_event_dispatcher = self.dispatcher
+            self.engine = Engine(headless=True, dispatcher=self.dispatcher)
 
             # Forward all engine knobs including typematic repeat parameters
             self.engine.start_headless(
@@ -221,7 +221,7 @@ class MainWindow(QMainWindow):
             self.nav_buttons[title].setChecked(True)
 
         page_widget = self.stack.currentWidget()
-        if hasattr(page_widget, "on_page_shown"):
+        if isinstance(page_widget, BasePage):
             page_widget.on_page_shown()
 
     def _toggle_engine(self) -> None:

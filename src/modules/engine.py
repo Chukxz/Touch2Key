@@ -1,25 +1,16 @@
-from __future__ import annotations
-
-import argparse
-import multiprocessing
 import os
 import sys
 import subprocess
 import threading
-from typing import TYPE_CHECKING
-
-from PySide6.QtWidgets import QApplication
 
 from modules.database import store
-from modules.platforms import check_single_instance, get_platform
+from modules.platforms import get_platform
 from modules.utils import (
-    DIAGNOSTICS_FOLDER,
     MapperEvent,
     MapperEventDispatcher,
     TouchEvent,
     TouchPhase,
 )
-from modules.log_manager import AppLogManager
 from modules.core.config import AppConfig
 from modules.core.layout_loader import LayoutLoader
 from modules.core.touch_reader import TouchReader
@@ -28,21 +19,16 @@ from modules.core.mouse_mapper import MouseMapper
 from modules.core.key_mapper import KeyMapper
 from modules.core.wasd_mapper import WASDMapper
 from modules.core.pipeline import Pipeline
-from modules.scripts.pre_flight import run as pre_flight_run
 from modules.core.gestures import TwoFingerTapTracker
 from modules.cli.list_windows import select_window
 from modules.cli.key_capture import capture_keys, capture_performance_settings
 
-NAME = "Touch2Key_Engine"
-cli_profiler: Profile | None = None
-
-if TYPE_CHECKING:
-    from cProfile import Profile
-
 
 class Engine:
     def __init__(
-        self, headless: bool = False, dispatcher: MapperEventDispatcher | None = None
+        self,
+        headless: bool = False,
+        dispatcher: MapperEventDispatcher | None = None,
     ):
         platform_mod = get_platform()
         self.headless = headless
@@ -398,81 +384,7 @@ class Engine:
         except Exception:
             pass
 
-        profiler_cleanup(cli_profiler)
         store.close()
 
         if not self.headless:
-            os._exit(0)
-
-
-def profiler_cleanup(
-    prof: Profile | None, filename: str = "touch2key_cli.prof"
-) -> None:
-    if prof:
-        prof.disable()
-        DIAGNOSTICS_FOLDER.mkdir(parents=True, exist_ok=True)
-        dump_path = DIAGNOSTICS_FOLDER / filename
-        prof.dump_stats(dump_path)
-        print(f"[+] Profiling metrics saved to: {dump_path}")
-
-
-def run(parser: argparse.ArgumentParser | None = None) -> None:
-    global cli_profiler
-
-    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_cli")
-
-    if parser is None:
-        parser = argparse.ArgumentParser(description="Touch2Key Engine")
-
-    parser.add_argument(
-        "--profile",
-        action="store_true",
-        default=False,
-        help="Enable cProfile execution tracing",
-    )
-
-    args = parser.parse_args()
-    if args.profile:
-        import cProfile
-
-        cli_profiler = cProfile.Profile()
-        cli_profiler.enable()
-
-    if sys.platform == "linux":
-        from modules.platforms.linux import check_display_protocol
-
-        if not check_display_protocol():
-            sys.exit(1)
-    elif sys.platform != "win32":
-        print(f"[!] Unsupported OS: {sys.platform}")
-        sys.exit(1)
-
-    if not pre_flight_run():
-        profiler_cleanup(cli_profiler)
-        sys.exit(1)
-
-    try:
-        multiprocessing.set_start_method("spawn", force=True)
-    except RuntimeError:
-        pass
-
-    success, _ = check_single_instance(NAME)
-    if not success:
-        profiler_cleanup(cli_profiler)
-        sys.exit(0)
-
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication(sys.argv)
-
-    engine = Engine(headless=False)
-    try:
-        engine._start()
-    except KeyboardInterrupt:
-        engine._shutdown()
-    finally:
-        profiler_cleanup(cli_profiler)
-
-
-if __name__ == "__main__":
-    run()
+            sys.exit(0)

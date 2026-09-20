@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtWidgets import QMessageBox, QProgressDialog, QWidget
 
@@ -19,14 +20,19 @@ class WirelessConnectWorker(QObject):
 
     def run(self) -> None:
         try:
-            # Poll continuously until connected or cancelled by user
             while self._is_running:
                 ret = wireless_connect(continuous=False)
                 if ret:
                     success, endpoint = ret
                     if success:
                         self.connected.emit(endpoint)
+                        return
+
+                # Prevent 100% CPU core spinning while waiting for USB/network
+                for _ in range(10):
+                    if not self._is_running:
                         break
+                    time.sleep(0.1)
 
             if not self._is_running:
                 self.failed.emit("Wireless connection cancelled by user.")
@@ -43,7 +49,7 @@ class WirelessConnectWorker(QObject):
 def connect_wireless_gui(parent: QWidget | None = None) -> None:
     """Non-blocking GUI launcher with progress indicator and cancellation."""
     progress = QProgressDialog(
-        "Searching for USB device to switch to Wi-Fi...",
+        "Searching for USB device to switch to Wi-Fi...\nEnsure device is plugged in via USB with USB Debugging enabled.",
         "Cancel",
         0,
         0,
@@ -51,6 +57,8 @@ def connect_wireless_gui(parent: QWidget | None = None) -> None:
     )
     progress.setWindowTitle("Wireless ADB Connection")
     progress.setMinimumDuration(0)
+    progress.setAutoClose(False)
+    progress.setAutoReset(False)
 
     thread = QThread(parent)
     worker = WirelessConnectWorker()
@@ -61,7 +69,7 @@ def connect_wireless_gui(parent: QWidget | None = None) -> None:
     worker.finished.connect(worker.deleteLater)
     thread.finished.connect(thread.deleteLater)
 
-    # Cancel handling
+    # Clean cancellation link
     progress.canceled.connect(worker.stop)
 
     def on_connected(endpoint: str) -> None:

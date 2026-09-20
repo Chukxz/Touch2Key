@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 from PySide6.QtCore import QEvent, QObject, Qt
+
 from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
@@ -30,15 +31,16 @@ class KeyCaptureFilter(QObject):
         super().__init__(parent)
         self.callback = callback
 
-    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+    def eventFilter(self, obj: QObject, event) -> bool:
         if event.type() == QEvent.Type.KeyPress:
             if event.key() == Qt.Key.Key_Escape:
                 self.callback(None)
                 return True
+            
             precise_key = get_specific_qt_key(event)
-            _, key_name = get_scancode_and_bridge_key_from_key(precise_key)
-            if key_name:
-                self.callback(key_name)
+            _, bridge_key = get_scancode_and_bridge_key_from_key(precise_key)
+            if bridge_key is not None:
+                self.callback(bridge_key)
                 return True
         return False
 
@@ -106,8 +108,9 @@ class KeyBindingsPage(BasePage):
         btn.setEnabled(False)
 
         def on_captured(key_name: str | None):
-            self.removeEventFilter(self._active_filter)
-            self._active_filter = None
+            if self._active_filter is not None:
+                self.removeEventFilter(self._active_filter)
+                self._active_filter = None
             btn.setEnabled(True)
 
             if key_name:

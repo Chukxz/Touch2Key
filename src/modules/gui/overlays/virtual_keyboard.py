@@ -1,7 +1,11 @@
+from __future__ import annotations
+
 import sys
 import struct
 import psutil
 import argparse
+from typing import TYPE_CHECKING
+
 from PySide6.QtWidgets import (
     QApplication,
     QWidget,
@@ -12,6 +16,11 @@ from PySide6.QtWidgets import (
     QStyle,
 )
 from PySide6.QtCore import Qt, QTimer
+
+from modules.utils import M_MIDDLE, MODIFIER_KEYS, LOCK_KEYS, TOGGLE_KEY_ID, get_scancode_from_key
+
+if TYPE_CHECKING:
+    from . import VirtualKeyboard
 
 # IPC Struct: 1 byte for state (1=Down, 0=Up), 2 bytes for Scancode
 VKB_STRUCT = struct.Struct("<B H")
@@ -101,7 +110,7 @@ MAIN_LAYOUT = [
         ("/", 0x35, 1),
         ("Shift", 0x36, 3),
     ],
-    # Row 5: Modifiers (Removed Win Key)
+    # Row 5: Modifiers
     [
         ("Ctrl", 0x1D, 2),
         ("Alt", 0x38, 2),
@@ -111,60 +120,56 @@ MAIN_LAYOUT = [
     ],
 ]
 
-# --- Arrows Block ---
-# Format: (Row, Col, Label, Scancode)
-
-ARROW_LAYOUT = [
-    (4, 1, "Up", 0xE048),
-    (5, 0, "Left", 0xE04B),
-    (5, 1, "Down", 0xE050),
-    (5, 2, "Right", 0xE04D),
-]
-
-# --- Navigation Block ---
-# Format: (Row, Col, Label, Scancode)
+# --- Navigation & Arrows Block ---
+# Format: (Label, Scancode, Row, Col, RowSpan, ColSpan)
 
 NAV_LAYOUT = [
-    (0, 0, "PrtSc", 0xE037),
-    (0, 1, "ScrLk", 0x46),
-    (0, 2, "Pause", 0xE046),
-    (1, 0, "Insert", 0xE052),
-    (1, 1, "Home", 0xE047),
-    (1, 2, "PgUp", 0xE049),
-    (2, 1, "End", 0xE04F),
-    (2, 2, "PgDn", 0xE051),
+    ("Insert", 0xE050, 0, 0, 1, 3),
+    ("PrtSc", 0xE037, 0, 3, 1, 3),
+    ("Toggle Cursor", TOGGLE_KEY_ID, 1, 0, 1, 6),
+    ("Home", 0xE047, 3, 0, 1, 2),
+    ("End", 0xE04F, 3, 4, 1, 2),
+    ("PgUp", 0xE049, 2, 2, 1, 2),
+    ("PgDn", 0xE051, 3, 2, 1, 2),
+    ("Left", 0xE04B, 5, 0, 1, 2),
+    ("Right", 0xE04D, 5, 4, 1, 2),
+    ("Up", 0xE048, 4, 2, 1, 2),
+    ("Down", 0xE050, 5, 2, 1, 2),
 ]
 
 # --- Numpad Block ---
-# Format: (Row, Col, RowSpan, ColSpan, Label, Scancode)
+# Format: (Label, Scancode, Row, RowSpan, ColSpan)
 NUMPAD_LAYOUT = [
-    # Row 0 is an empty gap to align with F-Keys
-    (1, 0, 1, 1, "NumLk", 0x45),
-    (1, 1, 1, 1, "/", 0xE035),
-    (1, 2, 1, 1, "*", 0x37),
-    (1, 3, 1, 1, "-", 0x4A),
-    (2, 0, 1, 1, "7", 0x47),
-    (2, 1, 1, 1, "8", 0x48),
-    (2, 2, 1, 1, "9", 0x49),
-    (2, 3, 2, 1, "+", 0x4E),  # + spans 2 rows
-    (3, 0, 1, 1, "4", 0x4B),
-    (3, 1, 1, 1, "5", 0x4C),
-    (3, 2, 1, 1, "6", 0x4D),
-    (4, 0, 1, 1, "1", 0x4F),
-    (4, 1, 1, 1, "2", 0x50),
-    (4, 2, 1, 1, "3", 0x51),
-    (4, 3, 2, 1, "Ent", 0xE01C),  # Ent spans 2 rows
-    (5, 0, 1, 2, "0", 0x52),
-    (5, 2, 1, 1, ".", 0x53),  # 0 spans 2 cols
+    ("Mouse Middle", M_MIDDLE, 0, 0, 1, 4),
+    ("7", 0x47, 1, 0, 1, 1),
+    ("8", 0x48, 1, 1, 1, 1),
+    ("9", 0x49, 1, 2, 1, 1),
+    ("/", 0xE035, 1, 3, 1, 1),
+    ("4", 0x4B, 2, 0, 1, 1),
+    ("5", 0x4C, 2, 1, 1, 1),
+    ("6", 0x4D, 2, 2, 1, 1),
+    ("*", 0x37, 2, 3, 1, 1),
+    ("1", 0x4F, 3, 0, 1, 1),
+    ("2", 0x50, 3, 1, 1, 1),
+    ("3", 0x51, 3, 2, 1, 1),
+    ("-", 0x4A, 3, 3, 1, 1),
+    ("Num\nLock", 0x45, 4, 0, 2, 1),
+    ("0", 0x52, 4, 1, 1, 1),
+    (".", 0x53, 4, 2, 1, 1),
+    ("+", 0x4E, 4, 3, 1, 1),
+    ("Scroll Lock", 0x46, 5, 1, 1, 2),
+    ("Enter", 0xE01C, 5, 3, 1, 1),
 ]
 
 
-class KeyButton(QPushButton):
+class VirtualKeyButton(QPushButton):
     """Custom button that emits scancodes and explicitly ignores OS focus."""
 
-    def __init__(self, text: str, scancode: int, parent=None):
-        super().__init__(text, parent)
+    def __init__(self, key_label: str, scancode: int, mod_codes: list[int], lock_codes: list[int], parent_ref: VirtualKeyboard):
+        super().__init__(key_label, parent_ref)
         self.scancode = scancode
+        self.modifier_scancodes = mod_codes
+        self.lock_scancodes = mod_codes
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # CRITICAL: Do not accept focus, otherwise clicking a key minimizes the full-screen game
@@ -187,6 +192,32 @@ class KeyButton(QPushButton):
                 border: 1px solid #357abd;
             }
         """)
+        
+# Make modifiers "Sticky"
+        if scancode in ["shift", "ctrl", "alt"]:
+            self.setCheckable(True)
+            self.toggled.connect(self._on_modifier_toggled)
+        else:
+            # Standard keys trigger normally
+            self.pressed.connect(self._on_standard_pressed)
+            self.released.connect(self._on_standard_released)
+
+    def _on_modifier_toggled(self, checked: bool):
+        # 'checked' is True if the button is currently pressed down
+        if checked:
+            self._send_ipc_message("key_down", self.scancode)
+        else:
+            self._send_ipc_message("key_up", self.scancode)
+
+    def _on_standard_pressed(self):
+        self._send_ipc_message("key_down", self.scancode)
+
+    def _on_standard_released(self):
+        self._send_ipc_message("key_up", self.scancode)
+        
+    def _send_ipc_message(self, action: str, code: str):
+        # Your existing IPC code to send data to the engine
+        pass
 
 
 class VirtualKeyboard(QWidget):
@@ -195,6 +226,16 @@ class VirtualKeyboard(QWidget):
         self.pipe_name = pipe_name
         self.parent_pid = parent_pid
         self.pipe = None
+        self.modifier_scancodes = [
+            code
+            for key in MODIFIER_KEYS
+            if (code := get_scancode_from_key(key)) is not None
+        ]
+        self.lock_scancodes = [
+            code
+            for key in LOCK_KEYS
+            if (code := get_scancode_from_key(key)) is not None
+        ]
 
         self.setWindowTitle("Touch2Key - Virtual Keyboard")
         # Made wider to accommodate all 3 blocks cleanly
@@ -237,41 +278,27 @@ class VirtualKeyboard(QWidget):
                 main_grid.addWidget(btn, row_idx, col_idx, 1, col_span)
                 col_idx += col_span
 
-        # 2. Numpad Block
+        # 2. Nav Block
+        nav_grid = QGridLayout()
+        nav_grid.setSpacing(2)
+        for label, scancode, r, c, r_span, c_span in NAV_LAYOUT:
+            nav_grid.addWidget(self._create_btn(label, scancode), r, c, r_span, c_span)
+
+        # 3. Numpad Block
         numpad_grid = QGridLayout()
         numpad_grid.setSpacing(2)
-        numpad_grid.setRowStretch(0, 1)  # Gap for row 0
-        for r, c, r_span, c_span, label, scancode in NUMPAD_LAYOUT:
+        for label, scancode, r, c, r_span, c_span in NUMPAD_LAYOUT:
             numpad_grid.addWidget(
                 self._create_btn(label, scancode), r, c, r_span, c_span
             )
 
-        # 3. Arrow Block
-        arrow_grid = QGridLayout()
-        arrow_grid.setSpacing(2)
-        # Force the empty row 3 to have the same height scaling as active rows
-        arrow_grid.setRowStretch(3, 1)
-        for r, c, label, scancode in ARROW_LAYOUT:
-            arrow_grid.addWidget(self._create_btn(label, scancode), r, c)
-
-        # 4. Nav Block
-        nav_grid = QGridLayout()
-        nav_grid.setSpacing(2)
-        # Force the empty row 3 to have the same height scaling as active rows
-        nav_grid.setRowStretch(3, 1)
-        for r, c, label, scancode in NAV_LAYOUT:
-            nav_grid.addWidget(self._create_btn(label, scancode), r, c)
-
-        # Add all to master layout (Stretch factors: 15 for Main, 3 for Nav, 4 for Numpad)
+        # Add all to master layout (Stretch factors: 15 for Main, 6 for Nav, 4 for Numpad)
         master_layout.addLayout(main_grid, 15)
+        master_layout.addLayout(nav_grid, 6)
         master_layout.addLayout(numpad_grid, 4)
-        master_layout.addLayout(arrow_grid, 4)
-        master_layout.addLayout(nav_grid, 3)
 
-    def _create_btn(self, label: str, scancode: int) -> KeyButton:
-        btn = KeyButton(label, scancode)
-        btn.pressed.connect(lambda s=scancode: self._send_key(1, s))
-        btn.released.connect(lambda s=scancode: self._send_key(0, s))
+    def _create_btn(self, label: str, scancode: int) -> VirtualKeyButton:
+        btn = VirtualKeyButton(label, scancode, self.modifier_scancodes, self.lock_scancodes, self)
         return btn
 
     def _connect_pipe(self):
@@ -340,3 +367,8 @@ if __name__ == "__main__":
 
     # sys.exit ensures the terminal prompt returns instantly when app closes
     sys.exit(app.exec())
+
+
+
+        # btn.pressed.connect(lambda s=scancode: self._send_key(1, s))
+        # btn.released.connect(lambda s=scancode: self._send_key(0, s))

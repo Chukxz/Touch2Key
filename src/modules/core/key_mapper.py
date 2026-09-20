@@ -20,11 +20,11 @@ from modules.utils import (
     M_RIGHT,
     MOUSE_WHEEL_CODE,
     RECTANGLE,
-    SCANCODES,
-    SPECIAL_MAP,
     SPRINT_DISTANCE_CODE,
+    EXCLUDE_KEYS,
     TouchEvent,
     TouchPhase,
+    get_scancode_from_key,
 )
 
 if TYPE_CHECKING:
@@ -80,7 +80,7 @@ class KeyMapper:
 
     def _resolve_scancode_set(self, raw_tokens: str | None) -> set[int]:
         """Maps comma-separated string tokens into numerical hardware scancodes."""
-        fallback = {"w", "a", "s", "d", "shift", "ctrl", "alt"}
+        fallback = set(EXCLUDE_KEYS)
         tokens = (
             {k.strip().lower() for k in raw_tokens.split(",") if k.strip()}
             if raw_tokens
@@ -89,11 +89,7 @@ class KeyMapper:
 
         resolved_codes = set()
         for token in tokens:
-            code = SCANCODES.get(token)
-            if code is None:
-                canonical = SPECIAL_MAP.get(token)
-                if canonical:
-                    code = SCANCODES.get(canonical)
+            code = get_scancode_from_key(token)
             if code is not None:
                 resolved_codes.add(code)
         return resolved_codes

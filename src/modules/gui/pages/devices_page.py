@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import sys
 import logging
-from PySide6.QtCore import Qt
+
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -13,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from modules.database import store
-from modules.utils import MapperEvent, SYSTEM
+from modules.utils import MapperEvent
 
 logger = logging.getLogger("modules.gui.pages.devices")
 
@@ -62,9 +63,11 @@ class DevicesPage(QWidget):
         self._refresh_ui()
 
     def _refresh_ui(self) -> None:
-        if SYSTEM == "Windows":
-            k_id = store.get("windows_keyboard_device", default=None)
-            m_id = store.get("windows_mouse_device", default=None)
+        if sys.platform == "win32":
+            s = store.settings.get()
+            k_id: int | None = getattr(s, "windows_keyboard_device", None)
+            m_id: int | None = getattr(s, "windows_mouse_device", None)
+
             self.k_label.setText(
                 f"Configured Keyboard ID: {k_id if k_id is not None else 'Unassigned'}"
             )
@@ -78,7 +81,7 @@ class DevicesPage(QWidget):
             self.rebind_btn.setEnabled(False)
 
     def _handle_rebind(self) -> None:
-        if SYSTEM != "Windows":
+        if sys.platform != "win32":
             return
 
         from modules.platforms.windows.query_interception_device import (
@@ -87,14 +90,17 @@ class DevicesPage(QWidget):
 
         devices = select_keyboard_then_mouse(parent=self)
         if not devices:
-            logger.info("Device re-selection cancelled by user.")
+            logger.info(
+                "\n[!] Error selecting device, re-selection likely cancelled by user."
+            )
             return
 
         k_device, m_device = devices
 
         # 1. Update persistent store
-        store.set("windows_keyboard_device", k_device)
-        store.set("windows_mouse_device", m_device)
+        store.settings.update(
+            windows_keyboard_device=k_device, windows_mouse_device=m_device
+        )
         self._refresh_ui()
 
         # 2. Hot-reload active running engine

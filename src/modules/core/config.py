@@ -37,6 +37,15 @@ class AppConfig:
             self.settings = store.settings.update(left_handed=int(new_val))
         self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
         return self.settings.left_handed
+    
+    def set_floating(self, enabled: bool) -> bool:
+        """Toggles floating mode and dispatches reload."""
+        with self.config_lock:
+            self.settings = store.settings.update(
+                floating_joystick=int(enabled)
+            )
+        self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+        return self.settings.floating_joystick
 
     def set_anchored_floating(self, enabled: bool) -> bool:
         """Toggles anchored floating mode and dispatches reload."""

@@ -24,6 +24,7 @@ class InvalidFieldError(ValueError):
 class AppSettings:
     id: int
     left_handed: bool
+    floating_joystick: bool
     anchored_floating_joystick: bool
     joystick_snap_radius: float
     json_dev_width: int
@@ -41,23 +42,19 @@ class AppSettings:
     typematic_rate_hz: float
     typematic_exclude_keys: Optional[str]
     active_layout_id: Optional[int]
+    windows_keyboard_device: Optional[int]
+    windows_mouse_device: Optional[int]
     updated_at: str
 
     @classmethod
     def from_row(cls, row) -> AppSettings:
-        data = {f.name: row[f.name] for f in dataclass_fields(cls) if f.name in row.keys()}
-        data["left_handed"] = bool(data.get("left_handed", 0))
-        data["anchored_floating_joystick"] = bool(data.get("anchored_floating_joystick", 0))
-        data["joystick_snap_radius"] = float(data.get("joystick_snap_radius", 80.0))
-
-        # Typematic type coercions & safe null handling
-        data["typematic_enabled"] = bool(data.get("typematic_enabled", 1))
-        data["typematic_delay_ms"] = float(data.get("typematic_delay_ms", 250.0))
-        data["typematic_rate_hz"] = float(data.get("typematic_rate_hz", 30.0))
-        raw_excludes = data.get("typematic_exclude_keys")
-        data["typematic_exclude_keys"] = str(raw_excludes) if raw_excludes is not None else None
-
-        return cls(**data)
+        # Convert sqlite3.Row directly to kwargs
+        d = dict(row)
+        # Coerce booleans in a single generic pass
+        d["left_handed"] = bool(d["left_handed"])
+        d["anchored_floating_joystick"] = bool(d["anchored_floating_joystick"])
+        d["typematic_enabled"] = bool(d["typematic_enabled"])
+        return cls(**d)
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,10 +102,10 @@ class LayoutZone:
 
     @property
     def move_camera(self) -> bool:
-        """Determines if this zone is configured for camera look/track-fire."""
+        """Determines if this zone is configured for camera look around."""
         try:
             cfg = json.loads(self.pipeline_config)
-            return cfg.get("semantics", {}).get("mode") == "TRACK_FIRE"
+            return bool(cfg.get("semantics", {}).get("is_mouse_button", False))
         except Exception:
             return False
 
@@ -128,6 +125,7 @@ class AppSettingsRepository:
 
     ALLOWED_FIELDS = {
         "left_handed",
+        "floating_joystick",
         "anchored_floating_joystick",
         "joystick_snap_radius",
         "json_dev_width",
@@ -145,6 +143,8 @@ class AppSettingsRepository:
         "typematic_delay_ms",
         "typematic_rate_hz",
         "typematic_exclude_keys",
+        "windows_keyboard_device",
+        "windows_mouse_device",
     }
 
     def get(self) -> AppSettings:
@@ -252,23 +252,29 @@ class LayoutsRepository:
         if auto_seed_bezels:
             zones_repo = LayoutZonesRepository()
             w, h = float(layout.width), float(layout.height)
-            
+
             zones_repo.create(
                 layout_id=layout.id,
                 scancode="BEZEL_TOP",
                 name="Top Bezel",
                 zone_type="BEZEL",
-                x1=0.0, y1=0.0, x2=w, y2=50.0,
-                pipeline_config='{"priority": 100, "semantics": {"action": "TOGGLE_MODE"}}'
+                x1=0.0,
+                y1=0.0,
+                x2=w,
+                y2=50.0,
+                pipeline_config='{"priority": 100, "semantics": {"action": "TOGGLE_MODE"}}',
             )
-            
+
             zones_repo.create(
                 layout_id=layout.id,
                 scancode="BEZEL_BOTTOM",
                 name="Bottom Bezel",
                 zone_type="BEZEL",
-                x1=0.0, y1=h - 50.0, x2=w, y2=h,
-                pipeline_config='{"priority": 100, "semantics": {"action": "TOGGLE_VKB"}}'
+                x1=0.0,
+                y1=h - 50.0,
+                x2=w,
+                y2=h,
+                pipeline_config='{"priority": 100, "semantics": {"action": "TOGGLE_VKB"}}',
             )
 
         return layout
@@ -315,7 +321,7 @@ class LayoutsRepository:
             raise KeyError(f"No layout with id={layout_id}")
 
         new_layout = self.create(
-            auto_seed_bezels=False, # Prevent double-seeding, we will copy them below
+            auto_seed_bezels=False,  # Prevent double-seeding, we will copy them below
             name=new_name,
             width=source.width,
             height=source.height,
