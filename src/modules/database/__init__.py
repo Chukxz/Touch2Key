@@ -40,6 +40,18 @@ __all__ = [
 
 logger = logging.getLogger("modules.database")
 
+from modules.utils import (
+    BEZEL,
+    BEZEL_DP_THICKNESS,
+    TOP_BEZEL_ID,
+    BOTTOM_BEZEL_ID,
+    dp_to_px,
+    calculate_rect,
+    bezels_exist_ids,
+    ensure_top_bezel,
+    ensure_bottom_bezel,
+)
+
 if TYPE_CHECKING:
     from modules.database.connection import ConnectionManager
     from modules.database.repositories import (
@@ -102,12 +114,26 @@ def reset_layout_zones_to_app_settings(layout_id: int) -> int:
 
     inner_r = layout.mouse_wheel_radius
     outer_r = layout.sprint_distance
+    l_w = layout.width
+    l_h = layout.height
+    thickness = float(dp_to_px(BEZEL_DP_THICKNESS, layout.dpi))
     zones = store.zones.list_for_layout(layout_id)
     updated_count = 0
 
     for zone in zones:
-        if zone.zone_type == "BEZEL":
-            continue # CRITICAL: Leave system hardware boundary strips untouched
+        if zone.zone_type == BEZEL:
+
+            if zone.scancode == str(TOP_BEZEL_ID):
+                cx, cy, x1, y1, x2, y2 = calculate_rect(0.0, 0.0, l_w, thickness)
+                store.zones.update(
+                    zone.id, cx=cx, cy=cy, r=None, x1=x1, y1=y1, x2=x2, y2=y2
+                )
+
+            elif zone.scancode == str(BOTTOM_BEZEL_ID):
+                cx, cy, x1, y1, x2, y2 = calculate_rect(0.0, l_h - thickness, l_w, l_h)
+                store.zones.update(
+                    zone.id, cx=cx, cy=cy, r=None, x1=x1, y1=y1, x2=x2, y2=y2
+                )
 
         try:
             cfg = json.loads(zone.pipeline_config or "{}")
@@ -180,32 +206,12 @@ def ensure_system_bezels(layout_id: int) -> None:
         return
 
     zones = store.zones.list_for_layout(layout_id)
-    bezel_zones = [z for z in zones if z.zone_type == "BEZEL"]
+    top_id, bottom_id = bezels_exist_ids(zones)
 
-    # Check if they exist by inspecting the payload intent
-    has_top = any("TOGGLE_MODE" in z.pipeline_config or z.scancode == "BEZEL_TOP" for z in bezel_zones)
-    has_bottom = any("TOGGLE_VKB" in z.pipeline_config or z.scancode == "BEZEL_BOTTOM" for z in bezel_zones)
-
-    w, h = float(layout.width), float(layout.height)
-
-    if not has_top:
-        store.zones.create(
-            layout_id=layout.id,
-            scancode="BEZEL_TOP",
-            name="Top Bezel",
-            zone_type="BEZEL",
-            x1=0.0, y1=0.0, x2=w, y2=50.0,
-            pipeline_config='{"priority": 100, "semantics": {"action": "TOGGLE_MODE"}}'
-        )
+    if top_id < 0:
+        ensure_top_bezel(layout, store.zones)
         logger.info("Auto-healed missing Top Bezel for layout ID %d", layout.id)
 
-    if not has_bottom:
-        store.zones.create(
-            layout_id=layout.id,
-            scancode="BEZEL_BOTTOM",
-            name="Bottom Bezel",
-            zone_type="BEZEL",
-            x1=0.0, y1=h - 50.0, x2=w, y2=h,
-            pipeline_config='{"priority": 100, "semantics": {"action": "TOGGLE_VKB"}}'
-        )
+    if bottom_id < 0:
+        ensure_bottom_bezel(layout, store.zones)
         logger.info("Auto-healed missing Bottom Bezel for layout ID %d", layout.id)

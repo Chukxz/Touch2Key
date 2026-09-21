@@ -5,6 +5,9 @@ from .mapper import Mapper
 from .mouse_mapper import MouseMapper
 from .key_mapper import KeyMapper
 from .wasd_mapper import WASDMapper
+from .pipeline import Pipeline
+from .pipeline_output import BridgeOutputSink
+from .pipeline_factory import create_pipeline_from_zone
 
 __all__ = [
     "AppConfig",
@@ -14,4 +17,7 @@ __all__ = [
     "MouseMapper",
     "KeyMapper",
     "WASDMapper",
+    "Pipeline",
+    "BridgeOutputSink",
+    "create_pipeline_from_zone",
 ]

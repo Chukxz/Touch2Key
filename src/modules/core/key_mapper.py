@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING, Callable, Any
+from typing import TYPE_CHECKING, Any
 
 from modules.core.pipeline import (
     Button,
@@ -12,7 +12,7 @@ from modules.core.pipeline import (
     RectangularRegion,
     TrackFire,
 )
-from modules.core.pipeline_output import BridgeOutputSink
+from modules.core import BridgeOutputSink
 from modules.utils import (
     CIRCLE,
     M_LEFT,
@@ -42,7 +42,6 @@ class KeyMapper:
     def __init__(
         self,
         mapper: Mapper,
-        on_toggle_mode: Callable[[], None] | None = None,
         typematic_enabled: bool = True,
         typematic_delay_ms: float = 250.0,
         typematic_rate_hz: float = 30.0,
@@ -51,7 +50,7 @@ class KeyMapper:
         self.mapper = mapper
         self.config = mapper.config
         self.bridge = mapper.bridge
-        self.output_sink = BridgeOutputSink(self.bridge, on_toggle_mode)
+        self.output_sink = BridgeOutputSink(self.bridge)
         self.mapper_event_dispatcher = mapper.mapper_event_dispatcher
 
         self.typematic_enabled = typematic_enabled

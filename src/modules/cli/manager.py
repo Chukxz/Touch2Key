@@ -158,21 +158,21 @@ def delete_profile(layout_id: int) -> bool:
     if active_layout and active_layout.id == layout_id:
         store.settings.update(active_layout_id=None)
 
-    store.zones.delete_all_for_layout(layout_id)
+    store.zones.delete_all_for_layout(layout_id, False)
     store.layouts.delete(layout_id)
     print(f"Layout '{target.name}' (ID: {layout_id}) and all mapped zones deleted.")
     return True
 
 
 def clear_zones(layout_id: int) -> bool:
-    """Removes all touch zones from a profile while keeping the layout entry."""
+    """Removes all touch zones from a profile while keeping the layout entry and reseeding its bezels."""
     target = store.layouts.get(layout_id)
     if not target:
         print(f"Error: Layout ID {layout_id} not found.")
         return False
 
     store.zones.delete_all_for_layout(layout_id)
-    print(f"All touch zones cleared for layout '{target.name}' (ID: {layout_id}).")
+    print(f"All touch zones (bezels reseeded) cleared for layout '{target.name}' (ID: {layout_id}).")
     return True
 
 
@@ -288,7 +288,7 @@ def interactive_menu() -> None:
     """Terminal CLI UI loop."""
     while True:
         list_profiles()
-        print("Commands:")
+        print("\n\nCommands:")
         print("  [s]    Select / Switch Active Profile")
         print("  [lz]   List Zones / Pipelines for Profile")
         print("  [cp]   Duplicate Profile")
@@ -695,3 +695,19 @@ def run() -> None:
 
 if __name__ == "__main__":
     run()
+
+
+
+# In cli.py
+def set_profile_image(layout_id: int, image_path: Path) -> bool:
+    target = store.layouts.get(layout_id)
+    if not target:
+        print(f"Error: Layout ID {layout_id} not found.")
+        return False
+    if not image_path.exists():
+        print(f"Error: Image file '{image_path}' does not exist.")
+        return False
+
+    store.layouts.update(layout_id, image_path=str(image_path.resolve()))
+    print(f"Updated profile '{target.name}' background image to: {image_path.name}")
+    return True

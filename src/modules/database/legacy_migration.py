@@ -131,9 +131,7 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
     typ_delay = typematic_table.get(
         "delay_ms", keys_table.get("typematic_delay_ms", 250.0)
     )
-    typ_rate = typematic_table.get(
-        "rate_hz", keys_table.get("typematic_rate_hz", 30.0)
-    )
+    typ_rate = typematic_table.get("rate_hz", keys_table.get("typematic_rate_hz", 30.0))
     typ_excludes = typematic_table.get(
         "exclude_keys",
         keys_table.get("typematic_exclude_keys", "w,a,s,d,shift,ctrl,alt"),
@@ -158,7 +156,9 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
         "typematic_enabled": int(bool(typ_enabled)),
         "typematic_delay_ms": float(typ_delay),
         "typematic_rate_hz": float(typ_rate),
-        "typematic_exclude_keys": str(typ_excludes) if typ_excludes is not None else None,
+        "typematic_exclude_keys": (
+            str(typ_excludes) if typ_excludes is not None else None
+        ),
     }
 
     store.settings.update(**fields)
@@ -209,7 +209,7 @@ def migrate_json_layout(
         layout_id = existing.id
     else:
         layout = store.layouts.create(
-            auto_seed_bezels=False, # We are importing zones, do not seed defaults
+            auto_seed_bezels=False,  # We are importing zones, do not seed defaults
             name=target_name,
             width=int(metadata["width"]),
             height=int(metadata["height"]),
@@ -306,8 +306,6 @@ def migrate_json_layout(
             len(content),
         )
 
-        # CRITICAL: Verify the imported data. If it was a legacy file missing the new 
-        # Virtual Keyboard bottom bezel, this will seamlessly inject it.
         ensure_system_bezels(layout_id)
 
     if set_active:

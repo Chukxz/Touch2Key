@@ -9,7 +9,17 @@ import json
 from dataclasses import dataclass, fields as dataclass_fields
 from typing import Any, Optional, TYPE_CHECKING
 
-from modules.utils import EXCLUDE_KEYS
+from modules.utils import (
+    EXCLUDE_KEYS,
+    BEZEL,
+    BEZEL_DP_THICKNESS,
+    CIRCLE,
+    RECTANGLE,
+    bezels_exist_ids,
+    get_bezel_thickness,
+    ensure_top_bezel,
+    ensure_bottom_bezel,
+)
 from .connection import connection_manager
 
 if TYPE_CHECKING:
@@ -250,34 +260,14 @@ class LayoutsRepository:
 
         # --- Auto-Seed System Bezels for fresh layouts ---
         if auto_seed_bezels:
-            zones_repo = LayoutZonesRepository()
-            w, h = float(layout.width), float(layout.height)
-
-            zones_repo.create(
-                layout_id=layout.id,
-                scancode="BEZEL_TOP",
-                name="Top Bezel",
-                zone_type="BEZEL",
-                x1=0.0,
-                y1=0.0,
-                x2=w,
-                y2=50.0,
-                pipeline_config='{"priority": 100, "semantics": {"action": "TOGGLE_MODE"}}',
-            )
-
-            zones_repo.create(
-                layout_id=layout.id,
-                scancode="BEZEL_BOTTOM",
-                name="Bottom Bezel",
-                zone_type="BEZEL",
-                x1=0.0,
-                y1=h - 50.0,
-                x2=w,
-                y2=h,
-                pipeline_config='{"priority": 100, "semantics": {"action": "TOGGLE_VKB"}}',
-            )
-
+            self._auto_seed_bezels(layout)
         return layout
+
+    @staticmethod
+    def _auto_seed_bezels(layout: Layout, top_thickness: float | None = None, bottom_thickness: float | None = None):
+        zones_repo = LayoutZonesRepository()
+        ensure_top_bezel(layout, zones_repo, top_thickness)
+        ensure_bottom_bezel(layout, zones_repo, bottom_thickness)
 
     def update(self, layout_id: int, **fields: Any) -> Layout:
         unknown = set(fields) - self.ALLOWED_FIELDS
@@ -365,7 +355,7 @@ class LayoutZonesRepository:
         "pipeline_config",
     }
 
-    VALID_ZONE_TYPES = {"CIRCLE", "RECTANGLE", "BEZEL"}
+    VALID_ZONE_TYPES = {BEZEL, CIRCLE, RECTANGLE}
     _REQUIRED_ON_CREATE = {"layout_id", "scancode", "zone_type"}
 
     def list_for_layout(self, layout_id: int) -> list[LayoutZone]:
@@ -438,12 +428,44 @@ class LayoutZonesRepository:
             raise KeyError(f"No zone with id={zone_id}")
         return zone
 
-    def delete(self, zone_id: int) -> None:
-        conn = connection_manager.get_connection()
-        with conn:
-            conn.execute("DELETE FROM layout_zones WHERE id = ?;", (zone_id,))
-
-    def delete_all_for_layout(self, layout_id: int) -> None:
+    def delete(self, zone_id: int, delete_bezel=False) -> None:
+        delete_zone = True
+        
+        if not delete_bezel:
+            zone = self.get(zone_id)
+            if zone is not None and zone.zone_type == BEZEL:
+                delete_zone = False
+        
+        if delete_zone:
+            conn = connection_manager.get_connection()
+            with conn:
+                conn.execute("DELETE FROM layout_zones WHERE id = ?;", (zone_id,))
+        
+        else:
+            print(f"[!] Could not delete zone because deletion of 'zone type: {BEZEL}' is forbidden by the caller.")
+            
+    def delete_all_for_layout(self, layout_id: int, auto_seed_bezels=True) -> None:
+        layouts_repo = LayoutsRepository()
+        layout = layouts_repo.get(layout_id)
+        top_bezel_thickness = BEZEL_DP_THICKNESS
+        bottom_bezel_thickness = BEZEL_DP_THICKNESS
+        
+        if auto_seed_bezels:
+            zones = self.list_for_layout(layout_id)
+            top_id, bottom_id = bezels_exist_ids(zones)
+            
+            top_zone = self.get(top_id)
+            if top_zone is not None and layout is not None:
+                top_bezel_thickness = get_bezel_thickness(top_zone, layout)
+                
+            bottom_zone = self.get(bottom_id)
+            if bottom_zone is not None and layout is not None:
+                bottom_bezel_thickness = get_bezel_thickness(bottom_zone, layout)
+            
         conn = connection_manager.get_connection()
         with conn:
             conn.execute("DELETE FROM layout_zones WHERE layout_id = ?;", (layout_id,))
+
+        if auto_seed_bezels:
+            if layout is not None:
+                layouts_repo._auto_seed_bezels(layout, top_bezel_thickness, bottom_bezel_thickness)

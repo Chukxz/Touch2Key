@@ -23,7 +23,17 @@ from PySide6.QtWidgets import (
 )
 
 from modules.database import reset_layout_zones_to_app_settings, store
-from modules.utils import MapperEvent
+from modules.utils import (
+    CIRCLE,
+    RECTANGLE,
+    BEZEL,
+    BEZEL_DP_THICKNESS,
+    TOP_BEZEL_ID,
+    BOTTOM_BEZEL_ID,
+    dp_to_px,
+    calculate_rect,
+    MapperEvent,
+)
 from .base_page import BasePage
 
 if TYPE_CHECKING:
@@ -43,7 +53,6 @@ class PipelinesPage(BasePage):
         parent: QWidget | None = None,
     ):
         super().__init__(dispatcher, parent)
-
         body_layout = QHBoxLayout()
 
         # -------------------------------------------------------------
@@ -153,15 +162,25 @@ class PipelinesPage(BasePage):
         )
         self.region_stack.addWidget(self.region_rect_page)
 
-        self.region_bezel_page = QWidget()
-        bezel_form = QFormLayout(self.region_bezel_page)
-        bezel_form.setContentsMargins(0, 0, 0, 0)
-        self.reg_bezel_height = QDoubleSpinBox()
-        self.reg_bezel_height.setRange(2, 100)
-        self.reg_bezel_height.setValue(14)
-        self.reg_bezel_height.setSuffix(" px")
-        bezel_form.addRow("Bezel Height:", self.reg_bezel_height)
-        self.region_stack.addWidget(self.region_bezel_page)
+        self.top_region_bezel_page = QWidget()
+        top_bezel_form = QFormLayout(self.top_region_bezel_page)
+        top_bezel_form.setContentsMargins(0, 0, 0, 0)
+        self.top_reg_bezel_dp_thickness = QDoubleSpinBox()
+        self.top_reg_bezel_dp_thickness.setValue(BEZEL_DP_THICKNESS)
+        self.top_reg_bezel_dp_thickness.setRange(2, 100)
+        self.top_reg_bezel_dp_thickness.setSuffix(" dp")
+        top_bezel_form.addRow("Bezel DP Thickness:", self.top_reg_bezel_dp_thickness)
+        self.region_stack.addWidget(self.top_region_bezel_page)
+        
+        self.bottom_region_bezel_page = QWidget()
+        bottom_bezel_form = QFormLayout(self.bottom_region_bezel_page)
+        bottom_bezel_form.setContentsMargins(0, 0, 0, 0)
+        self.bottom_reg_bezel_dp_thickness = QDoubleSpinBox()
+        self.bottom_reg_bezel_dp_thickness.setRange(2, 100)
+        self.bottom_reg_bezel_dp_thickness.setValue(BEZEL_DP_THICKNESS)
+        self.bottom_reg_bezel_dp_thickness.setSuffix(" dp")
+        bottom_bezel_form.addRow("Bezel DP Thickness:", self.bottom_reg_bezel_dp_thickness)
+        self.region_stack.addWidget(self.bottom_region_bezel_page)
 
         region_layout.addWidget(self.region_stack)
         inspector.addWidget(region_box)
@@ -447,19 +466,27 @@ class PipelinesPage(BasePage):
 
         return None
 
-    def _get_pipeline_dict(self) -> dict:
+    def _get_pipeline_dict(self, scancode: str) -> dict:
         reg_idx = self.region_type_combo.currentIndex()
         origin_idx = self.origin_type_combo.currentIndex()
         const_idx = self.constraint_type_combo.currentIndex()
         trans_idx = self.transform_type_combo.currentIndex()
         sem_idx = self.semantic_type_combo.currentIndex()
+        
+        if scancode == str(TOP_BEZEL_ID):
+            bezel_dp_thickness_value = self.top_reg_bezel_dp_thickness.value()
+        elif scancode == str(BOTTOM_BEZEL_ID):
+            bezel_dp_thickness_value = self.bottom_reg_bezel_dp_thickness.value()
+        else:
+            bezel_dp_thickness_value = float(BEZEL_DP_THICKNESS)
+            
 
         return {
             "priority": int(self.priority_spin.value()),
             "region": {
                 "type_idx": reg_idx,
-                "type": ["ALWAYS", "CIRCLE", "RECTANGLE", "BEZEL"][reg_idx],
-                "bezel_height": self.reg_bezel_height.value(),
+                "type": ["ALWAYS", CIRCLE, RECTANGLE, BEZEL][reg_idx],
+                "bezel_dp_thickness": bezel_dp_thickness_value,
             },
             "origin": {
                 "type_idx": origin_idx,
@@ -575,7 +602,7 @@ class PipelinesPage(BasePage):
             cfg = json.loads(zone.pipeline_config or "{}")
 
             target_region = cfg.get("region", {}).get("type")
-            if target_region in ("BEZEL"):
+            if target_region in (BEZEL):
                 QMessageBox.warning(
                     self,
                     "Cannot Duplicate Doubleton",
@@ -661,9 +688,18 @@ class PipelinesPage(BasePage):
 
             # Unpack JSON pipeline config
             reg = cfg.get("region", {})
-            default_reg_idx = 1 if zone.zone_type == "CIRCLE" else 2
+            default_reg_idx = (
+                1
+                if zone.zone_type == CIRCLE
+                else 3 if zone.zone_type == RECTANGLE else 2
+            )
             self.region_type_combo.setCurrentIndex(reg.get("type_idx", default_reg_idx))
-            self.reg_bezel_height.setValue(reg.get("bezel_height", 14.0))
+            self.top_reg_bezel_dp_thickness.setValue(
+                reg.get("bezel_dp_thickness", BEZEL_DP_THICKNESS)                
+            )
+            self.bottom_reg_bezel_dp_thickness.setValue(
+                reg.get("bezel_dp_thickness", BEZEL_DP_THICKNESS)
+            )
 
             orig = cfg.get("origin", {})
             self.origin_type_combo.setCurrentIndex(orig.get("type_idx", 1))
@@ -729,6 +765,14 @@ class PipelinesPage(BasePage):
             current_zone_id = (
                 selected[0].data(Qt.ItemDataRole.UserRole) if selected else None
             )
+            
+            if current_zone_id is None:
+                return
+            
+            zone = store.zones.get(current_zone_id)
+            
+            if zone is None:
+                return
 
             # Enforce single movement joystick and single mouse look zone
             if target_mode in ("WASD", "POINTER"):
@@ -746,28 +790,57 @@ class PipelinesPage(BasePage):
                     )
                     return
 
+            # Default coords values
+            cx, cy, x1, y1, x2, y2 = calculate_rect(
+                self.reg_x1.value(),
+                self.reg_y1.value(),
+                self.reg_x2.value(),
+                self.reg_y2.value(),
+            )
+            coords = (cx, cy, None, x1, y1, x2, y2)
+
             reg_idx = self.region_type_combo.currentIndex()
             if reg_idx == 1:
-                z_type = "CIRCLE"
+                z_type = CIRCLE
+                coords = (
+                    self.reg_center_x.value(),
+                    self.reg_center_y.value(),
+                    self.reg_radius.value(),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+
             elif reg_idx == 3:
-                z_type = "BEZEL"
+                z_type = BEZEL
+                if zone.scancode == str(TOP_BEZEL_ID):
+                    _thickness = float(dp_to_px(self.top_reg_bezel_dp_thickness.value(), active_layout.dpi))
+                    cx, cy, x1, y1, x2, y2 = calculate_rect(0.0, 0.0, active_layout.width, _thickness)
+                    coords = (cx, cy, None, x1, y1, x2, y2)
+                    
+                elif zone.scancode == str(BOTTOM_BEZEL_ID):
+                    _thickness = float(dp_to_px(self.bottom_reg_bezel_dp_thickness.value(), active_layout.dpi))
+                    cx, cy, x1, y1, x2, y2 = calculate_rect(0.0, active_layout.height - _thickness, active_layout.width, active_layout.height)
+                    coords = (cx, cy, None, x1, y1, x2, y2)
+
             else:
-                z_type = "RECTANGLE"
-
-            serialized_config = json.dumps(self._get_pipeline_dict())
-
+                z_type = RECTANGLE
+                
+            serialized_config = json.dumps(self._get_pipeline_dict(zone.scancode))
+            
             zone_fields = {
                 "layout_id": active_layout.id,
                 "name": self.name_edit.text().strip() or "Custom Pipeline",
                 "scancode": self.output_key_edit.text().strip() or "space",
                 "zone_type": z_type,
-                "cx": self.reg_center_x.value() if z_type == "CIRCLE" else None,
-                "cy": self.reg_center_y.value() if z_type == "CIRCLE" else None,
-                "r": self.reg_radius.value() if z_type == "CIRCLE" else None,
-                "x1": self.reg_x1.value() if z_type == "RECTANGLE" else None,
-                "y1": self.reg_y1.value() if z_type == "RECTANGLE" else None,
-                "x2": self.reg_x2.value() if z_type == "RECTANGLE" else None,
-                "y2": self.reg_y2.value() if z_type == "RECTANGLE" else None,
+                "cx": coords[0],
+                "cy": coords[1],
+                "r": coords[2],
+                "x1": coords[3],
+                "y1": coords[4],
+                "x2": coords[5],
+                "y2": coords[6],
                 "pipeline_config": serialized_config,
             }
 
@@ -809,8 +882,8 @@ class PipelinesPage(BasePage):
         try:
             cfg = json.loads(zone.pipeline_config or "{}")
             target_region = cfg.get("region", {}).get("type")
-            
-            if target_region in ("BEZEL"):
+
+            if target_region in (BEZEL):
                 QMessageBox.warning(
                     self,
                     "Cannot Delete a Doubleton",

@@ -15,19 +15,6 @@ from modules.utils import DB_PATH
 logger = logging.getLogger("modules.database.connection")
 
 _SCHEMA = """
-CREATE TABLE IF NOT EXISTS layouts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    width INTEGER NOT NULL,
-    height INTEGER NOT NULL,
-    dpi INTEGER NOT NULL,
-    mouse_wheel_radius REAL NOT NULL DEFAULT 50.0,
-    sprint_distance REAL NOT NULL DEFAULT 10.0,
-    image_path TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
 CREATE TABLE IF NOT EXISTS app_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     left_handed INTEGER NOT NULL DEFAULT 0,
@@ -51,6 +38,19 @@ CREATE TABLE IF NOT EXISTS app_settings (
     windows_keyboard_device INTEGER,
     windows_mouse_device INTEGER,
     typematic_exclude_keys TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS layouts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    dpi INTEGER NOT NULL,
+    mouse_wheel_radius REAL NOT NULL DEFAULT 50.0,
+    sprint_distance REAL NOT NULL DEFAULT 10.0,
+    image_path TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

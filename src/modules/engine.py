@@ -276,7 +276,6 @@ class Engine:
         self.mouse_mapper = MouseMapper(self.mapper)
         self.key_mapper = KeyMapper(
             self.mapper,
-            on_toggle_mode=self.toggle_mode,
             typematic_enabled=typematic_enabled,
             typematic_delay_ms=typematic_delay_ms,
             typematic_rate_hz=typematic_rate_hz,

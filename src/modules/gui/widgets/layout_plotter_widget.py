@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import sys
 import datetime
 import json
 import math
 import os
 from pathlib import Path
 from PIL import Image
+from typing import Any
 from modules.platforms import get_platform, get_specific_mt_key
 
 get_platform().SystemConfig().set_dpi_awareness()
@@ -1986,10 +1988,10 @@ class LayoutPlotterWidget(QWidget):
                 sprint_distance=self.sprint_distance,
                 image_path=rel_img_path,
             )
-            store.zones.delete_all_for_layout(layout_id)
+            store.zones.delete_all_for_layout(layout_id, False)
         else:
             if existing_layout:
-                layout_id = existing_layout.id
+                layout_id = existing_layout.id 
                 store.layouts.update(
                     layout_id,
                     width=self.width,
@@ -2256,7 +2258,7 @@ class LayoutPlotterWidget(QWidget):
         return candidates[0]["pt"]
 
 
-def calculate_raw_rect(values):
+def calculate_raw_rect(values: tuple[tuple[float, float], tuple[float, float]]):
     if len(values) < 2:
         return None, None, None, None
     xs = [v[0] for v in values]
@@ -2270,7 +2272,11 @@ def calculate_raw_rect(values):
 
 
 def ensure_bezels(
-    layout_id: int, w: int, h: int, top_bezel_height: int, bottom_bezel_height: int
+    w: int,
+    h: int,
+    top_bezel_height: int,
+    bottom_bezel_height: int,
+    layout_id: int | None = None,
 ):
     # Top Bezel
     top_bezel_bb = (0, h - top_bezel_height), (w, h)
@@ -2280,36 +2286,38 @@ def ensure_bezels(
         (top_x_min, top_y_min), (top_x_max, top_y_max) = top_bb
 
         top_pipeline_config = {}
-
-        store.zones.create(
-            layout_id=layout_id,
-            scancode=str(TOP_BEZEL_ID),
-            name="TOP_BEZEL",
-            zone_type="RECTANGLE",
-            x1=top_x_min,
-            y1=top_y_min,
-            x2=top_x_max,
-            y2=top_y_max,
-            pipeline_config=top_pipeline_config,
-        )
+        
+        if layout_id is not None:
+            store.zones.create(
+                layout_id=layout_id,
+                scancode=str(TOP_BEZEL_ID),
+                name="TOP_BEZEL",
+                zone_type="RECTANGLE",
+                x1=top_x_min,
+                y1=top_y_min,
+                x2=top_x_max,
+                y2=top_y_max,
+                pipeline_config=top_pipeline_config,
+            )
 
     # Bottom Bezel
     bottom_bezel_bb = (0, 0), (w, bottom_bezel_height)
-    bottom_cx, bottom_cy, _, bottom_bb = calculate_raw_rect(bottom_bezel_height)
+    bottom_cx, bottom_cy, _, bottom_bb = calculate_raw_rect(bottom_bezel_bb)
 
     if bottom_bb is not None:
         (bottom_x_min, bottom_y_min), (bottom_x_max, bottom_y_max) = bottom_bb
 
         bottom_pipeline_config = {}
 
-        store.zones.create(
-            layout_id=layout_id,
-            scancode=str(BOTTOM_BEZEL_ID),
-            name="BOTTOM_BEZEL",
-            zone_type=BEZEL,
-            x1=bottom_x_min,
-            y1=bottom_y_min,
-            x2=bottom_x_max,
-            y2=bottom_y_max,
-            pipeline_config=bottom_pipeline_config,
-        )
+        if layout_id is not None:
+            store.zones.create(
+                layout_id=layout_id,
+                scancode=str(BOTTOM_BEZEL_ID),
+                name="BOTTOM_BEZEL",
+                zone_type=BEZEL,
+                x1=bottom_x_min,
+                y1=bottom_y_min,
+                x2=bottom_x_max,
+                y2=bottom_y_max,
+                pipeline_config=bottom_pipeline_config,
+            )

@@ -390,6 +390,7 @@ class ProfilesPage(BasePage):
             QMessageBox.critical(self, "Export Failed", str(exc))
 
     def _on_clear_zones(self) -> None:
+        """Removes all the zones while reseeding the bezels"""
         layout_id = self._get_selected_layout_id()
         if layout_id is None:
             return
@@ -430,7 +431,7 @@ class ProfilesPage(BasePage):
             active_layout = store.get_active_layout()
             is_active = active_layout and active_layout.id == layout_id
 
-            store.zones.delete_all_for_layout(layout_id)
+            store.zones.delete_all_for_layout(layout_id, False)
             store.layouts.delete(layout_id)
 
             if is_active:

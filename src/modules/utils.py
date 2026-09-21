@@ -8,6 +8,7 @@ import struct
 import subprocess
 import time
 import threading
+import json
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
@@ -37,6 +38,7 @@ KEEPALIVE_INTERVAL = 5.0
 
 if TYPE_CHECKING:
     from multiprocessing import Process
+    from modules.database.repositories import Layout, LayoutZone, LayoutZonesRepository
 
 # ---------------------------------------------------------------------------
 # Project & Data Paths
@@ -76,7 +78,9 @@ PROFILES_FOLDER.mkdir(parents=True, exist_ok=True)
 # Constants
 # ---------------------------------------------------------------------------
 
-DEF_DPI = 160
+BASELINE_DPI = 160
+BASELINE_WIDTH = 800
+BASELINE_HEIGHT = 360
 DOWN = "DOWN"
 UP = "UP"
 PRESSED = "PRESSED"
@@ -84,7 +88,10 @@ IDLE = "IDLE"
 
 CIRCLE = "CIRCLE"
 RECTANGLE = "RECTANGLE"
-BEZEL = BEZEL
+BEZEL = "BEZEL"
+
+TOGGLE_VKB = "TOGGLE_VKB"
+TOGGLE_MODE = "TOGGLE_MODE"
 
 # VIRTUAL KEYBOARD CONSTANTS
 MODIFIER_KEYS = "lshift,rshift,lctrl,rctrl,lalt,ralt"
@@ -94,8 +101,11 @@ TOGGLE_KEY_ID = 0x9900
 M_LEFT = 0x9901
 M_RIGHT = 0x9902
 M_MIDDLE = 0x9903
+TOP_BEZEL_NAME = "Top Bezel"
 TOP_BEZEL_ID = 0x9905
+BOTTOM_BEZEL_NAME = "Bottom Bezel"
 BOTTOM_BEZEL_ID = 0x9906
+BEZEL_DP_THICKNESS = 25  # ~3.97mm
 SPRINT_DISTANCE_CODE = "LEFT_BRACKET"
 MOUSE_WHEEL_CODE = "RIGHT_BRACKET"
 
@@ -538,9 +548,9 @@ def get_dpi(device: str):
             timeout=10,
         )
         val = result.stdout.strip()
-        return int(val) if val else DEF_DPI
+        return int(val) if val else BASELINE_DPI
     except Exception:
-        return DEF_DPI
+        return BASELINE_DPI
 
 
 def is_device_online(device: str):
@@ -694,3 +704,123 @@ def get_key_from_scancode(scancode: str | int):
         return None
     key = SCANCODES_INV.get(code_int)
     return SPECIAL_MAP_INV.get(key, key) if key else None
+
+
+def dp_to_px(dp: float, dpi: int = BASELINE_DPI) -> int:
+    """Converts density-independent pixels (DP) to device pixels (PX)."""
+    return round(dp * (dpi / BASELINE_DPI))
+
+
+def px_to_dp(px: float, dpi: int = BASELINE_DPI) -> float:
+    """Converts device pixels (PX) to density-independent pixels (DP)."""
+    return px / (dpi / BASELINE_DPI)
+
+
+def calculate_rect(
+    x1: float, y1: float, x2: float, y2: float
+) -> tuple[float, float, float, float, float, float]:
+    xs = [x1, x2]
+    ys = [y1, y2]
+    cx = float(round(sum(xs) / 2))
+    cy = float(round(sum(ys) / 2))
+
+    return (cx, cy, min(xs), min(ys), max(xs), max(ys))
+
+
+def bezels_exist_ids(zones: list[LayoutZone]) -> tuple[int, int]:
+    top_id = -1
+    bottom_id = -1
+
+    for z in zones:
+        if z.zone_type != BEZEL:
+            continue
+
+        cfg_raw = z.pipeline_config
+
+        if top_id < 0 and (
+            TOGGLE_MODE in cfg_raw or str(z.scancode) == str(TOP_BEZEL_ID)
+        ):
+            top_id = z.id
+
+        if bottom_id < 0 and (
+            TOGGLE_VKB in cfg_raw or str(z.scancode) == str(BOTTOM_BEZEL_ID)
+        ):
+            bottom_id = z.id
+
+        if top_id >= 0 and bottom_id >= 0:
+            break
+
+    return top_id, bottom_id
+
+
+def get_bezel_thickness(zone: LayoutZone, layout: Layout):
+    cfg_raw = zone.pipeline_config or "{}"
+
+    try:
+        cfg = json.loads(cfg_raw)
+    except Exception:
+        cfg = {}
+
+    reg_cfg = cfg.get("region", {})
+    reg_bezel_dp_thickness = reg_cfg.get("bezel_dp_thickness", BEZEL_DP_THICKNESS)
+
+    return float(dp_to_px(reg_bezel_dp_thickness, layout.dpi))
+
+
+def ensure_top_bezel(
+    layout: Layout,
+    zones_repo: LayoutZonesRepository,
+    thickness: float | None = None,
+):
+    if thickness is None:
+        _thickness = float(dp_to_px(BEZEL_DP_THICKNESS, layout.dpi))
+    else:
+        _thickness = thickness
+
+    w = layout.width
+    cx, cy, x1, y1, x2, y2 = calculate_rect(0.0, 0.0, w, _thickness)
+
+    zones_repo.create(
+        layout_id=layout.id,
+        scancode=TOP_BEZEL_ID,
+        name=TOP_BEZEL_NAME,
+        zone_type=BEZEL,
+        cx=cx,
+        cy=cy,
+        r=None,
+        x1=x1,
+        y1=y1,
+        x2=x2,
+        y2=y2,
+        pipeline_config=f'{{"priority": 100, "semantics": {{"action": "{TOGGLE_MODE}"}}}}',
+    )
+
+
+def ensure_bottom_bezel(
+    layout: Layout,
+    zones_repo: LayoutZonesRepository,
+    thickness: float | None = None,
+):
+    if thickness is None:
+        _thickness = float(dp_to_px(BEZEL_DP_THICKNESS, layout.dpi))
+    else:
+        _thickness = thickness
+
+    w = layout.width
+    h = layout.height
+    cx, cy, x1, y1, x2, y2 = calculate_rect(0.0, h - _thickness, w, h)
+
+    zones_repo.create(
+        layout_id=layout.id,
+        scancode=BOTTOM_BEZEL_ID,
+        name=BOTTOM_BEZEL_NAME,
+        zone_type=BEZEL,
+        cx=cx,
+        cy=cy,
+        r=None,
+        x1=x1,
+        y1=y1,
+        x2=x2,
+        y2=y2,
+        pipeline_config=f'{{"priority": 100, "semantics": {{"action": "{TOGGLE_VKB}"}}}}',
+    )

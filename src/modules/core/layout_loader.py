@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from modules.core.pipeline_factory import create_pipeline_from_zone
 from modules.database import Layout, LayoutZone, store, ensure_system_bezels
-from modules.utils import CIRCLE, RECTANGLE, MapperEvent
+from modules.utils import BEZEL, CIRCLE, RECTANGLE, BASELINE_DPI, BASELINE_HEIGHT, BASELINE_WIDTH, MapperEvent
 
 if TYPE_CHECKING:
     from modules.core.pipeline import Pipeline
@@ -35,14 +35,15 @@ class LayoutLoader:
         self.active_layout: Layout | None = None
         self.zones: list[LayoutZone] = []
 
-        self.width: int = 360
-        self.height: int = 800
-        self.dpi: int = 160
+        self.width: int = BASELINE_WIDTH
+        self.height: int = BASELINE_HEIGHT
+        self.dpi: int = BASELINE_DPI
         self.mouse_wheel_radius: float = 50.0
         self.sprint_distance: float = 10.0
         self.bezel_height: float = 14.0  # Kept strictly for backward compatibility if plugins expect it
 
-        self.json_data: list[tuple[str, dict[str, Any]]] = []
+        self.keys_json_data: list[tuple[str, dict[str, Any]]] = []
+        self.bezels_json_data: list[tuple[str, dict[str, Any]]] = []
         self.custom_pipelines: list[Pipeline] = []
 
         self._load_layout()
@@ -57,17 +58,17 @@ class LayoutLoader:
             return self.mouse_wheel_radius, self.sprint_distance
 
     def _load_layout(self) -> None:
-        """Loads metadata and parses custom pipelines."""
+        """Loads metadata and parses bezel pipelines."""
         layout = store.get_active_layout()
         if layout is None:
             logger.warning("No active layout found in SQLite database.")
             settings = store.settings.get()
             with self.layout_lock:
-                self.width = settings.json_dev_width or 360
-                self.height = settings.json_dev_height or 800
-                self.dpi = settings.json_dev_dpi or 160
+                self.width = settings.json_dev_width or BASELINE_WIDTH
+                self.height = settings.json_dev_height or BASELINE_HEIGHT
+                self.dpi = settings.json_dev_dpi or BASELINE_DPI
                 self.custom_pipelines = []
-                self.json_data = []
+                self.keys_json_data = []
             return
 
         # --- Self-Heal ---
@@ -89,28 +90,13 @@ class LayoutLoader:
 
             compiled_pipelines: list[Pipeline] = []
 
-            for z in zones:
-                # We no longer skip BEZEL types! They are compiled into SystemToggle 
-                # pipelines and routed straight to the Engine.
-                pipeline = create_pipeline_from_zone(
-                    zone=z,
-                    screen_width=float(self.width),
-                    screen_height=float(self.height),
-                    toggle_mode_callback=self.toggle_mode_callback,
-                )
-                if pipeline is not None:
-                    compiled_pipelines.append(pipeline)
-
             self.custom_pipelines = compiled_pipelines
 
-            # Normalize touch coordinates for the Android/Mobile payload.
-            # We still skip BEZELs here because the mobile screen doesn't need to 
-            # render bounding boxes for invisible system edge triggers.
-            normalized: list[tuple[str, dict[str, Any]]] = []
+            # Normalize touch and bezel coordinates for the Android/Mobile payload..
+            normalized_keys: list[tuple[str, dict[str, Any]]] = []
+            normalized_bezels: list[tuple[str, dict[str, Any]]] = []
+            
             for z in zones:
-                if z.zone_type == "BEZEL":
-                    continue
-
                 z_dict: dict[str, Any] = {
                     "name": z.name,
                     "type": z.zone_type,
@@ -123,15 +109,20 @@ class LayoutLoader:
                     z_dict["cx"] = (z.cx or 0.0) / self.width
                     z_dict["cy"] = (z.cy or 0.0) / self.height
                     z_dict["r"] = (z.r or 0.0) / self.width
-                elif z.zone_type == RECTANGLE:
+                    
+                elif z.zone_type == BEZEL or z.zone_type == RECTANGLE:
                     z_dict["x1"] = (z.x1 or 0.0) / self.width
                     z_dict["y1"] = (z.y1 or 0.0) / self.height
                     z_dict["x2"] = (z.x2 or 0.0) / self.width
                     z_dict["y2"] = (z.y2 or 0.0) / self.height
 
-                normalized.append((z.scancode, z_dict))
+                if z.zone_type == "BEZEL":
+                    normalized_bezels.append((z.scancode, z_dict))
+                else:                
+                    normalized_keys.append((z.scancode, z_dict))
 
-            self.json_data = normalized
+            self.bezels_json_data = normalized_bezels
+            self.keys_json_data = normalized_keys
 
             logger.info(
                 "Active layout '%s' loaded. (%dx%d, %d zones, %d compiled pipelines)",

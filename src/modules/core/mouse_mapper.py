@@ -18,7 +18,8 @@ from modules.core.pipeline import (
     TouchPhase,
     Vector,
 )
-from modules.core.pipeline_output import BridgeOutputSink
+
+from modules.core import BridgeOutputSink
 from modules.utils import TouchEvent
 
 if TYPE_CHECKING:
