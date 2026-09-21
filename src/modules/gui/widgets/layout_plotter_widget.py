@@ -16,7 +16,7 @@ from modules.utils import (
     BEZEL,
     CIRCLE,
     RECTANGLE,
-    DEF_DPI,
+    BASELINE_DPI,
     IMAGES_FOLDER,
     MOUSE_WHEEL_CODE,
     SPRINT_DISTANCE_CODE,
@@ -1190,7 +1190,7 @@ class LayoutPlotterWidget(QWidget):
 
         except Exception:
             pass
-        self.img_dpi = int(round(img.info.get("dpi", DEF_DPI)[0]))
+        self.img_dpi = int(round(img.info.get("dpi", BASELINE_DPI)[0]))
 
     def init_crosshairs(self):
         self.crosshair_h_bg = self.ax.axhline(

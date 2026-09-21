@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 from modules.core.pipeline import (
     Button,
     CircularRegion,
-    ModeAwareRegion,
     Point,
     RectangularRegion,
     TrackFire,
@@ -123,10 +122,9 @@ class KeyMapper:
             return self.slot_zone_map.get(slot_id)
 
     def _build_pipelines(self) -> None:
-        raw_zones = self.mapper.layout_loader.json_data.copy()
+        raw_zones = self.mapper.layout_loader.keys_json_data.copy()
         w = float(self.mapper.layout_loader.width)
         h = float(self.mapper.layout_loader.height)
-        toggle_scancode = self.mapper.toggle_key_scancode
 
         def _scale_x(val: float | None) -> float:
             if val is None:
@@ -162,18 +160,7 @@ class KeyMapper:
             else:
                 continue
 
-            is_toggle_zone = toggle_scancode is not None and (
-                scancode == toggle_scancode
-                or str(scancode) == str(toggle_scancode)
-                or name == self.mapper.emulator.get("toggle_key")
-            )
-
-            if is_toggle_zone:
-                region = ModeAwareRegion(
-                    base_region=base_region, engine_ref=self.mapper.engine_ref
-                )
-            else:
-                region = base_region
+            region = base_region
 
             is_mouse_btn = scancode in (M_LEFT, M_RIGHT, M_MIDDLE)
             if move_camera:

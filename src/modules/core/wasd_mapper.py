@@ -54,7 +54,7 @@ class WASDMapper:
         w = float(self.mapper.layout_loader.width)
         h = float(self.mapper.layout_loader.height)
 
-        raw_zones = self.mapper.layout_loader.json_data.copy()
+        raw_zones = self.mapper.layout_loader.keys_json_data.copy()
 
         # Check if the layout defines an explicit fixed HUD joystick zone
         fixed_zone = None
