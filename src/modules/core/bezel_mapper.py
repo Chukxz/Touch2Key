@@ -29,7 +29,7 @@ class BezelMapper:
         w = float(self.mapper.layout_loader.width)
         h = float(self.mapper.layout_loader.height)
 
-        bezel_zones = [z for z in zones if z.zone_type == "BEZEL"]
+        bezel_raw_zones = [z for z in zones if z.zone_type == "BEZEL"]
 
         for z in bezel_zones:
             bezel_pipeline = create_pipeline_from_zone(

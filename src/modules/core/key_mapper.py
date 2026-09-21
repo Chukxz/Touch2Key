@@ -24,6 +24,7 @@ from modules.utils import (
     TouchEvent,
     TouchPhase,
     get_scancode_from_key,
+    scale_x, scale_y
 )
 
 if TYPE_CHECKING:
@@ -126,16 +127,6 @@ class KeyMapper:
         w = float(self.mapper.layout_loader.width)
         h = float(self.mapper.layout_loader.height)
 
-        def _scale_x(val: float | None) -> float:
-            if val is None:
-                return 0.0
-            return val * w if val <= 1.0 else val
-
-        def _scale_y(val: float | None) -> float:
-            if val is None:
-                return 0.0
-            return val * h if val <= 1.0 else val
-
         new_pipelines = []
 
         for scancode, value in raw_zones:
@@ -149,13 +140,13 @@ class KeyMapper:
 
             if z_type == CIRCLE:
                 base_region = CircularRegion(
-                    center=Point(_scale_x(value.get("cx")), _scale_y(value.get("cy"))),
-                    radius=_scale_x(value.get("r", value.get("val1", 50.0))),
+                    center=Point(scale_x(w, value.get("cx")), scale_y(h, value.get("cy"))),
+                    radius=scale_x(w, value.get("r", value.get("val1", 50.0))),
                 )
             elif z_type == RECTANGLE:
                 base_region = RectangularRegion(
-                    top_left=Point(_scale_x(value.get("x1")), _scale_y(value.get("y1"))),
-                    bottom_right=Point(_scale_x(value.get("x2")), _scale_y(value.get("y2"))),
+                    top_left=Point(scale_x(w, value.get("x1")), scale_y(h, value.get("y1"))),
+                    bottom_right=Point(scale_x(w, value.get("x2")), scale_y(h, value.get("y2"))),
                 )
             else:
                 continue

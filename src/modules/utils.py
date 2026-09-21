@@ -824,3 +824,13 @@ def ensure_bottom_bezel(
         y2=y2,
         pipeline_config=f'{{"priority": 100, "semantics": {{"action": "{TOGGLE_VKB}"}}}}',
     )
+
+def scale_x(w: float, val: float | None) -> float:
+    if val is None:
+        return 0.0
+    return val * w if val <= 1.0 else val
+
+def scale_y(h: float, val: float | None) -> float:
+    if val is None:
+        return 0.0
+    return val * h if val <= 1.0 else val
