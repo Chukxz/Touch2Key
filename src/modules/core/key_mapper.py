@@ -9,7 +9,6 @@ from modules.core.pipeline import (
     CircularRegion,
     Point,
     RectangularRegion,
-    TrackFire,
 )
 from modules.core import BridgeOutputSink
 from modules.utils import (
@@ -24,7 +23,7 @@ from modules.utils import (
     TouchEvent,
     TouchPhase,
     get_scancode_from_key,
-    scale_x, scale_y
+    scale_coord,
 )
 
 if TYPE_CHECKING:
@@ -123,13 +122,16 @@ class KeyMapper:
             return self.slot_zone_map.get(slot_id)
 
     def _build_pipelines(self) -> None:
-        raw_zones = self.mapper.layout_loader.keys_json_data.copy()
+        key_raw_zones = self.mapper.layout_loader.keys_json_data.copy()
         w = float(self.mapper.layout_loader.width)
         h = float(self.mapper.layout_loader.height)
 
         new_pipelines = []
 
-        for scancode, value in raw_zones:
+        for scancode, value in key_raw_zones:
+            if scancode == str(self.mapper.toggle_key_scancode):
+                return
+
             name = value.get("name", "")
             if name in self.ignored_keys:
                 continue
@@ -139,36 +141,35 @@ class KeyMapper:
             priority = value.get("priority", 0)
 
             if z_type == CIRCLE:
-                base_region = CircularRegion(
-                    center=Point(scale_x(w, value.get("cx")), scale_y(h, value.get("cy"))),
-                    radius=scale_x(w, value.get("r", value.get("val1", 50.0))),
+                region = CircularRegion(
+                    center=Point(
+                        scale_coord(w, value.get("cx")), scale_coord(h, value.get("cy"))
+                    ),
+                    radius=scale_coord(w, value.get("r", value.get("val1", 50.0))),
                 )
             elif z_type == RECTANGLE:
-                base_region = RectangularRegion(
-                    top_left=Point(scale_x(w, value.get("x1")), scale_y(h, value.get("y1"))),
-                    bottom_right=Point(scale_x(w, value.get("x2")), scale_y(h, value.get("y2"))),
+                region = RectangularRegion(
+                    top_left=Point(
+                        scale_coord(w, value.get("x1")), scale_coord(h, value.get("y1"))
+                    ),
+                    bottom_right=Point(
+                        scale_coord(w, value.get("x2")), scale_coord(h, value.get("y2"))
+                    ),
                 )
             else:
                 continue
 
-            region = base_region
-
             is_mouse_btn = scancode in (M_LEFT, M_RIGHT, M_MIDDLE)
-            if move_camera:
-                pipeline = TrackFire(
-                    button=str(scancode),
-                    region=region,
-                    sensitivity_x=self.config.settings.sensitivity,
-                    sensitivity_y=self.config.settings.sensitivity,
-                    priority=priority,
-                )
-            else:
-                pipeline = Button(
-                    output=str(scancode),
-                    region=region,
-                    mouse_button=is_mouse_btn,
-                    priority=priority,
-                )
+
+            pipeline = Button(
+                button=str(scancode),
+                region=region,
+                pointer=move_camera,
+                sensitivity_x=self.config.settings.sensitivity,
+                sensitivity_y=self.config.settings.sensitivity,
+                mouse_button=is_mouse_btn,
+                priority=priority,
+            )
 
             new_pipelines.append(pipeline)
 

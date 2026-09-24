@@ -5,8 +5,10 @@ from .mapper import Mapper
 from .mouse_mapper import MouseMapper
 from .key_mapper import KeyMapper
 from .wasd_mapper import WASDMapper
-from .pipeline import Pipeline
+from .bezel_mapper import BezelMapper
+from .pipeline import Pipeline, PipelineConfig
 from .pipeline_output import BridgeOutputSink
+from .gestures import TwoFingerTapTracker
 from .pipeline_factory import create_pipeline_from_zone
 
 __all__ = [
@@ -18,6 +20,8 @@ __all__ = [
     "KeyMapper",
     "WASDMapper",
     "Pipeline",
+    "PipelineConfig",
     "BridgeOutputSink",
     "create_pipeline_from_zone",
+    "TwoFingerTapTracker"
 ]

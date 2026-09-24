@@ -1,30 +1,244 @@
 from __future__ import annotations
 
+import sys
 import json
 import math
 from typing import Any, cast
 
 from modules.core.pipeline import (
+    Unit,
+    Region,
     AlwaysRegion,
     CircularRegion,
     RectangularRegion,
     FixedOrigin,
     DynamicOrigin,
-    AnchoredDynamicOrigin,
+    AnchoredOrigin,
     NoConstraint,
     RadialConstraint,
     LeashConstraint,
     IdentityTransform,
     DeltaTransform,
-    JoystickSectorTransform,
+    JoystickTransform,
     ButtonSemantic,
     ToggleSemantic,
-    PointerMoveSemantic,
-    DirectionalKeySemantic,
+    PointerSemantic,
+    DirectionalSemantic,
     Pipeline,
     Transformation,
 )
-from modules.utils import Point
+
+from modules.utils import (
+    BASELINE_DPI,
+    TOGGLE_MODE,
+    TOGGLE_VKB,
+    dp_to_px,
+    Point,
+    Vector,
+)
+
+
+# ---------------------------------------------------------------------------
+# Factory Constructors
+# ---------------------------------------------------------------------------
+
+
+def Button(
+    button: str,
+    region: Region | None,
+    pointer: bool = False,
+    sensitivity_x: float = 1.0,
+    sensitivity_y: float = 1.0,
+    mouse_button: bool = False,
+    priority: int = 0,
+    creation_id: int = 0,
+) -> Pipeline[Vector]:
+    return Pipeline(
+        region=region or AlwaysRegion(),
+        origin=DynamicOrigin(),
+        constraint=NoConstraint(),
+        transformation=DeltaTransform(sensitivity_x, sensitivity_y),
+        semantics=[
+            ButtonSemantic(output=button, mouse_button=mouse_button),
+            PointerSemantic(pointer=pointer),
+        ],
+        priority=priority,
+        type_precedence=2,
+        creation_id=creation_id,
+        allow_multi_claim=True,
+    )
+
+
+def FixedJoystick(
+    center: Point,
+    touch_radius: float,
+    dead_zone: float,
+    walk_radius: float,
+    sprint_distance: float = 0.0,
+    hysteresis_deg: float = 5.0,
+    up: str = "w",
+    down: str = "s",
+    left: str = "a",
+    right: str = "d",
+    sprint_key: str = "shift",
+    priority: int = 0,
+    creation_id: int = 0,
+) -> Pipeline[frozenset[str]]:
+    return Pipeline(
+        region=CircularRegion(center=center, radius=touch_radius),
+        origin=FixedOrigin(position=center),
+        constraint=RadialConstraint(radius=touch_radius),
+        transformation=JoystickTransform(
+            dead_zone=dead_zone,
+            walk_radius=walk_radius,
+            sprint_distance=sprint_distance,
+            hysteresis_rad=math.radians(hysteresis_deg),
+            up=up,
+            down=down,
+            left=left,
+            right=right,
+            sprint_key=sprint_key,
+        ),
+        semantics=[DirectionalSemantic()],
+        priority=priority,
+        type_precedence=1,
+        creation_id=creation_id,
+    )
+
+
+def FloatingJoystick(
+    region: Region,
+    dead_zone: float,
+    walk_radius: float,
+    sprint_distance: float = 0.0,
+    leash_radius: float = 0.0,
+    hysteresis_deg: float = 5.0,
+    up: str = "w",
+    down: str = "s",
+    left: str = "a",
+    right: str = "d",
+    sprint_key: str = "shift",
+    priority: int = 0,
+    creation_id: int = 0,
+) -> Pipeline[frozenset[str]]:
+    constraint = LeashConstraint(
+        leash_radius
+        if leash_radius > 0
+        else (
+            sprint_distance
+            if sprint_distance > 0
+            else (float(dp_to_px(60.0, BASELINE_DPI)))  # 60 DP stick radius
+        )
+    )
+    return Pipeline(
+        region=region,
+        origin=DynamicOrigin(),
+        constraint=constraint,
+        transformation=JoystickTransform(
+            dead_zone=dead_zone,
+            walk_radius=walk_radius,
+            sprint_distance=sprint_distance,
+            hysteresis_rad=math.radians(hysteresis_deg),
+            up=up,
+            down=down,
+            left=left,
+            right=right,
+            sprint_key=sprint_key,
+        ),
+        semantics=[DirectionalSemantic()],
+        priority=priority,
+        type_precedence=1,
+        creation_id=creation_id,
+    )
+
+
+def AnchoredJoystick(
+    default_anchor: Point,
+    region: Region,
+    dead_zone: float,
+    walk_radius: float,
+    sprint_distance: float = 0.0,
+    leash_radius: float = 0.0,
+    snap_radius: float = 80.0,
+    hysteresis_deg: float = 5.0,
+    up: str = "w",
+    down: str = "s",
+    left: str = "a",
+    right: str = "d",
+    sprint_key: str = "shift",
+    priority: int = 0,
+    creation_id: int = 0,
+) -> Pipeline[frozenset[str]]:
+    constraint = LeashConstraint(
+        leash_radius
+        if leash_radius > 0
+        else (
+            sprint_distance
+            if sprint_distance > 0
+            else (float(dp_to_px(60.0, BASELINE_DPI)))  # 60 DP stick radius
+        )
+    )
+    return Pipeline(
+        region=region,
+        origin=AnchoredOrigin(default_anchor=default_anchor, snap_radius=snap_radius),
+        constraint=constraint,
+        transformation=JoystickTransform(
+            dead_zone=dead_zone,
+            walk_radius=walk_radius,
+            sprint_distance=sprint_distance,
+            hysteresis_rad=math.radians(hysteresis_deg),
+            up=up,
+            down=down,
+            left=left,
+            right=right,
+            sprint_key=sprint_key,
+        ),
+        semantics=[DirectionalSemantic()],
+        priority=priority,
+        type_precedence=1,
+        creation_id=creation_id,
+        allow_multi_claim=False,
+    )
+
+
+def RelativePointer(
+    region: Region | None,
+    sensitivity_x: float = 1.0,
+    sensitivity_y: float = 1.0,
+    priority: int = -100,
+    creation_id: int = sys.maxsize,
+) -> Pipeline[Vector]:
+    return Pipeline(
+        region=region or AlwaysRegion(),
+        origin=DynamicOrigin(),
+        constraint=NoConstraint(),
+        transformation=DeltaTransform(sensitivity_x, sensitivity_y),
+        semantics=[PointerSemantic()],
+        priority=priority,
+        type_precedence=0,
+        creation_id=creation_id,
+    )
+
+
+def SystemToggle(
+    output: str,
+    region: Region,
+    priority: int = 100,
+    creation_id: int = 0,
+) -> Pipeline[Unit]:
+    """Factory for standardizing Bezel/System boundary zones defined in the layout."""
+    return Pipeline(
+        region=region,
+        origin=FixedOrigin(Point(0.0, 0.0)),
+        constraint=NoConstraint(),
+        transformation=IdentityTransform(),
+        semantics=[ToggleSemantic(output=output)],
+        priority=priority,
+        type_precedence=2,
+        creation_id=creation_id,
+        allow_multi_claim=False,
+        is_system=True,
+    )
 
 
 def create_pipeline_from_zone(
@@ -72,7 +286,7 @@ def create_pipeline_from_zone(
             float(orig_cfg.get("anchor_y", zone.cy or 0.0)),
         )
         snap_r = float(orig_cfg.get("snap_radius", 80.0))
-        origin = AnchoredDynamicOrigin(default_anchor=anchor, snap_radius=snap_r)
+        origin = AnchoredOrigin(default_anchor=anchor, snap_radius=snap_r)
     else:
         fixed_pt = Point(float(zone.cx or 0.0), float(zone.cy or 0.0))
         origin = FixedOrigin(position=fixed_pt)
@@ -99,7 +313,7 @@ def create_pipeline_from_zone(
         sy = float(trans_cfg.get("sens_y", 1.0))
         transformation = DeltaTransform(sensitivity_x=sx, sensitivity_y=sy)
     elif trans_type == "JOYSTICK":
-        transformation = JoystickSectorTransform(
+        transformation = JoystickTransform(
             dead_zone=float(trans_cfg.get("joy_dz", 10.0)),
             walk_radius=float(trans_cfg.get("joy_walk", 80.0)),
             sprint_radius=float(trans_cfg.get("joy_sprint", 120.0)),
@@ -121,22 +335,20 @@ def create_pipeline_from_zone(
     type_precedence = 2
 
     if action == "TOGGLE_MODE" or sem_mode == "TOGGLE_MODE":
-        semantics.append(ToggleSemantic(output="TOGGLE_MODE", is_mode_switch=True))
+        semantics.append(ToggleSemantic(output="TOGGLE_MODE"))
     elif action == "TOGGLE_VKB" or sem_mode == "TOGGLE_VKB":
         semantics.append(ToggleSemantic(output="TOGGLE_VKB"))
-    elif sem_mode == "TOGGLE_KEY":
-        semantics.append(ToggleSemantic(output=target_key, is_mode_switch=False))
     elif sem_mode == "WASD":
-        semantics.append(DirectionalKeySemantic())
+        semantics.append(DirectionalSemantic())
         type_precedence = 1
     elif sem_mode == "POINTER":
-        semantics.append(PointerMoveSemantic())
+        semantics.append(PointerSemantic())
         type_precedence = 0
     elif sem_mode == "TRACK_FIRE":
         semantics.append(
             ButtonSemantic(output=target_key, mouse_button=is_mouse_button)
         )
-        semantics.append(PointerMoveSemantic())
+        semantics.append(PointerSemantic())
         allow_multi_claim = True
     else:  # BUTTON
         semantics.append(

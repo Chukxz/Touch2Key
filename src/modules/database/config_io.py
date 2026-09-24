@@ -36,7 +36,7 @@ def export_layout_json(layout_id: int, target_path: Optional[Path] = None) -> Pa
                 "val2": zone.y1 or 0.0,
                 "val3": zone.x2 or 0.0,
                 "val4": zone.y2 or 0.0,
-                "move_camera": bool(zone.move_camera),
+                "pointer": bool(zone.pointer),
                 "priority": zone.priority,
                 "pipeline_config": zone.pipeline_config,
             }
@@ -87,7 +87,9 @@ def export_settings_toml(
         system.add("json_path", str(linked_json_path.resolve()))
     else:
         system.add("json_path", "")
-
+        
+    system.add("double_tap_enabled", bool(s.double_tap_enabled))
+    system.add("system_toggle_enabled", bool(s.system_toggle_enabled))
     doc.add("system", system)
 
     # Performance Section
@@ -100,7 +102,7 @@ def export_settings_toml(
     joystick = tomlkit.table()
     joystick.add("deadzone", float(s.deadzone))
     joystick.add("hysteresis", float(s.hysteresis))
-    joystick.add("anchored_floating_joystick", bool(s.anchored_floating_joystick))
+    joystick.add("anchored_joystick", bool(s.anchored_joystick))
     joystick.add("joystick_snap_radius", float(s.joystick_snap_radius))
     doc.add("joystick", joystick)
 

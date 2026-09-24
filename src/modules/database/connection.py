@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS app_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     left_handed INTEGER NOT NULL DEFAULT 0,
     floating_joystick INTEGER NOT NULL DEFAULT 0
-    anchored_floating_joystick INTEGER NOT NULL DEFAULT 0,
+    anchored_joystick INTEGER NOT NULL DEFAULT 0,
     joystick_snap_radius REAL NOT NULL DEFAULT 80.0,
     json_dev_width INTEGER NOT NULL DEFAULT 360,
     json_dev_height INTEGER NOT NULL DEFAULT 800,
@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
     windows_keyboard_device INTEGER,
     windows_mouse_device INTEGER,
     typematic_exclude_keys TEXT,
+    double_tap_enabled INTEGER NOT NULL DEFAULT 1,
+    system_toggle_enabled INTEGER NOT NULL DEFAULT 1,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

@@ -11,15 +11,20 @@ from modules.utils import (
     TouchEvent,
     TouchPhase,
 )
-from modules.core.config import AppConfig
-from modules.core.layout_loader import LayoutLoader
-from modules.core.touch_reader import TouchReader
-from modules.core.mapper import Mapper
-from modules.core.mouse_mapper import MouseMapper
-from modules.core.key_mapper import KeyMapper
-from modules.core.wasd_mapper import WASDMapper
-from modules.core.pipeline import Pipeline
-from modules.core.gestures import TwoFingerTapTracker
+
+from modules.core import (
+    AppConfig,
+    LayoutLoader,
+    TouchReader,
+    Mapper,
+    BezelMapper,
+    MouseMapper,
+    KeyMapper,
+    WASDMapper,
+    Pipeline,
+    TwoFingerTapTracker
+)
+
 from modules.cli.list_windows import select_window
 from modules.cli.key_capture import capture_keys, capture_performance_settings
 
@@ -45,6 +50,7 @@ class Engine:
         self.touch_reader: TouchReader | None = None
         self.layout_loader: LayoutLoader | None = None
         self.mapper: Mapper | None = None
+        self.bezel_mapper: BezelMapper | None = None
         self.mouse_mapper: MouseMapper | None = None
         self.key_mapper: KeyMapper | None = None
         self.wasd_mapper: WASDMapper | None = None
@@ -273,6 +279,7 @@ class Engine:
             self,
         )
 
+        self.bezel_mapper = BezelMapper(self.mapper, self.toggle_mode, self.toggle_virtual_keyboard)
         self.mouse_mapper = MouseMapper(self.mapper)
         self.key_mapper = KeyMapper(
             self.mapper,

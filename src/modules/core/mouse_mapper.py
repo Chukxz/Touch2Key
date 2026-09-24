@@ -13,7 +13,7 @@ from modules.core.pipeline import (
     NoConstraint,
     Pipeline,
     Point,
-    PointerMoveSemantic,
+    PointerSemantic,
     RectangularRegion,
     TouchPhase,
     Vector,
@@ -163,7 +163,7 @@ class MouseMapper:
             origin=DynamicOrigin(),
             constraint=NoConstraint(),
             transformation=DeltaTransform(sensitivity_x=sens_x, sensitivity_y=sens_y),
-            semantics=[PointerMoveSemantic()],
+            semantics=[PointerSemantic()],
         )
         with self.lock:
             self.pipeline = pipeline
@@ -187,12 +187,6 @@ class MouseMapper:
         )
 
         if active_zone is not None:
-            # If the touch is driving a TrackFire button, NEVER let camera look consume it
-            cfg = getattr(active_zone, "parsed_pipeline_config", {})
-            sem_mode = cfg.get("semantics", {}).get("mode", "")
-            if sem_mode == "TRACK_FIRE" or active_zone.__class__.__name__ == "TrackFire":
-                return True
-
             # Standard buttons only pass motion to camera if move_camera is True
             if not getattr(active_zone, "move_camera", False):
                 return True

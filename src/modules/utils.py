@@ -9,10 +9,13 @@ import subprocess
 import time
 import threading
 import json
+import math
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Literal, Any
+
+from modules.core import PipelineConfig
 
 # Task IDs
 TASK_BUTTON = 0
@@ -151,6 +154,14 @@ EVENT_TYPE = Literal[
     "ON_TARGET_WINDOW_CHANGE",
     "ON_DEVICES_CHANGED",
 ]
+
+# Pipeline: Region ⟶ Origin ⟶ Constraint ⟶ Transformation ⟶ Semantic
+
+REGION_MODES = ["ALWAYS", "CIRCULAR", "RECTANGULAR"]
+ORIGIN_MODES = ["FIXED", "DYNAMIC", "ANCHORED"]
+CONSTRAINT_MODES = ["NONE", "RADIAL", "LEASH"]
+TRANSFORM_MODES = ["IDENTITY", "DELTA", "JOYSTICK"]
+SEMANTIC_MODES = ["BUTTON", "DIRECTIONAL", "POINTER", "TOGGLE"]
 
 # Low-level worker constants
 MAX_COALESCE = 20
@@ -349,8 +360,6 @@ class Vector:
 
     @property
     def magnitude(self) -> float:
-        import math
-
         return math.hypot(self.x, self.y)
 
     @property
@@ -735,16 +744,11 @@ def bezels_exist_ids(zones: list[LayoutZone]) -> tuple[int, int]:
         if z.zone_type != BEZEL:
             continue
 
-        cfg_raw = z.pipeline_config
 
-        if top_id < 0 and (
-            TOGGLE_MODE in cfg_raw or str(z.scancode) == str(TOP_BEZEL_ID)
-        ):
+        if top_id < 0 and str(z.scancode) == str(TOP_BEZEL_ID):
             top_id = z.id
 
-        if bottom_id < 0 and (
-            TOGGLE_VKB in cfg_raw or str(z.scancode) == str(BOTTOM_BEZEL_ID)
-        ):
+        if bottom_id < 0 and str(z.scancode) == str(BOTTOM_BEZEL_ID):
             bottom_id = z.id
 
         if top_id >= 0 and bottom_id >= 0:
@@ -754,7 +758,7 @@ def bezels_exist_ids(zones: list[LayoutZone]) -> tuple[int, int]:
 
 
 def get_bezel_thickness(zone: LayoutZone, layout: Layout):
-    cfg_raw = zone.pipeline_config or "{}"
+    Pipeline_Config = PipelineConfig()
 
     try:
         cfg = json.loads(cfg_raw)
@@ -825,12 +829,8 @@ def ensure_bottom_bezel(
         pipeline_config=f'{{"priority": 100, "semantics": {{"action": "{TOGGLE_VKB}"}}}}',
     )
 
-def scale_x(w: float, val: float | None) -> float:
-    if val is None:
-        return 0.0
-    return val * w if val <= 1.0 else val
 
-def scale_y(h: float, val: float | None) -> float:
+def scale_coord(base: float, val: float | None = None) -> float:
     if val is None:
         return 0.0
-    return val * h if val <= 1.0 else val
+    return val * base if val <= 1.0 else val

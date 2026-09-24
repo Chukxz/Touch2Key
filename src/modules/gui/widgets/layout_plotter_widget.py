@@ -59,7 +59,7 @@ HELP_STR = "F1 (Help)"
 DEF_STR = (
     "MODE: IDLE | F12 (Save to DB) | Esc (Exit) | F6 (Circle) | F7 (RECTANGLE) | F8 (Cancel)\n"
     "    Del (Delete) | F2 (Delete All) | F9 (List Shapes) | F4 (Toggle Overlays)\n"
-    "    [ (Sprint Threshold) | ] (Mouse Wheel) | Space (Toggle _Move Camera)\n"
+    "    [ (Sprint Threshold) | ] (Mouse Wheel) | Space (Toggle Pointer)\n"
     "    Arrows: Nudge | Shift+Arrows: Fast Nudge | P / O: Change Priority"
 )
 
@@ -148,10 +148,10 @@ class _Draggable:
         priority = self.plotter.shapes[self.entry_id].get("priority", 0)
         self.plotter.zone_selected.emit(priority)
 
-        move_camera_info = (
-            "_Move Camera Enabled"
-            if self.plotter.shapes[self.entry_id]["move_camera"]
-            else "_Move Camera Disabled"
+        pointer_info = (
+            "Pointer Enabled"
+            if self.plotter.shapes[self.entry_id]["pointer"]
+            else "Pointer Disabled"
         )
 
         if curr_id.startswith("label_"):
@@ -165,7 +165,7 @@ class _Draggable:
                     label_bbox.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
 
                 self.plotter.update_title(
-                    f"Current Artist: {curr_id} (ID: {self.entry_id}, Prio: {priority}) | Drag/Nudge | {move_camera_info} | {HELP_STR}",
+                    f"Current Artist: {curr_id} (ID: {self.entry_id}, Prio: {priority}) | Drag/Nudge | {pointer_info} | {HELP_STR}",
                     True,
                 )
 
@@ -183,7 +183,7 @@ class _Draggable:
                     draggable_shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
 
                 self.plotter.update_title(
-                    f"Current Artist: {curr_id} (ID: {self.entry_id}, Prio: {priority}) | Drag/Resize/Nudge | {move_camera_info} | {HELP_STR}",
+                    f"Current Artist: {curr_id} (ID: {self.entry_id}, Prio: {priority}) | Drag/Resize/Nudge | {pointer_info} | {HELP_STR}",
                     True,
                 )
 
@@ -1366,7 +1366,7 @@ class LayoutPlotterWidget(QWidget):
                 key_name=key_name,
                 bridge_key=bridge_key or zone.name,
                 hex_code=zone.scancode,
-                move_camera=zone.move_camera,
+                pointer=zone.pointer,
                 priority=zone.priority,
                 pipeline_config=cfg_raw,
             )
@@ -1727,8 +1727,8 @@ class LayoutPlotterWidget(QWidget):
                 try:
                     uid = int(self.input_buffer)
                     if uid in self.shapes:
-                        was_marked = self.shapes[uid]["move_camera"]
-                        self.shapes[uid]["move_camera"] = not was_marked
+                        was_marked = self.shapes[uid]["pointer"]
+                        self.shapes[uid]["pointer"] = not was_marked
                         if not was_marked:
                             self.label_drag_managers[uid].dull_face_color()
                             self.shape_drag_managers[uid].dull_face_color()
@@ -1784,7 +1784,7 @@ class LayoutPlotterWidget(QWidget):
             key_name=key_name,
             bridge_key=bridge_key,
             hex_code=hex_code,
-            move_camera=False,
+            pointer=False,
             priority=0,
             pipeline_config="{}",
         )
@@ -1799,7 +1799,7 @@ class LayoutPlotterWidget(QWidget):
         key_name: str,
         bridge_key: str,
         hex_code: str,
-        move_camera: bool = False,
+        pointer: bool = False,
         priority: int = 0,
         pipeline_config: str = "{}",
     ):
@@ -1807,7 +1807,7 @@ class LayoutPlotterWidget(QWidget):
             return
 
         saved, entry_id = self.save_entry(
-            bridge_key, hex_code, cx, cy, r, bb, move_camera, priority, pipeline_config
+            bridge_key, hex_code, cx, cy, r, bb, pointer, priority, pipeline_config
         )
         if not saved:
             return
@@ -1843,7 +1843,7 @@ class LayoutPlotterWidget(QWidget):
             self.label_drag_managers[entry_id] = _DraggableLabel(entry_id, self)
             self.shape_drag_managers[entry_id] = _DraggableCircle(entry_id, self)
 
-            if move_camera:
+            if pointer:
                 self.label_drag_managers[entry_id].dull_face_color()
                 self.shape_drag_managers[entry_id].dull_face_color()
 
@@ -1871,7 +1871,7 @@ class LayoutPlotterWidget(QWidget):
             self.label_drag_managers[entry_id] = _DraggableLabel(entry_id, self)
             self.shape_drag_managers[entry_id] = _DraggableRectangle(entry_id, self)
 
-            if move_camera:
+            if pointer:
                 self.label_drag_managers[entry_id].dull_face_color()
                 self.shape_drag_managers[entry_id].dull_face_color()
 
@@ -1942,7 +1942,7 @@ class LayoutPlotterWidget(QWidget):
             if "semantics" not in cfg:
                 cfg["semantics"] = {}
 
-            if data["move_camera"]:
+            if data["pointer"]:
                 cfg["semantics"]["mode"] = "BUTTON"
             elif cfg["semantics"].get("mode") == "TRACK_FIRE":
                 cfg["semantics"]["mode"] = "BUTTON"
@@ -1991,7 +1991,7 @@ class LayoutPlotterWidget(QWidget):
             store.zones.delete_all_for_layout(layout_id, False)
         else:
             if existing_layout:
-                layout_id = existing_layout.id 
+                layout_id = existing_layout.id
                 store.layouts.update(
                     layout_id,
                     width=self.width,
@@ -2061,7 +2061,7 @@ class LayoutPlotterWidget(QWidget):
         cy,
         r,
         bb,
-        move_camera,
+        pointer,
         priority=0,
         pipeline_config="{}",
     ):
@@ -2143,7 +2143,7 @@ class LayoutPlotterWidget(QWidget):
             "cy": cy,
             "r": r,
             "bb": bb,
-            "move_camera": move_camera,
+            "pointer": pointer,
             "priority": priority,
             "pipeline_config": pipeline_config,
         }
@@ -2286,7 +2286,7 @@ def ensure_bezels(
         (top_x_min, top_y_min), (top_x_max, top_y_max) = top_bb
 
         top_pipeline_config = {}
-        
+
         if layout_id is not None:
             store.zones.create(
                 layout_id=layout_id,

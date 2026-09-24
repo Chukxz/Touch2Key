@@ -100,7 +100,7 @@ class LayoutLoader:
                 z_dict: dict[str, Any] = {
                     "name": z.name,
                     "type": z.zone_type,
-                    "move_camera": z.move_camera,
+                    "pointer": z.pointer,
                     "priority": getattr(z, "priority", 0),
                     "pipeline_config": getattr(z, "pipeline_config", "{}") or "{}",
                 }

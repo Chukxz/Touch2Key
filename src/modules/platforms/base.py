@@ -5,6 +5,8 @@ from typing import Any
 
 
 class AbstractWindowManager(ABC):
+    __slots__ = ()
+
     @abstractmethod
     def get_foreground_window(self) -> int:
         raise NotImplementedError
@@ -53,6 +55,8 @@ class AbstractWindowManager(ABC):
 
 
 class AbstractBridge(ABC):
+    __slots__ = ()
+
     @abstractmethod
     def start_worker_processes(
         self, k_device_handle: int | None, m_device_handle: int | None
@@ -105,7 +109,7 @@ class AbstractBridge(ABC):
     @abstractmethod
     def middle_click_up(self) -> None:
         raise NotImplementedError
-    
+
     @abstractmethod
     def update_typematic(
         self,
@@ -134,6 +138,8 @@ class AbstractBridge(ABC):
 
 
 class AbstractSystemConfig(ABC):
+    __slots__ = ()
+
     @abstractmethod
     def set_dpi_awareness(self) -> None:
         raise NotImplementedError
@@ -148,6 +154,8 @@ class AbstractSystemConfig(ABC):
 
 
 class AbstractMapping(ABC):
+    __slots__ = ()
+
     @abstractmethod
     def get_key_name_from_code(self, key_code: int) -> str:
         """Translates a platform native scancode into a key token."""

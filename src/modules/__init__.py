@@ -19,9 +19,10 @@ from .core.pipeline import (
     Pipeline,
     Button,
     RelativePointer,
-    TrackFire,
     FixedJoystick,
     FloatingJoystick,
+    AnchoredJoystick,
+    SystemToggle,
 )
 
 __all__ = [
@@ -42,7 +43,8 @@ __all__ = [
     "Pipeline",
     "Button",
     "RelativePointer",
-    "TrackFire",
     "FixedJoystick",
     "FloatingJoystick",
+    "AnchoredJoystick",
+    "SystemToggle",
 ]

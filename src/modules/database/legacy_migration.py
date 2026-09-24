@@ -144,8 +144,8 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
         "json_dev_dpi": int(system.get("json_dev_dpi", 160)),
         "deadzone": float(joystick.get("deadzone", 0.1)),
         "hysteresis": float(joystick.get("hysteresis", 5.0)),
-        "anchored_floating_joystick": int(
-            bool(joystick.get("anchored_floating_joystick", False))
+        "anchored_joystick": int(
+            bool(joystick.get("anchored_joystick", False))
         ),
         "joystick_snap_radius": float(joystick.get("joystick_snap_radius", 80.0)),
         "sensitivity": float(mouse.get("sensitivity", 1.0)),

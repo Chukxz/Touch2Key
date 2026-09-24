@@ -1,13 +1,25 @@
 from __future__ import annotations
 
 import math
-import sys
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar, Any
 
-from modules.utils import Point, Vector, TouchEvent, TouchPhase
-
+from modules.utils import (
+    REGION_MODES,
+    ORIGIN_MODES,
+    CONSTRAINT_MODES,
+    TRANSFORM_MODES,
+    SEMANTIC_MODES,
+    BEZEL_DP_THICKNESS,
+    TOGGLE_MODE,
+    TOGGLE_VKB,
+    Point,
+    Vector,
+    TouchEvent,
+    TouchPhase,
+)
 
 # Pipeline: Region ⟶ Origin ⟶ Constraint ⟶ Transformation ⟶ Semantic
 
@@ -35,6 +47,7 @@ class OutputSink(ABC):
     def toggle_virtual_keyboard(self) -> None: ...
 
 
+@dataclass(slots=True)
 class Region(ABC):
     @abstractmethod
     def activates(self, event: TouchEvent) -> bool: ...
@@ -44,6 +57,7 @@ class Region(ABC):
     def area(self) -> float: ...
 
 
+@dataclass(slots=True)
 class AlwaysRegion(Region):
     def activates(self, event: TouchEvent) -> bool:
         return True
@@ -87,12 +101,20 @@ class RectangularRegion(Region):
 
 
 # ---------------------------------------------------------------------------
-# Constraints, Origins, Transforms, Semantics 
+# Constraints, Origins, Transforms, self.semantics
 # ---------------------------------------------------------------------------
 
+
+@dataclass(slots=True)
 class Constraint(ABC):
     @abstractmethod
     def apply(self, origin: Point, position: Point) -> Point: ...
+
+
+@dataclass(slots=True)
+class NoConstraint(Constraint):
+    def apply(self, origin: Point, position: Point) -> Point:
+        return position
 
 
 @dataclass(slots=True)
@@ -108,11 +130,6 @@ class RadialConstraint(Constraint):
         return Point(origin.x + delta.x * scale, origin.y + delta.y * scale)
 
 
-class NoConstraint(Constraint):
-    def apply(self, origin: Point, position: Point) -> Point:
-        return position
-
-
 @dataclass(slots=True)
 class LeashConstraint(Constraint):
     leash_radius: float
@@ -121,6 +138,7 @@ class LeashConstraint(Constraint):
         return position
 
 
+@dataclass(slots=True)
 class Origin(ABC):
     @abstractmethod
     def begin(self, position: Point) -> None: ...
@@ -176,7 +194,7 @@ class DynamicOrigin(Origin):
 
 
 @dataclass(slots=True)
-class AnchoredDynamicOrigin(Origin):
+class AnchoredOrigin(Origin):
     default_anchor: Point
     snap_radius: float = 80.0
     _position: Point | None = field(init=False, default=None)
@@ -240,6 +258,7 @@ UNIT = Unit()
 T = TypeVar("T")
 
 
+@dataclass(slots=True)
 class Transformation(ABC, Generic[T]):
     @abstractmethod
     def apply(self, context: PipelineContext) -> T: ...
@@ -247,6 +266,7 @@ class Transformation(ABC, Generic[T]):
         pass
 
 
+@dataclass(slots=True)
 class IdentityTransform(Transformation[Unit]):
     def apply(self, context: PipelineContext) -> Unit:
         return UNIT
@@ -265,10 +285,10 @@ class DeltaTransform(Transformation[Vector]):
 
 
 @dataclass(slots=True)
-class JoystickSectorTransform(Transformation[frozenset[str]]):
+class JoystickTransform(Transformation[frozenset[str]]):
     dead_zone: float
     walk_radius: float
-    sprint_radius: float
+    sprint_distance: float
     hysteresis_rad: float = math.radians(5.0)
     up: str = "w"
     down: str = "s"
@@ -310,13 +330,14 @@ class JoystickSectorTransform(Transformation[frozenset[str]]):
             7: {self.up, self.right},
         }
         active_keys = set(sector_map.get(new_sector, set()))
-        if self.sprint_radius > 0 and dist_sq > (
-            self.sprint_radius * self.sprint_radius
+        if self.sprint_distance > 0 and dist_sq > (
+            self.sprint_distance * self.sprint_distance
         ):
             active_keys.add(self.sprint_key)
         return frozenset(active_keys)
 
 
+@dataclass(slots=True)
 class Semantic(ABC, Generic[T]):
     @abstractmethod
     def process(
@@ -342,7 +363,7 @@ class ButtonSemantic(Semantic[T], Generic[T]):
 
 
 @dataclass(slots=True)
-class DirectionalKeySemantic(Semantic[frozenset[str]]):
+class DirectionalSemantic(Semantic[frozenset[str]]):
     _active: frozenset[str] = field(init=False, default_factory=frozenset)
 
     def process(
@@ -363,11 +384,18 @@ class DirectionalKeySemantic(Semantic[frozenset[str]]):
         self._active = frozenset()
 
 
-class PointerMoveSemantic(Semantic[Vector]):
+@dataclass(slots=True)
+class PointerSemantic(Semantic[Vector]):
+    pointer: bool = True
+
     def process(
         self, context: PipelineContext, value: Vector, output: OutputSink
     ) -> None:
-        if context.event.phase is TouchPhase.MOVE and (value.x or value.y):
+        if (
+            self.pointer
+            and context.event.phase is TouchPhase.MOVE
+            and (value.x or value.y)
+        ):
             output.mouse_move(value.x, value.y)
 
 
@@ -377,9 +405,9 @@ class ToggleSemantic(Semantic[Unit]):
     Executes a system toggle command on touch UP, strictly enforcing tap constraints
     to prevent accidental triggers from Android system edge swipes or long presses.
     """
+
     output: str
-    is_mode_switch: bool = False
-    
+
     # Tap constraint parameters
     max_duration_s: float = 0.3
     max_drift_px: float = 30.0
@@ -412,25 +440,24 @@ class ToggleSemantic(Semantic[Unit]):
 
             # 3. Fire only if it passes the strict tap constraint
             if duration <= self.max_duration_s and drift <= self.max_drift_px:
-                if self.output == "TOGGLE_MODE" or self.is_mode_switch:
+                if self.output == TOGGLE_MODE:
                     output.toggle_menu_mode()
-                elif self.output == "TOGGLE_VKB":
+                elif self.output == TOGGLE_VKB:
                     output.toggle_virtual_keyboard()
                 else:
-                    output.key_down(self.output)
-                    output.key_up(self.output)
+                    pass
 
     def reset(self, output: OutputSink) -> None:
         self._start_time = None
         self._start_pos = None
 
 
-
 # ---------------------------------------------------------------------------
 # Pipeline with Touch Ownership & Priority Contract
 # ---------------------------------------------------------------------------
 
-@dataclass
+
+@dataclass(slots=True)
 class Pipeline(Generic[T]):
     region: Region
     origin: Origin
@@ -438,9 +465,9 @@ class Pipeline(Generic[T]):
     transformation: Transformation[T]
     semantics: list[Semantic[T]]
     priority: int = 0
-    type_precedence: int = 0  
+    type_precedence: int = 0
     creation_id: int = 0
-    allow_multi_claim: bool = False  
+    allow_multi_claim: bool = False
     is_system: bool = False  # Allows pipeline to intercept touches even in Menu Mode
 
     _owned_contact: int | None = field(init=False, default=None)
@@ -503,210 +530,369 @@ class Pipeline(Generic[T]):
 
 
 # ---------------------------------------------------------------------------
-# Factory Constructors 
+# Pipeline Configs
 # ---------------------------------------------------------------------------
 
-def SystemToggle(
-    output: str,
-    region: Region,
-    priority: int = 100,
-    creation_id: int = 0,
-) -> Pipeline[Unit]:
-    """Factory for standardizing Bezel/System boundary zones defined in the layout."""
-    return Pipeline(
-        region=region,
-        origin=FixedOrigin(Point(0.0, 0.0)),
-        constraint=NoConstraint(),
-        transformation=IdentityTransform(),
-        semantics=[ToggleSemantic(output=output)],
-        priority=priority,
-        type_precedence=2,
-        creation_id=creation_id,
-        allow_multi_claim=False,
-        is_system=True, 
-    )
 
+@dataclass(slots=True)
+class PipelineConfig:
+    pipeline_config: dict = field(default_factory=dict)
 
-def Button(
-    output: str,
-    region: Region | None = None,
-    mouse_button: bool = False,
-    priority: int = 0,
-    creation_id: int = 0,
-) -> Pipeline[Unit]:
-    return Pipeline(
-        region=region or AlwaysRegion(),
-        origin=FixedOrigin(Point(0.0, 0.0)),
-        constraint=NoConstraint(),
-        transformation=IdentityTransform(),
-        semantics=[ButtonSemantic(output=output, mouse_button=mouse_button)],
-        priority=priority,
-        type_precedence=2,
-        creation_id=creation_id,
-        allow_multi_claim=True,
-    )
+    def get_region_config(self, pipeline_config: dict | None = None):
+        pipeline_config = (
+            pipeline_config if pipeline_config is not None else self.pipeline_config
+        )
 
+        region = pipeline_config.get("region", {})
+        idx = int(region.get("idx", -1))
+        mode = str(region.get("mode", ""))
+        bezel_dp_thickness = float(region.get("bezel_dp_thickness", BEZEL_DP_THICKNESS))
+        priority = int(region.get("priority", 0))
 
-def TrackFire(
-    button: str = "mouse_left",
-    region: Region | None = None,
-    sensitivity_x: float = 1.0,
-    sensitivity_y: float = 1.0,
-    priority: int = 0,
-    creation_id: int = 0,
-) -> Pipeline[Vector]:
-    return Pipeline(
-        region=region or AlwaysRegion(),
-        origin=DynamicOrigin(),
-        constraint=NoConstraint(),
-        transformation=DeltaTransform(sensitivity_x, sensitivity_y),
-        semantics=[
-            ButtonSemantic(output=button, mouse_button=False),
-            PointerMoveSemantic(),
-        ],
-        priority=priority,
-        type_precedence=2,
-        creation_id=creation_id,
-        allow_multi_claim=True,
-    )
+        return (idx, mode, bezel_dp_thickness, priority)
 
+    def set_region_config(
+        self,
+        idx: int | None = None,
+        bezel_dp_thickness: float | None = None,
+        priority: int | None = None,
+        pipeline_config: dict | None = None,
+        keep_previous=True,
+    ):
+        pipeline_config = (
+            pipeline_config if pipeline_config is not None else self.pipeline_config
+        )
 
-def FixedJoystick(
-    center: Point,
-    touch_radius: float,
-    dead_zone: float,
-    walk_radius: float,
-    sprint_radius: float = 0.0,
-    hysteresis_deg: float = 5.0,
-    up: str = "w",
-    down: str = "s",
-    left: str = "a",
-    right: str = "d",
-    sprint_key: str = "shift",
-    priority: int = 0,
-    creation_id: int = 0,
-) -> Pipeline[frozenset[str]]:
-    return Pipeline(
-        region=CircularRegion(center=center, radius=touch_radius),
-        origin=FixedOrigin(position=center),
-        constraint=RadialConstraint(radius=touch_radius),
-        transformation=JoystickSectorTransform(
-            dead_zone=dead_zone,
-            walk_radius=walk_radius,
-            sprint_radius=sprint_radius,
-            hysteresis_rad=math.radians(hysteresis_deg),
-            up=up,
-            down=down,
-            left=left,
-            right=right,
-            sprint_key=sprint_key,
-        ),
-        semantics=[DirectionalKeySemantic()],
-        priority=priority,
-        type_precedence=1,
-        creation_id=creation_id,
-    )
+        prev_idx, prev_mode, prev_bezel_dp_thickness, prev_priority = (
+            self.get_region_config(pipeline_config)
+        )
 
+        # Resolve Target IDX
+        if idx is not None:
+            target_idx = idx
+        elif keep_previous:
+            target_idx = prev_idx
+        else:
+            target_idx = -1
 
-def FloatingJoystick(
-    region: Region,
-    dead_zone: float,
-    walk_radius: float,
-    sprint_radius: float = 0.0,
-    leash_radius: float = 0.0,
-    hysteresis_deg: float = 5.0,
-    up: str = "w",
-    down: str = "s",
-    left: str = "a",
-    right: str = "d",
-    sprint_key: str = "shift",
-    priority: int = 0,
-    creation_id: int = 0,
-) -> Pipeline[frozenset[str]]:
-    constraint = (
-        LeashConstraint(leash_radius=leash_radius)
-        if leash_radius > 0
-        else NoConstraint()
-    )
-    return Pipeline(
-        region=region,
-        origin=DynamicOrigin(),
-        constraint=constraint,
-        transformation=JoystickSectorTransform(
-            dead_zone=dead_zone,
-            walk_radius=walk_radius,
-            sprint_radius=sprint_radius,
-            hysteresis_rad=math.radians(hysteresis_deg),
-            up=up,
-            down=down,
-            left=left,
-            right=right,
-            sprint_key=sprint_key,
-        ),
-        semantics=[DirectionalKeySemantic()],
-        priority=priority,
-        type_precedence=1,
-        creation_id=creation_id,
-    )
+        # Resolve Target Mode
+        if 0 <= target_idx < len(REGION_MODES):
+            target_mode = REGION_MODES[target_idx]
+        elif keep_previous:
+            target_mode = prev_mode
+        else:
+            target_mode = ""
 
+        # Resolve Target Bezel DP Thickness
+        if bezel_dp_thickness is not None:
+            target_bezel_dp_thickness = bezel_dp_thickness
+        elif keep_previous:
+            target_bezel_dp_thickness = prev_bezel_dp_thickness
+        else:
+            target_bezel_dp_thickness = float(BEZEL_DP_THICKNESS)
 
-def AnchoredFloatingJoystick(
-    default_anchor: Point,
-    region: Region,
-    dead_zone: float,
-    walk_radius: float,
-    sprint_radius: float = 0.0,
-    leash_radius: float = 0.0,
-    snap_radius: float = 80.0,
-    hysteresis_deg: float = 5.0,
-    up: str = "w",
-    down: str = "s",
-    left: str = "a",
-    right: str = "d",
-    sprint_key: str = "shift",
-    priority: int = 0,
-    creation_id: int = 0,
-) -> Pipeline[frozenset[str]]:
-    constraint = LeashConstraint(leash_radius=leash_radius or sprint_radius)
-    return Pipeline(
-        region=region,
-        origin=AnchoredDynamicOrigin(
-            default_anchor=default_anchor, snap_radius=snap_radius
-        ),
-        constraint=constraint,
-        transformation=JoystickSectorTransform(
-            dead_zone=dead_zone,
-            walk_radius=walk_radius,
-            sprint_radius=sprint_radius,
-            hysteresis_rad=math.radians(hysteresis_deg),
-            up=up,
-            down=down,
-            left=left,
-            right=right,
-            sprint_key=sprint_key,
-        ),
-        semantics=[DirectionalKeySemantic()],
-        priority=priority,
-        type_precedence=1,
-        creation_id=creation_id,
-        allow_multi_claim=False,
-    )
+        # Resolve Target Priority
+        if priority is not None:
+            target_priority = priority
+        elif keep_previous:
+            target_priority = prev_priority
+        else:
+            target_priority = 0
 
+        region = pipeline_config.setdefault("region", {})
+        region.update(
+            {
+                "idx": target_idx,
+                "mode": target_mode,
+                "bezel_dp_thickness": target_bezel_dp_thickness,
+                "priority": target_priority,
+            }
+        )
 
-def RelativePointer(
-    region: Region | None = None,
-    sensitivity_x: float = 1.0,
-    sensitivity_y: float = 1.0,
-    priority: int = -100,
-    creation_id: int = sys.maxsize,
-) -> Pipeline[Vector]:
-    return Pipeline(
-        region=region or AlwaysRegion(),
-        origin=DynamicOrigin(),
-        constraint=NoConstraint(),
-        transformation=DeltaTransform(sensitivity_x, sensitivity_y),
-        semantics=[PointerMoveSemantic()],
-        priority=priority,
-        type_precedence=0,
-        creation_id=creation_id,
-    )
+    def get_origin_config(self, pipeline_config: dict | None = None):
+        pipeline_config = (
+            pipeline_config if pipeline_config is not None else self.pipeline_config
+        )
+
+        origin = pipeline_config.get("origin", {})
+        idx = int(origin.get("idx", -1))
+        mode = str(origin.get("mode", ""))
+
+        return (idx, mode)
+
+    def set_origin_config(
+        self,
+        idx: int | None = None,
+        pipeline_config: dict | None = None,
+        keep_previous=True,
+    ):
+        pipeline_config = (
+            pipeline_config if pipeline_config is not None else self.pipeline_config
+        )
+
+        prev_idx, prev_mode = self.get_origin_config(pipeline_config)
+
+        # Resolve Target IDX
+        if idx is not None:
+            target_idx = idx
+        elif keep_previous:
+            target_idx = prev_idx
+        else:
+            target_idx = -1
+
+        # Resolve Target Mode
+        if 0 <= target_idx < len(ORIGIN_MODES):
+            target_mode = ORIGIN_MODES[target_idx]
+        elif keep_previous:
+            target_mode = prev_mode
+        else:
+            target_mode = ""
+
+        origin = pipeline_config.setdefault("origin", {})
+        origin.update(
+            {
+                "idx": target_idx,
+                "mode": target_mode,
+            }
+        )
+
+    def get_constraint_config(self, pipeline_config: dict | None = None):
+        pipeline_config = (
+            pipeline_config if pipeline_config is not None else self.pipeline_config
+        )
+
+        constraint = pipeline_config.get("constraint", {})
+        idx = int(constraint.get("idx", -1))
+        mode = str(constraint.get("mode", ""))
+
+        return (idx, mode)
+
+    def set_constraint_config(
+        self,
+        idx: int | None = None,
+        pipeline_config: dict | None = None,
+        keep_previous=True,
+    ):
+        pipeline_config = (
+            pipeline_config if pipeline_config is not None else self.pipeline_config
+        )
+
+        prev_idx, prev_mode = self.get_constraint_config(pipeline_config)
+
+        # Resolve Target IDX
+        if idx is not None:
+            target_idx = idx
+        elif keep_previous:
+            target_idx = prev_idx
+        else:
+            target_idx = -1
+
+        # Resolve Target Mode
+        if 0 <= target_idx < len(CONSTRAINT_MODES):
+            target_mode = CONSTRAINT_MODES[target_idx]
+        elif keep_previous:
+            target_mode = prev_mode
+        else:
+            target_mode = ""
+
+        constraint = pipeline_config.setdefault("constraint", {})
+        constraint.update(
+            {
+                "idx": target_idx,
+                "mode": target_mode,
+            }
+        )
+
+    def get_transform_config(self, pipeline_config: dict | None = None):
+        pipeline_config = (
+            pipeline_config if pipeline_config is not None else self.pipeline_config
+        )
+
+        transform = pipeline_config.get("transform", {})
+        idx = int(transform.get("idx", -1))
+        mode = str(transform.get("mode", ""))
+        sensitivity_x = float(transform.get("sensitivity_x", 1.0))
+        sensitivity_y = float(transform.get("sensitivity_y", 1.0))
+        deadzone = float(transform.get("deadzone", 0.1))
+        hysterisis = float(transform.get("hysterisis", 5.0))
+
+        return (
+            idx,
+            mode,
+            sensitivity_x,
+            sensitivity_y,
+            deadzone,
+            hysterisis,
+        )
+
+    def set_transform_config(
+        self,
+        idx: int | None = None,
+        sensitivity_x: float | None = None,
+        sensitivity_y: float | None = None,
+        deadzone: float | None = None,
+        hysterisis: float | None = None,
+        pipeline_config: dict | None = None,
+        keep_previous=True,
+    ):
+        pipeline_config = (
+            pipeline_config if pipeline_config is not None else self.pipeline_config
+        )
+
+        (
+            prev_idx,
+            prev_mode,
+            prev_sensitivity_x,
+            prev_sensitivity_y,
+            prev_deadzone,
+            prev_hysterisis,
+        ) = self.get_transform_config(pipeline_config)
+
+        # Resolve Target IDX
+        if idx is not None:
+            target_idx = idx
+        elif keep_previous:
+            target_idx = prev_idx
+        else:
+            target_idx = -1
+
+        # Resolve Target Mode
+        if 0 <= target_idx < len(TRANSFORM_MODES):
+            target_mode = TRANSFORM_MODES[target_idx]
+        elif keep_previous:
+            target_mode = prev_mode
+        else:
+            target_mode = ""
+
+        # Resolve Target X sensitivity
+        if sensitivity_x is not None:
+            target_sensitivity_x = sensitivity_x
+        elif keep_previous:
+            target_sensitivity_x = prev_sensitivity_x
+        else:
+            target_sensitivity_x = 1.0
+
+        # Resolve Target Y sensitivity
+        if sensitivity_y is not None:
+            target_sensitivity_y = sensitivity_y
+        elif keep_previous:
+            target_sensitivity_y = prev_sensitivity_y
+        else:
+            target_sensitivity_y = 1.0
+
+        # Resolve Target Deadzone
+        if deadzone is not None:
+            target_deadzone = deadzone
+        elif keep_previous:
+            target_deadzone = prev_deadzone
+        else:
+            target_deadzone = 0.1
+
+        # Resolve Target Hysterisis
+        if hysterisis is not None:
+            target_hysterisis = hysterisis
+        elif keep_previous:
+            target_hysterisis = prev_hysterisis
+        else:
+            target_hysterisis = 5.0
+
+        transform = pipeline_config.setdefault("transform", {})
+        transform.update(
+            {
+                "idx": target_idx,
+                "mode": target_mode,
+                "sensitivity_x": target_sensitivity_x,
+                "sensitivity_y": target_sensitivity_y,
+                "deadzone": target_deadzone,
+                "hysteresis": target_hysterisis,
+            }
+        )
+
+    def get_semantic_config(self, pipeline_config: dict | None = None):
+        pipeline_config = (
+            pipeline_config if pipeline_config is not None else self.pipeline_config
+        )
+
+        semantic = pipeline_config.get("semantic", {})
+        idx = int(semantic.get("idx", -1))
+        mode = str(semantic.get("mode", ""))
+        pointer = bool(semantic.get("pointer", False))
+
+        return (idx, mode, pointer)
+
+    def set_semantic_config(
+        self,
+        idx: int | None = None,
+        pointer: bool | None = None,
+        pipeline_config: dict | None = None,
+        keep_previous=True,
+    ):
+        pipeline_config = (
+            pipeline_config if pipeline_config is not None else self.pipeline_config
+        )
+
+        prev_idx, prev_mode, prev_pointer = self.get_semantic_config(pipeline_config)
+
+        # Resolve Target IDX
+        if idx is not None:
+            target_idx = idx
+        elif keep_previous:
+            target_idx = prev_idx
+        else:
+            target_idx = -1
+
+        # Resolve Target Mode
+        if 0 <= target_idx < len(SEMANTIC_MODES):
+            target_mode = SEMANTIC_MODES[target_idx]
+        elif keep_previous:
+            target_mode = prev_mode
+        else:
+            target_mode = ""
+
+        # Resolve Target Pointer
+        if pointer is not None:
+            target_pointer = pointer
+        elif keep_previous:
+            target_pointer = prev_pointer
+        else:
+            target_pointer = False
+
+        semantic = pipeline_config.setdefault("semantic", {})
+        semantic.update(
+            {
+                "idx": target_idx,
+                "mode": target_mode,
+                "pointer": target_pointer,
+            }
+        )
+
+    def get_pipeline_json_from_config(self, pipeline_config: dict | None = None):
+        pipeline_config = (
+            pipeline_config if pipeline_config is not None else self.pipeline_config
+        )
+        try:
+            pipeline_json = json.dumps(pipeline_config)
+        except:
+            pipeline_json = "{}"
+            print(
+                "[!] Error dumping pipeline configuration to json, pipeline json is set to '{}'."
+            )
+
+        return pipeline_json
+
+    def set_pipeline_config_from_json(
+        self, pipeline_json="{}", pipeline_config: dict | None = None
+    ):
+        pipeline_config = (
+            pipeline_config if pipeline_config is not None else self.pipeline_config
+        )
+        try:
+            _pipeline_config = json.loads(pipeline_json)
+        except:
+            _pipeline_config = {}
+            print(
+                "[!] Error loading pipeline configuration from json, pipeline configuration set to {}"
+            )
+
+        pipeline_config.clear()
+        pipeline_config.update(_pipeline_config)

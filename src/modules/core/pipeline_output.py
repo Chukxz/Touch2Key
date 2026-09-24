@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable
 from modules.core.pipeline import OutputSink
-from modules.utils import M_LEFT, M_RIGHT, M_MIDDLE, SCANCODES
+from modules.utils import SCANCODES
 
 if TYPE_CHECKING:
     from modules.platforms.base import AbstractBridge
@@ -14,22 +14,22 @@ class BridgeOutputSink(OutputSink):
     def __init__(
         self,
         bridge: AbstractBridge,
-        on_toggle_mode: Callable[[], None] | None = None,
-        on_toggle_vkb: Callable[[], None] | None = None,
+        toggle_mode: Callable[[], None] | None = None,
+        toggle_vkb: Callable[[], None] | None = None,
     ) -> None:
         self.bridge = bridge
-        self.on_toggle_mode = on_toggle_mode
-        self.on_toggle_vkb = on_toggle_vkb
+        self._toggle_mode = toggle_mode
+        self._toggle_vkb = toggle_vkb
 
     def toggle_menu_mode(self) -> None:
         """Invokes Engine.toggle_mode directly."""
-        if self.on_toggle_mode is not None:
-            self.on_toggle_mode()
+        if self._toggle_mode is not None:
+            self._toggle_mode()
 
     def toggle_virtual_keyboard(self) -> None:
         """Invokes Engine.toggle_virtual_keyboard directly."""
-        if self.on_toggle_vkb is not None:
-            self.on_toggle_vkb()
+        if self._toggle_vkb is not None:
+            self._toggle_vkb()
 
     def key_down(self, key: str) -> None:
         scancode = self._resolve_scancode(key)

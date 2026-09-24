@@ -20,6 +20,9 @@ from modules.utils import (
     ensure_top_bezel,
     ensure_bottom_bezel,
 )
+
+from modules.core import PipelineConfig
+
 from .connection import connection_manager
 
 if TYPE_CHECKING:
@@ -35,7 +38,7 @@ class AppSettings:
     id: int
     left_handed: bool
     floating_joystick: bool
-    anchored_floating_joystick: bool
+    anchored_joystick: bool
     joystick_snap_radius: float
     json_dev_width: int
     json_dev_height: int
@@ -54,6 +57,8 @@ class AppSettings:
     active_layout_id: Optional[int]
     windows_keyboard_device: Optional[int]
     windows_mouse_device: Optional[int]
+    double_tap_enabled: bool
+    system_toggle_enabled: bool
     updated_at: str
 
     @classmethod
@@ -62,8 +67,10 @@ class AppSettings:
         d = dict(row)
         # Coerce booleans in a single generic pass
         d["left_handed"] = bool(d["left_handed"])
-        d["anchored_floating_joystick"] = bool(d["anchored_floating_joystick"])
+        d["anchored_joystick"] = bool(d["anchored_joystick"])
         d["typematic_enabled"] = bool(d["typematic_enabled"])
+        d["double_tap_enabled"] = bool(d["double_tap_enabled"])
+        d["system_toggle_enabled"] = bool(d["system_toggle_enabled"])
         return cls(**d)
 
 
@@ -91,7 +98,7 @@ class LayoutZone:
     layout_id: int
     scancode: str
     name: str
-    zone_type: str  # 'CIRCLE' | 'RECTANGLE' | 'BEZEL'
+    zone_type: str  # BEZEL | CIRCLE | RECTANGLE
     cx: Optional[float]
     cy: Optional[float]
     r: Optional[float]
@@ -101,23 +108,28 @@ class LayoutZone:
     y2: Optional[float]
     pipeline_config: str
 
+    _CONFIG_HELPER = PipelineConfig()
+
+    def _get_parsed_config(self) -> dict:
+        try:
+            cfg = json.loads(self.pipeline_config or "{}")
+            return cfg if isinstance(cfg, dict) else {}
+        except Exception:
+            return {}
+
     @property
     def priority(self) -> int:
         """Extracts runtime priority from the unified pipeline_config JSON."""
-        try:
-            cfg = json.loads(self.pipeline_config)
-            return int(cfg.get("priority", 0))
-        except Exception:
-            return 0
+        cfg = self._get_parsed_config()
+        _, _, _, priority = self._CONFIG_HELPER.get_region_config(cfg)
+        return priority
 
     @property
-    def move_camera(self) -> bool:
+    def pointer(self) -> bool:
         """Determines if this zone is configured for camera look around."""
-        try:
-            cfg = json.loads(self.pipeline_config)
-            return bool(cfg.get("semantics", {}).get("is_mouse_button", False))
-        except Exception:
-            return False
+        cfg = self._get_parsed_config()
+        _, _, pointer = self._CONFIG_HELPER.get_semantic_config(cfg)
+        return pointer
 
     @classmethod
     def from_row(cls, row) -> LayoutZone:
@@ -136,7 +148,7 @@ class AppSettingsRepository:
     ALLOWED_FIELDS = {
         "left_handed",
         "floating_joystick",
-        "anchored_floating_joystick",
+        "anchored_joystick",
         "joystick_snap_radius",
         "json_dev_width",
         "json_dev_height",
@@ -155,6 +167,8 @@ class AppSettingsRepository:
         "typematic_exclude_keys",
         "windows_keyboard_device",
         "windows_mouse_device",
+        "double_tap_enabled",
+        "system_toggle_enabled",
     }
 
     def get(self) -> AppSettings:
@@ -264,7 +278,11 @@ class LayoutsRepository:
         return layout
 
     @staticmethod
-    def _auto_seed_bezels(layout: Layout, top_thickness: float | None = None, bottom_thickness: float | None = None):
+    def _auto_seed_bezels(
+        layout: Layout,
+        top_thickness: float | None = None,
+        bottom_thickness: float | None = None,
+    ):
         zones_repo = LayoutZonesRepository()
         ensure_top_bezel(layout, zones_repo, top_thickness)
         ensure_bottom_bezel(layout, zones_repo, bottom_thickness)
@@ -430,42 +448,46 @@ class LayoutZonesRepository:
 
     def delete(self, zone_id: int, delete_bezel=False) -> None:
         delete_zone = True
-        
+
         if not delete_bezel:
             zone = self.get(zone_id)
             if zone is not None and zone.zone_type == BEZEL:
                 delete_zone = False
-        
+
         if delete_zone:
             conn = connection_manager.get_connection()
             with conn:
                 conn.execute("DELETE FROM layout_zones WHERE id = ?;", (zone_id,))
-        
+
         else:
-            print(f"[!] Could not delete zone because deletion of 'zone type: {BEZEL}' is forbidden by the caller.")
-            
+            print(
+                f"[!] Could not delete zone because deletion of 'zone type: {BEZEL}' is forbidden by the caller."
+            )
+
     def delete_all_for_layout(self, layout_id: int, auto_seed_bezels=True) -> None:
         layouts_repo = LayoutsRepository()
         layout = layouts_repo.get(layout_id)
         top_bezel_thickness = BEZEL_DP_THICKNESS
         bottom_bezel_thickness = BEZEL_DP_THICKNESS
-        
+
         if auto_seed_bezels:
             zones = self.list_for_layout(layout_id)
             top_id, bottom_id = bezels_exist_ids(zones)
-            
+
             top_zone = self.get(top_id)
             if top_zone is not None and layout is not None:
                 top_bezel_thickness = get_bezel_thickness(top_zone, layout)
-                
+
             bottom_zone = self.get(bottom_id)
             if bottom_zone is not None and layout is not None:
                 bottom_bezel_thickness = get_bezel_thickness(bottom_zone, layout)
-            
+
         conn = connection_manager.get_connection()
         with conn:
             conn.execute("DELETE FROM layout_zones WHERE layout_id = ?;", (layout_id,))
 
         if auto_seed_bezels:
             if layout is not None:
-                layouts_repo._auto_seed_bezels(layout, top_bezel_thickness, bottom_bezel_thickness)
+                layouts_repo._auto_seed_bezels(
+                    layout, top_bezel_thickness, bottom_bezel_thickness
+                )
