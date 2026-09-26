@@ -46,3 +46,18 @@ Button
 RelativePointer
       ↓
 Track fire
+
+
+@dataclass(slots=True)
+class ModeAwareRegion(Region):
+    base_region: Region
+    engine_ref: Any
+
+    def activates(self, event: TouchEvent) -> bool:
+        if getattr(self.engine_ref, "is_visible", False):
+            return False
+        return self.base_region.activates(event)
+
+    @property
+    def area(self) -> float:
+        return self.base_region.area

@@ -5,12 +5,12 @@ import threading
 from typing import TYPE_CHECKING, Any
 
 from modules.core.pipeline import (
-    Button,
     CircularRegion,
     Point,
     RectangularRegion,
 )
-from modules.core import BridgeOutputSink
+from modules.core import BridgeOutputSink, Button
+
 from modules.utils import (
     CIRCLE,
     M_LEFT,
@@ -128,47 +128,53 @@ class KeyMapper:
 
         new_pipelines = []
 
-        for scancode, value in key_raw_zones:
-            if scancode == str(self.mapper.toggle_key_scancode):
-                return
-
-            name = value.get("name", "")
+        for scancode, values in key_raw_zones:
+            name = values.get("name", "")
             if name in self.ignored_keys:
                 continue
+            
+            z_id = int(values.get("id", 0))
+            z_type = str(values.get("type", ""))
+            pointer = bool(values.get("pointer", False))
+            priority = int(values.get("priority", 0))
+            ignore_app_settings = bool(values.get("ignore_app_settings", False))
+            is_mouse_btn = scancode in (M_LEFT, M_RIGHT, M_MIDDLE)
 
-            z_type = value.get("type")
-            move_camera = value.get("move_camera", False)
-            priority = value.get("priority", 0)
-
+            sens_x = (float(values.get("sensitivity_x", 1.0)) if ignore_app_settings
+                        else self.config.settings.sensitivity_x)
+            sens_y = float((values.get("sensitivity_y", 1.0)) if ignore_app_settings
+                           else self.config.settings.sensitivity_y)
+            
             if z_type == CIRCLE:
                 region = CircularRegion(
                     center=Point(
-                        scale_coord(w, value.get("cx")), scale_coord(h, value.get("cy"))
+                        scale_coord(w, values.get("cx")), scale_coord(h, values.get("cy"))
                     ),
-                    radius=scale_coord(w, value.get("r", value.get("val1", 50.0))),
+                    radius=scale_coord(w, values.get("r", values.get("val1", 50.0))),
                 )
             elif z_type == RECTANGLE:
                 region = RectangularRegion(
                     top_left=Point(
-                        scale_coord(w, value.get("x1")), scale_coord(h, value.get("y1"))
+                        scale_coord(w, values.get("x1")), scale_coord(h, values.get("y1"))
                     ),
                     bottom_right=Point(
-                        scale_coord(w, value.get("x2")), scale_coord(h, value.get("y2"))
+                        scale_coord(w, values.get("x2")), scale_coord(h, values.get("y2"))
                     ),
                 )
             else:
                 continue
 
-            is_mouse_btn = scancode in (M_LEFT, M_RIGHT, M_MIDDLE)
+            
 
             pipeline = Button(
                 button=str(scancode),
                 region=region,
-                pointer=move_camera,
-                sensitivity_x=self.config.settings.sensitivity,
-                sensitivity_y=self.config.settings.sensitivity,
+                pointer=pointer,
+                sensitivity_x=sens_x,
+                sensitivity_y=sens_y,
                 mouse_button=is_mouse_btn,
                 priority=priority,
+                creation_id=z_id,
             )
 
             new_pipelines.append(pipeline)

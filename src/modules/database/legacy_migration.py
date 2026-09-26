@@ -10,8 +10,17 @@ from typing import Any, Optional
 
 import tomlkit
 
-from modules.database import store, ensure_system_bezels
-from modules.utils import JSONS_FOLDER, TOML_PATH
+from modules.database import store
+from modules.utils import (
+    JSONS_FOLDER,
+    TOML_PATH,
+    CIRCLE,
+    RECTANGLE,
+    BEZEL,
+    MOUSE_WHEEL_CODE,
+    ensure_system_bezels,
+    PipelineConfig,
+)
 
 logger = logging.getLogger("modules.database.legacy_migration")
 
@@ -21,77 +30,6 @@ def _read_keys(doc: dict) -> tuple[Optional[str], Optional[str]]:
     toggle_key = keys.get("toggle_key")
     sprint_key = keys.get("sprint_key")
     return toggle_key, sprint_key
-
-
-def _build_default_pipeline_config(
-    zone_type: str,
-    move_camera: bool,
-    priority: int = 0,
-    cx: float = 0.0,
-    cy: float = 0.0,
-    r: float = 50.0,
-    bezel_height: float = 14.0,
-) -> str:
-    """Synthesizes complete 5-stage pipeline metadata for imported legacy zones."""
-    if zone_type == "CIRCLE":
-        reg_idx = 1
-    elif zone_type == "BEZEL":
-        reg_idx = 3
-    else:
-        reg_idx = 2
-
-    sem_idx = 5 if move_camera else (2 if zone_type == "BEZEL" else 0)
-    sem_mode = (
-        "TRACK_FIRE"
-        if move_camera
-        else ("TOGGLE_MODE" if zone_type == "BEZEL" else "BUTTON")
-    )
-    trans_idx = 1 if move_camera else 0
-    trans_type = "DELTA" if move_camera else "IDENTITY"
-
-    cfg = {
-        "priority": priority,
-        "region": {
-            "type_idx": reg_idx,
-            "type": zone_type,
-            "bezel_height": bezel_height,
-        },
-        "origin": {
-            "type_idx": 1,
-            "type": "FIXED",
-            "anchor_x": cx,
-            "anchor_y": cy,
-            "snap_radius": 80.0,
-        },
-        "constraint": {
-            "type_idx": 0,
-            "type": "NONE",
-            "radius": r,
-            "half_w": 50.0,
-            "half_h": 50.0,
-            "leash_radius": 150.0,
-        },
-        "transform": {
-            "type_idx": trans_idx,
-            "type": trans_type,
-            "sens_x": 1.0,
-            "sens_y": 1.0,
-            "deadzone": 0.0,
-            "threshold": 50.0,
-            "joy_dz": 10.0,
-            "joy_walk": 80.0,
-            "joy_sprint": 120.0,
-            "joy_hysteresis": 5.0,
-            "dt_interval": 0.30,
-            "dt_dist": 35.0,
-        },
-        "semantics": {
-            "type_idx": sem_idx,
-            "mode": sem_mode,
-            "is_mouse_button": False,
-        },
-    }
-    return json.dumps(cfg)
 
 
 def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
@@ -124,6 +62,9 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
         ],
     )
 
+    double_tap_enabled = system.get("double_tap_enabled", True)
+    system_toggle_enabled = system.get("system_toggle_enabled", True)
+
     # Read typematic values from [typematic] or fall back to legacy [keys] definitions
     typ_enabled = typematic_table.get(
         "enabled", keys_table.get("typematic_enabled", True)
@@ -138,27 +79,28 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
     )
 
     fields: dict[str, Any] = {
-        "left_handed": int(bool(system.get("left_handed", False))),
+        "left_handed": bool(system.get("left_handed", False)),
         "json_dev_width": int(width),
         "json_dev_height": int(height),
         "json_dev_dpi": int(system.get("json_dev_dpi", 160)),
         "deadzone": float(joystick.get("deadzone", 0.1)),
         "hysteresis": float(joystick.get("hysteresis", 5.0)),
-        "anchored_joystick": int(
-            bool(joystick.get("anchored_joystick", False))
-        ),
-        "joystick_snap_radius": float(joystick.get("joystick_snap_radius", 80.0)),
-        "sensitivity": float(mouse.get("sensitivity", 1.0)),
+        "anchored_joystick": bool(joystick.get("anchored_joystick", False)),
+        "floating_joystick": bool(joystick.get("floating_joystick", False)),
+        "sensitivity_x": float(mouse.get("sensitivity_x", 1.0)),
+        "sensitivity_y": float(mouse.get("sensitivity_y", 1.0)),
         "toggle_key": str(toggle_key) if toggle_key else "",
         "sprint_key": str(sprint_key) if sprint_key else "",
         "adb_rate_cap": float(performance.get("adb_rate_cap", 250.0)),
         "pps_alert_threshold": float(performance.get("pps_alert_threshold", 60.0)),
-        "typematic_enabled": int(bool(typ_enabled)),
+        "typematic_enabled": bool(typ_enabled),
         "typematic_delay_ms": float(typ_delay),
         "typematic_rate_hz": float(typ_rate),
         "typematic_exclude_keys": (
             str(typ_excludes) if typ_excludes is not None else None
         ),
+        "double_tap_enabled": bool(double_tap_enabled),
+        "system_toggle_enabled": bool(system_toggle_enabled),
     }
 
     store.settings.update(**fields)
@@ -227,7 +169,7 @@ def migrate_json_layout(
                 continue
 
             zone_type = str(item.get("type", "")).upper()
-            if zone_type not in ("CIRCLE", "RECTANGLE", "BEZEL"):
+            if zone_type not in (CIRCLE, RECTANGLE, BEZEL):
                 logger.warning(
                     "Skipping zone with unrecognized type %r for scancode %s.",
                     zone_type,
@@ -235,68 +177,64 @@ def migrate_json_layout(
                 )
                 continue
 
-            try:
-                priority = int(item.get("priority", 0))
-                move_camera = bool(item.get("move_camera", False))
+            priority = int(item.get("priority", 0))
+            pointer = bool(item.get("pointer", False))
+            Pipeline_Config = PipelineConfig()
+            zone_name = str(item.get("name", ""))
+            app_settings = store.settings.get()
 
-                raw_cfg = item.get("pipeline_config")
-                if raw_cfg and isinstance(raw_cfg, str) and raw_cfg != "{}":
-                    pipeline_cfg = raw_cfg
-                else:
-                    cx = float(item.get("cx", 0.0))
-                    cy = float(item.get("cy", 0.0))
-                    r = float(item.get("val1", 50.0)) if zone_type == "CIRCLE" else 50.0
-                    bezel_h = float(item.get("bezel_height", item.get("val2", 14.0)))
+            Pipeline_Config.set_region_config(2, priority)
+            Pipeline_Config.set_origin_config(1)
+            Pipeline_Config.set_constraint_config(0)
+            Pipeline_Config.set_transform_config(1)
+            Pipeline_Config.set_semantic_config(0, pointer)
 
-                    pipeline_cfg = _build_default_pipeline_config(
-                        zone_type=zone_type,
-                        move_camera=move_camera,
-                        priority=priority,
-                        cx=cx,
-                        cy=cy,
-                        r=r,
-                        bezel_height=bezel_h,
-                    )
+            if zone_type == CIRCLE:
+                reg_idx = 1
 
-                if zone_type == "CIRCLE":
-                    store.zones.create(
-                        layout_id=layout_id,
-                        scancode=str(scancode),
-                        name=item.get("name", ""),
-                        zone_type="CIRCLE",
-                        cx=float(item["cx"]),
-                        cy=float(item["cy"]),
-                        r=float(item["val1"]),
-                        pipeline_config=pipeline_cfg,
-                    )
-                elif zone_type == "BEZEL":
-                    store.zones.create(
-                        layout_id=layout_id,
-                        scancode=str(scancode),
-                        name=item.get("name", "Top Bezel"),
-                        zone_type="BEZEL",
-                        x1=0.0,
-                        y1=0.0,
-                        x2=float(metadata["width"]),
-                        y2=bezel_h,
-                        pipeline_config=pipeline_cfg,
-                    )
-                else:  # RECTANGLE
-                    store.zones.create(
-                        layout_id=layout_id,
-                        scancode=str(scancode),
-                        name=item.get("name", ""),
-                        zone_type="RECTANGLE",
-                        x1=float(item["val1"]),
-                        y1=float(item["val2"]),
-                        x2=float(item["val3"]),
-                        y2=float(item["val4"]),
-                        pipeline_config=pipeline_cfg,
-                    )
-                imported += 1
-            except (KeyError, ValueError) as e:
-                logger.warning("Skipping invalid zone (scancode=%s): %s", scancode, e)
-                continue
+                if zone_name == MOUSE_WHEEL_CODE:
+                    Pipeline_Config.set_semantic_config(1)
+
+                    reg_idx = 1
+                    orig_idx = 0
+                    const_idx = 1
+
+                    if app_settings.floating_joystick:
+                        reg_idx = 2
+                        orig_idx = 1
+                        const_idx = 2
+
+                    if app_settings.anchored_joystick:
+                        reg_idx = 2
+                        orig_idx = 2
+                        const_idx = 2
+
+                    Pipeline_Config.set_origin_config(orig_idx)
+                    Pipeline_Config.set_constraint_config(const_idx)
+
+                Pipeline_Config.set_region_config(reg_idx)
+
+            elif zone_type == BEZEL:
+                Pipeline_Config.set_origin_config(0)
+                Pipeline_Config.set_transform_config(0)
+                Pipeline_Config.set_semantic_config(3)
+
+            store.zones.create(
+                layout_id=layout_id,
+                scancode=str(scancode),
+                name=item.get("name", ""),
+                zone_type=zone_type,
+                cx=item.get("cx", None),
+                cy=item.get("cy", None),
+                r=item.get("val1", None) if zone_type == CIRCLE else None,
+                x1=item.get("val1", None),
+                y1=item.get("val2", None),
+                x2=item.get("val3", None),
+                y2=item.get("val4", None),
+                pipeline_json=Pipeline_Config.get_pipeline_json_from_config(),
+            )
+
+            imported += 1
 
         logger.info(
             "Migrated JSON layout %s into layouts.id=%s (%d/%d zones imported).",
@@ -306,7 +244,7 @@ def migrate_json_layout(
             len(content),
         )
 
-        ensure_system_bezels(layout_id)
+        ensure_system_bezels(layout_id, store.layouts, store.zones)
 
     if set_active:
         store.settings.update(active_layout_id=layout_id)

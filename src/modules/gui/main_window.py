@@ -24,9 +24,9 @@ from modules.gui.pages import BasePage
 from modules.gui.pages.dashboard_page import DashboardPage
 from modules.gui.pages.devices_page import DevicesPage
 from modules.gui.pages.key_bindings_page import KeyBindingsPage
-from modules.gui.pages.layout_editor_page import LayoutEditorPage
+from modules.gui.pages.layouts_editor_page import LayoutsEditorPage
 from modules.gui.pages.performance_page import PerformancePage
-from modules.gui.pages.pipelines_page import PipelinesPage
+from modules.gui.pages.pipelines import PipelinesPage
 from modules.gui.pages.profiles_page import ProfilesPage
 from modules.gui.pages.settings_page import SettingsPage
 from modules.gui.pages.typematic_page import TypematicPage
@@ -154,7 +154,7 @@ class MainWindow(QMainWindow):
         self.pages: dict[str, QWidget] = {
             "Dashboard": DashboardPage(self.dispatcher, self),
             "Devices": DevicesPage(self.dispatcher, self),
-            "Layout Editor": LayoutEditorPage(self.dispatcher, self),
+            "Layout Editor": LayoutsEditorPage(self.dispatcher, self),
             "Profiles": ProfilesPage(self.dispatcher, self),
             "Pipelines": PipelinesPage(self.dispatcher, self),
             "Key Bindings": KeyBindingsPage(self.dispatcher, self),

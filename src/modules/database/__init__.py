@@ -35,7 +35,6 @@ __all__ = [
     "LayoutZonesRepository",
     "InvalidFieldError",
     "reset_layout_zones_to_app_settings",
-    "ensure_system_bezels",
 ]
 
 logger = logging.getLogger("modules.database")
@@ -47,9 +46,6 @@ from modules.utils import (
     BOTTOM_BEZEL_ID,
     dp_to_px,
     calculate_rect,
-    bezels_exist_ids,
-    ensure_top_bezel,
-    ensure_bottom_bezel,
 )
 
 if TYPE_CHECKING:
@@ -112,8 +108,7 @@ def reset_layout_zones_to_app_settings(layout_id: int) -> int:
     if not layout:
         return 0
 
-    inner_r = layout.mouse_wheel_radius
-    outer_r = layout.sprint_distance
+
     l_w = layout.width
     l_h = layout.height
     thickness = float(dp_to_px(BEZEL_DP_THICKNESS, layout.dpi))
@@ -122,7 +117,6 @@ def reset_layout_zones_to_app_settings(layout_id: int) -> int:
 
     for zone in zones:
         if zone.zone_type == BEZEL:
-
             if zone.scancode == str(TOP_BEZEL_ID):
                 cx, cy, x1, y1, x2, y2 = calculate_rect(0.0, 0.0, l_w, thickness)
                 store.zones.update(
@@ -135,83 +129,47 @@ def reset_layout_zones_to_app_settings(layout_id: int) -> int:
                     zone.id, cx=cx, cy=cy, r=None, x1=x1, y1=y1, x2=x2, y2=y2
                 )
 
-        try:
-            cfg = json.loads(zone.pipeline_config or "{}")
-        except Exception:
-            cfg = {}
+        zone.set_parsed_config_from_json()
 
-        sem_mode = cfg.get("semantics", {}).get("mode", "BUTTON")
-        trans_type = cfg.get("transform", {}).get("type", "IDENTITY")
+        _, sem_mode, _ = zone.CONFIG_HELPER.get_semantic_config()              
+            
+        # 1. Bezels
+        if sem_mode == "TOGGLE":
+            zone.CONFIG_HELPER.set_region_config(
+                bezel_dp_thickness=BEZEL_DP_THICKNESS
+            )
+            
+        # 2. Standard Buttons
+        elif sem_mode == "BUTTON":
+            zone.CONFIG_HELPER.set_transform_config(
+                sensitivity_x=settings.sensitivity_x,
+                sensitivity_y=settings.sensitivity_y
+            )
 
-        # 1. Directional Movement Joystick Zone
-        if sem_mode == "WASD" or trans_type == "JOYSTICK" or zone.name == "MOUSE_WHEEL":
-            origin_type = "ANCHORED" if settings.anchored_floating_joystick else "FIXED"
-            cfg["origin"] = {
-                "type_idx": 2 if settings.anchored_floating_joystick else 1,
-                "type": origin_type,
-                "anchor_x": float(zone.cx or 0.0),
-                "anchor_y": float(zone.cy or 0.0),
-                "snap_radius": float(settings.joystick_snap_radius),
-            }
-            cfg["transform"] = {
-                "type_idx": 3,
-                "type": "JOYSTICK",
-                "joy_dz": float(settings.deadzone * inner_r),
-                "joy_walk": float(inner_r),
-                "joy_sprint": float(outer_r),
-                "joy_hysteresis": float(settings.hysteresis),
-            }
-            cfg["semantics"] = {"type_idx": 3, "mode": "WASD", "is_mouse_button": False}
-            cfg["priority"] = 0
+        # 3. Directional Movement Joystick Zone
+        elif sem_mode == "DIRECTIONAL":
+            origin_idx = 0
+            
+            if settings.anchored_joystick:
+                origin_idx = 2
+            elif settings.floating_joystick:
+                origin_idx = 1
+            
+            zone.CONFIG_HELPER.set_origin_config(origin_idx)       
+            
+        # 4. Camera Look Area (Populated dynamically but added here anyway)
+        elif sem_mode == "POINTER":
+            zone.CONFIG_HELPER.set_transform_config(
+                sensitivity_x=settings.sensitivity_x,
+                sensitivity_y=settings.sensitivity_y,
+                deadzone=settings.deadzone,
+                hysterisis=settings.hysteresis
+            )
 
-        # 2. Camera Look Area
-        elif sem_mode == "POINTER" or trans_type == "DELTA":
-            cfg["transform"] = {
-                "type_idx": 1,
-                "type": "DELTA",
-                "sens_x": float(settings.sensitivity),
-                "sens_y": float(settings.sensitivity),
-            }
-            cfg["semantics"] = {
-                "type_idx": 4,
-                "mode": "POINTER",
-                "is_mouse_button": False,
-            }
-            cfg["priority"] = -100
-
-        # 3. Standard Buttons & Track-Fire
-        else:
-            if sem_mode == "TRACK_FIRE":
-                cfg["transform"] = {
-                    "type_idx": 1,
-                    "type": "DELTA",
-                    "sens_x": float(settings.sensitivity),
-                    "sens_y": float(settings.sensitivity),
-                }
-            cfg["priority"] = 0
-
-        store.zones.update(zone.id, pipeline_config=json.dumps(cfg))
+        store.zones.update(zone.id, ignore_app_settings=False, pipeline_json=zone.CONFIG_HELPER.get_pipeline_json_from_config())
         updated_count += 1
 
     logger.info(
         "Reset %d zones in layout ID %d to AppSettings.", updated_count, layout_id
     )
     return updated_count
-
-
-def ensure_system_bezels(layout_id: int) -> None:
-    """Verifies a layout has both system bezels (Top/Mode, Bottom/VKB) and creates them if missing."""
-    layout = store.layouts.get(layout_id)
-    if not layout:
-        return
-
-    zones = store.zones.list_for_layout(layout_id)
-    top_id, bottom_id = bezels_exist_ids(zones)
-
-    if top_id < 0:
-        ensure_top_bezel(layout, store.zones)
-        logger.info("Auto-healed missing Top Bezel for layout ID %d", layout.id)
-
-    if bottom_id < 0:
-        ensure_bottom_bezel(layout, store.zones)
-        logger.info("Auto-healed missing Bottom Bezel for layout ID %d", layout.id)

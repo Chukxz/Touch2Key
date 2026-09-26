@@ -22,7 +22,7 @@ from modules.core import (
     KeyMapper,
     WASDMapper,
     Pipeline,
-    TwoFingerTapTracker
+    TwoFingerTapTracker,
 )
 
 from modules.cli.list_windows import select_window
@@ -181,7 +181,6 @@ class Engine:
         ):
             return
 
-        self.mapper.event_count += 1
         tiers = self._build_pipeline_tiers()
         sink = self.key_mapper.output_sink
 
@@ -193,7 +192,7 @@ class Engine:
             # Allow system pipelines (Bezels) to intercept touches even in Menu mode
             for tier in tiers:
                 for p in tier:
-                    if getattr(p, "is_system", False) and p.claims(touch_event):
+                    if p.is_system and p.claims(touch_event):
                         p.process(touch_event, sink)
                         return
 
@@ -201,17 +200,7 @@ class Engine:
                 touch_event.contact_id == 0
                 and not self.two_finger_tap_tracker._contacts
             ):
-                gx, gy = self.mapper.device_to_game_abs(
-                    touch_event.position.x, touch_event.position.y
-                )
-                if touch_event.phase is TouchPhase.DOWN:
-                    self.bridge_class.mouse_move_abs(int(round(gx)), int(round(gy)))
-                    self.bridge_class.left_click_down()
-                elif touch_event.phase is TouchPhase.MOVE:
-                    self.bridge_class.mouse_move_abs(int(round(gx)), int(round(gy)))
-                elif touch_event.phase is TouchPhase.UP:
-                    self.bridge_class.left_click_up()
-            return
+                self.mouse_mapper.process_touch(touch_event, self.is_visible)
 
         # --- Game Mode Pipeline Dispatch ---
         claimed_existing = False
@@ -279,7 +268,9 @@ class Engine:
             self,
         )
 
-        self.bezel_mapper = BezelMapper(self.mapper, self.toggle_mode, self.toggle_virtual_keyboard)
+        self.bezel_mapper = BezelMapper(
+            self.mapper, self.toggle_mode, self.toggle_virtual_keyboard
+        )
         self.mouse_mapper = MouseMapper(self.mapper)
         self.key_mapper = KeyMapper(
             self.mapper,
@@ -375,11 +366,12 @@ class Engine:
             procs = [
                 p
                 for p in (
-                    getattr(self.bridge_class, "k_proc", None),
-                    getattr(self.bridge_class, "m_proc", None),
+                    self.bridge_class.k_proc,
+                    self.bridge_class.m_proc,
                 )
                 if p is not None
             ]
+
             for p in procs:
                 if p.is_alive():
                     p.terminate()

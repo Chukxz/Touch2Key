@@ -38,7 +38,6 @@ def export_layout_json(layout_id: int, target_path: Optional[Path] = None) -> Pa
                 "val4": zone.y2 or 0.0,
                 "pointer": bool(zone.pointer),
                 "priority": zone.priority,
-                "pipeline_config": zone.pipeline_config,
             }
         )
 
@@ -103,12 +102,13 @@ def export_settings_toml(
     joystick.add("deadzone", float(s.deadzone))
     joystick.add("hysteresis", float(s.hysteresis))
     joystick.add("anchored_joystick", bool(s.anchored_joystick))
-    joystick.add("joystick_snap_radius", float(s.joystick_snap_radius))
+    joystick.add("floating_joystick", bool(s.floating_joystick))
     doc.add("joystick", joystick)
 
     # Mouse Section
     mouse = tomlkit.table()
-    mouse.add("sensitivity", float(s.sensitivity))
+    mouse.add("sensitivity_x", float(s.sensitivity_x))
+    mouse.add("sensitivity_y", float(s.sensitivity_y))
     doc.add("mouse", mouse)
 
     # Keys Section

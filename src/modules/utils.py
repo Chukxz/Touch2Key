@@ -41,7 +41,7 @@ KEEPALIVE_INTERVAL = 5.0
 
 if TYPE_CHECKING:
     from multiprocessing import Process
-    from modules.database.repositories import Layout, LayoutZone, LayoutZonesRepository
+    from modules.database.repositories import Layout, LayoutsRepository, LayoutZone, LayoutZonesRepository
 
 # ---------------------------------------------------------------------------
 # Project & Data Paths
@@ -162,6 +162,11 @@ ORIGIN_MODES = ["FIXED", "DYNAMIC", "ANCHORED"]
 CONSTRAINT_MODES = ["NONE", "RADIAL", "LEASH"]
 TRANSFORM_MODES = ["IDENTITY", "DELTA", "JOYSTICK"]
 SEMANTIC_MODES = ["BUTTON", "DIRECTIONAL", "POINTER", "TOGGLE"]
+ALLOWED_PIPELINE_FIELDS = {
+    "center",
+    "snap_radius",
+    "radius",
+}
 
 # Low-level worker constants
 MAX_COALESCE = 20
@@ -329,11 +334,14 @@ SPECIAL_MAP = {
 
 SPECIAL_MAP_INV = {v: k for k, v in SPECIAL_MAP.items()}
 
+COPY_RE = re.compile(r"- Copy(?:\((\d+)\)|(?=\s|$))")
 
-# ---------------------------------------------------------------------------
-# Fundamental Pipeline Data Types
-# ---------------------------------------------------------------------------
 
+class InvalidFieldError(ValueError):
+    """Raised when update()/create()/create_pipeline_from_zone()
+    
+    receives a field name outside ALLOWED_FIELDS."""
+    
 
 class TouchPhase(Enum):
     DOWN = auto()
@@ -744,7 +752,6 @@ def bezels_exist_ids(zones: list[LayoutZone]) -> tuple[int, int]:
         if z.zone_type != BEZEL:
             continue
 
-
         if top_id < 0 and str(z.scancode) == str(TOP_BEZEL_ID):
             top_id = z.id
 
@@ -757,34 +764,33 @@ def bezels_exist_ids(zones: list[LayoutZone]) -> tuple[int, int]:
     return top_id, bottom_id
 
 
-def get_bezel_thickness(zone: LayoutZone, layout: Layout):
-    Pipeline_Config = PipelineConfig()
-
-    try:
-        cfg = json.loads(cfg_raw)
-    except Exception:
-        cfg = {}
-
-    reg_cfg = cfg.get("region", {})
-    reg_bezel_dp_thickness = reg_cfg.get("bezel_dp_thickness", BEZEL_DP_THICKNESS)
-
-    return float(dp_to_px(reg_bezel_dp_thickness, layout.dpi))
+def get_bezel_thicknesses(zone: LayoutZone, layout: Layout):
+    zone.set_parsed_config_from_json()
+    _, _, bezel_dp_thickness, _ = zone.CONFIG_HELPER.get_region_config()
+    return bezel_dp_thickness, float(dp_to_px(bezel_dp_thickness, layout.dpi))
 
 
 def ensure_top_bezel(
     layout: Layout,
     zones_repo: LayoutZonesRepository,
-    thickness: float | None = None,
+    dp_thickness: float | None = None,
 ):
-    if thickness is None:
-        _thickness = float(dp_to_px(BEZEL_DP_THICKNESS, layout.dpi))
-    else:
-        _thickness = thickness
+    if dp_thickness is None:
+        dp_thickness = float(BEZEL_DP_THICKNESS)
 
     w = layout.width
-    cx, cy, x1, y1, x2, y2 = calculate_rect(0.0, 0.0, w, _thickness)
+    h = layout.height
+    _thickness = float(dp_to_px(dp_thickness, layout.dpi))
+    cx, cy, x1, y1, x2, y2 = calculate_rect(0.0, h - _thickness, w, _thickness)
+    
+    Pipeline_Config = PipelineConfig()
+    Pipeline_Config.set_region_config(2, dp_thickness, 100)
+    Pipeline_Config.set_origin_config(0)
+    Pipeline_Config.set_constraint_config(0)
+    Pipeline_Config.set_transform_config(0)
+    Pipeline_Config.set_semantic_config(3)
 
-    zones_repo.create(
+    return zones_repo.create(
         layout_id=layout.id,
         scancode=TOP_BEZEL_ID,
         name=TOP_BEZEL_NAME,
@@ -796,25 +802,30 @@ def ensure_top_bezel(
         y1=y1,
         x2=x2,
         y2=y2,
-        pipeline_config=f'{{"priority": 100, "semantics": {{"action": "{TOGGLE_MODE}"}}}}',
-    )
+        pipeline_json=Pipeline_Config.get_pipeline_json_from_config(),
+    ).id
 
 
 def ensure_bottom_bezel(
     layout: Layout,
     zones_repo: LayoutZonesRepository,
-    thickness: float | None = None,
+    dp_thickness: float | None = None,
 ):
-    if thickness is None:
-        _thickness = float(dp_to_px(BEZEL_DP_THICKNESS, layout.dpi))
-    else:
-        _thickness = thickness
-
+    if dp_thickness is None:
+        dp_thickness = float(BEZEL_DP_THICKNESS)
+        
     w = layout.width
-    h = layout.height
-    cx, cy, x1, y1, x2, y2 = calculate_rect(0.0, h - _thickness, w, h)
+    _thickness = float(dp_to_px(dp_thickness, layout.dpi))        
+    cx, cy, x1, y1, x2, y2 = calculate_rect(0.0, 0.0, w, _thickness)
 
-    zones_repo.create(
+    Pipeline_Config = PipelineConfig()
+    Pipeline_Config.set_region_config(2, dp_thickness, 100)
+    Pipeline_Config.set_origin_config(0)
+    Pipeline_Config.set_constraint_config(0)
+    Pipeline_Config.set_transform_config(0)
+    Pipeline_Config.set_semantic_config(3)
+
+    return zones_repo.create(
         layout_id=layout.id,
         scancode=BOTTOM_BEZEL_ID,
         name=BOTTOM_BEZEL_NAME,
@@ -826,11 +837,48 @@ def ensure_bottom_bezel(
         y1=y1,
         x2=x2,
         y2=y2,
-        pipeline_config=f'{{"priority": 100, "semantics": {{"action": "{TOGGLE_VKB}"}}}}',
-    )
+        pipeline_json=Pipeline_Config.get_pipeline_json_from_config(),
+    ).id
 
+
+def ensure_system_bezels(layout_id: int, layouts_repo: LayoutsRepository,
+    zones_repo: LayoutZonesRepository):
+    """Verifies a layout has both system bezels (Top/Mode, Bottom/VKB) and creates them if missing."""
+    layout = layouts_repo.get(layout_id)
+    if not layout:
+        return -1, -1
+
+    zones = zones_repo.list_for_layout(layout_id)
+    top_id, bottom_id = bezels_exist_ids(zones)
+
+    if top_id < 0:
+        top_id = ensure_top_bezel(layout, zones_repo)
+        print("Auto-healed missing Top Bezel for layout ID %d", layout.id)
+
+    if bottom_id < 0:
+        bottom_id = ensure_bottom_bezel(layout, zones_repo)
+        print("Auto-healed missing Bottom Bezel for layout ID %d", layout.id)
+
+    
+    return top_id, bottom_id
 
 def scale_coord(base: float, val: float | None = None) -> float:
     if val is None:
         return 0.0
     return val * base if val <= 1.0 else val
+
+
+def make_copy_name(name: str) -> str:
+    matches = list(COPY_RE.finditer(name))
+
+    if not matches:
+        return f"{name} - Copy"
+
+    match = matches[-1]
+    number = int(match.group(1) or 1) + 1
+
+    return (
+        name[:match.start()]
+        + f"- Copy({number})"
+        + name[match.end():]
+    )

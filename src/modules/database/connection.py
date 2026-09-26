@@ -20,13 +20,13 @@ CREATE TABLE IF NOT EXISTS app_settings (
     left_handed INTEGER NOT NULL DEFAULT 0,
     floating_joystick INTEGER NOT NULL DEFAULT 0
     anchored_joystick INTEGER NOT NULL DEFAULT 0,
-    joystick_snap_radius REAL NOT NULL DEFAULT 80.0,
     json_dev_width INTEGER NOT NULL DEFAULT 360,
     json_dev_height INTEGER NOT NULL DEFAULT 800,
     json_dev_dpi INTEGER NOT NULL DEFAULT 160,
     deadzone REAL NOT NULL DEFAULT 0.1,
     hysteresis REAL NOT NULL DEFAULT 5.0,
-    sensitivity REAL NOT NULL DEFAULT 1.0,
+    sensitivity_x REAL NOT NULL DEFAULT 1.0,
+    sensitivity_y REAL NOT NULL DEFAULT 1.0,
     toggle_key TEXT,
     sprint_key TEXT,
     adb_rate_cap REAL NOT NULL DEFAULT 250.0,
@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS app_settings (
     typematic_exclude_keys TEXT,
     double_tap_enabled INTEGER NOT NULL DEFAULT 1,
     system_toggle_enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -64,7 +65,10 @@ CREATE TABLE IF NOT EXISTS layout_zones (
     zone_type TEXT NOT NULL CHECK (zone_type IN ('CIRCLE', 'RECTANGLE', 'BEZEL')),
     cx REAL, cy REAL, r REAL,
     x1 REAL, y1 REAL, x2 REAL, y2 REAL,
-    pipeline_config TEXT NOT NULL DEFAULT '{}'
+    ignore_app_settings INTEGER NOT NULL DEFAULT 0,
+    pipeline_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_layout_zones_layout_id ON layout_zones(layout_id);
 """
@@ -103,13 +107,13 @@ class ConnectionManager:
         conn.executescript(_SCHEMA)
         conn.execute(_SEED_DEFAULT_SETTINGS_ROW)
 
-        # Migration safeguard: ensure pipeline_config column exists
+        # Migration safeguard: ensure pipeline_json column exists
         cursor = conn.cursor()
         cursor.execute("PRAGMA table_info(layout_zones);")
         columns = [row["name"] for row in cursor.fetchall()]
-        if "pipeline_config" not in columns:
+        if "pipeline_json" not in columns:
             cursor.execute(
-                "ALTER TABLE layout_zones ADD COLUMN pipeline_config TEXT NOT NULL DEFAULT '{}';"
+                "ALTER TABLE layout_zones ADD COLUMN pipeline_json TEXT NOT NULL DEFAULT '{}';"
             )
 
         set_fresh_install_version(conn)

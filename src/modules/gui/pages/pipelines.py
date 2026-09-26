@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import json
 import logging
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
@@ -24,22 +22,12 @@ from PySide6.QtWidgets import (
 
 from modules.database import reset_layout_zones_to_app_settings, store
 from modules.utils import (
-    CIRCLE,
-    RECTANGLE,
     BEZEL,
     BEZEL_DP_THICKNESS,
-    TOP_BEZEL_NAME,
     TOP_BEZEL_ID,
-    BOTTOM_BEZEL_NAME,
     BOTTOM_BEZEL_ID,
-    dp_to_px,
-    calculate_rect,
-    bezels_exist_ids,
-    get_key_from_scancode,
     MapperEvent,
 )
-
-from modules.core import PipelineConfig
 
 from .base_page import BasePage
 
@@ -66,32 +54,30 @@ class PipelinesPage(BasePage):
         # -------------------------------------------------------------
         # Left Column: Pipeline List, Presets & Global Actions
         # -------------------------------------------------------------
-        left_panel = QVBoxLayout()
+        self.left_panel = QVBoxLayout()
 
         self.pipeline_list = QListWidget()
-        left_panel.addWidget(self.pipeline_list)
+        self.left_panel.addWidget(self.pipeline_list)
 
         list_btn_row = QHBoxLayout()
-        self.new_btn = QPushButton("New")
-        self.duplicate_btn = QPushButton("Duplicate")
-        self.delete_btn = QPushButton("Delete")
-        list_btn_row.addWidget(self.new_btn)
-        list_btn_row.addWidget(self.duplicate_btn)
-        list_btn_row.addWidget(self.delete_btn)
-        left_panel.addLayout(list_btn_row)
+        self.left_panel.addLayout(list_btn_row)
 
         self.reset_all_btn = QPushButton("Reset All Zones to App Defaults")
-        left_panel.addWidget(self.reset_all_btn)
+        self.left_panel.addWidget(self.reset_all_btn)
 
-        body_layout.addLayout(left_panel, stretch=1)
+        self.ignore_app_settings_btn = QCheckBox("Ignore App Settings")
+        self.ignore_app_settings_btn.setChecked(False)
+        self.left_panel.addWidget(self.ignore_app_settings_btn)
+
+        body_layout.addLayout(self.left_panel, stretch=1)
 
         # -------------------------------------------------------------
-        # Right Column: 5-Stage Pipeline Inspector
+        # Right Column: 5-Stage Pipeline inspector
         # -------------------------------------------------------------
-        inspector = QVBoxLayout()
+        self.inspector = QVBoxLayout()
 
-        self.name = QLabel("Unset")
-        inspector.addWidget(self.name)
+        self.name_label = QLabel("Unset")
+        self.inspector.addWidget(self.name_label)
         self.zone: LayoutZone | None = None
 
         # Stage 1: Region
@@ -133,7 +119,7 @@ class PipelinesPage(BasePage):
         self.region_stack.addWidget(self.bottom_region_bezel_page)
 
         region_layout.addWidget(self.region_stack)
-        inspector.addWidget(region_box)
+        self.inspector.addWidget(region_box)
 
         # Stage 4: Transformation
         transform_box = QGroupBox("4. Transformation")
@@ -171,14 +157,14 @@ class PipelinesPage(BasePage):
         self.transform_stack.addWidget(self.trans_joy_page)
 
         transform_layout.addWidget(self.transform_stack)
-        inspector.addWidget(transform_box)
+        self.inspector.addWidget(transform_box)
 
         # Stage 5: Semantics / Output
         semantic_box = QGroupBox("5. Semantics & Output")
         semantic_form = QFormLayout(semantic_box)
         self.is_pointer_btn_check = QCheckBox("Output is Pointer Button")
         semantic_form.addRow("Pointer enabled", self.is_pointer_btn_check)
-        inspector.addWidget(semantic_box)
+        self.inspector.addWidget(semantic_box)
 
         # Action Buttons
         btn_action_row = QHBoxLayout()
@@ -186,10 +172,10 @@ class PipelinesPage(BasePage):
         self.save_pipeline_btn = QPushButton("Save Pipeline to Active Layout")
         btn_action_row.addWidget(self.reset_defaults_btn)
         btn_action_row.addWidget(self.save_pipeline_btn)
-        inspector.addLayout(btn_action_row)
+        self.inspector.addLayout(btn_action_row)
 
-        inspector.addStretch()
-        body_layout.addLayout(inspector, stretch=2)
+        self.inspector.addStretch()
+        body_layout.addLayout(self.inspector, stretch=2)
         self.content_layout().addLayout(body_layout)
 
         self._wire_internal_signals()
@@ -205,6 +191,10 @@ class PipelinesPage(BasePage):
         )
         self.reset_all_btn.clicked.connect(self._on_reset_all_zones)
         self.pipeline_list.itemSelectionChanged.connect(self._on_zone_selected)
+        self.ignore_app_settings_btn.toggled.connect(
+            self._on_toggle_ignore_app_settings
+        )
+        self.is_pointer_btn_check.toggled.connect(self._on_toggle_pointer_btn_check)
 
     def load_active_layout_zones(self) -> None:
         self.pipeline_list.clear()
@@ -221,12 +211,11 @@ class PipelinesPage(BasePage):
 
     def _get_existing_singleton_zone_id(self, sem_mode: str) -> int | None:
         """Finds if a singleton zone already exists in the active layout."""
-        Pipeline_Config = PipelineConfig()
 
         for zone in store.get_active_layout_zones():
-            Pipeline_Config.set_pipeline_config_from_json(zone.pipeline_config)
+            zone.set_parsed_config_from_json()
 
-            semantic = Pipeline_Config.get_semantic_config()
+            semantic = zone.CONFIG_HELPER.get_semantic_config()
             _, semantic_mode, _ = semantic
 
             if semantic_mode == sem_mode:
@@ -245,12 +234,9 @@ class PipelinesPage(BasePage):
         else:
             bezel_dp_thickness_value = float(BEZEL_DP_THICKNESS)
 
-        Pipeline_Config = PipelineConfig()
-        Pipeline_Config.set_pipeline_config_from_json(zone.pipeline_config)
+        zone.CONFIG_HELPER.set_region_config(None, bezel_dp_thickness_value)
 
-        Pipeline_Config.set_region_config(None, bezel_dp_thickness_value)
-
-        Pipeline_Config.set_transform_config(
+        zone.CONFIG_HELPER.set_transform_config(
             None,
             self.trans_sens_x.value(),
             self.trans_sens_y.value(),
@@ -258,32 +244,32 @@ class PipelinesPage(BasePage):
             self.trans_joy_hysteresis.value(),
         )
 
-        Pipeline_Config.set_semantic_config(None, self.is_pointer_btn_check.isChecked())
+        zone.CONFIG_HELPER.set_semantic_config(
+            None, self.is_pointer_btn_check.isChecked()
+        )
 
-        return Pipeline_Config.pipeline_config
+        return zone.CONFIG_HELPER.pipeline_config
 
     def _reset_current_zone_to_app_settings(self) -> None:
         if self.zone is None:
             return
 
         settings = store.settings.get()
-
-        Pipeline_Config = PipelineConfig()
-        Pipeline_Config.set_pipeline_config_from_json(self.zone.pipeline_config)
-        sem_idx, _, _ = Pipeline_Config.get_semantic_config()
+        self.zone.set_parsed_config_from_json
+        sem_idx, _, _ = self.zone.CONFIG_HELPER.get_semantic_config()
 
         if sem_idx == 1:  # DIRECTIONAL
             self.trans_joy_deadzone.setValue(settings.deadzone)
             self.trans_joy_hysteresis.setValue(settings.hysteresis)
 
         elif sem_idx in (0, 2):  # BUTTON / POINTER
-            self.trans_sens_x.setValue(settings.sensitivity)
-            self.trans_sens_y.setValue(settings.sensitivity)
+            self.trans_sens_x.setValue(settings.sensitivity_x)
+            self.trans_sens_y.setValue(settings.sensitivity_y)
 
         QMessageBox.information(
             self,
             "Reset Applied",
-            "Inspector fields repopulated with active AppSettings. Click 'Save Pipeline' to commit.",
+            "self.inspector fields repopulated with active AppSettings. Click 'Save Pipeline' to commit.",
         )
 
     def _on_reset_all_zones(self) -> None:
@@ -301,6 +287,7 @@ class PipelinesPage(BasePage):
             self.load_active_layout_zones()
             if self.dispatcher:
                 self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+
             QMessageBox.information(
                 self, "Success", f"Reset {count} zones to default AppSettings."
             )
@@ -316,10 +303,12 @@ class PipelinesPage(BasePage):
         if not zone:
             return
 
-        Pipeline_Config = PipelineConfig()
-        Pipeline_Config.set_pipeline_config_from_json(zone.pipeline_config)
+        self.name_label.setText(zone.name)
+        self.ignore_app_settings_btn.setChecked(zone.ignore_app_settings)
 
-        _, _, bezel_dp_thickness, priority = Pipeline_Config.get_region_config()
+        zone.set_parsed_config_from_json()
+
+        _, _, bezel_dp_thickness, priority = zone.CONFIG_HELPER.get_region_config()
         self.priority_number.setValue(priority)
 
         if zone.zone_type == BEZEL:
@@ -328,13 +317,13 @@ class PipelinesPage(BasePage):
             elif zone.scancode == str(BOTTOM_BEZEL_ID):
                 self.bottom_reg_bezel_dp_thickness.setValue(bezel_dp_thickness)
 
-        _, _, sens_x, sens_y, dz, hys = Pipeline_Config.get_transform_config()
+        _, _, sens_x, sens_y, dz, hys = zone.CONFIG_HELPER.get_transform_config()
         self.trans_sens_x.setValue(sens_x)
         self.trans_sens_y.setValue(sens_y)
         self.trans_joy_deadzone.setValue(dz)
         self.trans_joy_hysteresis.setValue(hys)
 
-        _, sem_mode, pointer = Pipeline_Config.get_semantic_config()
+        _, sem_mode, pointer = zone.CONFIG_HELPER.get_semantic_config()
 
         if sem_mode == "BUTTON":
             self.is_pointer_btn_check.setEnabled(True)
@@ -343,8 +332,6 @@ class PipelinesPage(BasePage):
             self.is_pointer_btn_check.setEnabled(False)
 
     def _on_save_pipeline(self) -> None:
-        Pipeline_Config = PipelineConfig()
-
         active_layout = store.get_active_layout()
         if not active_layout:
             QMessageBox.warning(
@@ -353,8 +340,6 @@ class PipelinesPage(BasePage):
                 "Please set an active layout before saving pipelines.",
             )
             return
-
-        _, sem_mode, _ = Pipeline_Config.get_semantic_config()
 
         selected = self.pipeline_list.selectedItems()
         current_zone_id = (
@@ -370,6 +355,9 @@ class PipelinesPage(BasePage):
         if zone is None:
             return
 
+        zone.set_parsed_config_from_json()
+
+        _, sem_mode, _ = zone.CONFIG_HELPER.get_semantic_config()
         # Enforce single movement joystick and single mouse look zone
         if sem_mode in ("DIRECTIONAL", "POINTER"):
             existing_id = self._get_existing_singleton_zone_id(sem_mode)
@@ -386,11 +374,14 @@ class PipelinesPage(BasePage):
                 )
                 return
 
-        serialized_config = Pipeline_Config.get_pipeline_json_from_config(
+        serialized_json = zone.CONFIG_HELPER.get_pipeline_json_from_config(
             self._get_pipeline_dict(zone)
         )
 
-        store.zones.update(current_zone_id, pipeline_config=serialized_config)
+        store.zones.update(
+            current_zone_id,
+            pipeline_json=serialized_json,
+        )
         logger.info(
             "Updated pipeline zone ID %s ('%s')",
             current_zone_id,
@@ -400,11 +391,63 @@ class PipelinesPage(BasePage):
         self.load_active_layout_zones()
         if self.dispatcher:
             self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+
         QMessageBox.information(
             self, "Saved", "Pipeline saved and synced to active layout."
         )
 
         self.zone = None
+
+    def _on_toggle_ignore_app_settings(self, checked: bool) -> None:
+        if self.zone is None:
+            return
+
+        if checked:
+            self.inspector.setEnabled(False)
+
+        else:
+            self.inspector.setEnabled(True)
+
+        store.zones.update(
+            self.zone.id,
+            ignore_app_settings=checked,
+        )
+
+        logger.info(
+            "Updated pipeline zone ID %s ('%s')",
+            self.zone.id,
+            self.zone.name,
+        )
+
+        if self.dispatcher:
+            self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+
+        QMessageBox.information(
+            self,
+            "Toggled",
+            f"Ignore app settings for selected zone set to {checked} and synced.",
+        )
+
+    def _on_toggle_pointer_btn_check(self, checked: bool) -> None:
+        if self.zone is None:
+            return
+
+        self.zone.CONFIG_HELPER.set_semantic_config(None, checked)
+
+        logger.info(
+            "Updated pipeline zone ID %s ('%s')",
+            self.zone.id,
+            self.zone.name,
+        )
+
+        if self.dispatcher:
+            self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+
+        QMessageBox.information(
+            self,
+            "Toggled",
+            f"Pointer boolean for zone set to {checked} and synced.",
+        )
 
     @staticmethod
     def _pair_spins(spin_a: QDoubleSpinBox, spin_b: QDoubleSpinBox) -> QWidget:

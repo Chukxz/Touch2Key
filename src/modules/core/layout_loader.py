@@ -6,7 +6,15 @@ from typing import TYPE_CHECKING, Any
 
 from modules.core.pipeline_factory import create_pipeline_from_zone
 from modules.database import Layout, LayoutZone, store, ensure_system_bezels
-from modules.utils import BEZEL, CIRCLE, RECTANGLE, BASELINE_DPI, BASELINE_HEIGHT, BASELINE_WIDTH, MapperEvent
+from modules.utils import (
+    BEZEL,
+    CIRCLE,
+    RECTANGLE,
+    BASELINE_DPI,
+    BASELINE_HEIGHT,
+    BASELINE_WIDTH,
+    MapperEvent,
+)
 
 if TYPE_CHECKING:
     from modules.core.pipeline import Pipeline
@@ -40,17 +48,18 @@ class LayoutLoader:
         self.dpi: int = BASELINE_DPI
         self.mouse_wheel_radius: float = 50.0
         self.sprint_distance: float = 10.0
-        self.bezel_height: float = 14.0  # Kept strictly for backward compatibility if plugins expect it
+        self.bezel_height: float = (
+            14.0  # Kept strictly for backward compatibility if plugins expect it
+        )
 
         self.keys_json_data: list[tuple[str, dict[str, Any]]] = []
         self.bezels_json_data: list[tuple[str, dict[str, Any]]] = []
-        self.custom_pipelines: list[Pipeline] = []
 
         self._load_layout()
 
         if self.mapper_event_dispatcher is not None:
             self.mapper_event_dispatcher.register_callback(
-                "ON_LAYOUT_RELOAD", self._on_dispatcher_reload
+                "ON_LAYOUT_RELOAD", self._load_layout
             )
 
     def get_mouse_wheel_info(self) -> tuple[float, float]:
@@ -72,7 +81,7 @@ class LayoutLoader:
             return
 
         # --- Self-Heal ---
-        # Ensures existing SQLite databases automatically get the Virtual Keyboard 
+        # Ensures existing SQLite databases automatically get the Virtual Keyboard
         # and Mode Switch bezels injected before we compile pipelines.
         ensure_system_bezels(layout.id)
 
@@ -88,28 +97,32 @@ class LayoutLoader:
             self.mouse_wheel_radius = layout.mouse_wheel_radius
             self.sprint_distance = layout.sprint_distance
 
-            compiled_pipelines: list[Pipeline] = []
-
-            self.custom_pipelines = compiled_pipelines
-
             # Normalize touch and bezel coordinates for the Android/Mobile payload..
             normalized_keys: list[tuple[str, dict[str, Any]]] = []
             normalized_bezels: list[tuple[str, dict[str, Any]]] = []
-            
+
             for z in zones:
+                z.set_parsed_config_from_json()
+                _, _, sens_x, sens_y, dz, hys = z.CONFIG_HELPER.get_transform_config()
+
                 z_dict: dict[str, Any] = {
+                    "id": z.id,
                     "name": z.name,
                     "type": z.zone_type,
                     "pointer": z.pointer,
-                    "priority": getattr(z, "priority", 0),
-                    "pipeline_config": getattr(z, "pipeline_config", "{}") or "{}",
+                    "priority": z.priority,
+                    "sensitivity_x": sens_x,
+                    "sensitivity_y": sens_y,
+                    "deadzone": dz,
+                    "hysteresis": hys,
+                    "ignore_app_settings": z.ignore_app_settings,
                 }
 
                 if z.zone_type == CIRCLE:
                     z_dict["cx"] = (z.cx or 0.0) / self.width
                     z_dict["cy"] = (z.cy or 0.0) / self.height
                     z_dict["r"] = (z.r or 0.0) / self.width
-                    
+
                 elif z.zone_type == BEZEL or z.zone_type == RECTANGLE:
                     z_dict["x1"] = (z.x1 or 0.0) / self.width
                     z_dict["y1"] = (z.y1 or 0.0) / self.height
@@ -118,7 +131,7 @@ class LayoutLoader:
 
                 if z.zone_type == "BEZEL":
                     normalized_bezels.append((z.scancode, z_dict))
-                else:                
+                else:
                     normalized_keys.append((z.scancode, z_dict))
 
             self.bezels_json_data = normalized_bezels
@@ -130,11 +143,7 @@ class LayoutLoader:
                 self.width,
                 self.height,
                 len(self.zones),
-                len(self.custom_pipelines),
             )
-
-    def _on_dispatcher_reload(self) -> None:
-        self._load_layout()
 
     def reload(self) -> None:
         self._load_layout()

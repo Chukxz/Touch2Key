@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import sys
-import json
 import math
-from typing import Any, cast
+from typing import Any, TYPE_CHECKING
 
 from modules.core.pipeline import (
     Unit,
@@ -25,17 +24,26 @@ from modules.core.pipeline import (
     PointerSemantic,
     DirectionalSemantic,
     Pipeline,
-    Transformation,
 )
 
 from modules.utils import (
+    ALLOWED_PIPELINE_FIELDS,
+    M_LEFT,
+    M_MIDDLE,
+    M_RIGHT,
     BASELINE_DPI,
+    TOP_BEZEL_ID,
+    BOTTOM_BEZEL_ID,
     TOGGLE_MODE,
     TOGGLE_VKB,
     dp_to_px,
+    InvalidFieldError,
     Point,
     Vector,
 )
+
+if TYPE_CHECKING:
+    from modules.database import LayoutZone
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +79,7 @@ def Button(
 
 def FixedJoystick(
     center: Point,
-    touch_radius: float,
+    radius: float,
     dead_zone: float,
     walk_radius: float,
     sprint_distance: float = 0.0,
@@ -85,9 +93,9 @@ def FixedJoystick(
     creation_id: int = 0,
 ) -> Pipeline[frozenset[str]]:
     return Pipeline(
-        region=CircularRegion(center=center, radius=touch_radius),
+        region=CircularRegion(center=center, radius=radius),
         origin=FixedOrigin(position=center),
-        constraint=RadialConstraint(radius=touch_radius),
+        constraint=RadialConstraint(radius=radius),
         transformation=JoystickTransform(
             dead_zone=dead_zone,
             walk_radius=walk_radius,
@@ -111,7 +119,7 @@ def FloatingJoystick(
     dead_zone: float,
     walk_radius: float,
     sprint_distance: float = 0.0,
-    leash_radius: float = 0.0,
+    radius: float = 0.0,
     hysteresis_deg: float = 5.0,
     up: str = "w",
     down: str = "s",
@@ -122,8 +130,8 @@ def FloatingJoystick(
     creation_id: int = 0,
 ) -> Pipeline[frozenset[str]]:
     constraint = LeashConstraint(
-        leash_radius
-        if leash_radius > 0
+        radius
+        if radius > 0
         else (
             sprint_distance
             if sprint_distance > 0
@@ -158,7 +166,7 @@ def AnchoredJoystick(
     dead_zone: float,
     walk_radius: float,
     sprint_distance: float = 0.0,
-    leash_radius: float = 0.0,
+    radius: float = 0.0,
     snap_radius: float = 80.0,
     hysteresis_deg: float = 5.0,
     up: str = "w",
@@ -170,8 +178,8 @@ def AnchoredJoystick(
     creation_id: int = 0,
 ) -> Pipeline[frozenset[str]]:
     constraint = LeashConstraint(
-        leash_radius
-        if leash_radius > 0
+        radius
+        if radius > 0
         else (
             sprint_distance
             if sprint_distance > 0
@@ -197,11 +205,10 @@ def AnchoredJoystick(
         priority=priority,
         type_precedence=1,
         creation_id=creation_id,
-        allow_multi_claim=False,
     )
 
 
-def RelativePointer(
+def MousePointer(
     region: Region | None,
     sensitivity_x: float = 1.0,
     sensitivity_y: float = 1.0,
@@ -236,128 +243,131 @@ def SystemToggle(
         priority=priority,
         type_precedence=2,
         creation_id=creation_id,
-        allow_multi_claim=False,
         is_system=True,
     )
 
 
 def create_pipeline_from_zone(
-    zone: Any,
+    zone: LayoutZone,
     screen_width: float,
     screen_height: float,
+    center=Point(0.0, 0.0),
+    snap_radius = 80.0,
+    radius = 150.0,
+    walk_radius = 80.0,
+    sprint_distance = 120.0,
     toggle_mode_callback: Any | None = None,
+    **fields: Any,
 ) -> Pipeline[Any] | None:
     """Builds a typed 5-stage Pipeline instance from database zone metadata."""
-    cfg_raw = getattr(zone, "pipeline_config", "{}") or "{}"
-    try:
-        cfg = json.loads(cfg_raw)
-    except Exception:
-        cfg = {}
-
-    reg_cfg = cfg.get("region", {})
-    reg_type = reg_cfg.get("type", zone.zone_type)
+    unknown = set(fields) - ALLOWED_PIPELINE_FIELDS
+    if unknown:
+        raise InvalidFieldError(f"Unknown layout_zones field(s): {sorted(unknown)}")
     
-    # Flag to allow this pipeline to intercept touches even in Menu Mode
-    is_system = (reg_type == "BEZEL" or zone.zone_type == "BEZEL")
-
+    zone.set_parsed_config_from_json()
+    
     # Stage 1: Region Selection
-    if reg_type == "ALWAYS":
+    reg_idx, _, _, priority = zone.CONFIG_HELPER.get_region_config()
+
+    if reg_idx == 0: # ALWAYS
         region = AlwaysRegion()
-    elif reg_type == "RECTANGLE" or reg_type == "BEZEL":
+        
+    elif reg_idx == 1:  # CIRCLULAR
+        cx = float(zone.cx if zone.cx is not None else 0.0)
+        cy = float(zone.cy if zone.cy is not None else 0.0)
+        r = float(zone.r if zone.r is not None else 50.0)
+        region = CircularRegion(center=Point(cx, cy), radius=r)
+        
+    elif reg_idx == 2: # RECTANGULAR
         x1 = float(zone.x1 if zone.x1 is not None else 0.0)
         y1 = float(zone.y1 if zone.y1 is not None else 0.0)
         x2 = float(zone.x2 if zone.x2 is not None else screen_width)
         y2 = float(zone.y2 if zone.y2 is not None else screen_height)
         region = RectangularRegion(top_left=Point(x1, y1), bottom_right=Point(x2, y2))
-    else:  # CIRCLE default
-        cx = float(zone.cx if zone.cx is not None else 0.0)
-        cy = float(zone.cy if zone.cy is not None else 0.0)
-        r = float(zone.r if zone.r is not None else 50.0)
-        region = CircularRegion(center=Point(cx, cy), radius=r)
+    
+    else:
+        return
 
     # Stage 2: Origin Selection
-    orig_cfg = cfg.get("origin", {})
-    orig_type = orig_cfg.get("type", "FIXED")
-    if orig_type == "DYNAMIC":
+    orig_idx, _ = zone.CONFIG_HELPER.get_origin_config()
+    
+    if orig_idx == 0: # FIXED
+        origin = FixedOrigin(position=center)
+    elif orig_idx == 1: # DYNAMIC
         origin = DynamicOrigin()
-    elif orig_type == "ANCHORED":
-        anchor = Point(
-            float(orig_cfg.get("anchor_x", zone.cx or 0.0)),
-            float(orig_cfg.get("anchor_y", zone.cy or 0.0)),
-        )
-        snap_r = float(orig_cfg.get("snap_radius", 80.0))
-        origin = AnchoredOrigin(default_anchor=anchor, snap_radius=snap_r)
+    elif orig_idx == 2: # ANCHORED
+        origin = AnchoredOrigin(default_anchor=center, snap_radius=snap_radius)
     else:
-        fixed_pt = Point(float(zone.cx or 0.0), float(zone.cy or 0.0))
-        origin = FixedOrigin(position=fixed_pt)
-
+        return
+    
     # Stage 3: Constraint Selection
-    const_cfg = cfg.get("constraint", {})
-    const_type = const_cfg.get("type", "NONE")
-    if const_type == "RADIAL":
-        radius = float(const_cfg.get("radius", zone.r or 100.0))
-        constraint = RadialConstraint(radius=radius)
-    elif const_type == "LEASH":
-        leash_r = float(const_cfg.get("leash_radius", 150.0))
-        constraint = LeashConstraint(leash_radius=leash_r)
-    else:
+    const_idx, _ = zone.CONFIG_HELPER.get_constraint_config()
+    
+    if const_idx == 0: # NONE
         constraint = NoConstraint()
+    elif const_idx == 1: # RADIAL
+        constraint = RadialConstraint(radius=radius)
+    elif const_idx == 2: #LEASH
+        constraint = LeashConstraint(leash_radius=radius)
+    else:
+        return
 
     # Stage 4: Transformation Selection
-    trans_cfg = cfg.get("transform", {})
-    trans_type = trans_cfg.get("type", "IDENTITY")
+    trans_idx, _, sens_x, sens_y, dz, hys = zone.CONFIG_HELPER.get_transform_config()
 
-    transformation: Transformation[Any]
-    if trans_type == "DELTA":
-        sx = float(trans_cfg.get("sens_x", 1.0))
-        sy = float(trans_cfg.get("sens_y", 1.0))
-        transformation = DeltaTransform(sensitivity_x=sx, sensitivity_y=sy)
-    elif trans_type == "JOYSTICK":
+    if trans_idx == 0: # Identity
+        transformation = IdentityTransform()
+    elif trans_idx == 1: # Delta
+        transformation = DeltaTransform(sensitivity_x=sens_x, sensitivity_y=sens_y)
+    elif trans_idx == 2: # Joystick
         transformation = JoystickTransform(
-            dead_zone=float(trans_cfg.get("joy_dz", 10.0)),
-            walk_radius=float(trans_cfg.get("joy_walk", 80.0)),
-            sprint_radius=float(trans_cfg.get("joy_sprint", 120.0)),
-            hysteresis_rad=math.radians(float(trans_cfg.get("joy_hysteresis", 5.0))),
+            dead_zone=dz,
+            walk_radius=walk_radius,
+            sprint_distance=sprint_distance,
+            hysteresis_rad=hys,
         )
     else:
-        # Cast to Transformation[Any] to prevent invariance conflict with Transformation[Unit]
-        transformation = cast(Transformation[Any], IdentityTransform())
+        return
 
     # Stage 5: Semantics Selection
-    sem_cfg = cfg.get("semantics", {})
-    sem_mode = sem_cfg.get("mode", "BUTTON")
-    action = sem_cfg.get("action")
-    is_mouse_button = bool(sem_cfg.get("is_mouse_button", False))
-    target_key = str(zone.scancode or "space")
+    sem_idx, _, pointer = zone.CONFIG_HELPER.get_semantic_config()
 
     semantics: list[Any] = []
     allow_multi_claim = False
     type_precedence = 2
+    is_system = False
 
-    if action == "TOGGLE_MODE" or sem_mode == "TOGGLE_MODE":
-        semantics.append(ToggleSemantic(output="TOGGLE_MODE"))
-    elif action == "TOGGLE_VKB" or sem_mode == "TOGGLE_VKB":
-        semantics.append(ToggleSemantic(output="TOGGLE_VKB"))
-    elif sem_mode == "WASD":
+    if sem_idx == 0:  # BUTTON
+        is_mouse_button = int(zone.scancode) in (M_LEFT, M_RIGHT, M_MIDDLE)
+        semantics.append(
+            ButtonSemantic(output=zone.scancode, mouse_button=is_mouse_button)
+        )
+        semantics.append(PointerSemantic(pointer))
+        allow_multi_claim = True
+        
+    elif sem_idx == 1: # Directional
         semantics.append(DirectionalSemantic())
         type_precedence = 1
-    elif sem_mode == "POINTER":
+        
+    elif sem_idx == 2: # Pointer
         semantics.append(PointerSemantic())
-        type_precedence = 0
-    elif sem_mode == "TRACK_FIRE":
-        semantics.append(
-            ButtonSemantic(output=target_key, mouse_button=is_mouse_button)
-        )
-        semantics.append(PointerSemantic())
-        allow_multi_claim = True
-    else:  # BUTTON
-        semantics.append(
-            ButtonSemantic(output=target_key, mouse_button=is_mouse_button)
-        )
-        allow_multi_claim = True
-
-    priority = int(zone.priority if zone.priority is not None else 0)
-
+        type_precedence = 0        
+        
+    elif sem_idx == 3: # Toggle 
+        if zone.scancode == str(TOP_BEZEL_ID):
+            semantics.append(ToggleSemantic(output=TOGGLE_MODE))
+            is_system = True
+            
+        elif zone.scancode == str(BOTTOM_BEZEL_ID):
+            semantics.append(ToggleSemantic(output=TOGGLE_VKB))
+            is_system = True
+        
+        else:
+            return
+    
+    else:
+        return
+    
     return Pipeline[Any](
         region=region,
         origin=origin,
@@ -366,7 +376,7 @@ def create_pipeline_from_zone(
         semantics=semantics,
         priority=priority,
         type_precedence=type_precedence,
-        creation_id=int(zone.id or 0),
+        creation_id=zone.id,
         allow_multi_claim=allow_multi_claim,
-        is_system=is_system,  # Passes the system flag
+        is_system=is_system
     )

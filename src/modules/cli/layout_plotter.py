@@ -5,7 +5,7 @@ from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication, QMainWindow
 
 from modules.database import store
-from modules.gui.widgets.layout_plotter_widget import LayoutPlotterWidget
+from modules.gui.widgets.layouts_plotter_widget import LayoutsPlotterWidget
 
 
 class PlotterWindow(QMainWindow):
@@ -13,7 +13,7 @@ class PlotterWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Touch2Key - HUD Layout Editor (Standalone)")
         self.resize(1100, 700)
-        self.plotter = LayoutPlotterWidget(self, standalone=True)
+        self.plotter = LayoutsPlotterWidget(self, standalone=True)
         self.setCentralWidget(self.plotter)
 
     def closeEvent(self, event: QCloseEvent) -> None:

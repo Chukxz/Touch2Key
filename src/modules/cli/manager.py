@@ -24,7 +24,7 @@ from modules.database.legacy_migration import (
     migrate_json_layout,
     migrate_toml_config,
 )
-from modules.utils import JSONS_FOLDER, PROFILES_FOLDER, TOML_PATH, EXCLUDE_KEYS
+from modules.utils import JSONS_FOLDER, PROFILES_FOLDER, TOML_PATH, EXCLUDE_KEYS, BEZEL, CIRCLE, RECTANGLE
 
 # ---------------------------------------------------------------------------
 # Profile Inspection & Management
@@ -68,14 +68,14 @@ def list_layout_zones(layout_id: int) -> None:
         return
 
     print(f"\n--- Zones / Pipelines for '{layout.name}' (ID: {layout_id}) ---")
+    
     for z in zones:
-        if z.zone_type == "CIRCLE":
+        if z.zone_type == CIRCLE
             coords = f"Center=({z.cx}, {z.cy}), R={z.r}"
-        elif z.zone_type == "RECTANGLE":
+        elif z.zone_type == RECTANGLE or z.zone_type == BEZEL:
             coords = f"Rect=({z.x1}, {z.y1}) -> ({z.x2}, {z.y2})"
-        else:
-            coords = "Bezel Notch"
-        cam_flag = " [MoveCam/TrackFire]" if z.move_camera else ""
+        
+        cam_flag = " [MoveCam/TrackFire]" if z.pointer else ""
         print(
             f"  [{z.id}] {z.name or 'Unnamed'} | Key: {z.scancode} | "
             f"Type: {z.zone_type} | Prio: {z.priority} | {coords}{cam_flag}"

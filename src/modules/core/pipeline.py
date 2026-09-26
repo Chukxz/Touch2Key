@@ -226,21 +226,6 @@ class AnchoredOrigin(Origin):
         self._position = None
 
 
-@dataclass(slots=True)
-class ModeAwareRegion(Region):
-    base_region: Region
-    engine_ref: Any
-
-    def activates(self, event: TouchEvent) -> bool:
-        if getattr(self.engine_ref, "is_visible", False):
-            return False
-        return self.base_region.activates(event)
-
-    @property
-    def area(self) -> float:
-        return self.base_region.area
-
-
 @dataclass(slots=True, frozen=True)
 class PipelineContext:
     event: TouchEvent
@@ -536,7 +521,15 @@ class Pipeline(Generic[T]):
 
 @dataclass(slots=True)
 class PipelineConfig:
+    is_last_set_config_self: bool = False
+    should_get_config: bool = True
     pipeline_config: dict = field(default_factory=dict)
+
+    def _monitor_last_set_config(self, pipeline_config: dict | None = None):
+        if pipeline_config is None:
+            self.is_last_set_config_self = True
+        else:
+            self.is_last_set_config_self = False
 
     def get_region_config(self, pipeline_config: dict | None = None):
         pipeline_config = (
@@ -559,6 +552,10 @@ class PipelineConfig:
         pipeline_config: dict | None = None,
         keep_previous=True,
     ):
+        self._monitor_last_set_config(pipeline_config)
+        if pipeline_config is None:
+            self.should_get_config = True
+
         pipeline_config = (
             pipeline_config if pipeline_config is not None else self.pipeline_config
         )
@@ -626,6 +623,10 @@ class PipelineConfig:
         pipeline_config: dict | None = None,
         keep_previous=True,
     ):
+        self._monitor_last_set_config(pipeline_config)
+        if pipeline_config is None:
+            self.should_get_config = True
+
         pipeline_config = (
             pipeline_config if pipeline_config is not None else self.pipeline_config
         )
@@ -673,6 +674,10 @@ class PipelineConfig:
         pipeline_config: dict | None = None,
         keep_previous=True,
     ):
+        self._monitor_last_set_config(pipeline_config)
+        if pipeline_config is None:
+            self.should_get_config = True
+
         pipeline_config = (
             pipeline_config if pipeline_config is not None else self.pipeline_config
         )
@@ -714,7 +719,7 @@ class PipelineConfig:
         sensitivity_x = float(transform.get("sensitivity_x", 1.0))
         sensitivity_y = float(transform.get("sensitivity_y", 1.0))
         deadzone = float(transform.get("deadzone", 0.1))
-        hysterisis = float(transform.get("hysterisis", 5.0))
+        hysteresis = float(transform.get("hysteresis", 5.0))
 
         return (
             idx,
@@ -722,7 +727,7 @@ class PipelineConfig:
             sensitivity_x,
             sensitivity_y,
             deadzone,
-            hysterisis,
+            hysteresis,
         )
 
     def set_transform_config(
@@ -731,10 +736,14 @@ class PipelineConfig:
         sensitivity_x: float | None = None,
         sensitivity_y: float | None = None,
         deadzone: float | None = None,
-        hysterisis: float | None = None,
+        hysteresis: float | None = None,
         pipeline_config: dict | None = None,
         keep_previous=True,
     ):
+        self._monitor_last_set_config(pipeline_config)
+        if pipeline_config is None:
+            self.should_get_config = True
+
         pipeline_config = (
             pipeline_config if pipeline_config is not None else self.pipeline_config
         )
@@ -745,7 +754,7 @@ class PipelineConfig:
             prev_sensitivity_x,
             prev_sensitivity_y,
             prev_deadzone,
-            prev_hysterisis,
+            prev_hysteresis,
         ) = self.get_transform_config(pipeline_config)
 
         # Resolve Target IDX
@@ -788,13 +797,13 @@ class PipelineConfig:
         else:
             target_deadzone = 0.1
 
-        # Resolve Target Hysterisis
-        if hysterisis is not None:
-            target_hysterisis = hysterisis
+        # Resolve Target hysteresis
+        if hysteresis is not None:
+            target_hysteresis = hysteresis
         elif keep_previous:
-            target_hysterisis = prev_hysterisis
+            target_hysteresis = prev_hysteresis
         else:
-            target_hysterisis = 5.0
+            target_hysteresis = 5.0
 
         transform = pipeline_config.setdefault("transform", {})
         transform.update(
@@ -804,7 +813,7 @@ class PipelineConfig:
                 "sensitivity_x": target_sensitivity_x,
                 "sensitivity_y": target_sensitivity_y,
                 "deadzone": target_deadzone,
-                "hysteresis": target_hysterisis,
+                "hysteresis": target_hysteresis,
             }
         )
 
@@ -827,6 +836,10 @@ class PipelineConfig:
         pipeline_config: dict | None = None,
         keep_previous=True,
     ):
+        self._monitor_last_set_config(pipeline_config)
+        if pipeline_config is None:
+            self.should_get_config = True
+
         pipeline_config = (
             pipeline_config if pipeline_config is not None else self.pipeline_config
         )
@@ -883,6 +896,10 @@ class PipelineConfig:
     def set_pipeline_config_from_json(
         self, pipeline_json="{}", pipeline_config: dict | None = None
     ):
+        self._monitor_last_set_config(pipeline_config)
+        if pipeline_config is None:
+            self.should_get_config = False
+
         pipeline_config = (
             pipeline_config if pipeline_config is not None else self.pipeline_config
         )

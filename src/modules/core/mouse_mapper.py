@@ -20,7 +20,7 @@ from modules.core.pipeline import (
 )
 
 from modules.core import BridgeOutputSink
-from modules.utils import TouchEvent
+from modules.utils import scale_coord, TouchEvent
 
 if TYPE_CHECKING:
     from .mapper import Mapper
@@ -45,6 +45,9 @@ class MouseMapper:
 
         self.lock = threading.Lock()
         self.pipeline: Pipeline[Vector] | None = None
+        self.final_sens_x = 1.0
+        self.final_sens_y = 1.0
+
         self._build_pipeline()
 
         self.mapper_event_dispatcher.register_callback(
@@ -58,45 +61,46 @@ class MouseMapper:
         )
 
     def _build_pipeline(self) -> None:
-        s = self.config.settings
-        sens = s.sensitivity
         dev_w = float(self.mapper.layout_loader.width)
         dev_h = float(self.mapper.layout_loader.height)
         pc_w = float(self.mapper.screen_w)
-        ratio = (pc_w / dev_w) if dev_w > 0 else 1.0
-        final_sens = sens * ratio
-
+        pc_h = float(self.mapper.screen_h)
+        
+        ratio_x = (pc_w / dev_w) if dev_w > 0 else 1.0
+        ratio_y = (pc_h / dev_h) if dev_h > 0 else 1.0
+        sens_x = self.config.settings.sensitivity_x
+        sens_y = self.config.settings.sensitivity_y
+        
+        final_sens_x = sens_x * ratio_x
+        final_sens_y = sens_y * ratio_y
+        
         # 1. Check if the layout explicitly defined a custom POINTER / Look zone
         custom_look_zone = None
+        
         for zone in self.mapper.layout_loader.zones:
             try:
-                cfg = json.loads(zone.pipeline_config or "{}")
-                if cfg.get("semantics", {}).get("mode") == "POINTER":
-                    custom_look_zone = (zone, cfg)
+                zone.set_parsed_config_from_json()
+                sem_idx, _, _ = zone.CONFIG_HELPER.get_semantic_config()
+
+                if sem_idx == 2: # POINTER
+                    custom_look_zone = zone
                     break
             except Exception:
                 pass
-            if (
-                zone.name in ("LOOK_AREA", "Relative Pointer")
-                or zone.scancode == "MOUSE_LOOK"
-            ):
-                custom_look_zone = (zone, {})
-                break
 
-        if custom_look_zone:
-            zone, cfg = custom_look_zone
+        if custom_look_zone is not None:
+            zone = custom_look_zone
             reg_type = zone.zone_type.upper()
+            
+            # Inspect custom zone sensitivity overrides
+            zone.set_parsed_config_from_json()
+            _, _, trans_sens_x, trans_sens_y, _, _ = zone.CONFIG_HELPER.get_transform_config()
+            
+            sens_x = trans_sens_x if zone.ignore_app_settings else self.config.settings.sensitivity_x
+            sens_y = trans_sens_y if zone.ignore_app_settings else self.config.settings.sensitivity_y
+            final_sens_x = sens_x * ratio_x
+            final_sens_y = sens_y * ratio_y
 
-            # Helper to safely scale normalized (0-1) coordinates up to device dimensions
-            def _scale_x(val: float | None) -> float:
-                if val is None:
-                    return 0.0
-                return val * dev_w if val <= 1.0 else val
-
-            def _scale_y(val: float | None) -> float:
-                if val is None:
-                    return 0.0
-                return val * dev_h if val <= 1.0 else val
 
             if (
                 reg_type == "CIRCLE"
@@ -105,8 +109,8 @@ class MouseMapper:
                 and zone.r
             ):
                 look_region = CircularRegion(
-                    Point(_scale_x(zone.cx), _scale_y(zone.cy)),
-                    _scale_x(zone.r),
+                    Point(scale_coord(zone.cx), scale_coord(zone.cy)),
+                    scale_coord(zone.r),
                 )
             elif (
                 reg_type == "RECTANGLE"
@@ -116,25 +120,19 @@ class MouseMapper:
                 and zone.y2 is not None
             ):
                 look_region = RectangularRegion(
-                    Point(_scale_x(zone.x1), _scale_y(zone.y1)),
-                    Point(_scale_x(zone.x2), _scale_y(zone.y2)),
+                    Point(scale_coord(zone.x1), scale_coord(zone.y1)),
+                    Point(scale_coord(zone.x2), scale_coord(zone.y2)),
                 )
             else:
                 look_region = AlwaysRegion()
-
-            # Inspect custom zone sensitivity overrides if provided
-            trans_cfg = cfg.get("transform", {})
-            sens_x = trans_cfg.get("sens_x", final_sens)
-            sens_y = trans_cfg.get("sens_y", final_sens)
-
+        
             logger.info(
                 "MouseMapper assigned custom layout Look Area: '%s' (%s)",
                 zone.name,
                 reg_type,
             )
+            
         else:
-            sens_x = final_sens
-            sens_y = final_sens
             wasd_is_floating = self.mapper.is_floating_joystick
 
             # If WASD is fixed, mouse mapper can claim touches across the full screen
@@ -145,7 +143,7 @@ class MouseMapper:
                 )
             else:
                 # Floating joystick active: restrict look control to opposite half
-                if s.left_handed:
+                if self.config.settings.left_handed:
                     look_region = RectangularRegion(
                         Point(0.0, 0.0), Point(dev_w / 2.0, dev_h)
                     )
@@ -155,43 +153,29 @@ class MouseMapper:
                     )
                 logger.info(
                     "MouseMapper restricted to %s half-screen (Floating Joystick active).",
-                    "Left" if s.left_handed else "Right",
+                    "Left" if self.config.settings.left_handed else "Right",
                 )
+                
+        logger.info(
+            f"\n[MOUSEMAPPER] - Sync: PC width ({pc_w}px) / Phone width ({dev_w}px) = X Ratio ({ratio_x:.2f}).\
+              \n[MOUSEMAPPER] - Final X Sensitivity: {final_sens_x:.4f} (User X Sensitivity: {sens_x}x).\
+              \n\
+              \n[MOUSEMAPPER] - Sync: PC height ({pc_h}px) / Phone height ({dev_h}px) = Y Ratio ({ratio_y:.2f}).\
+              \n[MOUSEMAPPER] - Final Y Sensitivity: {final_sens_y:.4f} (User Y Sensitivity: {sens_y}x)."
+        )
+        
+        self.final_sens_x = final_sens_x
+        self.final_sens_y = final_sens_y
 
         pipeline = Pipeline(
             region=look_region,
             origin=DynamicOrigin(),
             constraint=NoConstraint(),
-            transformation=DeltaTransform(sensitivity_x=sens_x, sensitivity_y=sens_y),
+            transformation=DeltaTransform(sensitivity_x=final_sens_x, sensitivity_y=final_sens_y),
             semantics=[PointerSemantic()],
         )
         with self.lock:
             self.pipeline = pipeline
-
-    def _should_suppress_touch(self, touch_event: TouchEvent) -> bool:
-        """Determines if a touch slot is claimed by a TRACK_FIRE or button zone
-
-        that forbids camera/mouse look tracking.
-        """
-        key_mapper = getattr(self.mapper, "key_mapper", None)
-        if not key_mapper:
-            return False
-
-        slot_id = getattr(touch_event, "slot", None) or getattr(
-            touch_event, "tracking_id", None
-        )
-        active_zone = (
-            key_mapper.get_active_zone_for_slot(slot_id)
-            if hasattr(key_mapper, "get_active_zone_for_slot")
-            else None
-        )
-
-        if active_zone is not None:
-            # Standard buttons only pass motion to camera if move_camera is True
-            if not getattr(active_zone, "move_camera", False):
-                return True
-
-        return False
 
     def process_touch(self, touch_event: TouchEvent, is_visible: bool) -> None:
         if is_visible:
@@ -199,16 +183,13 @@ class MouseMapper:
             gx, gy = self.mapper.device_to_game_abs(
                 touch_event.position.x, touch_event.position.y
             )
-            self.bridge.mouse_move_abs(int(round(gx)), int(round(gy)))
 
             if touch_event.phase is TouchPhase.DOWN:
                 self.bridge.left_click_down()
+            elif touch_event.phase is TouchPhase.MOVE:
+                self.bridge.mouse_move_abs(int(round(gx)), int(round(gy)))                
             elif touch_event.phase is TouchPhase.UP:
                 self.bridge.left_click_up()
-            return
-
-        # Suppress motion if this touch contact belongs to a TRACK_FIRE reticle drag
-        if self._should_suppress_touch(touch_event):
             return
 
         with self.lock:
@@ -223,5 +204,4 @@ class MouseMapper:
     def _aggregate(
         self, sum_dx: float, sum_dy: float, acc_x: float, acc_y: float
     ) -> None:
-        sens = self.config.settings.sensitivity
-        self.output_sink.mouse_move(sum_dx * sens, sum_dy * sens)
+        self.output_sink.mouse_move(sum_dx * self.final_sens_x, sum_dy * self.final_sens_y)

@@ -4,14 +4,16 @@ import logging
 import threading
 from typing import TYPE_CHECKING
 
-from modules.core.pipeline import (
+from modules.core import (
     FixedJoystick,
     FloatingJoystick,
     AnchoredJoystick,
+    BridgeOutputSink,
+)
+from modules.core.pipeline import (
     Point,
     RectangularRegion,
 )
-from modules.core.pipeline_output import BridgeOutputSink
 from modules.utils import scale_coord, CIRCLE, MOUSE_WHEEL_CODE, TouchEvent
 
 if TYPE_CHECKING:
@@ -49,7 +51,6 @@ class WASDMapper:
         )
 
     def _build_pipeline(self) -> None:
-        s = self.config.settings
         inner_r, outer_r = self.mapper.layout_loader.get_mouse_wheel_info()
         w = float(self.mapper.layout_loader.width)
         h = float(self.mapper.layout_loader.height)
@@ -57,91 +58,102 @@ class WASDMapper:
         key_raw_zones = self.mapper.layout_loader.keys_json_data.copy()
 
         # Check if the layout defines an explicit fixed HUD joystick zone
-        fixed_zone = None
-        for scancode, z_dict in key_raw_zones:
-            if (
-                z_dict.get("name") == MOUSE_WHEEL_CODE
-                or str(scancode) == MOUSE_WHEEL_CODE
-            ) and z_dict.get("type") == CIRCLE:
-                fixed_zone = z_dict
+        wasd_zone_values = None
+        for _, values in key_raw_zones:
+            if (values.get("name") == MOUSE_WHEEL_CODE) and values.get(
+                "type"
+            ) == CIRCLE:
+
+                wasd_zone_values = values
                 break
 
         # Movement half-screen partition based on handedness
-        if s.left_handed:
+        if self.config.settings.left_handed:
             half_screen_region = RectangularRegion(Point(w / 2.0, 0.0), Point(w, h))
         else:
             half_screen_region = RectangularRegion(Point(0.0, 0.0), Point(w / 2.0, h))
 
-        floating_enabled = getattr(s, "floating_joystick", False)
-        anchored_enabled = getattr(s, "anchored_joystick", False)
+        if wasd_zone_values is not None:
+            z_id = int(values.get("id", 0))
+            priority = int(wasd_zone_values.get("priority", 0))
+            ignore_app_settings = bool(
+                wasd_zone_values.get("ignore_app_settings", False)
+            )
 
-        if fixed_zone is not None:
-            if floating_enabled:
+            deadzone = (
+                float(wasd_zone_values.get("deadzone", 0.1))
+                if ignore_app_settings
+                else self.config.settings.deadzone
+            )
+            hysteresis = float(
+                (wasd_zone_values.get("hysteresis", 4.0))
+                if ignore_app_settings
+                else self.config.settings.hysteresis
+            )
 
-                if anchored_enabled:
-                    # -------------------------------------------------------------
-                    # 1. Anchored Floating Joystick (Hybrid)
-                    # -------------------------------------------------------------
-                    self.mapper.is_floating_joystick = True
-                    self.mapper.is_anchored_joystick = True
+            sprint_key = self.config.settings.sprint_key or "lshift"
 
-                    anchor_pt = Point(
-                        scale_coord(fixed_zone["cx"], w),
-                        scale_coord(fixed_zone["cy"], h),
-                    )
-                    raw_r = fixed_zone.get("r", fixed_zone.get("val1"))
-                    snap_r = (
-                        scale_coord(raw_r, w)
-                        if raw_r is not None
-                        else getattr(s, "joystick_snap_radius", 80.0)
-                    )
+            if self.config.settings.anchored_joystick:
+                # -------------------------------------------------------------
+                # 1. Anchored Floating Joystick (Hybrid)
+                # -------------------------------------------------------------
+                self.mapper.is_floating_joystick = True
+                self.mapper.is_anchored_joystick = True
 
-                    pipeline = AnchoredJoystick(
-                        default_anchor=anchor_pt,
-                        region=half_screen_region,
-                        dead_zone=s.deadzone * inner_r,
-                        walk_radius=inner_r,
-                        sprint_radius=outer_r,
-                        leash_radius=outer_r,
-                        snap_radius=snap_r,
-                        hysteresis_deg=s.hysteresis,
-                        up="w",
-                        down="s",
-                        left="a",
-                        right="d",
-                        sprint_key=s.sprint_key or "shift",
-                    )
-                    logger.info(
-                        "Configured Anchored Floating Joystick at anchor=(%0.1f, %0.1f) snap_radius=%0.1f",
-                        anchor_pt.x,
-                        anchor_pt.y,
-                        snap_r,
-                    )
+                anchor_pt = Point(
+                    scale_coord(wasd_zone_values["cx"], w),
+                    scale_coord(wasd_zone_values["cy"], h),
+                )
 
-                else:
-                    # -------------------------------------------------------------
-                    # 2. Pure Floating Joystick
-                    # -------------------------------------------------------------
-                    self.mapper.is_floating_joystick = True
-                    self.mapper.is_anchored_joystick = False
+                pipeline = AnchoredJoystick(
+                    default_anchor=anchor_pt,
+                    region=half_screen_region,
+                    dead_zone=deadzone * inner_r,
+                    walk_radius=inner_r,
+                    sprint_distance=outer_r,
+                    radius=outer_r,
+                    snap_radius=inner_r,
+                    hysteresis_deg=hysteresis,
+                    up="w",
+                    down="s",
+                    left="a",
+                    right="d",
+                    sprint_key=sprint_key,
+                    priority=priority,
+                    creation_id=z_id,
+                )
+                logger.info(
+                    "Configured Anchored Floating Joystick at anchor=(%0.1f, %0.1f) snap_radius=%0.1f, with (Handedness: %s)",
+                    anchor_pt.x,
+                    anchor_pt.y,
+                    inner_r,
+                    "Left" if self.config.settings.left_handed else "Right",
+                )
 
-                    pipeline = FloatingJoystick(
-                        region=half_screen_region,
-                        dead_zone=s.deadzone * inner_r,
-                        walk_radius=inner_r,
-                        sprint_radius=outer_r,
-                        leash_radius=outer_r,
-                        hysteresis_deg=s.hysteresis,
-                        up="w",
-                        down="s",
-                        left="a",
-                        right="d",
-                        sprint_key=s.sprint_key or "shift",
-                    )
-                    logger.info(
-                        "Configured Floating Joystick (Handedness: %s)",
-                        "Left" if s.left_handed else "Right",
-                    )
+            elif self.config.settings.floating_joystick:
+                # -------------------------------------------------------------
+                # 2. Pure Floating Joystick
+                # -------------------------------------------------------------
+                self.mapper.is_floating_joystick = True
+                self.mapper.is_anchored_joystick = False
+
+                pipeline = FloatingJoystick(
+                    region=half_screen_region,
+                    dead_zone=deadzone * inner_r,
+                    walk_radius=inner_r,
+                    sprint_distance=outer_r,
+                    radius=outer_r,
+                    hysteresis_deg=hysteresis,
+                    up="w",
+                    down="s",
+                    left="a",
+                    right="d",
+                    sprint_key=sprint_key,
+                )
+                logger.info(
+                    "Configured Floating Joystick (Handedness: %s)",
+                    "Left" if self.config.settings.left_handed else "Right",
+                )
 
             else:
                 # -------------------------------------------------------------
@@ -151,30 +163,29 @@ class WASDMapper:
                 self.mapper.is_anchored_joystick = False
 
                 center = Point(
-                    scale_coord(fixed_zone["cx"], w),
-                    scale_coord(fixed_zone["cy"], h),
+                    scale_coord(wasd_zone_values["cx"], w),
+                    scale_coord(wasd_zone_values["cy"], h),
                 )
-                raw_r = fixed_zone.get("r", fixed_zone.get("val1", 50.0))
-                touch_radius = scale_coord(raw_r, w)
 
                 pipeline = FixedJoystick(
                     center=center,
-                    touch_radius=touch_radius,
-                    dead_zone=s.deadzone * inner_r,
+                    radius=inner_r,
+                    dead_zone=deadzone * inner_r,
                     walk_radius=inner_r,
-                    sprint_radius=outer_r,
-                    hysteresis_deg=s.hysteresis,
+                    sprint_distance=outer_r,
+                    hysteresis_deg=hysteresis,
                     up="w",
                     down="s",
                     left="a",
                     right="d",
-                    sprint_key=s.sprint_key or "shift",
+                    sprint_key=sprint_key,
                 )
                 logger.info(
-                    "Configured Fixed Joystick at (%0.1f, %0.1f) radius=%0.1f",
+                    "Configured Fixed Joystick at (%0.1f, %0.1f) radius=%0.1f, with (Handedness: %s)",
                     center.x,
                     center.y,
-                    touch_radius,
+                    inner_r,
+                    "Left" if self.config.settings.left_handed else "Right",
                 )
 
         with self.lock:

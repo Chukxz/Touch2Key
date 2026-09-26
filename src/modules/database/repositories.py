@@ -16,9 +16,10 @@ from modules.utils import (
     CIRCLE,
     RECTANGLE,
     bezels_exist_ids,
-    get_bezel_thickness,
+    get_bezel_thicknesses,
     ensure_top_bezel,
     ensure_bottom_bezel,
+    InvalidFieldError,
 )
 
 from modules.core import PipelineConfig
@@ -29,23 +30,19 @@ if TYPE_CHECKING:
     from . import AppSettings, Layout, LayoutZone
 
 
-class InvalidFieldError(ValueError):
-    """Raised when update()/create() receives a field name outside ALLOWED_FIELDS."""
-
-
 @dataclass(frozen=True, slots=True)
 class AppSettings:
     id: int
     left_handed: bool
     floating_joystick: bool
     anchored_joystick: bool
-    joystick_snap_radius: float
     json_dev_width: int
     json_dev_height: int
     json_dev_dpi: int
     deadzone: float
     hysteresis: float
-    sensitivity: float
+    sensitivity_x: float
+    sensitivity_y: float
     toggle_key: Optional[str]
     sprint_key: Optional[str]
     adb_rate_cap: float
@@ -106,29 +103,27 @@ class LayoutZone:
     y1: Optional[float]
     x2: Optional[float]
     y2: Optional[float]
-    pipeline_config: str
+    ignore_app_settings: bool
+    pipeline_json: str
 
-    _CONFIG_HELPER = PipelineConfig()
+    CONFIG_HELPER = PipelineConfig()
 
-    def _get_parsed_config(self) -> dict:
-        try:
-            cfg = json.loads(self.pipeline_config or "{}")
-            return cfg if isinstance(cfg, dict) else {}
-        except Exception:
-            return {}
+    def set_parsed_config_from_json(self):
+        if self.CONFIG_HELPER.should_get_config:
+            self.CONFIG_HELPER.set_pipeline_config_from_json(self.pipeline_json)
 
     @property
     def priority(self) -> int:
-        """Extracts runtime priority from the unified pipeline_config JSON."""
-        cfg = self._get_parsed_config()
-        _, _, _, priority = self._CONFIG_HELPER.get_region_config(cfg)
+        """Extracts runtime priority from the unified pipeline_json JSON."""
+        self.set_parsed_config_from_json()
+        _, _, _, priority = self.CONFIG_HELPER.get_region_config()
         return priority
 
     @property
     def pointer(self) -> bool:
         """Determines if this zone is configured for camera look around."""
-        cfg = self._get_parsed_config()
-        _, _, pointer = self._CONFIG_HELPER.get_semantic_config(cfg)
+        self.set_parsed_config_from_json()
+        _, _, pointer = self.CONFIG_HELPER.get_semantic_config()
         return pointer
 
     @classmethod
@@ -136,8 +131,9 @@ class LayoutZone:
         data = {
             f.name: row[f.name] for f in dataclass_fields(cls) if f.name in row.keys()
         }
-        data["pipeline_config"] = (
-            str(row["pipeline_config"]) if "pipeline_config" in row.keys() else "{}"
+        data["ignore_app_settings"] = bool(data["ignore_app_settings"])
+        data["pipeline_json"] = (
+            str(row["pipeline_json"]) if "pipeline_json" in row.keys() else "{}"
         )
         return cls(**data)
 
@@ -149,13 +145,13 @@ class AppSettingsRepository:
         "left_handed",
         "floating_joystick",
         "anchored_joystick",
-        "joystick_snap_radius",
         "json_dev_width",
         "json_dev_height",
         "json_dev_dpi",
         "deadzone",
         "hysteresis",
-        "sensitivity",
+        "sensitivity_x",
+        "sensitivity_y",
         "toggle_key",
         "sprint_key",
         "adb_rate_cap",
@@ -280,12 +276,12 @@ class LayoutsRepository:
     @staticmethod
     def _auto_seed_bezels(
         layout: Layout,
-        top_thickness: float | None = None,
-        bottom_thickness: float | None = None,
+        top_dp_thickness: float | None = None,
+        bottom_dp_thickness: float | None = None,
     ):
         zones_repo = LayoutZonesRepository()
-        ensure_top_bezel(layout, zones_repo, top_thickness)
-        ensure_bottom_bezel(layout, zones_repo, bottom_thickness)
+        ensure_top_bezel(layout, zones_repo, top_dp_thickness)
+        ensure_bottom_bezel(layout, zones_repo, bottom_dp_thickness)
 
     def update(self, layout_id: int, **fields: Any) -> Layout:
         unknown = set(fields) - self.ALLOWED_FIELDS
@@ -352,7 +348,7 @@ class LayoutsRepository:
                 y1=zone.y1,
                 x2=zone.x2,
                 y2=zone.y2,
-                pipeline_config=zone.pipeline_config,
+                pipeline_json=zone.pipeline_json,
             )
         return new_layout
 
@@ -370,7 +366,8 @@ class LayoutZonesRepository:
         "y1",
         "x2",
         "y2",
-        "pipeline_config",
+        "ignore_app_settings",
+        "pipeline_json",
     }
 
     VALID_ZONE_TYPES = {BEZEL, CIRCLE, RECTANGLE}
@@ -403,7 +400,8 @@ class LayoutZonesRepository:
             raise ValueError(f"zone_type must be one of {self.VALID_ZONE_TYPES}")
 
         fields.setdefault("name", "")
-        fields.setdefault("pipeline_config", "{}")
+        fields.setdefault("ignore_app_settings", False)
+        fields.setdefault("pipeline_json", "{}")
 
         columns = ", ".join(fields)
         placeholders = ", ".join(f":{key}" for key in fields)
@@ -467,8 +465,9 @@ class LayoutZonesRepository:
     def delete_all_for_layout(self, layout_id: int, auto_seed_bezels=True) -> None:
         layouts_repo = LayoutsRepository()
         layout = layouts_repo.get(layout_id)
-        top_bezel_thickness = BEZEL_DP_THICKNESS
-        bottom_bezel_thickness = BEZEL_DP_THICKNESS
+
+        top_bezel_dp_thickness = float(BEZEL_DP_THICKNESS)
+        bottom_bezel_dp_thickness = float(BEZEL_DP_THICKNESS)
 
         if auto_seed_bezels:
             zones = self.list_for_layout(layout_id)
@@ -476,11 +475,13 @@ class LayoutZonesRepository:
 
             top_zone = self.get(top_id)
             if top_zone is not None and layout is not None:
-                top_bezel_thickness = get_bezel_thickness(top_zone, layout)
+                top_bezel_dp_thickness, _ = get_bezel_thicknesses(top_zone, layout)
 
             bottom_zone = self.get(bottom_id)
             if bottom_zone is not None and layout is not None:
-                bottom_bezel_thickness = get_bezel_thickness(bottom_zone, layout)
+                bottom_bezel_dp_thickness, _ = get_bezel_thicknesses(
+                    bottom_zone, layout
+                )
 
         conn = connection_manager.get_connection()
         with conn:
@@ -489,5 +490,5 @@ class LayoutZonesRepository:
         if auto_seed_bezels:
             if layout is not None:
                 layouts_repo._auto_seed_bezels(
-                    layout, top_bezel_thickness, bottom_bezel_thickness
+                    layout, top_bezel_dp_thickness, bottom_bezel_dp_thickness
                 )

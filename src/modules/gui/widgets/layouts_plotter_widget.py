@@ -7,13 +7,13 @@ import math
 import os
 from pathlib import Path
 from PIL import Image
-from typing import Any
 from modules.platforms import get_platform, get_specific_mt_key
 
 get_platform().SystemConfig().set_dpi_awareness()
 
 from modules.utils import (
     BEZEL,
+    BEZEL_DP_THICKNESS,
     CIRCLE,
     RECTANGLE,
     BASELINE_DPI,
@@ -23,13 +23,22 @@ from modules.utils import (
     IDLE,
     TOP_BEZEL_ID,
     BOTTOM_BEZEL_ID,
+    bezels_exist_ids,
+    get_bezel_thicknesses,
+    dp_to_px,
+    ensure_top_bezel,
+    ensure_bottom_bezel,
     get_scancode_and_bridge_key_from_key,
     get_key_from_scancode,
     rotate_resolution,
     get_vibrant_random_color,
     get_dulled_hue_color,
     get_hue_modified_alpha_from_hsv,
+    make_copy_name,
 )
+
+from modules.core import PipelineConfig
+
 from modules.database import store
 
 if sys.platform == "win32":
@@ -97,7 +106,9 @@ class _CursorManager:
 
 
 class _Draggable:
-    def __init__(self, entry_id: int, is_shape: bool, plotter_ref: LayoutPlotterWidget):
+    def __init__(
+        self, entry_id: int, is_shape: bool, plotter_ref: LayoutsPlotterWidget
+    ):
         self.entry_id = entry_id
         self.plotter = plotter_ref
         self.cursor_manager = plotter_ref.cursor_manager
@@ -232,7 +243,7 @@ class _Draggable:
 
 
 class _DraggableLabel(_Draggable):
-    def __init__(self, entry_id: int, plotter_ref: LayoutPlotterWidget):
+    def __init__(self, entry_id: int, plotter_ref: LayoutsPlotterWidget):
         super().__init__(entry_id, False, plotter_ref)
         self.label_artist = self.plotter.labels_artists[entry_id]
         self.shape_artist = self.plotter.shapes_artists[entry_id]
@@ -382,7 +393,7 @@ class _DraggableLabel(_Draggable):
 
 
 class _DraggableShape(_Draggable):
-    def __init__(self, entry_id: int, plotter_ref: LayoutPlotterWidget):
+    def __init__(self, entry_id: int, plotter_ref: LayoutsPlotterWidget):
         super().__init__(entry_id, True, plotter_ref)
         self.label_artist = self.plotter.labels_artists[entry_id]
         self.shape_artist: Circle | Rectangle | None = None
@@ -533,7 +544,7 @@ class _DraggableShape(_Draggable):
 
 
 class _DraggableCircle(_DraggableShape):
-    def __init__(self, entry_id: int, plotter_ref: LayoutPlotterWidget):
+    def __init__(self, entry_id: int, plotter_ref: LayoutsPlotterWidget):
         super().__init__(entry_id, plotter_ref)
         if not isinstance(self.shape_artist, Circle):
             return
@@ -766,7 +777,7 @@ class _DraggableCircle(_DraggableShape):
 
 
 class _DraggableRectangle(_DraggableShape):
-    def __init__(self, entry_id: int, plotter_ref: LayoutPlotterWidget):
+    def __init__(self, entry_id: int, plotter_ref: LayoutsPlotterWidget):
         super().__init__(entry_id, plotter_ref)
         if not isinstance(self.shape_artist, Rectangle):
             return
@@ -978,7 +989,7 @@ class _DraggableRectangle(_DraggableShape):
         self.plotter.drawn = False
 
 
-class LayoutPlotterWidget(QWidget):
+class LayoutsPlotterWidget(QWidget):
     layout_saved = Signal(str, int)
     zone_selected = Signal(int)
 
@@ -1005,16 +1016,25 @@ class LayoutPlotterWidget(QWidget):
         self.mode = None
         self.state = IDLE
         self.input_buffer = ""
+        self.bg_cache = None
+
+        self.active_layout = None
         self.shapes_artists: dict[int, Circle | Rectangle] = {}
         self.labels_artists: dict[int, Text] = {}
         self.label_drag_managers: dict[int, _DraggableLabel] = {}
         self.shape_drag_managers: dict[int, _DraggableShape] = {}
-        self.bezel_artist: Rectangle | None = None
-        self.bezel_text_artist: Text | None = None
-        self.active_bezel_height = 14.0
+
+        self.top_bezel_id = None
+        self.top_bezel_label_artist = Text()
+        self.top_bezel_shape_artist = Rectangle((0, 0), 0, 0)
+        self.top_bezel_dp_thickness = float(BEZEL_DP_THICKNESS)
+
+        self.bottom_bezel_id = None
+        self.bottom_bezel_label_artist = Text()
+        self.bottom_bezel_shape_artist = Rectangle((0, 0), 0, 0)
+        self.bottom_bezel_dp_thickness = float(BEZEL_DP_THICKNESS)
 
         self.init_params_helper()
-        self.bg_cache = None
 
         self.canvas.mpl_connect("motion_notify_event", self.on_mouse_move)
         self.canvas.mpl_connect("key_press_event", self.on_key_press)
@@ -1026,6 +1046,85 @@ class LayoutPlotterWidget(QWidget):
 
         self._setup_shortcuts()
         self.reload_active_layout()
+
+    def init_params_helper(self):
+        self.input_buffer = ""
+        self.buffer_default = True
+        self.shapes = {}
+        self.count = 0
+        self.artists_points = 0
+        self.saved_mouse_wheel = False
+        self.saved_sprint_distance = False
+        self.sprint_artist_id: int | None = None
+        self.mouse_wheel_radius = 0.0
+        self.mouse_wheel_cx = 0.0
+        self.mouse_wheel_cy = 0.0
+        self.sprint_distance = 0.0
+        self.show_overlays = True
+        self.img_width: int = 0
+        self.img_height: int = 0
+        self.img_dpi: float = 0
+
+        for uid in list(self.shapes_artists.keys()):
+            self.shapes_artists[uid].remove()
+        self.shapes_artists = {}
+        for uid in list(self.labels_artists.keys()):
+            self.labels_artists[uid].remove()
+        self.labels_artists = {}
+        for uid in list(self.label_drag_managers.keys()):
+            self.label_drag_managers[uid]._disconnect_cids()
+        self.label_drag_managers = {}
+        for uid in list(self.shape_drag_managers.keys()):
+            self.shape_drag_managers[uid]._disconnect_cids()
+        self.shape_drag_managers = {}
+
+        self.last_artist_id: str | None = None
+        self.ignore_current_draggable_id_n = 0
+        self.current_draggable_id = None
+        self.current_draggable: _DraggableLabel | _DraggableShape | None = None
+        self.draggables_ids = []
+        self.drawn = False
+        self.current_move_distance = 0.0
+        self.iter_count = 0
+        self.fire_on_motion = False
+
+    def init_crosshairs(self):
+        self.crosshair_h_bg = self.ax.axhline(
+            0,
+            color="black",
+            linewidth=1.5,
+            alpha=0.8,
+            visible=False,
+            zorder=10,
+            animated=True,
+        )
+        self.crosshair_v_bg = self.ax.axvline(
+            0,
+            color="black",
+            linewidth=1.5,
+            alpha=0.8,
+            visible=False,
+            zorder=10,
+            animated=True,
+        )
+        self.crosshair_h_fg = self.ax.axhline(
+            0,
+            color="white",
+            linewidth=0.6,
+            alpha=1.0,
+            visible=False,
+            zorder=11,
+            animated=True,
+        )
+        self.crosshair_v_fg = self.ax.axvline(
+            0,
+            color="white",
+            linewidth=0.6,
+            alpha=1.0,
+            visible=False,
+            zorder=11,
+            animated=True,
+        )
 
     def _setup_shortcuts(self) -> None:
         context = (
@@ -1101,52 +1200,100 @@ class LayoutPlotterWidget(QWidget):
         self.bg_cache = None
 
         self.load_active_layout_zones()
-        self._render_bezel_notch()
+        self._render_bezels_notch()
         self.canvas.draw_idle()
         return True
 
-    def _render_bezel_notch(self) -> None:
-        if self.bezel_artist is not None:
-            try:
-                self.bezel_artist.remove()
-            except Exception:
-                pass
-        if self.bezel_text_artist is not None:
-            try:
-                self.bezel_text_artist.remove()
-            except Exception:
-                pass
-
-        if self.img_width <= 0:
+    def _render_bezels_notch(self):
+        if self.img_width <= 0 or self.img_height <= 0:
             return
 
-        self.bezel_artist = Rectangle(
-            (0, 0),
-            self.img_width,
-            self.active_bezel_height,
-            fill=True,
-            facecolor=(1.0, 0.2, 0.2, 0.25),
-            edgecolor=(1.0, 0.4, 0.4, 0.7),
-            linewidth=1.0,
-            linestyle="--",
-            zorder=8,
-        )
-        self.bezel_artist.set_visible(self.show_overlays)
-        self.ax.add_patch(self.bezel_artist)
+        top_bezel_kwargs = self._render_bezel_notch(self.top_bezel_id, True)
+        bottom_bezel_kwargs = self._render_bezel_notch(self.bottom_bezel_id, False)
 
-        self.bezel_text_artist = Text(
-            self.img_width / 2.0,
-            self.active_bezel_height / 2.0,
-            f"Bezel Notch ({self.active_bezel_height:.0f}px)",
-            color="white",
-            fontsize=7,
-            ha="center",
-            va="center",
-            zorder=9,
-            alpha=0.8,
-        )
-        self.bezel_text_artist.set_visible(self.show_overlays)
-        self.ax.add_artist(self.bezel_text_artist)
+        # Top Bezel Kwargs
+        if top_bezel_kwargs is not None:
+            top_bezel_label_kwargs, top_bezel_shape_kwargs = top_bezel_kwargs
+
+            self.top_bezel_label_artist.set(**top_bezel_label_kwargs)
+            self.top_bezel_shape_artist.set(**top_bezel_shape_kwargs)
+        else:
+            self.top_bezel_label_artist.remove()
+            self.top_bezel_shape_artist.remove()
+
+        # Bottom Bezel Kwargs
+        if bottom_bezel_kwargs is not None:
+            bottom_bezel_label_kwargs, bottom_bezel_shape_kwargs = bottom_bezel_kwargs
+
+            self.bottom_bezel_label_artist.set(**bottom_bezel_label_kwargs)
+            self.bottom_bezel_shape_artist.set(**bottom_bezel_shape_kwargs)
+        else:
+            self.bottom_bezel_label_artist.remove()
+            self.bottom_bezel_shape_artist.remove()
+
+        # Top Bezel Rendering
+        self.top_bezel_label_artist.set_visible(self.show_overlays)
+        if self.top_bezel_label_artist.axes is None:
+            self.ax.add_artist(self.top_bezel_label_artist)
+
+        self.top_bezel_shape_artist.set_visible(self.show_overlays)
+        if self.top_bezel_shape_artist.axes is None:
+            self.ax.add_patch(self.top_bezel_shape_artist)
+
+        # Bottom Bezel Rendering
+        self.bottom_bezel_label_artist.set_visible(self.show_overlays)
+        if self.bottom_bezel_label_artist.axes is None:
+            self.ax.add_artist(self.bottom_bezel_label_artist)
+
+        self.bottom_bezel_shape_artist.set_visible(self.show_overlays)
+        if self.bottom_bezel_shape_artist.axes is None:
+            self.ax.add_patch(self.bottom_bezel_shape_artist)
+
+    def _render_bezel_notch(self, bezel_id: int | None, is_top: bool):
+        if self.active_layout is not None:
+            bezel_dp_thickness = float(BEZEL_DP_THICKNESS)
+            bezel_px_thickness = float(
+                dp_to_px(bezel_dp_thickness, self.active_layout.dpi)
+            )
+            store_bezel_zone = store.zones.get(bezel_id)
+
+            if store_bezel_zone:
+                bezel_dp_thickness, bezel_px_thickness = get_bezel_thicknesses(
+                    store_bezel_zone, self.active_layout
+                )
+
+            if is_top:
+                y = self.img_height - bezel_px_thickness
+            else:
+                y = 0.0
+
+            bezel_label_kwargs = {
+                "x": self.img_width / 2.0,
+                "y": bezel_px_thickness / 2.0,
+                "text": f"Bezel Notch ({bezel_px_thickness:.0f}px)",
+                "color": "white",
+                "fontsize": 7,
+                "ha": "center",
+                "va": "center",
+                "zorder": 9,
+                "alpha": 0.8,
+            }
+
+            bezel_shape_kwargs = {
+                "xy": (0.0, y),
+                "width": self.img_width,
+                "height": bezel_px_thickness,
+                "fill": True,
+                "facecolor": (1.0, 0.2, 0.2, 0.25),
+                "edgecolor": (1.0, 0.4, 0.4, 0.7),
+                "linewidth": 1.0,
+                "linestyle": "--",
+                "zorder": 8,
+            }
+
+            return bezel_label_kwargs, bezel_shape_kwargs
+
+        return None
 
     def _render_empty_state(self, message: str) -> None:
         self.ax.clear()
@@ -1191,86 +1338,6 @@ class LayoutPlotterWidget(QWidget):
         except Exception:
             pass
         self.img_dpi = int(round(img.info.get("dpi", BASELINE_DPI)[0]))
-
-    def init_crosshairs(self):
-        self.crosshair_h_bg = self.ax.axhline(
-            0,
-            color="black",
-            linewidth=1.5,
-            alpha=0.8,
-            visible=False,
-            zorder=10,
-            animated=True,
-        )
-        self.crosshair_v_bg = self.ax.axvline(
-            0,
-            color="black",
-            linewidth=1.5,
-            alpha=0.8,
-            visible=False,
-            zorder=10,
-            animated=True,
-        )
-        self.crosshair_h_fg = self.ax.axhline(
-            0,
-            color="white",
-            linewidth=0.6,
-            alpha=1.0,
-            visible=False,
-            zorder=11,
-            animated=True,
-        )
-        self.crosshair_v_fg = self.ax.axvline(
-            0,
-            color="white",
-            linewidth=0.6,
-            alpha=1.0,
-            visible=False,
-            zorder=11,
-            animated=True,
-        )
-
-    def init_params_helper(self):
-        self.input_buffer = ""
-        self.buffer_default = True
-        self.shapes = {}
-        self.count = 0
-        self.artists_points = 0
-        self.saved_mouse_wheel = False
-        self.saved_sprint_distance = False
-        self.sprint_artist_id: int | None = None
-        self.mouse_wheel_radius = 0.0
-        self.mouse_wheel_cx = 0.0
-        self.mouse_wheel_cy = 0.0
-        self.sprint_distance = 0.0
-        self.show_overlays = True
-        self.img_width: int = 0
-        self.img_height: int = 0
-        self.img_dpi: float = 0
-        self.active_bezel_height = 14.0
-
-        for uid in list(self.shapes_artists.keys()):
-            self.shapes_artists[uid].remove()
-        self.shapes_artists = {}
-        for uid in list(self.labels_artists.keys()):
-            self.labels_artists[uid].remove()
-        self.labels_artists = {}
-        for uid in list(self.label_drag_managers.keys()):
-            self.label_drag_managers[uid]._disconnect_cids()
-        self.label_drag_managers = {}
-        for uid in list(self.shape_drag_managers.keys()):
-            self.shape_drag_managers[uid]._disconnect_cids()
-        self.shape_drag_managers = {}
-
-        self.last_artist_id: str | None = None
-        self.ignore_current_draggable_id_n = 0
-        self.current_draggable_id = None
-        self.current_draggable: _DraggableLabel | _DraggableShape | None = None
-        self.draggables_ids = []
-        self.drawn = False
-        self.current_move_distance = 0.0
-        self.iter_count = 0
-        self.fire_on_motion = False
 
     def update_title(self, text: str, idle_override: bool = False):
         self.ax.set_title(text)
@@ -1320,16 +1387,17 @@ class LayoutPlotterWidget(QWidget):
         scale_x = self.img_width / (self.active_layout.width or self.img_width)
         scale_y = self.img_height / (self.active_layout.height or self.img_height)
 
+        # Handle Bezels existence in the layout
+        self.top_bezel_id, self.bottom_bezel_id = bezels_exist_ids(zones)
+        if self.top_bezel_id < 0:
+            self.top_bezel_id = ensure_top_bezel(self.active_layout, store.zones)
+        if self.bottom_bezel_id < 0:
+            self.bottom_bezel_id = ensure_bottom_bezel(
+                self.active_layout, store.zones
+            )
+
         for zone in zones:
-            cfg_raw = zone.pipeline_config or "{}"
-            try:
-                cfg = json.loads(cfg_raw)
-                reg = cfg.get("region", {})
-                if reg.get("type") == "BEZEL" or zone.zone_type == "BEZEL":
-                    self.active_bezel_height = float(reg.get("bezel_height", 14.0))
-                    continue
-            except Exception:
-                pass
+            zone.set_parsed_config_from_json()
 
             key_name = get_key_from_scancode(zone.scancode)
             if key_name is None:
@@ -1363,12 +1431,11 @@ class LayoutPlotterWidget(QWidget):
                 cy=cy,
                 r=r,
                 bb=bb,
-                key_name=key_name,
                 bridge_key=bridge_key or zone.name,
                 hex_code=zone.scancode,
                 pointer=zone.pointer,
                 priority=zone.priority,
-                pipeline_config=cfg_raw,
+                pipeline_json=zone.pipeline_json,
             )
 
         self.mouse_wheel_radius = self.active_layout.mouse_wheel_radius
@@ -1382,10 +1449,12 @@ class LayoutPlotterWidget(QWidget):
             artist.set_visible(self.show_overlays)
         for artist in self.labels_artists.values():
             artist.set_visible(self.show_overlays)
-        if self.bezel_artist:
-            self.bezel_artist.set_visible(self.show_overlays)
-        if self.bezel_text_artist:
-            self.bezel_text_artist.set_visible(self.show_overlays)
+            
+        self.top_bezel_label_artist.set_visible(self.show_overlays)
+        self.top_bezel_shape_artist.set_visible(self.show_overlays)
+        self.bottom_bezel_label_artist.set_visible(self.show_overlays)
+        self.bottom_bezel_shape_artist.set_visible(self.show_overlays)
+            
         self.update_title(f"OVERLAYS: {state_str} | {DEF_STR}")
 
     def label(self, center_x, center_y, label_text, fc):
@@ -1781,12 +1850,11 @@ class LayoutPlotterWidget(QWidget):
             cy=cy,
             r=r,
             bb=bb,
-            key_name=key_name,
             bridge_key=bridge_key,
             hex_code=hex_code,
             pointer=False,
             priority=0,
-            pipeline_config="{}",
+            pipeline_json="{}",
         )
         self.reset_state()
 
@@ -1796,18 +1864,17 @@ class LayoutPlotterWidget(QWidget):
         cy: int | None,
         r: int | None,
         bb: tuple | None,
-        key_name: str,
         bridge_key: str,
         hex_code: str,
         pointer: bool = False,
         priority: int = 0,
-        pipeline_config: str = "{}",
+        pipeline_json: str = "{}",
     ):
         if cx is None:
             return
 
         saved, entry_id = self.save_entry(
-            bridge_key, hex_code, cx, cy, r, bb, pointer, priority, pipeline_config
+            bridge_key, hex_code, cx, cy, r, bb, pointer, priority, pipeline_json
         )
         if not saved:
             return
@@ -1907,7 +1974,7 @@ class LayoutPlotterWidget(QWidget):
             elif not final_name:
                 final_name = datetime.datetime.now().strftime("map_%Y%m%d_%H%M%S")
 
-            self.save_to_database(final_name, delete_former=is_regular_save)
+            self.save_to_database(final_name, as_copy=is_save_as_copy)
             self.reset_state()
             return
 
@@ -1928,24 +1995,10 @@ class LayoutPlotterWidget(QWidget):
             f"SAVE: [{display_name}] | Enter: Save/Rename | Shift+Enter: Save as Copy | Esc: Cancel"
         )
 
-    def save_to_database(self, user_name: str, delete_former: bool = False):
+    def save_to_database(self, user_name: str, as_copy=False):
         output = []
         for _, data in self.shapes.items():
             # Non-destructive pipeline merge: Preserve existing 5-stage config
-            cfg_raw = data.get("pipeline_config", "{}") or "{}"
-            try:
-                cfg = json.loads(cfg_raw)
-            except Exception:
-                cfg = {}
-
-            cfg["priority"] = data.get("priority", 0)
-            if "semantics" not in cfg:
-                cfg["semantics"] = {}
-
-            if data["pointer"]:
-                cfg["semantics"]["mode"] = "BUTTON"
-            elif cfg["semantics"].get("mode") == "TRACK_FIRE":
-                cfg["semantics"]["mode"] = "BUTTON"
 
             entry = {
                 "name": data["bridge_key"],
@@ -1957,16 +2010,36 @@ class LayoutPlotterWidget(QWidget):
                 "val2": 0,
                 "val3": 0,
                 "val4": 0,
-                "pipeline_config": json.dumps(cfg),
+                "pipeline_json": "",
             }
+
+            Pipeline_Config = PipelineConfig()
+            Pipeline_Config.set_pipeline_config_from_json(
+                data.get("pipeline_json", "{}")
+            )
+
+            region_idx = 1
+
             if data["type"] == CIRCLE:
+                region_idx = 1
                 entry["val1"] = data["r"]
+
             elif data["type"] == RECTANGLE:
+                region_idx = 2
                 (x_min, y_min), (x_max, y_max) = data["bb"]
                 entry["val1"] = x_min
                 entry["val2"] = y_min
                 entry["val3"] = x_max
                 entry["val4"] = y_max
+
+            Pipeline_Config.set_region_config(region_idx)
+            Pipeline_Config.set_origin_config(1)
+            Pipeline_Config.set_constraint_config(0)
+            Pipeline_Config.set_transform_config(1)
+            Pipeline_Config.set_semantic_config(0)
+
+            entry["pipeline_json"] = Pipeline_Config.get_pipeline_json_from_config()
+
             output.append(entry)
 
         rel_img_path = (
@@ -1975,53 +2048,46 @@ class LayoutPlotterWidget(QWidget):
             else str(self.image_path)
         )
         existing_layout = store.layouts.get_by_name(user_name)
-        former_layout = self.active_layout
 
-        if former_layout is not None and former_layout.name == user_name:
-            layout_id = former_layout.id
-            store.layouts.update(
-                layout_id,
-                width=self.width,
-                height=self.height,
-                dpi=self.img_dpi,
-                mouse_wheel_radius=self.mouse_wheel_radius,
-                sprint_distance=self.sprint_distance,
-                image_path=rel_img_path,
-            )
-            store.zones.delete_all_for_layout(layout_id, False)
-        else:
-            if existing_layout:
-                layout_id = existing_layout.id
-                store.layouts.update(
-                    layout_id,
-                    width=self.width,
-                    height=self.height,
-                    dpi=self.img_dpi,
-                    mouse_wheel_radius=self.mouse_wheel_radius,
-                    sprint_distance=self.sprint_distance,
-                    image_path=rel_img_path,
-                )
-                store.zones.delete_all_for_layout(layout_id)
-            else:
+        if existing_layout:
+            
+            if as_copy:
+                user_name = make_copy_name(user_name)
                 new_layout = store.layouts.create(
                     name=user_name,
-                    width=self.width,
-                    height=self.height,
+                    width=self.img_width,
+                    height=self.img_height,
                     dpi=self.img_dpi,
                     mouse_wheel_radius=self.mouse_wheel_radius,
                     sprint_distance=self.sprint_distance,
                     image_path=rel_img_path,
                 )
                 layout_id = new_layout.id
-
-            if (
-                delete_former
-                and former_layout is not None
-                and former_layout.id != layout_id
-            ):
-                store.zones.delete_all_for_layout(former_layout.id)
-                store.layouts.delete(former_layout.id)
-
+                
+            else:
+                layout_id = existing_layout.id
+                store.layouts.update(
+                    layout_id,
+                    width=self.img_width,
+                    height=self.img_height,
+                    dpi=self.img_dpi,
+                    mouse_wheel_radius=self.mouse_wheel_radius,
+                    sprint_distance=self.sprint_distance,
+                    image_path=rel_img_path,
+                )
+                store.zones.delete_all_for_layout(layout_id)
+        else:
+            new_layout = store.layouts.create(
+                name=user_name,
+                width=self.img_width,
+                height=self.img_height,
+                dpi=self.img_dpi,
+                mouse_wheel_radius=self.mouse_wheel_radius,
+                sprint_distance=self.sprint_distance,
+                image_path=rel_img_path,
+            )
+            layout_id = new_layout.id
+            
         for item in output:
             if item["type"] == CIRCLE:
                 store.zones.create(
@@ -2032,9 +2098,10 @@ class LayoutPlotterWidget(QWidget):
                     cx=float(item["cx"]),
                     cy=float(item["cy"]),
                     r=float(item["val1"]),
-                    pipeline_config=item["pipeline_config"],
+                    ignore_app_settings=False,
+                    pipeline_json=item["pipeline_json"],
                 )
-            else:
+            elif item["type"] == RECTANGLE:
                 store.zones.create(
                     layout_id=layout_id,
                     scancode=str(item["scancode"]),
@@ -2044,7 +2111,8 @@ class LayoutPlotterWidget(QWidget):
                     y1=float(item["val2"]),
                     x2=float(item["val3"]),
                     y2=float(item["val4"]),
-                    pipeline_config=item["pipeline_config"],
+                    ignore_app_settings=False,
+                    pipeline_json=item["pipeline_json"],
                 )
 
         store.set_active_layout(layout_id)
@@ -2063,7 +2131,7 @@ class LayoutPlotterWidget(QWidget):
         bb,
         pointer,
         priority=0,
-        pipeline_config="{}",
+        pipeline_json="{}",
     ):
         uid = self.count
         inc_count = True
@@ -2145,7 +2213,7 @@ class LayoutPlotterWidget(QWidget):
             "bb": bb,
             "pointer": pointer,
             "priority": priority,
-            "pipeline_config": pipeline_config,
+            "pipeline_json": pipeline_json,
         }
 
         self.shapes[uid] = entry
@@ -2269,55 +2337,3 @@ def calculate_raw_rect(values: tuple[tuple[float, float], tuple[float, float]]):
         None,
         ((min(xs), min(ys)), (max(xs), max(ys))),
     )
-
-
-def ensure_bezels(
-    w: int,
-    h: int,
-    top_bezel_height: int,
-    bottom_bezel_height: int,
-    layout_id: int | None = None,
-):
-    # Top Bezel
-    top_bezel_bb = (0, h - top_bezel_height), (w, h)
-    top_cx, top_cy, _, top_bb = calculate_raw_rect(top_bezel_bb)
-
-    if top_bb is not None:
-        (top_x_min, top_y_min), (top_x_max, top_y_max) = top_bb
-
-        top_pipeline_config = {}
-
-        if layout_id is not None:
-            store.zones.create(
-                layout_id=layout_id,
-                scancode=str(TOP_BEZEL_ID),
-                name="TOP_BEZEL",
-                zone_type="RECTANGLE",
-                x1=top_x_min,
-                y1=top_y_min,
-                x2=top_x_max,
-                y2=top_y_max,
-                pipeline_config=top_pipeline_config,
-            )
-
-    # Bottom Bezel
-    bottom_bezel_bb = (0, 0), (w, bottom_bezel_height)
-    bottom_cx, bottom_cy, _, bottom_bb = calculate_raw_rect(bottom_bezel_bb)
-
-    if bottom_bb is not None:
-        (bottom_x_min, bottom_y_min), (bottom_x_max, bottom_y_max) = bottom_bb
-
-        bottom_pipeline_config = {}
-
-        if layout_id is not None:
-            store.zones.create(
-                layout_id=layout_id,
-                scancode=str(BOTTOM_BEZEL_ID),
-                name="BOTTOM_BEZEL",
-                zone_type=BEZEL,
-                x1=bottom_x_min,
-                y1=bottom_y_min,
-                x2=bottom_x_max,
-                y2=bottom_y_max,
-                pipeline_config=bottom_pipeline_config,
-            )

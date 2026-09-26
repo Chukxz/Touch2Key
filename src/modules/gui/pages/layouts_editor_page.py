@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 
 from modules.database import store
 from modules.database.config_io import export_bundle, export_layout_json, import_any
-from modules.gui.widgets.layout_plotter_widget import LayoutPlotterWidget
+from modules.gui.widgets.layouts_plotter_widget import LayoutsPlotterWidget
 from modules.scripts.adb_screen_capture import capture_android_screen
 from modules.utils import CIRCLE, JSONS_FOLDER, PROFILES_FOLDER, RECTANGLE, MapperEvent
 from .base_page import BasePage
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("modules.gui.layout_editor")
 
 
-class LayoutEditorPage(BasePage):
+class LayoutsEditorPage(BasePage):
     """HUD Layout Editor hosting the visual Plotter canvas and SQLite layout synchronization."""
 
     title = "Layout editor"
@@ -95,7 +95,7 @@ class LayoutEditorPage(BasePage):
         self.content_layout().addLayout(tools_row)
 
         # Interactive Canvas
-        self.plotter_widget = LayoutPlotterWidget(self, standalone=False)
+        self.plotter_widget = LayoutsPlotterWidget(self, standalone=False)
         self.content_layout().addWidget(self.plotter_widget, stretch=1)
 
         self._wire_signals()

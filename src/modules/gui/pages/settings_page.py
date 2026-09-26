@@ -51,22 +51,25 @@ class SettingsPage(BasePage):
         self.left_handed_check = QCheckBox("Left-handed mode")
         input_form.addRow(self.left_handed_check)
 
-        self.anchored_floating_check = QCheckBox("Anchored Floating Joystick")
-        self.anchored_floating_check.setToolTip(
-            "Locks touches near center to the anchor, floats dynamically elsewhere."
+        self.floating_check = QCheckBox("Floating Joystick")
+        self.floating_check.setToolTip("Floats dynamically, is overriden by anchored.")
+        input_form.addRow(self.floating_check)
+
+        self.anchored_check = QCheckBox("Anchored Floating Joystick")
+        self.anchored_check.setToolTip(
+            "Locks touches near center to the anchor, floats dynamically elsewhere. Overrides floating."
         )
-        input_form.addRow(self.anchored_floating_check)
+        input_form.addRow(self.anchored_check)
 
-        self.snap_radius_spin = QDoubleSpinBox()
-        self.snap_radius_spin.setRange(10.0, 500.0)
-        self.snap_radius_spin.setSingleStep(5.0)
-        self.snap_radius_spin.setSuffix(" px")
-        input_form.addRow("Joystick Snap Radius:", self.snap_radius_spin)
+        self.sensitivity_spin_x = QDoubleSpinBox()
+        self.sensitivity_spin_x.setRange(0.1, 10.0)
+        self.sensitivity_spin_x.setSingleStep(0.1)
+        input_form.addRow("Sensitivity X:", self.sensitivity_spin_x)
 
-        self.sensitivity_spin = QDoubleSpinBox()
-        self.sensitivity_spin.setRange(0.1, 10.0)
-        self.sensitivity_spin.setSingleStep(0.1)
-        input_form.addRow("Sensitivity:", self.sensitivity_spin)
+        self.sensitivity_spin_y = QDoubleSpinBox()
+        self.sensitivity_spin_y.setRange(0.1, 10.0)
+        self.sensitivity_spin_y.setSingleStep(0.1)
+        input_form.addRow("Sensitivity Y:", self.sensitivity_spin_y)
 
         self.deadzone_spin = QDoubleSpinBox()
         self.deadzone_spin.setRange(0.0, 1.0)
@@ -135,9 +138,10 @@ class SettingsPage(BasePage):
 
     def _wire_signals(self) -> None:
         self.left_handed_check.toggled.connect(self._on_left_handed_changed)
-        self.anchored_floating_check.toggled.connect(self._on_anchored_floating_changed)
-        self.snap_radius_spin.valueChanged.connect(self._on_snap_radius_changed)
-        self.sensitivity_spin.valueChanged.connect(self._on_sensitivity_changed)
+        self.floating_check.toggled.connect(self._on_floating_joystick_changed)
+        self.anchored_check.toggled.connect(self._on_anchored_joystick_changed)
+        self.sensitivity_spin_x.valueChanged.connect(self._on_sensitivity_x_changed)
+        self.sensitivity_spin_y.valueChanged.connect(self._on_sensitivity_y_changed)
         self.deadzone_spin.valueChanged.connect(self._on_deadzone_changed)
 
         self.rate_cap_spin.valueChanged.connect(self._on_rate_cap_changed)
@@ -165,9 +169,10 @@ class SettingsPage(BasePage):
             settings = store.settings.get()
 
             self.left_handed_check.blockSignals(True)
-            self.anchored_floating_check.blockSignals(True)
-            self.snap_radius_spin.blockSignals(True)
-            self.sensitivity_spin.blockSignals(True)
+            self.floating_check.blockSignals(True)
+            self.anchored_check.blockSignals(True)
+            self.sensitivity_spin_x.blockSignals(True)
+            self.sensitivity_spin_y.blockSignals(True)
             self.deadzone_spin.blockSignals(True)
             self.rate_cap_spin.blockSignals(True)
             self.pps_alert_spin.blockSignals(True)
@@ -175,12 +180,10 @@ class SettingsPage(BasePage):
             self.sprint_key_input.blockSignals(True)
 
             self.left_handed_check.setChecked(bool(settings.left_handed))
-            self.anchored_floating_check.setChecked(
-                bool(settings.anchored_floating_joystick)
-            )
-            self.snap_radius_spin.setValue(settings.joystick_snap_radius)
-            self.snap_radius_spin.setEnabled(bool(settings.anchored_floating_joystick))
-            self.sensitivity_spin.setValue(settings.sensitivity)
+            self.floating_check.setChecked(bool(settings.floating_joystick))
+            self.anchored_check.setChecked(bool(settings.anchored_joystick))
+            self.sensitivity_spin_x.setValue(settings.sensitivity_x)
+            self.sensitivity_spin_y.setValue(settings.sensitivity_y)
             self.deadzone_spin.setValue(settings.deadzone)
 
             self.rate_cap_spin.setValue(settings.adb_rate_cap)
@@ -190,9 +193,10 @@ class SettingsPage(BasePage):
             self.sprint_key_input.setText(settings.sprint_key or "")
 
             self.left_handed_check.blockSignals(False)
-            self.anchored_floating_check.blockSignals(False)
-            self.snap_radius_spin.blockSignals(False)
-            self.sensitivity_spin.blockSignals(False)
+            self.floating_check.blockSignals(False)
+            self.anchored_check.blockSignals(False)
+            self.sensitivity_spin_x.blockSignals(False)
+            self.sensitivity_spin_y.blockSignals(False)
             self.deadzone_spin.blockSignals(False)
             self.rate_cap_spin.blockSignals(False)
             self.pps_alert_spin.blockSignals(False)
@@ -208,27 +212,33 @@ class SettingsPage(BasePage):
         except Exception as exc:
             logger.exception("Failed to update left_handed setting")
 
-    def _on_anchored_floating_changed(self, checked: bool) -> None:
+    def _on_floating_joystick_changed(self, checked: bool) -> None:
         try:
-            self.snap_radius_spin.setEnabled(checked)
-            store.settings.update(anchored_floating_joystick=int(checked))
+            store.settings.update(anchored_joystick=int(checked))
             self._notify_reload()
         except Exception as exc:
-            logger.exception("Failed to update anchored_floating_joystick setting")
+            logger.exception("Failed to update floating_joystick setting")
 
-    def _on_snap_radius_changed(self, value: float) -> None:
+    def _on_anchored_joystick_changed(self, checked: bool) -> None:
         try:
-            store.settings.update(joystick_snap_radius=value)
+            store.settings.update(anchored_joystick=int(checked))
             self._notify_reload()
         except Exception as exc:
-            logger.exception("Failed to update joystick_snap_radius setting")
+            logger.exception("Failed to update anchored_joystick setting")
 
-    def _on_sensitivity_changed(self, value: float) -> None:
+    def _on_sensitivity_x_changed(self, value: float) -> None:
         try:
-            store.settings.update(sensitivity=value)
+            store.settings.update(sensitivity_x=value)
             self._notify_reload()
         except Exception as exc:
-            logger.exception("Failed to update sensitivity setting")
+            logger.exception("Failed to update X sensitivity setting")
+
+    def _on_sensitivity_y_changed(self, value: float) -> None:
+        try:
+            store.settings.update(sensitivity_y=value)
+            self._notify_reload()
+        except Exception as exc:
+            logger.exception("Failed to update Y sensitivity setting")
 
     def _on_deadzone_changed(self, value: float) -> None:
         try:
