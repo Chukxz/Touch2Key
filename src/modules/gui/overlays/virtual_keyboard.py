@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import sys
-import struct
-import psutil
-import argparse
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
@@ -15,15 +12,18 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QStyle,
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 
-from modules.utils import M_MIDDLE, MODIFIER_KEYS, LOCK_KEYS, TOGGLE_KEY_ID, get_scancode_from_key
+from modules.utils import (
+    M_MIDDLE,
+    MODIFIER_KEYS,
+    TOGGLE_KEY_ID,
+    VKB_STRUCT,
+    get_scancode_from_key,
+)
 
 if TYPE_CHECKING:
-    from . import VirtualKeyboard
-
-# IPC Struct: 1 byte for state (1=Down, 0=Up), 2 bytes for Scancode
-VKB_STRUCT = struct.Struct("<B H")
+    from multiprocessing.connection import Connection
 
 # --- Main Alphanumeric Block ---
 # Format: (Label, Scancode, Column Span)
@@ -165,11 +165,17 @@ NUMPAD_LAYOUT = [
 class VirtualKeyButton(QPushButton):
     """Custom button that emits scancodes and explicitly ignores OS focus."""
 
-    def __init__(self, key_label: str, scancode: int, mod_codes: list[int], lock_codes: list[int], parent_ref: VirtualKeyboard):
+    def __init__(
+        self,
+        key_label: str,
+        scancode: int,
+        mod_codes: list[int],
+        parent_ref: VirtualKeyboard,
+    ):
         super().__init__(key_label, parent_ref)
         self.scancode = scancode
         self.modifier_scancodes = mod_codes
-        self.lock_scancodes = mod_codes
+        self.parent_ref = parent_ref
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # CRITICAL: Do not accept focus, otherwise clicking a key minimizes the full-screen game
@@ -192,9 +198,9 @@ class VirtualKeyButton(QPushButton):
                 border: 1px solid #357abd;
             }
         """)
-        
-# Make modifiers "Sticky"
-        if scancode in ["shift", "ctrl", "alt"]:
+
+        # Make modifiers "Sticky"
+        if scancode in mod_codes:
             self.setCheckable(True)
             self.toggled.connect(self._on_modifier_toggled)
         else:
@@ -205,38 +211,30 @@ class VirtualKeyButton(QPushButton):
     def _on_modifier_toggled(self, checked: bool):
         # 'checked' is True if the button is currently pressed down
         if checked:
-            self._send_ipc_message("key_down", self.scancode)
+            self._send_ipc_message(0, self.scancode)
         else:
-            self._send_ipc_message("key_up", self.scancode)
+            self._send_ipc_message(1, self.scancode)
 
     def _on_standard_pressed(self):
-        self._send_ipc_message("key_down", self.scancode)
+        self._send_ipc_message(0, self.scancode)
 
     def _on_standard_released(self):
-        self._send_ipc_message("key_up", self.scancode)
-        
-    def _send_ipc_message(self, action: str, code: str):
-        # Your existing IPC code to send data to the engine
-        pass
+        self._send_ipc_message(1, self.scancode)
+
+    def _send_ipc_message(self, state: int, scancode: int):
+        self.parent_ref._send_key(state, scancode)
 
 
 class VirtualKeyboard(QWidget):
-    def __init__(self, pipe_name: str | None = None, parent_pid: int | None = None):
+    def __init__(self, conn: Connection | None):
         super().__init__()
-        self.pipe_name = pipe_name
-        self.parent_pid = parent_pid
-        self.pipe = None
+        self.conn = conn
+        self._pressed_keys = set()
         self.modifier_scancodes = [
             code
             for key in MODIFIER_KEYS
             if (code := get_scancode_from_key(key)) is not None
         ]
-        self.lock_scancodes = [
-            code
-            for key in LOCK_KEYS
-            if (code := get_scancode_from_key(key)) is not None
-        ]
-
         self.setWindowTitle("Touch2Key - Virtual Keyboard")
         # Made wider to accommodate all 3 blocks cleanly
         self.resize(1100, 300)
@@ -254,13 +252,8 @@ class VirtualKeyboard(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, True)
 
         self._setup_ui()
-        self._connect_pipe()
 
         # Proactive Fail-Safe: Check if Main Engine is still alive
-        if self.parent_pid:
-            self.health_timer = QTimer(self)
-            self.health_timer.timeout.connect(self._check_parent_alive)
-            self.health_timer.start(1000)
 
     def _setup_ui(self):
         """Constructs the 3 distinct blocks (Main, Nav, Numpad) side-by-side."""
@@ -298,77 +291,70 @@ class VirtualKeyboard(QWidget):
         master_layout.addLayout(numpad_grid, 4)
 
     def _create_btn(self, label: str, scancode: int) -> VirtualKeyButton:
-        btn = VirtualKeyButton(label, scancode, self.modifier_scancodes, self.lock_scancodes, self)
+        btn = VirtualKeyButton(label, scancode, self.modifier_scancodes, self)
         return btn
-
-    def _connect_pipe(self):
-        """Attempts to open the named IPC pipe to the main engine."""
-        if not self.pipe_name:
-            return
-
-        try:
-            self.pipe = open(self.pipe_name, "wb")
-        except Exception as e:
-            # Silent fail in production to avoid console spam
-            pass
 
     def _send_key(self, state: int, scancode: int):
         """Packs the keystroke and sends it through the IPC pipe."""
-        if not self.pipe:
+        if state == 0:  # DOWN
+            self._pressed_keys.add(scancode)
+        elif state == 1:  # UP
+            self._pressed_keys.discard(scancode)
+
+        if self.conn is None:
             # Standalone Testing Mode ONLY: Print to console
-            action = "DOWN" if state == 1 else "UP  "
+            action = "DOWN" if state == 0 else "UP  "
             print(f"[VirtualKeyboard] {action} | Scancode: {hex(scancode)}")
             return
 
         # Production Mode: SILENT IPC Write
         try:
-            packet = VKB_STRUCT.pack(state, scancode)
-            self.pipe.write(packet)
-            self.pipe.flush()
-        except (BrokenPipeError, EOFError, OSError):
+            self.conn.send_bytes(VKB_STRUCT.pack(state, int(scancode)))
+        except OSError:
             self.close()
 
-    def _check_parent_alive(self):
-        """Forces the keyboard to close if the parent process dies unexpectedly."""
-        if self.parent_pid is not None and not psutil.pid_exists(self.parent_pid):
-            self.close()
+    def release_all(self):
+        if self.conn is not None and self._pressed_keys:
+            for code in list(self._pressed_keys):
+                try:
+                    self.conn.send_bytes(VKB_STRUCT.pack(1, int(code)))
+                except OSError:
+                    pass
+            self._pressed_keys.clear()
 
     def closeEvent(self, event):
         """Ensures the terminal loop dies completely when the window 'X' is clicked."""
-        # Stop the background timer so it doesn't keep the process alive
-        if hasattr(self, "health_timer") and self.health_timer.isActive():
-            self.health_timer.stop()
+        # Release all pressed keys and close the IPC pipe cleanly
 
-        # Close the IPC pipe cleanly
-        if self.pipe:
+        self.release_all()
+
+        if self.conn:
             try:
-                self.pipe.close()
+                self.conn.close()
             except Exception:
                 pass
 
         event.accept()
 
+    def _heartbeat_loop(self): ...
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--pipe", type=str, help="Named pipe file descriptor", default=None
-    )
-    parser.add_argument("--pid", type=int, help="Parent Process ID", default=None)
-    args = parser.parse_args()
 
+def run(conn: Connection | None = None):
     app = QApplication(sys.argv)
     app.setWindowIcon(
         QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
     )
 
-    window = VirtualKeyboard(pipe_name=args.pipe, parent_pid=args.pid)
+    window = VirtualKeyboard(conn)
     window.show()
 
     # sys.exit ensures the terminal prompt returns instantly when app closes
     sys.exit(app.exec())
 
 
+if __name__ == "__main__":
+    run()
 
-        # btn.pressed.connect(lambda s=scancode: self._send_key(1, s))
-        # btn.released.connect(lambda s=scancode: self._send_key(0, s))
+
+def virtual_keyboard_worker(conn: Connection):
+    run(conn)
