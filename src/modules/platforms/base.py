@@ -111,6 +111,10 @@ class AbstractBridge(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def wheel(self, dx: float, dy: float) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     def update_typematic(
         self,
         enabled: bool,

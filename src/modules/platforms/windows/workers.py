@@ -16,12 +16,21 @@ from modules.utils import (
     KEY_PING,
     LEFT_BUTTON_DOWN,
     LEFT_BUTTON_UP,
+    MIDDLE_BUTTON_DOWN,
+    MIDDLE_BUTTON_UP,
+    RIGHT_BUTTON_DOWN,
+    RIGHT_BUTTON_UP,
+    BUTTON_4_DOWN,
+    BUTTON_4_UP,
+    BUTTON_5_DOWN,
+    BUTTON_5_UP,
+    MOUSE_WHEEL,
+    MOUSE_HWHEEL,
+    WHEEL_DELTA,
     MAX_BUTTON_DWELL,
     MAX_COALESCE,
     MAX_KEY_DWELL,
     MAX_MOUSE_DWELL,
-    MIDDLE_BUTTON_DOWN,
-    MIDDLE_BUTTON_UP,
     MIN_BUTTON_DWELL,
     MIN_KEY_DWELL,
     MIN_MOUSE_DWELL,
@@ -33,11 +42,11 @@ from modules.utils import (
     PACK_BUTTON_STRUCT,
     PACK_KEY_STRUCT,
     PACK_REL_STRUCT,
+    PACK_WHEEL_STRUCT,
     PACK_TYPEMATIC_STRUCT,
-    RIGHT_BUTTON_DOWN,
-    RIGHT_BUTTON_UP,
     TASK_ABS,
     TASK_REL,
+    TASK_WHEEL,
 )
 
 if TYPE_CHECKING:
@@ -61,24 +70,42 @@ def _release_all_keys(k_ctx, k_handle, K_Stroke, keys_set, reason=""):
 
 
 def _release_all_buttons(
-    m_ctx, m_handle, M_Stroke, left_down, right_down, middle_down, reason=""
+    m_ctx,
+    m_handle,
+    M_Stroke,
+    left_down,
+    right_down,
+    middle_down,
+    btn4_down,
+    btn5_down,
+    reason="",
 ):
     print(f"\n[WORKER] - {reason}.")
-    buttons_set_sum = sum([left_down, right_down, middle_down])
+    buttons_set_sum = sum([left_down, right_down, middle_down, btn4_down, btn5_down])
     if buttons_set_sum > 0:
         print(f"\n[WORKER] - Releasing {buttons_set_sum} buttons.")
         if left_down:
             m_ctx.send(m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, LEFT_BUTTON_UP, 0, 0, 0))
         if right_down:
-            m_ctx.send(m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, RIGHT_BUTTON_UP, 0, 0, 0))
+            m_ctx.send(
+                m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, RIGHT_BUTTON_UP, 0, 0, 0)
+            )
         if middle_down:
-            m_ctx.send(m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, MIDDLE_BUTTON_UP, 0, 0, 0))
+            m_ctx.send(
+                m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, MIDDLE_BUTTON_UP, 0, 0, 0)
+            )
+        if btn4_down:
+            m_ctx.send(m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, BUTTON_4_UP, 0, 0, 0))
+        if btn5_down:
+            m_ctx.send(m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, BUTTON_5_UP, 0, 0, 0))
 
 
 def keyboard_worker(k_pipe_read: Connection, k_device_handle: int | None):
-    """Dedicated process for Windows Interception driver keyboard events."""
+    """Dedicated process for Windows Interception driver keyboard events with typematic engine."""
     if k_device_handle is None:
-        print("\n[WORKER] - Keyboard worker has an invalid Interception keyboard handle.")
+        print(
+            "\n[WORKER] - Keyboard worker has an invalid Interception keyboard handle."
+        )
         return
 
     from interception.interception import Interception
@@ -176,7 +203,9 @@ def keyboard_worker(k_pipe_read: Connection, k_device_handle: int | None):
                     continue
 
                 if payload and payload[0] == KEY_CONFIG:
-                    _, enabled, delay_ns, rate_sec, count = PACK_TYPEMATIC_STRUCT.unpack_from(payload, 0)
+                    _, enabled, delay_ns, rate_sec, count = (
+                        PACK_TYPEMATIC_STRUCT.unpack_from(payload, 0)
+                    )
                     offset = PACK_TYPEMATIC_STRUCT.size
                     excludes = set()
                     for _ in range(count):
@@ -208,7 +237,7 @@ def keyboard_worker(k_pipe_read: Connection, k_device_handle: int | None):
 def mouse_worker(
     m_pipe_read: Connection, mb_pipe_read: Connection, m_device_handle: int | None
 ):
-    """Movement (REL/ABS) and Button worker for Windows Interception driver."""
+    """Dedicated process for Windows Interception driver mouse events."""
     if m_device_handle is None:
         print("\n[WORKER] - Mouse worker has an invalid Interception mouse handle.")
         return
@@ -225,7 +254,7 @@ def mouse_worker(
     state = {"running": True}
 
     def button_loop():
-        left_down = right_down = middle_down = False
+        left_down = right_down = middle_down = btn4_down = btn5_down = False
         while state["running"]:
             try:
                 if mb_pipe_read.poll(15.0):
@@ -247,6 +276,14 @@ def mouse_worker(
                         middle_down = True
                     elif data == MIDDLE_BUTTON_UP:
                         middle_down = False
+                    elif data == BUTTON_4_DOWN:
+                        btn4_down = True
+                    elif data == BUTTON_4_UP:
+                        btn4_down = False
+                    elif data == BUTTON_5_DOWN:
+                        btn5_down = True
+                    elif data == BUTTON_5_UP:
+                        btn5_down = False
 
                     with send_lock:
                         m_ctx.send(
@@ -268,9 +305,11 @@ def mouse_worker(
                             left_down,
                             right_down,
                             middle_down,
+                            btn4_down,
+                            btn5_down,
                             "Mouse Button Timeout",
                         )
-                    left_down = right_down = middle_down = False
+                    left_down = right_down = middle_down = btn4_down = btn5_down = False
 
             except EOFError:
                 state["running"] = False
@@ -283,7 +322,8 @@ def mouse_worker(
     )
     button_thread.start()
 
-    acc_dx, acc_dy = 0, 0
+    acc_dx, acc_dy = 0.0, 0.0
+    acc_dw_x, acc_dw_y = 0.0, 0.0
     pending_task = None
 
     while state["running"]:
@@ -324,7 +364,7 @@ def mouse_worker(
                             m_device_handle,
                             MouseStroke(MOUSE_MOVE_RELATIVE, 0, 0, acc_dx, acc_dy),
                         )
-                    acc_dx, acc_dy = 0, 0
+                    acc_dx, acc_dy = 0.0, 0.0
 
                 _sleep(_uniform(MIN_MOUSE_DWELL, MAX_MOUSE_DWELL))
 
@@ -341,6 +381,56 @@ def mouse_worker(
                             y,
                         ),
                     )
+                _sleep(CONSTANT_DWELL)
+
+            elif task_id == TASK_WHEEL:
+                _, dw_x, dw_y = PACK_WHEEL_STRUCT.unpack(payload)
+                acc_dw_x += dw_x
+                acc_dw_y += dw_y
+
+                coalesce_count = 0
+                while m_pipe_read.poll() and coalesce_count < MAX_COALESCE:
+                    next_payload = m_pipe_read.recv_bytes()
+                    next_task_id = next_payload[0]
+
+                    if next_task_id == TASK_WHEEL:
+                        _, next_wx, next_wy = PACK_WHEEL_STRUCT.unpack(next_payload)
+                        acc_dw_x += next_wx
+                        acc_dw_y += next_wy
+                        coalesce_count += 1
+                    else:
+                        pending_task = next_payload
+                        break
+                
+                with send_lock:
+                    # Vertical wheel
+                    if acc_dw_y != 0:
+                        m_ctx.send(
+                            m_device_handle,
+                            MouseStroke(
+                                MOUSE_MOVE_RELATIVE,
+                                MOUSE_WHEEL,
+                                acc_dw_y * WHEEL_DELTA,
+                                0,
+                                0,
+                            ),
+                        )
+                    
+                    # Horizontal wheel (tilt wheel)
+                    if acc_dw_x != 0:
+                        m_ctx.send(
+                            m_device_handle,
+                            MouseStroke(
+                                MOUSE_MOVE_RELATIVE,
+                                MOUSE_HWHEEL,
+                                acc_dw_x * WHEEL_DELTA,
+                                0,
+                                0,
+                            ),
+                        )
+                    
+                    acc_dw_x, acc_dw_y = 0.0, 0.0
+                        
                 _sleep(CONSTANT_DWELL)
 
         except EOFError:

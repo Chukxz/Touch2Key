@@ -15,12 +15,18 @@ from modules.utils import (
     KEY_PING,
     LEFT_BUTTON_DOWN,
     LEFT_BUTTON_UP,
+    MIDDLE_BUTTON_DOWN,
+    MIDDLE_BUTTON_UP,
+    RIGHT_BUTTON_DOWN,
+    RIGHT_BUTTON_UP,
+    BUTTON_4_DOWN,
+    BUTTON_4_UP,
+    BUTTON_5_DOWN,
+    BUTTON_5_UP,
     MAX_BUTTON_DWELL,
     MAX_COALESCE,
     MAX_KEY_DWELL,
     MAX_MOUSE_DWELL,
-    MIDDLE_BUTTON_DOWN,
-    MIDDLE_BUTTON_UP,
     MIN_BUTTON_DWELL,
     MIN_KEY_DWELL,
     MIN_MOUSE_DWELL,
@@ -28,12 +34,13 @@ from modules.utils import (
     PACK_BUTTON_STRUCT,
     PACK_KEY_STRUCT,
     PACK_REL_STRUCT,
+    PACK_WHEEL_STRUCT,
     PACK_TYPEMATIC_STRUCT,
-    RIGHT_BUTTON_DOWN,
-    RIGHT_BUTTON_UP,
     TASK_ABS,
     TASK_REL,
+    TASK_WHEEL,
 )
+
 from .ecodes_map import BTN_MAP, KEYBOARD_CAP, LINUX_KEY_MAP, MOUSE_CAP
 
 if TYPE_CHECKING:
@@ -51,10 +58,17 @@ def _release_all_keys(ui_device, ecodes, keys_set, reason=""):
 
 
 def _release_all_buttons(
-    ui_device, ecodes, left_down, right_down, middle_down, reason=""
+    ui_device,
+    ecodes,
+    left_down,
+    right_down,
+    middle_down,
+    btn4_down,
+    btn5_down,
+    reason="",
 ):
     print(f"\n[WORKER] - {reason}.")
-    buttons_set_sum = sum([left_down, right_down, middle_down])
+    buttons_set_sum = sum([left_down, right_down, middle_down, btn4_down, btn5_down])
     if buttons_set_sum > 0:
         print(f"\n[WORKER] - Releasing {buttons_set_sum} buttons.")
         if left_down:
@@ -63,11 +77,15 @@ def _release_all_buttons(
             ui_device.write(ecodes.EV_KEY, ecodes.BTN_RIGHT, 0)
         if middle_down:
             ui_device.write(ecodes.EV_KEY, ecodes.BTN_MIDDLE, 0)
+        if btn4_down:
+            ui_device.write(ecodes.EV_KEY, ecodes.BTN_SIDE, 0)
+        if btn5_down:
+            ui_device.write(ecodes.EV_KEY, ecodes.BTN_EXTRA, 0)
         ui_device.syn()
 
 
 def keyboard_worker(k_pipe_read: Connection):
-    """Dedicated process for Linux evdev virtual keyboard with typematic engine."""
+    """Dedicated process for Linux evdev keyboard events with typematic engine."""
     from evdev import UInput, ecodes
 
     ui_device = UInput(KEYBOARD_CAP, name="Touch2Key-Keyboard")
@@ -197,7 +215,7 @@ def keyboard_worker(k_pipe_read: Connection):
 
 
 def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection):
-    """Dedicated UInput worker for mouse movement and button emulation."""
+    """Dedicated process for Linux evdev mouse events."""
     from evdev import UInput, ecodes
 
     ui_device = UInput(MOUSE_CAP, name="Touch2Key-Mouse")
@@ -205,7 +223,7 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection):
     state = {"running": True}
 
     def button_loop():
-        left_down = right_down = middle_down = False
+        left_down = right_down = middle_down = btn4_down = btn5_down = False
         while state["running"]:
             try:
                 if mb_pipe_read.poll(15.0):
@@ -227,6 +245,14 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection):
                         middle_down = True
                     elif data == MIDDLE_BUTTON_UP:
                         middle_down = False
+                    elif data == BUTTON_4_DOWN:
+                        btn4_down = True
+                    elif data == BUTTON_4_UP:
+                        btn4_down = False
+                    elif data == BUTTON_5_DOWN:
+                        btn5_down = True
+                    elif data == BUTTON_5_UP:
+                        btn5_down = False
 
                     btn_code, btn_val = BTN_MAP[data]
                     with send_lock:
@@ -246,9 +272,11 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection):
                             left_down,
                             right_down,
                             middle_down,
+                            btn4_down,
+                            btn5_down,
                             "Mouse Button Timeout",
                         )
-                    left_down = right_down = middle_down = False
+                    left_down = right_down = middle_down = btn4_down = btn5_down = False
 
             except EOFError:
                 state["running"] = False
@@ -261,7 +289,8 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection):
     )
     button_thread.start()
 
-    acc_dx, acc_dy = 0, 0
+    acc_dx, acc_dy = 0.0, 0.0
+    acc_dw_x, acc_dw_y = 0.0, 0.0
     pending_task = None
 
     while state["running"]:
@@ -301,7 +330,7 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection):
                         ui_device.write(ecodes.EV_REL, ecodes.REL_X, acc_dx)
                         ui_device.write(ecodes.EV_REL, ecodes.REL_Y, acc_dy)
                         ui_device.syn()
-                    acc_dx, acc_dy = 0, 0
+                    acc_dx, acc_dy = 0.0, 0.0
 
                 _sleep(_uniform(MIN_MOUSE_DWELL, MAX_MOUSE_DWELL))
 
@@ -311,6 +340,35 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection):
                     ui_device.write(ecodes.EV_ABS, ecodes.ABS_X, x)
                     ui_device.write(ecodes.EV_ABS, ecodes.ABS_Y, y)
                     ui_device.syn()
+                _sleep(CONSTANT_DWELL)
+
+            elif task_id == TASK_WHEEL:
+                _, dw_x, dw_y = PACK_WHEEL_STRUCT.unpack(payload)
+                acc_dw_x += dw_x
+                acc_dw_y += dw_y
+
+                coalesce_count = 0
+                while m_pipe_read.poll() and coalesce_count < MAX_COALESCE:
+                    next_payload = m_pipe_read.recv_bytes()
+                    next_task_id = next_payload[0]
+
+                    if next_task_id == TASK_WHEEL:
+                        _, next_wx, next_wy = PACK_WHEEL_STRUCT.unpack(next_payload)
+                        acc_dw_x += next_wx
+                        acc_dw_y += next_wy
+                        coalesce_count += 1
+                    else:
+                        pending_task = next_payload
+                        break
+
+                with send_lock:
+                    if acc_dw_y != 0:
+                        ui_device.write(ecodes.EV_REL, ecodes.REL_WHEEL, acc_dw_y)
+                    if acc_dw_x != 0:
+                        ui_device.write(ecodes.EV_REL, ecodes.REL_HWHEEL, acc_dw_x)
+                    ui_device.syn()
+                acc_dw_x, acc_dw_y = 0.0, 0.0
+
                 _sleep(CONSTANT_DWELL)
 
         except EOFError:

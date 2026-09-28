@@ -17,7 +17,7 @@ from modules.utils import (
     RECTANGLE,
     BASELINE_DPI,
     IMAGES_FOLDER,
-    MOUSE_WHEEL_CODE,
+    MOUSE_WHEEL_SIMULATOR_CODE,
     SPRINT_DISTANCE_CODE,
     IDLE,
     dp_to_px,
@@ -608,7 +608,7 @@ class _DraggableCircle(_DraggableShape):
 
         if (
             self.plotter.saved_mouse_wheel
-            and current_shape["bridge_key"] == MOUSE_WHEEL_CODE
+            and current_shape["bridge_key"] == MOUSE_WHEEL_SIMULATOR_CODE
         ):
             self.plotter.mouse_wheel_cx = new_cx
             self.plotter.mouse_wheel_cy = new_cy
@@ -701,7 +701,7 @@ class _DraggableCircle(_DraggableShape):
 
         if (
             self.plotter.saved_mouse_wheel
-            and current_shape["bridge_key"] == MOUSE_WHEEL_CODE
+            and current_shape["bridge_key"] == MOUSE_WHEEL_SIMULATOR_CODE
         ):
             new_r = min(
                 new_r,
@@ -1741,7 +1741,7 @@ class LayoutsPlotterWidget(QWidget):
         shape_data = self.shapes[uid]
         bridge_key = shape_data["bridge_key"]
 
-        if bridge_key == MOUSE_WHEEL_CODE:
+        if bridge_key == MOUSE_WHEEL_SIMULATOR_CODE:
             sprint_uids = [
                 k
                 for k, v in self.shapes.items()
@@ -1880,7 +1880,7 @@ class LayoutsPlotterWidget(QWidget):
             return
 
         label = bridge_key
-        if bridge_key == MOUSE_WHEEL_CODE:
+        if bridge_key == MOUSE_WHEEL_SIMULATOR_CODE:
             label = "MOUSE_WHEEL"
         elif bridge_key == SPRINT_DISTANCE_CODE:
             label = "SPRINT_DISTANCE"
@@ -1888,7 +1888,7 @@ class LayoutsPlotterWidget(QWidget):
             label = label.split("E0_")[-1]
 
         if self.mode == CIRCLE and cx and cy and r:
-            if bridge_key == MOUSE_WHEEL_CODE:
+            if bridge_key == MOUSE_WHEEL_SIMULATOR_CODE:
                 fc = DEFAULT_MOUSE_WHEEL_FACE_COLOR
             elif bridge_key == SPRINT_DISTANCE_CODE:
                 fc = DEFAULT_SPRINT_DISTANCE_FACE_COLOR
@@ -2137,11 +2137,11 @@ class LayoutsPlotterWidget(QWidget):
         inc_count = True
         saved = False
 
-        if bridge_key == MOUSE_WHEEL_CODE:
+        if bridge_key == MOUSE_WHEEL_SIMULATOR_CODE:
             if self.mode == CIRCLE:
                 if self.saved_mouse_wheel:
                     for k, v in list(self.shapes.items()):
-                        if v["bridge_key"] == MOUSE_WHEEL_CODE:
+                        if v["bridge_key"] == MOUSE_WHEEL_SIMULATOR_CODE:
                             uid = k
                             inc_count = False
                             self.shapes.pop(k)

@@ -17,7 +17,7 @@ from modules.utils import (
     CIRCLE,
     RECTANGLE,
     BEZEL,
-    MOUSE_WHEEL_CODE,
+    MOUSE_WHEEL_SIMULATOR_CODE,
 )
 
 from modules.core.pipeline import PipelineConfig
@@ -196,7 +196,7 @@ def migrate_json_layout(
             if zone_type == CIRCLE:
                 reg_idx = 1
 
-                if zone_name == MOUSE_WHEEL_CODE:
+                if zone_name == MOUSE_WHEEL_SIMULATOR_CODE:
                     Pipeline_Config.set_semantic_config(1)
 
                     reg_idx = 1

@@ -5,8 +5,10 @@ import time
 import ctypes
 from typing import TYPE_CHECKING
 
-from modules.utils import get_scancode_from_key
+from modules.utils import get_scancode_from_key, scale_coord
+from modules.database import store
 from modules.platforms import get_platform, check_single_instance, get_specific_qt_key
+
 
 from PySide6.QtWidgets import QApplication, QMainWindow, QGraphicsScene, QGraphicsView
 from PySide6.QtGui import (
@@ -27,9 +29,34 @@ _PLATFORM = get_platform()
 
 VISUALIZER_NAME = "Touch2Key_Visualizer"
 
+MOUSE_BUTTON_INFO: dict[Qt.MouseButton, tuple[str, str]] = {
+    Qt.MouseButton.LeftButton: ("Left", "cyan"),
+    Qt.MouseButton.RightButton: ("Right", "magenta"),
+    Qt.MouseButton.MiddleButton: ("Middle", "blue"),
+    Qt.MouseButton.BackButton: ("Back", "orange"),
+    Qt.MouseButton.ForwardButton: ("Forward", "yellow"),
+}
+
+
+def get_locations_dict() -> dict[int, tuple[int, int]]:
+    loc_dict: dict[int, tuple[int, int]] = {}
+    settings = store.settings.get()
+    w = float(settings.json_dev_width)
+    h = float(settings.json_dev_height)
+
+    zones = store.get_active_layout_zones()
+    for zone in zones:
+        scancode = int(zone.scancode)
+        scaled_x = int(scale_coord(w, zone.cx))
+        scaled_y = int(scale_coord(h, zone.cy))
+
+        loc_dict[scancode] = (scaled_x, scaled_y)
+
+    return loc_dict
+
 
 class DiagnosticView(QGraphicsView):
-    def __init__(self, parent):
+    def __init__(self, parent: MainWindow):
         super().__init__(parent)
         self.parent_window = parent
         self.setMouseTracking(True)
@@ -43,36 +70,65 @@ class DiagnosticView(QGraphicsView):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         instruction = self.scene.addText(
-            "DIAGNOSTIC MODE: Press ESC to exit and view Heatmap", QFont("Arial", 10)
+            "DIAGNOSTIC MODE: Press ESC to exit.", QFont("Arial", 10)
         )
         instruction.setDefaultTextColor(QColor("#444444"))
         instruction.setPos(50, 30)
 
-        self.active_key_text = self.scene.addText(
+        self.active_buttons = self.scene.addText(
             "", QFont("Courier", 16, QFont.Weight.Bold)
         )
-        self.active_key_text.setDefaultTextColor(QColor("lime"))
-        self.active_key_text.setZValue(100)
+        self.active_buttons.setDefaultTextColor(QColor("lime"))
+        self.active_buttons.setZValue(100)
+
+    def _set_active_buttons_pos(self, x, y):
+        if self.scene is not None:
+            self.scene.addRect(x, y, 1, 1, QPen(QColor("#1a1a1a")))
+            self.active_buttons.setPos(x + 20, y - 20)
+
+    def _set_labelled_ripple(self, x, y, name, scancode: int, color):
+        self._set_active_buttons_pos(x, y)
+
+        pos_x = x
+        pos_y = y
+
+        if self.scene is not None:
+            loc_value = self.parent_window.loc_dict.get(scancode)
+            if loc_value is not None:
+                pos_x, pos_y = loc_value
+
+            ripple = self.scene.addEllipse(
+                pos_x - 15, pos_y - 15, 30, 30, QPen(QColor(color), 2)
+            )
+            label = self.scene.addText(f"{name}", QFont("Arial", 8))
+            label.setDefaultTextColor(QColor(color))
+            label.setPos(pos_x, pos_y + 15)
+
+        QTimer.singleShot(5000, lambda: self._remove_scene_item(ripple))
+        QTimer.singleShot(5000, lambda: self._remove_scene_item(label))
+
+    @staticmethod
+    def _mouse_button_info(btn: Qt.MouseButton) -> tuple[str, str]:
+        return MOUSE_BUTTON_INFO.get(btn, (f"Btn{int(btn.value)}", "white"))
 
     def mouseMoveEvent(self, event: QMouseEvent):
         pos = event.position().toPoint()
 
         if self.scene is not None:
             self.scene.addRect(pos.x(), pos.y(), 1, 1, QPen(QColor("#1a1a1a")))
-            self.active_key_text.setPos(pos.x() + 20, pos.y() - 20)
+            self.active_buttons.setPos(pos.x() + 20, pos.y() - 20)
 
         super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent):
+        mouse_key = get_specific_qt_key(event)
+        scancode = get_scancode_from_key(mouse_key) or 0
+
         pos = event.position().toPoint()
         btn = event.button()
+        btn_name, color = self._mouse_button_info(btn)
 
-        if btn == Qt.MouseButton.LeftButton:
-            btn_name, color = "Left", "cyan"
-        elif btn == Qt.MouseButton.RightButton:
-            btn_name, color = "Right", "magenta"
-        else:
-            btn_name, color = "Middle", "yellow"
+        self.parent_window.pressed_mouse_buttons.add(btn_name)
 
         self.parent_window.data.append(
             {
@@ -83,18 +139,15 @@ class DiagnosticView(QGraphicsView):
             }
         )
 
-        if self.scene is not None:
-            ripple = self.scene.addEllipse(
-                pos.x() - 15, pos.y() - 15, 30, 30, QPen(QColor(color), 2)
-            )
-            label = self.scene.addText(f"{btn_name}", QFont("Arial", 8))
-            label.setDefaultTextColor(QColor(color))
-            label.setPos(pos.x(), pos.y() + 15)
-
-        QTimer.singleShot(1000, lambda: self._remove_scene_item(ripple))
-        QTimer.singleShot(1000, lambda: self._remove_scene_item(label))
-
+        self._set_labelled_ripple(pos.x(), pos.y(), btn_name, scancode, color)
+        self.parent_window._update_active_display()
         super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        btn_name, _color = self._mouse_button_info(event.button())
+        self.parent_window.pressed_mouse_buttons.discard(btn_name)
+        self.parent_window._update_active_display()
+        super().mouseReleaseEvent(event)
 
     def _remove_scene_item(self, item: QGraphicsItem, /) -> None:
         if self.scene is not None:
@@ -102,11 +155,18 @@ class DiagnosticView(QGraphicsView):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, toggle_key_scancode: int | None = None):
+    def __init__(
+        self,
+        toggle_key_scancode: int | None,
+    ):
         super().__init__()
+
         self.toggle_key_scancode = toggle_key_scancode
+        self.loc_dict = get_locations_dict()
         self.cursor_visible = _PLATFORM.WindowManager().is_cursor_visible(True, 0)
         self.data = []
+        self.pressed_keys: dict[int, str] = {}
+        self.pressed_mouse_buttons: set[str] = set()
 
         self.setWindowTitle(VISUALIZER_NAME)
         self.setWindowOpacity(0.4)
@@ -135,11 +195,18 @@ class MainWindow(QMainWindow):
             while QGuiApplication.overrideCursor() is not None:
                 QGuiApplication.restoreOverrideCursor()
 
+    def _update_active_display(self) -> None:
+        """Rebuilds the on-screen indicator from current held-state, rather
+        than overwriting it with just the latest key -- so multiple keys
+        and/or mouse buttons held simultaneously all show at once, and
+        anything released drops out immediately.
+        """
+        parts = list(self.pressed_keys.values()) + sorted(self.pressed_mouse_buttons)
+        self.view.active_buttons.setPlainText(f"[{' + '.join(parts)}]" if parts else "")
+
     def keyPressEvent(self, event: QKeyEvent):
         key = get_specific_qt_key(event)
         scancode = get_scancode_from_key(key) or 0
-
-        print(scancode, self.toggle_key_scancode)
 
         if scancode == self.toggle_key_scancode:
             if event.isAutoRepeat():
@@ -158,28 +225,56 @@ class MainWindow(QMainWindow):
                 self.close()
                 return
 
-        key_name = (
-            event.text().upper() if event.text() else f"KEY_{key.strip().upper()}"
-        )
+        key_name = key.strip().upper()
+
+        self.pressed_keys[scancode] = key_name
 
         cursor_pos = self.view.mapFromGlobal(self.cursor().pos())
         mx, my = cursor_pos.x(), cursor_pos.y()
-
         self.data.append(
             {"x": mx, "y": my, "type": f"Key: {key_name}", "time": time.time()}
         )
 
-        self.view.active_key_text.setPlainText(f"[{key_name}]")
+        self.view._set_labelled_ripple(mx, my, key_name, scancode, "red")
+        self._update_active_display()
         super().keyPressEvent(event)
 
+    def keyReleaseEvent(self, event: QKeyEvent):
+        # Autorepeat can synthesize a release+press pair for a key that's
+        # genuinely still held (X11 quirk) -- Qt marks that release with
+        # isAutoRepeat()==True. Ignoring it here means a held key can only
+        # leave pressed_keys on a real release, not a repeat-cycle artifact.
+        if event.isAutoRepeat():
+            super().keyReleaseEvent(event)
+            return
 
-def run():
+        key = get_specific_qt_key(event)
+        scancode = get_scancode_from_key(key) or 0
+
+        self.pressed_keys.pop(scancode, None)
+        self._update_active_display()
+        super().keyReleaseEvent(event)
+
+    def focusOutEvent(self, event):
+        # If focus leaves this window while a key/button is physically
+        # held, the OS may never deliver the matching release event here
+        # (e.g. Alt-Tab). Without this, that entry would stay stuck in the
+        # held set forever with no way to self-correct.
+        self.pressed_keys.clear()
+        self.pressed_mouse_buttons.clear()
+        self._update_active_display()
+        super().focusOutEvent(event)
+
+
+def run(
+    toggle_key_scancode: int | None = None,
+):
     success, _ = check_single_instance(VISUALIZER_NAME)
     if not success:
         sys.exit(0)
 
     app = QApplication(sys.argv)
-    MainWindow()
+    MainWindow(toggle_key_scancode)
     sys.exit(app.exec())
 
 

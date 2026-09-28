@@ -16,7 +16,7 @@ from modules.core.pipeline import (
     Point,
     RectangularRegion,
 )
-from modules.utils import scale_coord, CIRCLE, MOUSE_WHEEL_CODE
+from modules.utils import scale_coord, CIRCLE, MOUSE_WHEEL_SIMULATOR_CODE
 
 if TYPE_CHECKING:
     from .mapper import Mapper
@@ -62,7 +62,7 @@ class WASDMapper:
         # Check if the layout defines an explicit fixed HUD joystick zone
         wasd_zone_values = None
         for _, values in key_raw_zones:
-            if (values.get("name") == MOUSE_WHEEL_CODE) and values.get(
+            if (values.get("name") == MOUSE_WHEEL_SIMULATOR_CODE) and values.get(
                 "type"
             ) == CIRCLE:
 

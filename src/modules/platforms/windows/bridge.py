@@ -24,6 +24,7 @@ from modules.utils import (
     PACK_BUTTON_STRUCT,
     PACK_KEY_STRUCT,
     PACK_REL_STRUCT,
+    PACK_WHEEL_STRUCT,
     PACK_TYPEMATIC_STRUCT,
     RIGHT_BUTTON_DOWN,
     RIGHT_BUTTON_UP,
@@ -31,6 +32,7 @@ from modules.utils import (
     TASK_ABS,
     TASK_BUTTON,
     TASK_REL,
+    TASK_WHEEL,
 )
 
 
@@ -245,7 +247,7 @@ class InterceptionBridge(AbstractBridge):
                 PACK_REL_STRUCT.pack(TASK_REL, int(dx), int(dy))
             )
         except OSError:
-            self.selective_release()
+            pass
 
     def mouse_move_abs(self, x, y):
         abs_x = max(0, min(65535, int((x / self.screen_w) * 65535)))
@@ -255,8 +257,17 @@ class InterceptionBridge(AbstractBridge):
                 PACK_ABS_STRUCT.pack(TASK_ABS, int(abs_x), int(abs_y))
             )
         except OSError:
-            self.selective_release()
+            pass
 
+    def wheel(self, dx: float, dy: float):
+        with self.bridge_lock:
+            try:
+                self.mb_pipe_write.send_bytes(
+                    PACK_WHEEL_STRUCT.pack(TASK_WHEEL, dx, dy)
+                )
+            except OSError:
+                pass
+            
     def left_click_down(self):
         with self.bridge_lock:
             try:

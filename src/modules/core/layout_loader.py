@@ -73,9 +73,9 @@ class LayoutLoader:
             logger.warning("No active layout found in SQLite database.")
             settings = store.settings.get()
             with self.layout_lock:
-                self.width = settings.json_dev_width or BASELINE_WIDTH
-                self.height = settings.json_dev_height or BASELINE_HEIGHT
-                self.dpi = settings.json_dev_dpi or BASELINE_DPI
+                self.width = settings.json_dev_width
+                self.height = settings.json_dev_height
+                self.dpi = settings.json_dev_dpi
                 self.custom_pipelines = []
                 self.keys_json_data = []
             return

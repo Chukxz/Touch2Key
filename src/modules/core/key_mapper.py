@@ -17,7 +17,7 @@ from modules.utils import (
     M_LEFT,
     M_MIDDLE,
     M_RIGHT,
-    MOUSE_WHEEL_CODE,
+    MOUSE_WHEEL_SIMULATOR_CODE,
     RECTANGLE,
     SPRINT_DISTANCE_CODE,
     EXCLUDED_KEYS,
@@ -59,7 +59,7 @@ class KeyMapper:
         # Tracks touch slot assignments for camera look suppression
         self.lock = threading.Lock()
         self.pipelines = []
-        self.ignored_keys = {MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE}
+        self.ignored_keys = {MOUSE_WHEEL_SIMULATOR_CODE, SPRINT_DISTANCE_CODE}
 
         self._build_pipelines()
         self._sync_typematic_to_bridge()

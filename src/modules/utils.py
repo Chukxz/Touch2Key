@@ -22,19 +22,24 @@ APP_NAME = "Touch2Key"
 TASK_BUTTON = 0
 TASK_REL = 1
 TASK_ABS = 2
+TASK_WHEEL = 3
 
-# Pre-compiled C-struct formats for maximum speed
-PACK_BUTTON_STRUCT = struct.Struct("<Bi")
-PACK_REL_STRUCT = struct.Struct("<Bhh")
-PACK_ABS_STRUCT = struct.Struct("<Bii")
-PACK_KEY_STRUCT = struct.Struct("<HB")
+# Packing: 1 byte task ID, 2 bytes signed short delta (h-delta, v-delta)
+# Example: delta_y > 0 is scroll up, delta_y < 0 is scroll down
+
+# Pre-compiled C-struct formats
+PACK_BUTTON_STRUCT = struct.Struct("<Bi")  # task_id, button
+PACK_REL_STRUCT = struct.Struct("<Bhh")  # task_id, delta_x, delta_y
+PACK_ABS_STRUCT = struct.Struct("<Bii")  # task_id, x, y
+PACK_KEY_STRUCT = struct.Struct("<HB")  # key_code, key_state
+PACK_WHEEL_STRUCT = struct.Struct("<Bhh")  # task_id, delta_x, delta_y
 
 # Sentinel values for IPC Key and Mouse streams
 KEY_PING = 2
 KEY_CONFIG = 3  # Configuration payload for typematic timing & exclusions
 
 # Structure: <B (Task ID = 3) ? (enabled) I (initial_delay_ns) f (repeat_rate_sec) H (excluded_count)
-# Followed by array of H (unsigned short scancodes)
+# Followed by a dynamically populated array of H (unsigned short scancodes)
 PACK_TYPEMATIC_STRUCT = struct.Struct("<B?IfH")
 
 BUTTON_PING = 0x0000
@@ -104,18 +109,20 @@ TOGGLE_MODE = "TOGGLE_MODE"
 # VIRTUAL KEYBOARD CONSTANTS
 MODIFIER_KEYS = "lshift,rshift,lctrl,rctrl,lalt,ralt"
 LOCK_KEYS = "caps_lock,num_lock,scroll_lock"
-TOGGLE_KEY_ID = 0x9900
 
-M_LEFT = 0x9901
-M_RIGHT = 0x9902
-M_MIDDLE = 0x9903
-TOP_BEZEL_NAME = "Top Bezel"
+M_LEFT = 0x9900
+M_RIGHT = 0x9901
+M_MIDDLE = 0x9902
+M_FORWARD = 0x9903
+M_BACK = 0x9904
 TOP_BEZEL_ID = 0x9905
-BOTTOM_BEZEL_NAME = "Bottom Bezel"
 BOTTOM_BEZEL_ID = 0x9906
+
+TOP_BEZEL_NAME = "Top Bezel"
+BOTTOM_BEZEL_NAME = "Bottom Bezel"
 BEZEL_DP_THICKNESS = 25  # ~3.97mm
 SPRINT_DISTANCE_CODE = "LEFT_BRACKET"
-MOUSE_WHEEL_CODE = "RIGHT_BRACKET"
+MOUSE_WHEEL_SIMULATOR_CODE = "RIGHT_BRACKET"
 
 # Delays (in seconds)
 RELOAD_DELAY = 0.5
@@ -141,10 +148,17 @@ DEFAULT_PPS = 60
 MOUSE_MOVE_RELATIVE = 0x00
 MOUSE_MOVE_ABSOLUTE = 0x01
 MOUSE_VIRTUAL_DESKTOP = 0x02
+MOUSE_WHEEL = 0x0400
+MOUSE_HWHEEL = 0x0800
+WHEEL_DELTA = 120  # Windows standard step value
 
 LEFT_BUTTON_DOWN, LEFT_BUTTON_UP = 0x0001, 0x0002
 RIGHT_BUTTON_DOWN, RIGHT_BUTTON_UP = 0x0004, 0x0008
 MIDDLE_BUTTON_DOWN, MIDDLE_BUTTON_UP = 0x0010, 0x0020
+BUTTON_4_DOWN = 0x0040  # Back
+BUTTON_4_UP = 0x0080
+BUTTON_5_DOWN = 0x0100  # Forward
+BUTTON_5_UP = 0x0200
 
 WINDOWS_HEADERS = ["Window ID", "Title", "Class Name", "Left", "Top", "Width", "Height"]
 PORT = "5555"
@@ -177,7 +191,13 @@ ALLOWED_PIPELINE_FIELDS = {
 
 # Low-level worker constants
 MAX_COALESCE = 20
-DOWN_TUPLE = (LEFT_BUTTON_DOWN, RIGHT_BUTTON_DOWN, MIDDLE_BUTTON_DOWN)
+DOWN_TUPLE = (
+    LEFT_BUTTON_DOWN,
+    RIGHT_BUTTON_DOWN,
+    MIDDLE_BUTTON_DOWN,
+    BUTTON_4_DOWN,
+    BUTTON_5_DOWN,
+)
 CONSTANT_DWELL = 0.001
 MIN_BUTTON_DWELL = 0.025
 MAX_BUTTON_DWELL = 0.04

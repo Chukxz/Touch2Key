@@ -3,13 +3,19 @@ from evdev import ecodes, AbsInfo
 from modules.utils import (
     LEFT_BUTTON_DOWN,
     LEFT_BUTTON_UP,
-    RIGHT_BUTTON_DOWN,
-    RIGHT_BUTTON_UP,
     MIDDLE_BUTTON_DOWN,
     MIDDLE_BUTTON_UP,
+    RIGHT_BUTTON_DOWN,
+    RIGHT_BUTTON_UP,
+    BUTTON_4_DOWN,
+    BUTTON_4_UP,
+    BUTTON_5_DOWN,
+    BUTTON_5_UP,
     M_LEFT,
     M_RIGHT,
     M_MIDDLE,
+    M_FORWARD,
+    M_BACK,
 )
 
 # Maps Windows/DOS Scancodes to Linux evdev ecodes
@@ -118,6 +124,8 @@ LINUX_KEY_MAP = {
     M_LEFT: ecodes.BTN_LEFT,
     M_RIGHT: ecodes.BTN_RIGHT,
     M_MIDDLE: ecodes.BTN_MIDDLE,
+    M_BACK: ecodes.BTN_SIDE,
+    M_FORWARD: ecodes.BTN_EXTRA,
 }
 
 LINUX_KEY_MAP_INV = {v: k for k, v in LINUX_KEY_MAP.items()}
@@ -125,8 +133,14 @@ LINUX_KEY_MAP_INV = {v: k for k, v in LINUX_KEY_MAP.items()}
 KEYBOARD_CAP = cap = {ecodes.EV_KEY: list(range(1, 256))}
 
 MOUSE_CAP = {
-    ecodes.EV_KEY: [ecodes.BTN_LEFT, ecodes.BTN_RIGHT, ecodes.BTN_MIDDLE],
-    ecodes.EV_REL: [ecodes.REL_X, ecodes.REL_Y, ecodes.REL_WHEEL],
+    ecodes.EV_KEY: [
+        ecodes.BTN_LEFT,
+        ecodes.BTN_RIGHT,
+        ecodes.BTN_MIDDLE,
+        ecodes.BTN_SIDE,
+        ecodes.BTN_EXTRA,
+    ],
+    ecodes.EV_REL: [ecodes.REL_X, ecodes.REL_Y, ecodes.REL_WHEEL, ecodes.REL_HWHEEL],
     ecodes.EV_ABS: [
         (
             ecodes.ABS_X,
@@ -142,8 +156,12 @@ MOUSE_CAP = {
 BTN_MAP = {
     LEFT_BUTTON_DOWN: (ecodes.BTN_LEFT, 1),
     LEFT_BUTTON_UP: (ecodes.BTN_LEFT, 0),
-    RIGHT_BUTTON_DOWN: (ecodes.BTN_RIGHT, 1),
-    RIGHT_BUTTON_UP: (ecodes.BTN_RIGHT, 0),
     MIDDLE_BUTTON_DOWN: (ecodes.BTN_MIDDLE, 1),
     MIDDLE_BUTTON_UP: (ecodes.BTN_MIDDLE, 0),
+    RIGHT_BUTTON_DOWN: (ecodes.BTN_RIGHT, 1),
+    RIGHT_BUTTON_UP: (ecodes.BTN_RIGHT, 0),
+    BUTTON_4_DOWN: (ecodes.BTN_SIDE, 1),
+    BUTTON_4_UP: (ecodes.BTN_SIDE, 0),
+    BUTTON_5_DOWN: (ecodes.BTN_EXTRA, 1),
+    BUTTON_5_UP: (ecodes.BTN_EXTRA, 0),
 }

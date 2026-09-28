@@ -13,7 +13,7 @@ from modules.utils import (
     SCANCODES,
     VKB_STRUCT,
     VKB_SLEEP_TIME,
-    TOGGLE_KEY_ID,
+    TOP_BEZEL_ID,
     M_LEFT,
     M_MIDDLE,
     M_RIGHT,
@@ -353,7 +353,7 @@ class Mapper:
                 payload = self.engine_ref.vkb_reader.recv_bytes()
                 state, scancode = VKB_STRUCT.unpack(payload)
                 
-                is_toggle_mode = scancode == TOGGLE_KEY_ID
+                is_toggle_mode = scancode == TOP_BEZEL_ID
                 is_mouse_left = scancode == M_LEFT
                 is_mouse_middle = scancode == M_MIDDLE
                 is_mouse_right = scancode == M_RIGHT

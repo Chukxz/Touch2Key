@@ -20,7 +20,7 @@ from modules.utils import (
     M_MIDDLE,
     M_RIGHT,
     MODIFIER_KEYS,
-    TOGGLE_KEY_ID,
+    TOP_BEZEL_ID,
     VKB_STRUCT,
     get_scancode_from_key,
 )
@@ -149,7 +149,7 @@ NAV_LAYOUT = [
 # --- Numpad Block ---
 # Format: (Label, key_code, Row, Col, RowSpan, ColSpan)
 NUMPAD_LAYOUT = [
-    ("Toggle Cursor", TOGGLE_KEY_ID, 0, 0, 1, 4),
+    ("Toggle Cursor", TOP_BEZEL_ID, 0, 0, 1, 4),
     ("7", 0x47, 1, 0, 1, 1),
     ("8", 0x48, 1, 1, 1, 1),
     ("9", 0x49, 1, 2, 1, 1),
@@ -437,13 +437,13 @@ class VirtualKeyboard(QWidget):
             action = "DOWN" if state == 0 else "UP  "
 
             if sys.platform == "win32":
-                if key_code in (TOGGLE_KEY_ID, M_LEFT, M_RIGHT, M_MIDDLE):
+                if key_code in (TOP_BEZEL_ID, M_LEFT, M_RIGHT, M_MIDDLE):
                     key_code_hex = "Internal"
                 else:
                     key_code_hex = hex(key_code)
 
             elif sys.platform == "linux":
-                if key_code == TOGGLE_KEY_ID:
+                if key_code == TOP_BEZEL_ID:
                     key_code_hex = "Internal"
                 else:
                     linux_code = self._linux_key_map.get(key_code, None)
