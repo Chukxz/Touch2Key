@@ -16,7 +16,9 @@ from PySide6.QtCore import Qt, QTimer
 
 from modules.utils import (
     LOCK_KEYS,
+    M_LEFT,
     M_MIDDLE,
+    M_RIGHT,
     MODIFIER_KEYS,
     TOGGLE_KEY_ID,
     VKB_STRUCT,
@@ -27,11 +29,11 @@ from modules.platforms import get_lock_states, check_single_instance
 
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection
-    
+
 VKB_NAME = "Touch2Key_VKB"
 
 # --- Main Alphanumeric Block ---
-# Format: (Label, Scancode, Column Span)
+# Format: (Label, key_code, Column Span)
 MAIN_LAYOUT = [
     # Row 0: Esc, F-Keys and Delete (Span 1 each, 14 total columns)
     [
@@ -126,26 +128,28 @@ MAIN_LAYOUT = [
 ]
 
 # --- Navigation & Arrows Block ---
-# Format: (Label, Scancode, Row, Col, RowSpan, ColSpan)
+# Format: (Label, key_code, Row, Col, RowSpan, ColSpan)
 
 NAV_LAYOUT = [
     ("Insert", 0xE050, 0, 0, 1, 3),
     ("PrtSc", 0xE037, 0, 3, 1, 3),
-    ("Toggle Cursor", TOGGLE_KEY_ID, 1, 0, 1, 6),
-    ("Home", 0xE047, 3, 0, 1, 2),
-    ("End", 0xE04F, 3, 4, 1, 2),
-    ("PgUp", 0xE049, 2, 2, 1, 2),
-    ("PgDn", 0xE051, 3, 2, 1, 2),
-    ("Left", 0xE04B, 5, 0, 1, 2),
-    ("Right", 0xE04D, 5, 4, 1, 2),
-    ("Up", 0xE048, 4, 2, 1, 2),
-    ("Down", 0xE050, 5, 2, 1, 2),
+    ("PgUp", 0xE049, 1, 2, 1, 2),
+    ("Home", 0xE047, 2, 0, 1, 2),
+    ("PgDn", 0xE051, 2, 2, 1, 2),
+    ("End", 0xE04F, 2, 4, 1, 2),
+    ("Up", 0xE048, 3, 2, 1, 2),
+    ("Left", 0xE04B, 4, 0, 1, 2),
+    ("Down", 0xE050, 4, 2, 1, 2),
+    ("Right", 0xE04D, 4, 4, 1, 2),
+    ("M_L", M_LEFT, 5, 0, 1, 2),
+    ("M_Mid", M_MIDDLE, 5, 2, 1, 2),
+    ("M_R", M_RIGHT, 5, 4, 1, 2),
 ]
 
 # --- Numpad Block ---
-# Format: (Label, Scancode, Row, RowSpan, ColSpan)
+# Format: (Label, key_code, Row, Col, RowSpan, ColSpan)
 NUMPAD_LAYOUT = [
-    ("Mouse Middle", M_MIDDLE, 0, 0, 1, 4),
+    ("Toggle Cursor", TOGGLE_KEY_ID, 0, 0, 1, 4),
     ("7", 0x47, 1, 0, 1, 1),
     ("8", 0x48, 1, 1, 1, 1),
     ("9", 0x49, 1, 2, 1, 1),
@@ -168,21 +172,23 @@ NUMPAD_LAYOUT = [
 
 
 class VirtualKeyButton(QPushButton):
-    """Custom button that emits scancodes and explicitly ignores OS focus."""
+    """Custom button that emits key_codes and explicitly ignores OS focus."""
+
+    LONG_PRESS_INTERVAL_MS = 300
 
     def __init__(
         self,
         key_label: str,
-        scancode: int,
+        key_code: int,
         mod_codes: list[int],
         parent_ref: VirtualKeyboard,
-        lock_codes: list[int] | None = None,
+        lock_codes: list[int],
     ):
         super().__init__(key_label, parent_ref)
-        self.scancode = scancode
-        self.modifier_scancodes = mod_codes
+        self.key_code = key_code
         self.parent_ref = parent_ref
-        self.is_lock_key = scancode in (lock_codes or [])
+        self.is_lock_key = key_code in lock_codes
+        self.is_mod_key = key_code in mod_codes
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # CRITICAL: Do not accept focus, otherwise clicking a key minimizes the full-screen game
@@ -212,34 +218,79 @@ class VirtualKeyButton(QPushButton):
         """)
 
         # Make modifiers "Sticky"
-        if scancode in mod_codes:
+        if self.is_mod_key:
             self.setCheckable(True)
             self.toggled.connect(self._on_modifier_toggled)
         else:
-            # Standard keys (including lock keys) trigger normally: momentary
-            # down+up per tap. Lock keys additionally get a "active" visual
-            # indicator (see set_active), but that's purely cosmetic and
-            # driven externally by polled OS state -- it never changes how
-            # this button sends, only how it looks.
+            # Standard keys (incl. lock keys): momentary down+up per tap,
+            # EXCEPT a long-press (held past LONG_PRESS_INTERVAL_MS) on a
+            # non-lock key locks it down (no UP sent on release) until the
+            # next tap explicitly releases it. Lock keys ignore all of this
+            # and just fire down+up every tap.
+            self._locked = False           # key is currently held down via a long-press lock
+            self._long_press_fired = False  # timer crossed the threshold during THIS press
+            self._suppress_release = False  # the paired release for an unlock-tap: no-op it
+            self._timer = QTimer(self)
+            self._timer.setSingleShot(True)
+            self._timer.setInterval(self.LONG_PRESS_INTERVAL_MS)
             self.pressed.connect(self._on_standard_pressed)
             self.released.connect(self._on_standard_released)
+            self._timer.timeout.connect(self._on_long_press_threshold)
 
     def _on_modifier_toggled(self, checked: bool):
         # 'checked' is True if the button is currently pressed down
         self.set_active(checked)
         if checked:
-            self._send_ipc_message(0, self.scancode)
+            self._send_ipc_message(0, self.key_code)
         else:
-            self._send_ipc_message(1, self.scancode)
+            self._send_ipc_message(1, self.key_code)
 
     def _on_standard_pressed(self):
-        self._send_ipc_message(0, self.scancode)
+        if self.is_lock_key:
+            self._send_ipc_message(0, self.key_code)
+            return
+
+        if self._locked:
+            # This press IS the unlock gesture: release immediately and
+            # consume it fully here. The paired `released` signal that
+            # follows belongs to this same tap -- suppress it below so it
+            # doesn't get reinterpreted as a fresh short tap.
+            self._send_ipc_message(1, self.key_code)
+            self._locked = False
+            self._suppress_release = True
+            self.set_active(False)
+            return
+
+        self._suppress_release = False
+        self._long_press_fired = False
+        self._send_ipc_message(0, self.key_code)
+        self._timer.start()
 
     def _on_standard_released(self):
-        self._send_ipc_message(1, self.scancode)
+        if self.is_lock_key:
+            self._send_ipc_message(1, self.key_code)
+            return
 
-    def _send_ipc_message(self, state: int, scancode: int):
-        self.parent_ref._send_key(state, scancode)
+        if self._suppress_release:
+            self._suppress_release = False
+            return
+
+        self._timer.stop()
+        if self._long_press_fired:
+            # Crossed the long-press threshold while still held: lock the
+            # key down instead of releasing it. No UP sent -- the DOWN
+            # from _on_standard_pressed stays in effect.
+            self._locked = True
+            self.set_active(True)
+        else:
+            # Ordinary short tap: momentary press.
+            self._send_ipc_message(1, self.key_code)
+
+    def _on_long_press_threshold(self):
+        self._long_press_fired = True
+
+    def _send_ipc_message(self, state: int, key_code: int):
+        self.parent_ref._send_key(state, key_code, self.text().upper())
 
     def set_active(self, active: bool) -> None:
         """
@@ -260,27 +311,33 @@ class VirtualKeyboard(QWidget):
         self.conn = conn
         self._pressed_keys = set()
 
-        self.modifier_scancodes = [
+        self.modifier_key_codes = [
             code
             for key in MODIFIER_KEYS.split(",")
             if (code := get_scancode_from_key(key)) is not None
         ]
 
-        # Lock keys: scancodes for the sticky-vs-momentary check above, and
-        # a name->scancode map to translate get_lock_states()'s
+        # Lock keys: key_codes for the sticky-vs-momentary check above, and
+        # a name->key_code map to translate get_lock_states()'s
         # "caps_lock"/"num_lock"/"scroll_lock" keys into the button to
         # update during polling.
-        self.lock_scancodes = [
+        self.lock_key_codes = [
             code
             for key in LOCK_KEYS.split(",")
             if (code := get_scancode_from_key(key)) is not None
         ]
-        self.lock_name_to_scancode = {
+        self.lock_name_to_key_code = {
             name: code
             for name in LOCK_KEYS.split(",")
             if (code := get_scancode_from_key(name)) is not None
         }
         self.lock_buttons: dict[int, VirtualKeyButton] = {}
+
+        self._linux_key_map = {}
+        if sys.platform == "linux":
+            from modules.platforms.linux.ecodes_map import LINUX_KEY_MAP
+
+            self._linux_key_map = LINUX_KEY_MAP
 
         self.setWindowTitle("Touch2Key - Virtual Keyboard")
         # Made wider to accommodate all 3 blocks cleanly
@@ -320,23 +377,23 @@ class VirtualKeyboard(QWidget):
         main_grid.setSpacing(2)
         for row_idx, row_data in enumerate(MAIN_LAYOUT):
             col_idx = 0
-            for label, scancode, col_span in row_data:
-                btn = self._create_btn(label, scancode)
+            for label, key_code, col_span in row_data:
+                btn = self._create_btn(label, key_code)
                 main_grid.addWidget(btn, row_idx, col_idx, 1, col_span)
                 col_idx += col_span
 
         # 2. Nav Block
         nav_grid = QGridLayout()
         nav_grid.setSpacing(2)
-        for label, scancode, r, c, r_span, c_span in NAV_LAYOUT:
-            nav_grid.addWidget(self._create_btn(label, scancode), r, c, r_span, c_span)
+        for label, key_code, r, c, r_span, c_span in NAV_LAYOUT:
+            nav_grid.addWidget(self._create_btn(label, key_code), r, c, r_span, c_span)
 
         # 3. Numpad Block
         numpad_grid = QGridLayout()
         numpad_grid.setSpacing(2)
-        for label, scancode, r, c, r_span, c_span in NUMPAD_LAYOUT:
+        for label, key_code, r, c, r_span, c_span in NUMPAD_LAYOUT:
             numpad_grid.addWidget(
-                self._create_btn(label, scancode), r, c, r_span, c_span
+                self._create_btn(label, key_code), r, c, r_span, c_span
             )
 
         # Add all to master layout (Stretch factors: 15 for Main, 6 for Nav, 4 for Numpad)
@@ -344,16 +401,16 @@ class VirtualKeyboard(QWidget):
         master_layout.addLayout(nav_grid, 6)
         master_layout.addLayout(numpad_grid, 4)
 
-    def _create_btn(self, label: str, scancode: int) -> VirtualKeyButton:
+    def _create_btn(self, label: str, key_code: int) -> VirtualKeyButton:
         btn = VirtualKeyButton(
             label,
-            scancode,
-            self.modifier_scancodes,
+            key_code,
+            self.modifier_key_codes,
             self,
-            lock_codes=self.lock_scancodes,
+            lock_codes=self.lock_key_codes,
         )
         if btn.is_lock_key:
-            self.lock_buttons[scancode] = btn
+            self.lock_buttons[key_code] = btn
         return btn
 
     def _poll_lock_states(self) -> None:
@@ -363,27 +420,44 @@ class VirtualKeyboard(QWidget):
         """
         states = get_lock_states()
         if states is not None:
-            for name, scancode in self.lock_name_to_scancode.items():
-                btn = self.lock_buttons.get(scancode)
+            for name, key_code in self.lock_name_to_key_code.items():
+                btn = self.lock_buttons.get(key_code)
                 if btn is not None:
                     btn.set_active(states.get(name, False))
 
-    def _send_key(self, state: int, scancode: int):
+    def _send_key(self, state: int, key_code: int, key_name: str):
         """Packs the keystroke and sends it through the IPC pipe."""
         if state == 0:  # DOWN
-            self._pressed_keys.add(scancode)
+            self._pressed_keys.add(key_code)
         elif state == 1:  # UP
-            self._pressed_keys.discard(scancode)
+            self._pressed_keys.discard(key_code)
 
         if self.conn is None:
             # Standalone Testing Mode ONLY: Print to console
             action = "DOWN" if state == 0 else "UP  "
-            print(f"[VirtualKeyboard] {action} | Scancode: {hex(scancode)}")
+
+            if sys.platform == "win32":
+                if key_code in (TOGGLE_KEY_ID, M_LEFT, M_RIGHT, M_MIDDLE):
+                    key_code_hex = "Internal"
+                else:
+                    key_code_hex = hex(key_code)
+
+            elif sys.platform == "linux":
+                if key_code == TOGGLE_KEY_ID:
+                    key_code_hex = "Internal"
+                else:
+                    linux_code = self._linux_key_map.get(key_code, None)
+                    if linux_code is None:
+                        key_code_hex = "None"
+                    else:
+                        key_code_hex = hex(linux_code)
+
+            print(f"[VirtualKeyboard] {key_name}: {action} | key_code: {key_code_hex}")
             return
 
         # Production Mode: SILENT IPC Write
         try:
-            self.conn.send_bytes(VKB_STRUCT.pack(state, int(scancode)))
+            self.conn.send_bytes(VKB_STRUCT.pack(state, int(key_code)))
         except OSError:
             self.close()
 
@@ -420,7 +494,7 @@ def run(conn: Connection | None = None, enforce_single_instance=True):
         success, _ = check_single_instance(VKB_NAME)
         if not success:
             sys.exit(0)
-    
+
     app = QApplication(sys.argv)
     app.setWindowIcon(
         QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
@@ -438,4 +512,4 @@ if __name__ == "__main__":
 
 
 def virtual_keyboard_worker(conn: Connection):
-    run(conn, False) # Don't enforce single instance checks
+    run(conn, False)  # Don't enforce single instance checks

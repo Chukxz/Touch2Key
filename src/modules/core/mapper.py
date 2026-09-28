@@ -360,7 +360,7 @@ class Mapper:
 
                 if state == 0:
                     if is_toggle_mode:
-                        pass # No-Op on key down
+                        self.engine_ref.toggle_mode()
                     elif is_mouse_left:
                         self.bridge.left_click_down()
                     elif is_mouse_middle:
@@ -372,7 +372,7 @@ class Mapper:
                     
                 elif state == 1:
                     if is_toggle_mode:
-                        self.engine_ref.toggle_mode()
+                        pass # No-Op on key up
                     elif is_mouse_left:
                         self.bridge.left_click_up()
                     elif is_mouse_middle:
@@ -387,7 +387,7 @@ class Mapper:
             except Exception as e:
                 print(f"\n[WORKER] - Virtual Keyboard crashed: {e}.")
                 self.stop_event.wait(VKB_SLEEP_TIME)
-    
+
     def _on_worker_respawn(self, worker_type: str) -> None:
         self.mapper_event_dispatcher.dispatch(
             MapperEvent(action="ON_WORKER_RESPAWN", worker_type=worker_type)
