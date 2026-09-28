@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
-    QLineEdit,
     QMessageBox,
     QPushButton,
     QWidget,
@@ -76,6 +75,12 @@ class SettingsPage(BasePage):
         self.deadzone_spin.setSingleStep(0.01)
         input_form.addRow("Deadzone:", self.deadzone_spin)
 
+        self.hysteresis_spin = QDoubleSpinBox()
+        self.hysteresis_spin.setRange(0.0, 45.0)
+        self.hysteresis_spin.setSingleStep(1.0)
+        self.hysteresis_spin.setSuffix("°")
+        input_form.addRow("Hysteresis:", self.hysteresis_spin)
+
         self.content_layout().addWidget(input_group)
 
         # 2. Performance & ADB Engine Group
@@ -96,21 +101,40 @@ class SettingsPage(BasePage):
 
         self.content_layout().addWidget(perf_group)
 
-        # 3. Keybinds Group
-        keys_group = QGroupBox("Hotkeys")
-        keys_form = QFormLayout(keys_group)
+        # 3. Typematic Group
+        typematic_group = QGroupBox("Typematic")
+        typematic_form = QFormLayout(typematic_group)
 
-        self.toggle_key_input = QLineEdit()
-        self.toggle_key_input.setPlaceholderText("e.g. F1, grave, etc.")
-        keys_form.addRow("Mapping Toggle Key:", self.toggle_key_input)
+        self.typematic_enabled_check = QCheckBox("Enable Typematic")
+        typematic_form.addRow("Enable Typematic:", self.typematic_enabled_check)
 
-        self.sprint_key_input = QLineEdit()
-        self.sprint_key_input.setPlaceholderText("e.g. shift")
-        keys_form.addRow("Sprint Key:", self.sprint_key_input)
+        self.typematic_delay_spin = QDoubleSpinBox()
+        self.typematic_delay_spin.setRange(100.0, 1000.0)
+        self.typematic_delay_spin.setSingleStep(10.0)
+        self.typematic_delay_spin.setSuffix(" ms")
+        typematic_form.addRow("Typematic Delay:", self.typematic_delay_spin)
 
-        self.content_layout().addWidget(keys_group)
+        self.typematic_rate_spin = QDoubleSpinBox()
+        self.typematic_rate_spin.setRange(1, 30)
+        self.typematic_rate_spin.setSingleStep(1.0)
+        self.typematic_rate_spin.setSuffix(" Hz")
+        typematic_form.addRow("Typematic Rate:", self.typematic_rate_spin)
 
-        # 4. Import / Export / Backup
+        self.content_layout().addWidget(typematic_group)
+
+        # 4. System Group
+        system_group = QGroupBox("System")
+        system_form = QFormLayout(system_group)
+
+        self.double_tap_enabled_check = QCheckBox()
+        system_form.addRow("Enable Double-Tap Gesture:", self.double_tap_enabled_check)
+
+        self.bezel_toggle_enabled_check = QCheckBox()
+        system_form.addRow("Enable Bezel Toggles:", self.bezel_toggle_enabled_check)
+
+        self.content_layout().addWidget(system_group)
+
+        # 5. Import / Export / Backup
         io_row = QHBoxLayout()
         self.export_toml_btn = QPushButton("Export settings.toml")
         self.import_toml_btn = QPushButton("Import Config (.toml / .json / Bundle)")
@@ -119,9 +143,10 @@ class SettingsPage(BasePage):
         io_row.addWidget(self.export_toml_btn)
         io_row.addWidget(self.import_toml_btn)
         io_row.addWidget(self.export_bundle_btn)
+
         self.content_layout().addLayout(io_row)
 
-        # 5. Database Reset Actions
+        # 6. Database Reset Actions
         reset_row = QHBoxLayout()
         self.reset_defaults_btn = QPushButton("Reset Settings to Defaults")
         self.delete_all_btn = QPushButton("Wipe Database (Factory Reset)")
@@ -129,6 +154,7 @@ class SettingsPage(BasePage):
 
         reset_row.addWidget(self.reset_defaults_btn)
         reset_row.addWidget(self.delete_all_btn)
+
         self.content_layout().addLayout(reset_row)
 
         self.content_layout().addStretch()
@@ -143,12 +169,23 @@ class SettingsPage(BasePage):
         self.sensitivity_spin_x.valueChanged.connect(self._on_sensitivity_x_changed)
         self.sensitivity_spin_y.valueChanged.connect(self._on_sensitivity_y_changed)
         self.deadzone_spin.valueChanged.connect(self._on_deadzone_changed)
+        self.hysteresis_spin.valueChanged.connect(self._on_hysteresis_changed)
 
         self.rate_cap_spin.valueChanged.connect(self._on_rate_cap_changed)
         self.pps_alert_spin.valueChanged.connect(self._on_pps_alert_changed)
 
-        self.toggle_key_input.editingFinished.connect(self._on_keys_changed)
-        self.sprint_key_input.editingFinished.connect(self._on_keys_changed)
+        self.typematic_enabled_check.toggled.connect(
+            self._on_typematic_enabled__changed
+        )
+        self.typematic_delay_spin.valueChanged.connect(self._on_typematic_delay_changed)
+        self.typematic_rate_spin.valueChanged.connect(self._on_typematic_rate_changed)
+
+        self.double_tap_enabled_check.toggled.connect(
+            self._on_double_tap_enabled__changed
+        )
+        self.bezel_toggle_enabled_check.toggled.connect(
+            self._on_bezel_toggle_enabled_changed
+        )
 
         self.export_toml_btn.clicked.connect(self._on_export_toml)
         self.import_toml_btn.clicked.connect(self._on_import_toml)
@@ -166,7 +203,10 @@ class SettingsPage(BasePage):
 
     def load_settings(self) -> None:
         try:
+            # Get the Database app Settings
             settings = store.settings.get()
+
+            # Block all Signals
 
             self.left_handed_check.blockSignals(True)
             self.floating_check.blockSignals(True)
@@ -174,23 +214,39 @@ class SettingsPage(BasePage):
             self.sensitivity_spin_x.blockSignals(True)
             self.sensitivity_spin_y.blockSignals(True)
             self.deadzone_spin.blockSignals(True)
+            self.hysteresis_spin.blockSignals(True)
+
             self.rate_cap_spin.blockSignals(True)
             self.pps_alert_spin.blockSignals(True)
-            self.toggle_key_input.blockSignals(True)
-            self.sprint_key_input.blockSignals(True)
 
-            self.left_handed_check.setChecked(bool(settings.left_handed))
-            self.floating_check.setChecked(bool(settings.floating_joystick))
-            self.anchored_check.setChecked(bool(settings.anchored_joystick))
+            self.typematic_enabled_check.blockSignals(True)
+            self.typematic_delay_spin.blockSignals(True)
+            self.typematic_rate_spin.blockSignals(True)
+
+            self.double_tap_enabled_check.blockSignals(True)
+            self.bezel_toggle_enabled_check.blockSignals(True)
+
+            # Set to Defaults
+
+            self.left_handed_check.setChecked(settings.left_handed)
+            self.floating_check.setChecked(settings.floating_joystick)
+            self.anchored_check.setChecked(settings.anchored_joystick)
             self.sensitivity_spin_x.setValue(settings.sensitivity_x)
             self.sensitivity_spin_y.setValue(settings.sensitivity_y)
             self.deadzone_spin.setValue(settings.deadzone)
+            self.hysteresis_spin.setValue(settings.hysteresis)
 
             self.rate_cap_spin.setValue(settings.adb_rate_cap)
             self.pps_alert_spin.setValue(settings.pps_alert_threshold)
 
-            self.toggle_key_input.setText(settings.toggle_key or "")
-            self.sprint_key_input.setText(settings.sprint_key or "")
+            self.typematic_enabled_check.setChecked(settings.typematic_enabled)
+            self.typematic_delay_spin.setValue(settings.typematic_delay_ms)
+            self.typematic_rate_spin.setValue(settings.typematic_rate_hz)
+
+            self.double_tap_enabled_check.setChecked(settings.double_tap_enabled)
+            self.bezel_toggle_enabled_check.setChecked(settings.bezel_toggle_enabled)
+
+            # Unblock all Signals
 
             self.left_handed_check.blockSignals(False)
             self.floating_check.blockSignals(False)
@@ -198,30 +254,38 @@ class SettingsPage(BasePage):
             self.sensitivity_spin_x.blockSignals(False)
             self.sensitivity_spin_y.blockSignals(False)
             self.deadzone_spin.blockSignals(False)
+            self.hysteresis_spin.blockSignals(False)
+
             self.rate_cap_spin.blockSignals(False)
             self.pps_alert_spin.blockSignals(False)
-            self.toggle_key_input.blockSignals(False)
-            self.sprint_key_input.blockSignals(False)
+
+            self.typematic_enabled_check.blockSignals(False)
+            self.typematic_delay_spin.blockSignals(False)
+            self.typematic_rate_spin.blockSignals(False)
+
+            self.double_tap_enabled_check.blockSignals(False)
+            self.bezel_toggle_enabled_check.blockSignals(False)
+
         except Exception as exc:
             logger.exception("Failed to load settings from database")
 
     def _on_left_handed_changed(self, checked: bool) -> None:
         try:
-            store.settings.update(left_handed=int(checked))
+            store.settings.update(left_handed=checked)
             self._notify_reload()
         except Exception as exc:
             logger.exception("Failed to update left_handed setting")
 
     def _on_floating_joystick_changed(self, checked: bool) -> None:
         try:
-            store.settings.update(anchored_joystick=int(checked))
+            store.settings.update(anchored_joystick=checked)
             self._notify_reload()
         except Exception as exc:
             logger.exception("Failed to update floating_joystick setting")
 
     def _on_anchored_joystick_changed(self, checked: bool) -> None:
         try:
-            store.settings.update(anchored_joystick=int(checked))
+            store.settings.update(anchored_joystick=checked)
             self._notify_reload()
         except Exception as exc:
             logger.exception("Failed to update anchored_joystick setting")
@@ -247,6 +311,13 @@ class SettingsPage(BasePage):
         except Exception as exc:
             logger.exception("Failed to update deadzone setting")
 
+    def _on_hysteresis_changed(self, value: float) -> None:
+        try:
+            store.settings.update(hysteresis=value)
+            self._notify_reload()
+        except Exception as exc:
+            logger.exception("Failed to update hysteresis setting")
+
     def _on_rate_cap_changed(self, value: float) -> None:
         try:
             store.settings.update(adb_rate_cap=value)
@@ -261,15 +332,40 @@ class SettingsPage(BasePage):
         except Exception as exc:
             logger.exception("Failed to update pps_alert_threshold setting")
 
-    def _on_keys_changed(self) -> None:
+    def _on_typematic_enabled__changed(self, checked: bool) -> None:
         try:
-            store.settings.update(
-                toggle_key=self.toggle_key_input.text().strip(),
-                sprint_key=self.sprint_key_input.text().strip(),
-            )
+            store.settings.update(typematic_enabled=checked)
             self._notify_reload()
         except Exception as exc:
-            logger.exception("Failed to update hotkey settings")
+            logger.exception("Failed to update typematic enabled setting")
+
+    def _on_typematic_delay_changed(self, value: float) -> None:
+        try:
+            store.settings.update(typematic_delay_ms=value)
+            self._notify_reload()
+        except Exception as exc:
+            logger.exception("Failed to update typematic_delay setting")
+
+    def _on_typematic_rate_changed(self, value: float) -> None:
+        try:
+            store.settings.update(typematic_rate_hz=value)
+            self._notify_reload()
+        except Exception as exc:
+            logger.exception("Failed to update typematic_rate setting")
+
+    def _on_double_tap_enabled__changed(self, checked: bool) -> None:
+        try:
+            store.settings.update(double_tap_enabled=checked)
+            self._notify_reload()
+        except Exception as exc:
+            logger.exception("Failed to update typematic enabled setting")
+
+    def _on_bezel_toggle_enabled_changed(self, checked: bool) -> None:
+        try:
+            store.settings.update(bezel_toggle_enabled=checked)
+            self._notify_reload()
+        except Exception as exc:
+            logger.exception("Failed to update typematic enabled setting")
 
     def _on_reset_defaults(self) -> None:
         reply = QMessageBox.question(

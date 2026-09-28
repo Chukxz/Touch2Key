@@ -18,8 +18,12 @@ from modules.utils import (
     RECTANGLE,
     BEZEL,
     MOUSE_WHEEL_CODE,
+)
+
+from modules.core.pipeline import PipelineConfig
+
+from modules.core.bezel_validator import (
     ensure_system_bezels,
-    PipelineConfig,
 )
 
 logger = logging.getLogger("modules.database.legacy_migration")
@@ -63,7 +67,7 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
     )
 
     double_tap_enabled = system.get("double_tap_enabled", True)
-    system_toggle_enabled = system.get("system_toggle_enabled", True)
+    bezel_toggle_enabled = system.get("bezel_toggle_enabled", True)
 
     # Read typematic values from [typematic] or fall back to legacy [keys] definitions
     typ_enabled = typematic_table.get(
@@ -100,7 +104,7 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
             str(typ_excludes) if typ_excludes is not None else None
         ),
         "double_tap_enabled": bool(double_tap_enabled),
-        "system_toggle_enabled": bool(system_toggle_enabled),
+        "bezel_toggle_enabled": bool(bezel_toggle_enabled),
     }
 
     store.settings.update(**fields)

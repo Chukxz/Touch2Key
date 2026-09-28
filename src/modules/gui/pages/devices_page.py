@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from modules.database import store
 from modules.utils import MapperEvent
+from modules.scripts.list_windows import select_window
 
 logger = logging.getLogger("modules.gui.pages.devices")
 
@@ -33,8 +34,9 @@ class DevicesPage(QWidget):
         layout.addWidget(title)
 
         desc = QLabel(
-            "Select and assign physical input devices. On Windows, this routes "
-            "Interception kernel drivers directly to your designated keyboard and mouse."
+            "Assign target application windows and physical input hardware. "
+            "Target window selection is supported across all platforms, while low-level "
+            "Interception driver rebinding applies to Windows."
         )
         desc.setWordWrap(True)
         layout.addWidget(desc)
@@ -44,43 +46,93 @@ class DevicesPage(QWidget):
         self.info_frame.setFrameShape(QFrame.Shape.StyledPanel)
         frame_layout = QVBoxLayout(self.info_frame)
 
+        self.w_label = QLabel("Target Window: None")
         self.k_label = QLabel("Configured Keyboard: None")
         self.m_label = QLabel("Configured Mouse: None")
+
+        frame_layout.addWidget(self.w_label)
         frame_layout.addWidget(self.k_label)
         frame_layout.addWidget(self.m_label)
         layout.addWidget(self.info_frame)
 
         # Action Buttons
         btn_layout = QHBoxLayout()
-        self.rebind_btn = QPushButton("Detect & Rebind Hardware")
-        self.rebind_btn.clicked.connect(self._handle_rebind)
-        btn_layout.addWidget(self.rebind_btn)
-        btn_layout.addStretch()
 
+        # Window selection works cross-platform
+        self.select_window_btn = QPushButton("Select Target Window")
+        self.select_window_btn.clicked.connect(self._handle_window_selection)
+        btn_layout.addWidget(self.select_window_btn)
+
+        # Interception driver selection is Windows-specific
+        self.rebind_hw_btn = QPushButton("Detect & Rebind Hardware")
+        self.rebind_hw_btn.clicked.connect(self._handle_hardware_rebind)
+        btn_layout.addWidget(self.rebind_hw_btn)
+
+        btn_layout.addStretch()
         layout.addLayout(btn_layout)
         layout.addStretch()
+        
+        self.w_id: int | None = None
+        self.w_title = ""
+        self.k_id: int | None = None
+        self.m_id: int | None = None
 
         self._refresh_ui()
 
     def _refresh_ui(self) -> None:
-        if sys.platform == "win32":
-            s = store.settings.get()
-            k_id: int | None = getattr(s, "windows_keyboard_device", None)
-            m_id: int | None = getattr(s, "windows_mouse_device", None)
+        s = store.settings.get()
 
+        # Target window is universally visible and active
+        self.w_label.setText(
+            f"Target Window ID:       {self.w_id if self.w_id is not None else 'Unassigned'} ({self.w_title})"
+        )
+        self.select_window_btn.setEnabled(True)
+
+        if sys.platform == "win32":
             self.k_label.setText(
-                f"Configured Keyboard ID: {k_id if k_id is not None else 'Unassigned'}"
+                f"Configured Keyboard ID: {self.k_id if self.k_id is not None else 'Unassigned'}"
             )
             self.m_label.setText(
-                f"Configured Mouse ID:    {m_id if m_id is not None else 'Unassigned'}"
+                f"Configured Mouse ID:    {self.m_id if self.m_id is not None else 'Unassigned'}"
             )
-            self.rebind_btn.setEnabled(True)
+            self.rebind_hw_btn.setEnabled(True)
         else:
-            self.k_label.setText("Virtual UInput subsystem active (Kernel-managed).")
-            self.m_label.setText("Mouse movements routed via Linux evdev.")
-            self.rebind_btn.setEnabled(False)
+            self.k_label.setText(
+                "Keyboard Subsystem:     Virtual UInput / Evdev (Kernel-managed)"
+            )
+            self.m_label.setText(
+                "Mouse Subsystem:        Evdev Pointer (Kernel-managed)"
+            )
+            self.rebind_hw_btn.setEnabled(False)
+            self.rebind_hw_btn.setToolTip(
+                "Interception device filtering is only applicable on Windows."
+            )
 
-    def _handle_rebind(self) -> None:
+    def _handle_window_selection(self) -> None:
+        window_result = select_window()
+        if not window_result:
+            logger.info("Window selection cancelled by user.")
+            return
+
+        self.w_id, self.w_title = window_result
+        self._refresh_ui()
+
+        self.dispatcher.dispatch(
+            MapperEvent(
+                action="ON_TARGET_WINDOW_CHANGE",
+                target_window_id=self.w_id,
+                target_window_title=self.w_title,
+            )
+        )
+
+        logger.info("Target window set: ID=%s (%s)", self.w_id, self.w_title)
+        QMessageBox.information(
+            self,
+            "Target Window Updated",
+            f"Active target window set:\nID: {self.w_id}\nTitle: {self.w_title}",
+        )
+
+    def _handle_hardware_rebind(self) -> None:
         if sys.platform != "win32":
             return
 
@@ -90,30 +142,24 @@ class DevicesPage(QWidget):
 
         devices = select_keyboard_then_mouse(parent=self)
         if not devices:
-            logger.info(
-                "\n[!] Error selecting device, re-selection likely cancelled by user."
-            )
+            logger.info("Hardware selection cancelled by user.")
             return
 
-        k_device, m_device = devices
-
-        # 1. Update persistent store
-        store.settings.update(
-            windows_keyboard_device=k_device, windows_mouse_device=m_device
-        )
+        self.k_id, self.m_id = devices
+        
         self._refresh_ui()
 
-        # 2. Hot-reload active running engine
         self.dispatcher.dispatch(
             MapperEvent(
-                action="ON_DEVICES_CHANGED",
-                payload={"keyboard_id": k_device, "mouse_id": m_device},
+                action="ON_DEVICES_CHANGE",
+                keyboard_device_id=self.k_id,
+                mouse_device_id=self.m_id,
             )
         )
 
-        logger.info("Devices reloaded successfully: K=%d, M=%d", k_device, m_device)
+        logger.info("Devices reloaded successfully: K=%d, M=%d", self.k_id, self.m_id)
         QMessageBox.information(
             self,
             "Devices Updated",
-            f"Hardware reloaded:\nKeyboard ID: {k_device}\nMouse ID: {m_device}",
+            f"Hardware reloaded:\nKeyboard ID: {self.k_id}\nMouse ID: {self.m_id}",
         )

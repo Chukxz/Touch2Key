@@ -5,12 +5,13 @@ Outputs via logging / QMessageBox in GUI mode and standard print in CLI mode.
 
 from __future__ import annotations
 
+import sys
 import logging
 import shutil
 from pathlib import Path
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from modules.utils import SYSTEM, ADB
+from modules.utils import ADB
 
 logger = logging.getLogger("modules.scripts.pre_flight")
 
@@ -29,7 +30,7 @@ def check_adb() -> bool:
 
 def check_driver() -> bool:
     """Verify low-level driver or kernel subsystem access."""
-    if SYSTEM == "Windows":
+    if sys.platform == "win32":
         try:
             from interception.interception import Interception
 
@@ -37,7 +38,7 @@ def check_driver() -> bool:
         except Exception:
             return False
 
-    elif SYSTEM == "Linux":
+    elif sys.platform == "linux":
         return Path("/dev/uinput").exists()
 
     return False
@@ -63,11 +64,11 @@ def run(verbose: bool = True, parent=None) -> bool:
             err_lines.append(
                 "• ADB binary not found. Run setup to download platform-tools."
             )
-        if SYSTEM == "Windows" and "Driver" in failed:
+        if sys.platform == "win32" and "Driver" in failed:
             err_lines.append(
                 "• Interception driver not accessible. Run setup or restart your PC."
             )
-        elif SYSTEM == "Linux" and "Driver" in failed:
+        elif sys.platform == "linux" and "Driver" in failed:
             err_lines.append(
                 "• /dev/uinput access missing. Run 'sudo setup' to configure udev rules."
             )

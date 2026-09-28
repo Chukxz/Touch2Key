@@ -4,8 +4,7 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Any
 
-from modules.core.pipeline_factory import create_pipeline_from_zone
-from modules.database import Layout, LayoutZone, store, ensure_system_bezels
+from modules.database import Layout, LayoutZone, store
 from modules.utils import (
     BEZEL,
     CIRCLE,
@@ -16,8 +15,9 @@ from modules.utils import (
     MapperEvent,
 )
 
+from modules.core.bezel_validator import ensure_system_bezels
+
 if TYPE_CHECKING:
-    from modules.core.pipeline import Pipeline
     from .config import AppConfig
 
 logger = logging.getLogger("modules.core.layout_loader")
@@ -83,7 +83,7 @@ class LayoutLoader:
         # --- Self-Heal ---
         # Ensures existing SQLite databases automatically get the Virtual Keyboard
         # and Mode Switch bezels injected before we compile pipelines.
-        ensure_system_bezels(layout.id)
+        ensure_system_bezels(layout.id, store.layouts, store.zones)
 
         # Fetch zones AFTER auto-healing ensures bezels exist
         zones = store.get_active_layout_zones()

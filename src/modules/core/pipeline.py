@@ -4,7 +4,7 @@ import math
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Generic, TypeVar, Any
+from typing import Generic, TypeVar
 
 from modules.utils import (
     REGION_MODES,
@@ -23,7 +23,7 @@ from modules.utils import (
 
 # Pipeline: Region ⟶ Origin ⟶ Constraint ⟶ Transformation ⟶ Semantic
 
-
+@dataclass(slots=True)
 class OutputSink(ABC):
     @abstractmethod
     def key_down(self, key: str) -> None: ...
@@ -326,9 +326,9 @@ class JoystickTransform(Transformation[frozenset[str]]):
 class Semantic(ABC, Generic[T]):
     @abstractmethod
     def process(
-        self, context: PipelineContext, value: T, output: OutputSink
+        self, context: PipelineContext, value: T, output_sink: OutputSink
     ) -> None: ...
-    def reset(self, output: OutputSink) -> None:
+    def reset(self, output_sink: OutputSink) -> None:
         pass
 
 
@@ -337,14 +337,14 @@ class ButtonSemantic(Semantic[T], Generic[T]):
     output: str
     mouse_button: bool = False
 
-    def process(self, context: PipelineContext, value: T, output: OutputSink) -> None:
+    def process(self, context: PipelineContext, value: T, output_sink: OutputSink) -> None:
         if context.event.phase is TouchPhase.DOWN:
-            (output.mouse_down if self.mouse_button else output.key_down)(self.output)
+            (output_sink.mouse_down if self.mouse_button else output_sink.key_down)(self.output)
         elif context.event.phase is TouchPhase.UP:
-            (output.mouse_up if self.mouse_button else output.key_up)(self.output)
+            (output_sink.mouse_up if self.mouse_button else output_sink.key_up)(self.output)
 
-    def reset(self, output: OutputSink) -> None:
-        (output.mouse_up if self.mouse_button else output.key_up)(self.output)
+    def reset(self, output_sink: OutputSink) -> None:
+        (output_sink.mouse_up if self.mouse_button else output_sink.key_up)(self.output)
 
 
 @dataclass(slots=True)
@@ -352,20 +352,20 @@ class DirectionalSemantic(Semantic[frozenset[str]]):
     _active: frozenset[str] = field(init=False, default_factory=frozenset)
 
     def process(
-        self, context: PipelineContext, value: frozenset[str], output: OutputSink
+        self, context: PipelineContext, value: frozenset[str], output_sink: OutputSink
     ) -> None:
         if context.event.phase is TouchPhase.UP:
-            self.reset(output)
+            self.reset(output_sink)
             return
         for key in self._active - value:
-            output.key_up(key)
+            output_sink.key_up(key)
         for key in value - self._active:
-            output.key_down(key)
+            output_sink.key_down(key)
         self._active = value
 
-    def reset(self, output: OutputSink) -> None:
+    def reset(self, output_sink: OutputSink) -> None:
         for key in self._active:
-            output.key_up(key)
+            output_sink.key_up(key)
         self._active = frozenset()
 
 
@@ -374,14 +374,14 @@ class PointerSemantic(Semantic[Vector]):
     pointer: bool = True
 
     def process(
-        self, context: PipelineContext, value: Vector, output: OutputSink
+        self, context: PipelineContext, value: Vector, output_sink: OutputSink
     ) -> None:
         if (
             self.pointer
             and context.event.phase is TouchPhase.MOVE
             and (value.x or value.y)
         ):
-            output.mouse_move(value.x, value.y)
+            output_sink.mouse_move(value.x, value.y)
 
 
 @dataclass(slots=True)
@@ -401,7 +401,7 @@ class ToggleSemantic(Semantic[Unit]):
     _start_pos: Point | None = field(init=False, default=None)
 
     def process(
-        self, context: PipelineContext, value: Unit, output: OutputSink
+        self, context: PipelineContext, value: Unit, output_sink: OutputSink
     ) -> None:
         phase = context.event.phase
 
@@ -426,13 +426,13 @@ class ToggleSemantic(Semantic[Unit]):
             # 3. Fire only if it passes the strict tap constraint
             if duration <= self.max_duration_s and drift <= self.max_drift_px:
                 if self.output == TOGGLE_MODE:
-                    output.toggle_menu_mode()
+                    output_sink.toggle_menu_mode()
                 elif self.output == TOGGLE_VKB:
-                    output.toggle_virtual_keyboard()
+                    output_sink.toggle_virtual_keyboard()
                 else:
                     pass
 
-    def reset(self, output: OutputSink) -> None:
+    def reset(self, output_sink: OutputSink) -> None:
         self._start_time = None
         self._start_pos = None
 
@@ -464,15 +464,15 @@ class Pipeline(Generic[T]):
     def owns(self, contact_id: int) -> bool:
         return self._owned_contact == contact_id
 
-    def reset(self, output: OutputSink) -> None:
+    def reset(self, output_sink: OutputSink) -> None:
         for semantic in self.semantics:
-            semantic.reset(output)
+            semantic.reset(output_sink)
         self.transformation.reset()
         self.origin.end()
         self._owned_contact = None
         self._prev_position = None
 
-    def process(self, event: TouchEvent, output: OutputSink) -> bool:
+    def process(self, event: TouchEvent, output_sink: OutputSink) -> bool:
         if event.phase is TouchPhase.DOWN:
             if self._owned_contact is not None:
                 return False
@@ -501,7 +501,7 @@ class Pipeline(Generic[T]):
 
         value = self.transformation.apply(context)
         for semantic in self.semantics:
-            semantic.process(context, value, output)
+            semantic.process(context, value, output_sink)
 
         self._prev_position = constrained
 

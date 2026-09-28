@@ -29,11 +29,11 @@ from modules.utils import (
     MOUSE_MOVE_RELATIVE,
     MOUSE_VIRTUAL_DESKTOP,
     NT_TIMER_RES,
-    PACK_ABS,
-    PACK_BUTTON,
-    PACK_KEY,
-    PACK_REL,
-    PACK_TYPEMATIC_HEADER,
+    PACK_ABS_STRUCT,
+    PACK_BUTTON_STRUCT,
+    PACK_KEY_STRUCT,
+    PACK_REL_STRUCT,
+    PACK_TYPEMATIC_STRUCT,
     RIGHT_BUTTON_DOWN,
     RIGHT_BUTTON_UP,
     TASK_ABS,
@@ -160,7 +160,7 @@ def keyboard_worker(k_pipe_read: Connection, k_device_handle: int | None):
                 payload = k_pipe_read.recv_bytes()
 
                 if len(payload) == 3:
-                    win_code, k_state = PACK_KEY.unpack(payload)
+                    win_code, k_state = PACK_KEY_STRUCT.unpack(payload)
                     if k_state == KEY_PING:
                         continue
                     if k_state == 0:
@@ -176,8 +176,8 @@ def keyboard_worker(k_pipe_read: Connection, k_device_handle: int | None):
                     continue
 
                 if payload and payload[0] == KEY_CONFIG:
-                    _, enabled, delay_ns, rate_sec, count = PACK_TYPEMATIC_HEADER.unpack_from(payload, 0)
-                    offset = PACK_TYPEMATIC_HEADER.size
+                    _, enabled, delay_ns, rate_sec, count = PACK_TYPEMATIC_STRUCT.unpack_from(payload, 0)
+                    offset = PACK_TYPEMATIC_STRUCT.size
                     excludes = set()
                     for _ in range(count):
                         (sc,) = struct.unpack_from("<H", payload, offset)
@@ -230,7 +230,7 @@ def mouse_worker(
             try:
                 if mb_pipe_read.poll(15.0):
                     payload = mb_pipe_read.recv_bytes()
-                    _, data = PACK_BUTTON.unpack(payload)
+                    _, data = PACK_BUTTON_STRUCT.unpack(payload)
 
                     if data == BUTTON_PING:
                         continue
@@ -300,7 +300,7 @@ def mouse_worker(
                     continue
 
             if task_id == TASK_REL:
-                _, dx, dy = PACK_REL.unpack(payload)
+                _, dx, dy = PACK_REL_STRUCT.unpack(payload)
                 acc_dx += dx
                 acc_dy += dy
 
@@ -310,7 +310,7 @@ def mouse_worker(
                     next_task_id = next_payload[0]
 
                     if next_task_id == TASK_REL:
-                        _, next_dx, next_dy = PACK_REL.unpack(next_payload)
+                        _, next_dx, next_dy = PACK_REL_STRUCT.unpack(next_payload)
                         acc_dx += next_dx
                         acc_dy += next_dy
                         coalesce_count += 1
@@ -329,7 +329,7 @@ def mouse_worker(
                 _sleep(_uniform(MIN_MOUSE_DWELL, MAX_MOUSE_DWELL))
 
             elif task_id == TASK_ABS:
-                _, x, y = PACK_ABS.unpack(payload)
+                _, x, y = PACK_ABS_STRUCT.unpack(payload)
                 with send_lock:
                     m_ctx.send(
                         m_device_handle,

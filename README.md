@@ -146,6 +146,8 @@ Because Touch2Key installs system-level drivers and kernel rules, **simply runni
 | `touch2key-uninstall --purge` | Uninstalls and removes jsons/images and the settings toml file. |
 | `touch2key-uninstall --purge-all` | Purges and removes the profiling (.prof) file. |
 | `touch2key-wireless` | Forces ADB wireless connection. |
+| `touch2key-keyboard` | Test the virtual keyboard program output.|
+| `touch2key-visualizer` | Visualize the keyboard and mouse events with support for cursor toggling visualization. |
 
 ### Typematic Commands (via Layout Manager)
 You can directly configure the hardware auto-repeat settings via `touch2key-manage`:

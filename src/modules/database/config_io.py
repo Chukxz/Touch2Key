@@ -88,7 +88,7 @@ def export_settings_toml(
         system.add("json_path", "")
         
     system.add("double_tap_enabled", bool(s.double_tap_enabled))
-    system.add("system_toggle_enabled", bool(s.system_toggle_enabled))
+    system.add("bezel_toggle_enabled", bool(s.bezel_toggle_enabled))
     doc.add("system", system)
 
     # Performance Section
@@ -122,7 +122,7 @@ def export_settings_toml(
     typematic.add("enabled", bool(s.typematic_enabled))
     typematic.add("delay_ms", float(s.typematic_delay_ms))
     typematic.add("rate_hz", float(s.typematic_rate_hz))
-    typematic.add("exclude_keys", s.typematic_exclude_keys or "w,a,s,d,shift,ctrl,alt")
+    typematic.add("exclude_keys", s.typematic_excluded_keys or "w,a,s,d,shift,ctrl,alt")
     doc.add("typematic", typematic)
 
     target_path.parent.mkdir(parents=True, exist_ok=True)

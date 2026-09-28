@@ -17,13 +17,12 @@ from modules.database import store
 from modules.gui.main_window import MainWindow
 from modules.platforms import check_single_instance
 from modules.scripts.pre_flight import run as pre_flight_run
-from modules.utils import DIAGNOSTICS_FOLDER
+from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER
 from modules.log_manager import AppLogManager
 
 if TYPE_CHECKING:
     from cProfile import Profile
 
-GUI_APP_NAME = "Touch2Key_GUI"
 gui_profiler: Profile | None = None
 
 
@@ -86,8 +85,8 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         multiprocessing.set_start_method("spawn", force=True)
     except RuntimeError:
         pass
-    
-    success, _ = check_single_instance(GUI_APP_NAME)
+
+    success, _ = check_single_instance(APP_NAME)
     if not success:
         profiler_cleanup(gui_profiler)
         sys.exit(0)
@@ -100,7 +99,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     )
 
     app = QApplication(sys.argv)
-    app.setApplicationName("Touch2Key")
+    app.setApplicationName(APP_NAME)
     app.setQuitOnLastWindowClosed(True)
 
     window = MainWindow()

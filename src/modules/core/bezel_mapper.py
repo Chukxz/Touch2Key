@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 import threading
 
 from modules.utils import BEZEL, scale_coord
 
-from modules.core.pipeline import RectangularRegion, Point, SystemToggle
-
-from modules.core import BridgeOutputSink
+from modules.core.pipeline import RectangularRegion, Point
+from modules.core.pipeline_factory import SystemToggle
 
 if TYPE_CHECKING:
-    from modules.core import Mapper, BridgeOutputSink
+    from modules.core.mapper import Mapper
 
 
 class BezelMapper:
@@ -19,13 +18,10 @@ class BezelMapper:
     def __init__(
         self,
         mapper: Mapper,
-        toggle_mode: Callable[[], None] | None = None,
-        toggle_vkb: Callable[[], None] | None = None,
     ):
         self.mapper = mapper
         self.config = mapper.config
         self.bridge = mapper.bridge
-        self.output_sink = BridgeOutputSink(self.bridge, toggle_mode, toggle_vkb)
         self.mapper_event_dispatcher = mapper.mapper_event_dispatcher
 
         self.lock = threading.Lock()
@@ -33,30 +29,39 @@ class BezelMapper:
 
         self._build_pipelines()
 
+        self.mapper_event_dispatcher.register_callback(
+            "ON_LAYOUT_RELOAD", self._build_pipelines
+        )
+
     def _build_pipelines(self):
         bezels_raw_zones = self.mapper.layout_loader.bezels_json_data.copy()
         w = float(self.mapper.layout_loader.width)
         h = float(self.mapper.layout_loader.height)
-        
+
         new_pipelines = []
 
-        for scancode, value in bezels_raw_zones:
-            z_type = value.get("type")
-            priority = value.get("priority", 0)
-            
+        for scancode, values in bezels_raw_zones:
+            z_type = str(values.get("type", ""))
+            priority = int(values.get("priority", 0))
+
             if z_type == BEZEL:
                 region = RectangularRegion(
-                    top_left=Point(scale_coord(w, value.get("x1")), scale_coord(h, value.get("y1"))),
-                    bottom_right=Point(scale_coord(w, value.get("x2")), scale_coord(h, value.get("y2")))
+                    top_left=Point(
+                        scale_coord(w, values.get("x1")),
+                        scale_coord(h, values.get("y1")),
+                    ),
+                    bottom_right=Point(
+                        scale_coord(w, values.get("x2")),
+                        scale_coord(h, values.get("y2")),
+                    ),
                 )
-                
+
                 pipeline = SystemToggle(
-                    output=(str(scancode)),
-                    region = region,
-                    priority=priority
+                    output=(str(scancode)), region=region, priority=priority
                 )
-                
+
                 new_pipelines.append(pipeline)
-        
+
         with self.lock:
+            # No need to reset
             self.pipelines = new_pipelines

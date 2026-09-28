@@ -12,7 +12,6 @@ from modules.platforms import get_platform, get_specific_mt_key
 get_platform().SystemConfig().set_dpi_awareness()
 
 from modules.utils import (
-    BEZEL,
     BEZEL_DP_THICKNESS,
     CIRCLE,
     RECTANGLE,
@@ -21,13 +20,7 @@ from modules.utils import (
     MOUSE_WHEEL_CODE,
     SPRINT_DISTANCE_CODE,
     IDLE,
-    TOP_BEZEL_ID,
-    BOTTOM_BEZEL_ID,
-    bezels_exist_ids,
-    get_bezel_thicknesses,
     dp_to_px,
-    ensure_top_bezel,
-    ensure_bottom_bezel,
     get_scancode_and_bridge_key_from_key,
     get_key_from_scancode,
     rotate_resolution,
@@ -37,7 +30,14 @@ from modules.utils import (
     make_copy_name,
 )
 
-from modules.core import PipelineConfig
+from modules.core.pipeline import PipelineConfig
+
+from modules.core.bezel_validator import (
+    bezels_exist_ids,
+    get_bezel_thicknesses,
+    ensure_top_bezel,
+    ensure_bottom_bezel,
+)
 
 from modules.database import store
 

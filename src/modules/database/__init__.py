@@ -7,9 +7,8 @@ sqlite-backed rewrite thin, and it's what legacy_migration.py writes into.
 
 from __future__ import annotations
 
-import json
 import logging
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
 from .connection import ConnectionManager, connection_manager
 from .repositories import (
@@ -24,7 +23,6 @@ from .repositories import (
 
 __all__ = [
     "Store",
-    "store",
     "connection_manager",
     "ConnectionManager",
     "AppSettings",
@@ -44,18 +42,9 @@ from modules.utils import (
     BEZEL_DP_THICKNESS,
     TOP_BEZEL_ID,
     BOTTOM_BEZEL_ID,
-    dp_to_px,
     calculate_rect,
+    dp_to_px,
 )
-
-if TYPE_CHECKING:
-    from modules.database.connection import ConnectionManager
-    from modules.database.repositories import (
-        AppSettings,
-        AppSettingsRepository,
-        LayoutsRepository,
-        LayoutZonesRepository,
-    )
 
 
 class Store:
@@ -108,7 +97,6 @@ def reset_layout_zones_to_app_settings(layout_id: int) -> int:
     if not layout:
         return 0
 
-
     l_w = layout.width
     l_h = layout.height
     thickness = float(dp_to_px(BEZEL_DP_THICKNESS, layout.dpi))
@@ -131,42 +119,44 @@ def reset_layout_zones_to_app_settings(layout_id: int) -> int:
 
         zone.set_parsed_config_from_json()
 
-        _, sem_mode, _ = zone.CONFIG_HELPER.get_semantic_config()              
-            
+        _, sem_mode, _ = zone.CONFIG_HELPER.get_semantic_config()
+
         # 1. Bezels
         if sem_mode == "TOGGLE":
-            zone.CONFIG_HELPER.set_region_config(
-                bezel_dp_thickness=BEZEL_DP_THICKNESS
-            )
-            
+            zone.CONFIG_HELPER.set_region_config(bezel_dp_thickness=BEZEL_DP_THICKNESS)
+
         # 2. Standard Buttons
         elif sem_mode == "BUTTON":
             zone.CONFIG_HELPER.set_transform_config(
                 sensitivity_x=settings.sensitivity_x,
-                sensitivity_y=settings.sensitivity_y
+                sensitivity_y=settings.sensitivity_y,
             )
 
         # 3. Directional Movement Joystick Zone
         elif sem_mode == "DIRECTIONAL":
             origin_idx = 0
-            
+
             if settings.anchored_joystick:
                 origin_idx = 2
             elif settings.floating_joystick:
                 origin_idx = 1
-            
-            zone.CONFIG_HELPER.set_origin_config(origin_idx)       
-            
+
+            zone.CONFIG_HELPER.set_origin_config(origin_idx)
+
         # 4. Camera Look Area (Populated dynamically but added here anyway)
         elif sem_mode == "POINTER":
             zone.CONFIG_HELPER.set_transform_config(
                 sensitivity_x=settings.sensitivity_x,
                 sensitivity_y=settings.sensitivity_y,
                 deadzone=settings.deadzone,
-                hysterisis=settings.hysteresis
+                hysteresis=settings.hysteresis,
             )
 
-        store.zones.update(zone.id, ignore_app_settings=False, pipeline_json=zone.CONFIG_HELPER.get_pipeline_json_from_config())
+        store.zones.update(
+            zone.id,
+            ignore_app_settings=False,
+            pipeline_json=zone.CONFIG_HELPER.get_pipeline_json_from_config(),
+        )
         updated_count += 1
 
     logger.info(

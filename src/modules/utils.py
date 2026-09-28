@@ -8,14 +8,15 @@ import struct
 import subprocess
 import time
 import threading
-import json
 import math
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Literal, Any
 
-from modules.core import PipelineConfig
+from PySide6.QtCore import QObject, Signal
+
+APP_NAME = "Touch2Key"
 
 # Task IDs
 TASK_BUTTON = 0
@@ -23,10 +24,10 @@ TASK_REL = 1
 TASK_ABS = 2
 
 # Pre-compiled C-struct formats for maximum speed
-PACK_BUTTON = struct.Struct("<Bi")
-PACK_REL = struct.Struct("<Bhh")
-PACK_ABS = struct.Struct("<Bii")
-PACK_KEY = struct.Struct("<HB")
+PACK_BUTTON_STRUCT = struct.Struct("<Bi")
+PACK_REL_STRUCT = struct.Struct("<Bhh")
+PACK_ABS_STRUCT = struct.Struct("<Bii")
+PACK_KEY_STRUCT = struct.Struct("<HB")
 
 # Sentinel values for IPC Key and Mouse streams
 KEY_PING = 2
@@ -34,14 +35,18 @@ KEY_CONFIG = 3  # Configuration payload for typematic timing & exclusions
 
 # Structure: <B (Task ID = 3) ? (enabled) I (initial_delay_ns) f (repeat_rate_sec) H (excluded_count)
 # Followed by array of H (unsigned short scancodes)
-PACK_TYPEMATIC_HEADER = struct.Struct("<B?IfH")
+PACK_TYPEMATIC_STRUCT = struct.Struct("<B?IfH")
 
 BUTTON_PING = 0x0000
 KEEPALIVE_INTERVAL = 5.0
 
+# IPC Struct: 1 byte for state (1=Down, 0=Up), 2 bytes for Scancode
+VKB_STRUCT = struct.Struct("<BH")
+
+
 if TYPE_CHECKING:
     from multiprocessing import Process
-    from modules.database.repositories import Layout, LayoutsRepository, LayoutZone, LayoutZonesRepository
+    from multiprocessing.connection import Connection
 
 # ---------------------------------------------------------------------------
 # Project & Data Paths
@@ -118,6 +123,8 @@ SHORT_DELAY = 1.0
 LONG_DELAY = 2.0
 WINDOW_UPDATE_INTERVAL = 0.05
 ROTATION_POLL_INTERVAL = 0.5
+DEF_MOVE_INTERVAL = 0.001
+VKB_SLEEP_TIME = 0.1
 
 # Delay (in nanoseconds)
 CURSOR_CHECK_DELAY_NS = 100_000_000
@@ -152,7 +159,7 @@ EVENT_TYPE = Literal[
     "ON_AGGREGATION",
     "ON_WORKER_RESPAWN",
     "ON_TARGET_WINDOW_CHANGE",
-    "ON_DEVICES_CHANGED",
+    "ON_DEVICES_CHANGE",
 ]
 
 # Pipeline: Region ⟶ Origin ⟶ Constraint ⟶ Transformation ⟶ Semantic
@@ -182,7 +189,7 @@ MAX_KEY_DWELL = 0.070
 # TYPEMATIC DEFAULTS
 INITIAL_DELAY_NS = 500_000_000
 REPEAT_RATE = 0.0333
-EXCLUDE_KEYS = "esc,tab,lshift,rshift,lctrl,rctrl,lalt,ralt,caps_lock,num_lock,scroll_lock,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12"
+EXCLUDED_KEYS = "esc,tab,lshift,rshift,lctrl,rctrl,lalt,ralt,caps_lock,num_lock,scroll_lock,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12"
 
 SCANCODES = {
     "ESC": 0x01,
@@ -339,9 +346,9 @@ COPY_RE = re.compile(r"- Copy(?:\((\d+)\)|(?=\s|$))")
 
 class InvalidFieldError(ValueError):
     """Raised when update()/create()/create_pipeline_from_zone()
-    
+
     receives a field name outside ALLOWED_FIELDS."""
-    
+
 
 class TouchPhase(Enum):
     DOWN = auto()
@@ -396,7 +403,9 @@ class MapperEvent:
     acc_y: float | None = None
     worker_type: str | None = None
     target_window_id: int | None = None
-    payload: dict | None = None
+    target_window_title: str = ""
+    keyboard_device_id: int | None = None
+    mouse_device_id: int | None = None
 
 
 class MapperEventDispatcher:
@@ -421,7 +430,7 @@ class MapperEventDispatcher:
             "ON_AGGREGATION": [],
             "ON_WORKER_RESPAWN": [],
             "ON_TARGET_WINDOW_CHANGE": [],
-            "ON_DEVICES_CHANGED": [],
+            "ON_DEVICES_CHANGE": [],
         }
 
     def register_callback(
@@ -440,6 +449,7 @@ class MapperEventDispatcher:
                 callbacks = self.callback_registry[event_type]
                 if func not in callbacks:
                     callbacks.append(func)
+
         except Exception as exc:
             func_name = getattr(func, "__name__", repr(func))
             print(
@@ -462,6 +472,7 @@ class MapperEventDispatcher:
                 callbacks = self.callback_registry[event_type]
                 if func in callbacks:
                     callbacks.remove(func)
+
         except Exception as exc:
             func_name = getattr(func, "__name__", repr(func))
             print(
@@ -478,6 +489,7 @@ class MapperEventDispatcher:
                         for cb in callbacks
                         if getattr(cb, "__self__", None) is not owner
                     ]
+
         except Exception as exc:
             print(f"[!] Error unregistering callbacks for owner {owner}: {exc}")
 
@@ -489,7 +501,7 @@ class MapperEventDispatcher:
 
     def dispatch(self, event: MapperEvent) -> None:
         with self._lock:
-            callbacks = tuple(self.callback_registry.get(event.action, ()))
+            callbacks = self.callback_registry.get(event.action, []).copy()
 
         args = self._get_callback_args(event)
 
@@ -524,12 +536,354 @@ class MapperEventDispatcher:
             return (event.worker_type,)
 
         if action == "ON_TARGET_WINDOW_CHANGE":
-            return (event.target_window_id,)
+            return (
+                event.target_window_id,
+                event.target_window_title,
+            )
 
-        if action == "ON_DEVICES_CHANGED":
-            return (event,)
+        if action == "ON_DEVICES_CHANGE":
+            return (
+                event.keyboard_device_id,
+                event.mouse_device_id,
+            )
 
         return ()
+
+
+# ---------------------------------------------------------------------------
+# Engine <-> GUI process IPC protocol
+# ---------------------------------------------------------------------------
+# Every message sent over the engine<->GUI multiprocessing.Pipe is one
+# `send_bytes`/`recv_bytes` frame: 1 opcode byte, then a fixed-width struct
+# payload (if the opcode has one), then a trailing UTF-8 string (if the
+# opcode carries one). Pipe framing gives each call its own boundary, so a
+# trailing string needs no length prefix of its own -- it's just "whatever's
+# left after the fixed part".
+#
+# GUI -> engine process (commands)
+IPC_CMD_START = 0x01
+IPC_CMD_STOP = 0x02
+IPC_CMD_CONFIG_RELOAD = 0x03
+IPC_CMD_LAYOUT_RELOAD = 0x04
+IPC_CMD_DEVICES_CHANGE = 0x05
+IPC_CMD_TARGET_WINDOW_CHANGE = 0x86
+
+# Engine process -> GUI (lifecycle + forwarded dispatcher events)
+IPC_EVT_STARTED = 0x80
+IPC_EVT_STOPPED = 0x81
+IPC_EVT_ERROR = 0x82
+
+# All little-endian, no implicit padding ("<" prefix). Optional ints use -1
+# as the "None" sentinel; optional strings use "" as the "None" sentinel.
+PACK_IPC_START_STRUCT = struct.Struct("<Biff?ff")
+PACK_IPC_DEVICES_CHANGE_STRUCT = struct.Struct("<Bii")
+PACK_IPC_MENU_MODE_TOGGLE_STRUCT = struct.Struct("<B?")
+PACK_IPC_AGGREGATION_STRUCT = struct.Struct("<Bffff")
+PACK_IPC_TARGET_WINDOW_CHANGE_STRUCT = struct.Struct("<Bi")
+
+_IPC_NONE_INT = -1
+_IPC_STR_SEP = "\x1f"  # unit separator
+
+
+def _pack_opt_int(value: int | None) -> int:
+    return _IPC_NONE_INT if value is None else value
+
+
+def _unpack_opt_int(value: int) -> int | None:
+    return None if value == _IPC_NONE_INT else value
+
+
+def _pack_trailing_strings(*values: str | None) -> bytes:
+    return _IPC_STR_SEP.join(v or "" for v in values).encode("utf-8")
+
+
+def _unpack_trailing_strings(data: bytes, count: int) -> list[str | None]:
+    parts = data.decode("utf-8").split(_IPC_STR_SEP) if data else [""] * count
+    parts = (parts + [""] * count)[:count]
+    return [p or None for p in parts]
+
+
+def pack_ipc_start_cmd(
+    window_id: int | None,
+    rate_cap: float,
+    pps: float,
+    toggle_key: str | None,
+    sprint_key: str | None,
+    typematic_enabled: bool,
+    typematic_delay_ms: float,
+    typematic_rate_hz: float,
+    typematic_excluded_keys: str | None,
+) -> bytes:
+    header = PACK_IPC_START_STRUCT.pack(
+        IPC_CMD_START,
+        _pack_opt_int(window_id),
+        rate_cap,
+        pps,
+        typematic_enabled,
+        typematic_delay_ms,
+        typematic_rate_hz,
+    )
+    return header + _pack_trailing_strings(
+        toggle_key, sprint_key, typematic_excluded_keys
+    )
+
+
+def unpack_ipc_start_cmd(payload: bytes) -> dict[str, Any]:
+    fixed_size = PACK_IPC_START_STRUCT.size
+    (
+        _,
+        window_id,
+        rate_cap,
+        pps,
+        typematic_enabled,
+        typematic_delay_ms,
+        typematic_rate_hz,
+    ) = PACK_IPC_START_STRUCT.unpack_from(payload, 0)
+    toggle_key, sprint_key, typematic_excluded_keys = _unpack_trailing_strings(
+        payload[fixed_size:], 3
+    )
+    return {
+        "window_id": _unpack_opt_int(window_id),
+        "rate_cap": rate_cap,
+        "pps": pps,
+        "typematic_enabled": typematic_enabled,
+        "typematic_delay_ms": typematic_delay_ms,
+        "typematic_rate_hz": typematic_rate_hz,
+        "toggle_key": toggle_key,
+        "sprint_key": sprint_key,
+        "typematic_excluded_keys": typematic_excluded_keys,
+    }
+
+
+def pack_ipc_stop_cmd() -> bytes:
+    return bytes([IPC_CMD_STOP])
+
+
+def pack_ipc_config_reload_cmd() -> bytes:
+    return bytes([IPC_CMD_CONFIG_RELOAD])
+
+
+def pack_ipc_layout_reload_cmd() -> bytes:
+    return bytes([IPC_CMD_LAYOUT_RELOAD])
+
+
+def pack_ipc_devices_change_cmd(k_id: int | None, m_id: int | None) -> bytes:
+    return PACK_IPC_DEVICES_CHANGE_STRUCT.pack(
+        IPC_CMD_DEVICES_CHANGE, _pack_opt_int(k_id), _pack_opt_int(m_id)
+    )
+
+
+def unpack_ipc_devices_change_cmd(payload: bytes) -> tuple[int | None, int | None]:
+    _, k_id, m_id = PACK_IPC_DEVICES_CHANGE_STRUCT.unpack(payload)
+    return _unpack_opt_int(k_id), _unpack_opt_int(m_id)
+
+
+def pack_ipc_target_window_change_cmd(
+    target_window_id: int | None, target_window_title: str
+) -> bytes:
+    header = PACK_IPC_TARGET_WINDOW_CHANGE_STRUCT.pack(
+        IPC_CMD_TARGET_WINDOW_CHANGE, _pack_opt_int(target_window_id)
+    )
+    return header + target_window_title.encode("utf-8")
+
+
+def unpack_ipc_target_window_change_cmd(payload: bytes) -> tuple[int | None, str]:
+    fixed_size = PACK_IPC_TARGET_WINDOW_CHANGE_STRUCT.size
+    _, target_window_id = PACK_IPC_TARGET_WINDOW_CHANGE_STRUCT.unpack_from(payload, 0)
+    title = payload[fixed_size:].decode("utf-8")
+    return _unpack_opt_int(target_window_id), title
+
+
+def pack_ipc_started_evt() -> bytes:
+    return bytes([IPC_EVT_STARTED])
+
+
+def pack_ipc_stopped_evt() -> bytes:
+    return bytes([IPC_EVT_STOPPED])
+
+
+def pack_ipc_error_evt(message: str) -> bytes:
+    return bytes([IPC_EVT_ERROR]) + message.encode("utf-8")
+
+
+def unpack_ipc_error_evt(payload: bytes) -> str:
+    return payload[1:].decode("utf-8")
+
+
+class IpcMapperEventDispatcher(MapperEventDispatcher):
+    """Engine-process-side dispatcher.
+
+    Drop-in replacement for MapperEventDispatcher: everything registered
+    in-process (AppConfig/LayoutLoader/Mapper callbacks) still fires exactly
+    as before. Incoming command bytes from the GUI are turned into local
+    dispatches so existing in-process callbacks (e.g. Engine._on_devices_change)
+    fire unchanged regardless of whether the event originated locally or over IPC.
+    """
+
+    def __init__(self, conn: Connection) -> None:
+        super().__init__()
+        self.conn = conn
+        self._send_lock = threading.Lock()
+
+    def dispatch(self, event: MapperEvent) -> None:
+        super().dispatch(event)
+
+    def send_ipc(self, payload: bytes) -> None:
+        with self._send_lock:
+            self.conn.send_bytes(payload)
+
+    def send_started(self) -> None:
+        self.send_ipc(pack_ipc_started_evt())
+
+    def send_stopped(self) -> None:
+        self.send_ipc(pack_ipc_stopped_evt())
+
+    def send_error(self, message: str) -> None:
+        self.send_ipc(pack_ipc_error_evt(message))
+
+    def handle_command(self, payload: bytes) -> bool:
+        """Decodes one incoming GUI->engine command and dispatches it locally.
+
+        Returns False for IPC_CMD_STOP (caller should stop the engine and its
+        reader loop), True for everything else handled.
+        """
+        opcode = payload[0]
+        if opcode == IPC_CMD_STOP:
+            return False
+        if opcode == IPC_CMD_CONFIG_RELOAD:
+            self.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+        elif opcode == IPC_CMD_LAYOUT_RELOAD:
+            self.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+        elif opcode == IPC_CMD_DEVICES_CHANGE:
+            k_id, m_id = unpack_ipc_devices_change_cmd(payload)
+            self.dispatch(
+                MapperEvent(
+                    action="ON_DEVICES_CHANGE",
+                    keyboard_device_id=k_id,
+                    mouse_device_id=m_id,
+                )
+            )
+        else:
+            print(f"[!] Unknown IPC command opcode: {opcode}")
+        return True
+
+    def run_command_loop(self) -> None:
+        """Blocks, servicing GUI->engine commands until IPC_CMD_STOP or the pipe closes."""
+        while True:
+            try:
+                payload = self.conn.recv_bytes()
+            except (EOFError, OSError):
+                return
+            if not payload or not self.handle_command(payload):
+                return
+
+
+class QtIpcMapperEventDispatcher(QObject):
+    """GUI-process-side counterpart to IpcMapperEventDispatcher.
+
+    Wraps the GUI's end of the engine<->GUI Pipe. A background thread reads
+    incoming lifecycle/forwarded-dispatcher bytes and re-emits them as Qt
+    signals (safe to connect to cross-thread; Qt queues the delivery onto
+    whatever thread the receiver lives in). Plain methods send commands
+    (start/stop/config reload/layout reload/devices change/windows change) to the engine.
+    """
+
+    engine_started = Signal()
+    engine_stopped = Signal()
+    engine_error = Signal(str)
+    menu_mode_toggled = Signal(bool)
+    aggregation = Signal(float, float, float, float)
+    worker_respawned = Signal(str)
+
+    def __init__(self, conn: Any, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self.conn = conn
+        self._send_lock = threading.Lock()
+        self._running = True
+        self._reader_thread = threading.Thread(target=self._read_loop, daemon=True)
+        self._reader_thread.start()
+
+    def _read_loop(self) -> None:
+        while self._running:
+            try:
+                payload = self.conn.recv_bytes()
+            except (EOFError, OSError):
+                return
+            if payload:
+                self._handle_event(payload)
+
+    def _handle_event(self, payload: bytes) -> None:
+        opcode = payload[0]
+        try:
+            if opcode == IPC_EVT_STARTED:
+                self.engine_started.emit()
+            elif opcode == IPC_EVT_STOPPED:
+                self.engine_stopped.emit()
+            elif opcode == IPC_EVT_ERROR:
+                self.engine_error.emit(unpack_ipc_error_evt(payload))
+            else:
+                print(f"[!] Unknown IPC event opcode: {opcode}")
+        except Exception as exc:
+            print(f"[!] Failed to handle IPC event (opcode={opcode}): {exc}")
+
+    def _send(self, payload: bytes) -> None:
+        with self._send_lock:
+            try:
+                self.conn.send_bytes(payload)
+            except (BrokenPipeError, OSError) as exc:
+                print(f"[!] Failed to send IPC command: {exc}")
+
+    def send_start(
+        self,
+        window_id: int | None,
+        rate_cap: float,
+        pps: float,
+        toggle_key: str | None,
+        sprint_key: str | None,
+        typematic_enabled: bool = True,
+        typematic_delay_ms: float = 250.0,
+        typematic_rate_hz: float = 30.0,
+        typematic_excluded_keys: str | None = None,
+    ) -> None:
+        self._send(
+            pack_ipc_start_cmd(
+                window_id,
+                rate_cap,
+                pps,
+                toggle_key,
+                sprint_key,
+                typematic_enabled,
+                typematic_delay_ms,
+                typematic_rate_hz,
+                typematic_excluded_keys,
+            )
+        )
+
+    def send_stop(self) -> None:
+        self._send(pack_ipc_stop_cmd())
+
+    def send_config_reload(self) -> None:
+        self._send(pack_ipc_config_reload_cmd())
+
+    def send_layout_reload(self) -> None:
+        self._send(pack_ipc_layout_reload_cmd())
+
+    def send_devices_change(self, k_id: int | None, m_id: int | None) -> None:
+        self._send(pack_ipc_devices_change_cmd(k_id, m_id))
+
+    def send_target_window_change(
+        self, target_window_id: int | None, target_window_title: str
+    ):
+        self._send(
+            pack_ipc_target_window_change_cmd(target_window_id, target_window_title)
+        )
+
+    def close(self) -> None:
+        self._running = False
+        try:
+            self.conn.close()
+        except OSError:
+            pass
 
 
 def get_adb_device():
@@ -744,124 +1098,6 @@ def calculate_rect(
     return (cx, cy, min(xs), min(ys), max(xs), max(ys))
 
 
-def bezels_exist_ids(zones: list[LayoutZone]) -> tuple[int, int]:
-    top_id = -1
-    bottom_id = -1
-
-    for z in zones:
-        if z.zone_type != BEZEL:
-            continue
-
-        if top_id < 0 and str(z.scancode) == str(TOP_BEZEL_ID):
-            top_id = z.id
-
-        if bottom_id < 0 and str(z.scancode) == str(BOTTOM_BEZEL_ID):
-            bottom_id = z.id
-
-        if top_id >= 0 and bottom_id >= 0:
-            break
-
-    return top_id, bottom_id
-
-
-def get_bezel_thicknesses(zone: LayoutZone, layout: Layout):
-    zone.set_parsed_config_from_json()
-    _, _, bezel_dp_thickness, _ = zone.CONFIG_HELPER.get_region_config()
-    return bezel_dp_thickness, float(dp_to_px(bezel_dp_thickness, layout.dpi))
-
-
-def ensure_top_bezel(
-    layout: Layout,
-    zones_repo: LayoutZonesRepository,
-    dp_thickness: float | None = None,
-):
-    if dp_thickness is None:
-        dp_thickness = float(BEZEL_DP_THICKNESS)
-
-    w = layout.width
-    h = layout.height
-    _thickness = float(dp_to_px(dp_thickness, layout.dpi))
-    cx, cy, x1, y1, x2, y2 = calculate_rect(0.0, h - _thickness, w, _thickness)
-    
-    Pipeline_Config = PipelineConfig()
-    Pipeline_Config.set_region_config(2, dp_thickness, 100)
-    Pipeline_Config.set_origin_config(0)
-    Pipeline_Config.set_constraint_config(0)
-    Pipeline_Config.set_transform_config(0)
-    Pipeline_Config.set_semantic_config(3)
-
-    return zones_repo.create(
-        layout_id=layout.id,
-        scancode=TOP_BEZEL_ID,
-        name=TOP_BEZEL_NAME,
-        zone_type=BEZEL,
-        cx=cx,
-        cy=cy,
-        r=None,
-        x1=x1,
-        y1=y1,
-        x2=x2,
-        y2=y2,
-        pipeline_json=Pipeline_Config.get_pipeline_json_from_config(),
-    ).id
-
-
-def ensure_bottom_bezel(
-    layout: Layout,
-    zones_repo: LayoutZonesRepository,
-    dp_thickness: float | None = None,
-):
-    if dp_thickness is None:
-        dp_thickness = float(BEZEL_DP_THICKNESS)
-        
-    w = layout.width
-    _thickness = float(dp_to_px(dp_thickness, layout.dpi))        
-    cx, cy, x1, y1, x2, y2 = calculate_rect(0.0, 0.0, w, _thickness)
-
-    Pipeline_Config = PipelineConfig()
-    Pipeline_Config.set_region_config(2, dp_thickness, 100)
-    Pipeline_Config.set_origin_config(0)
-    Pipeline_Config.set_constraint_config(0)
-    Pipeline_Config.set_transform_config(0)
-    Pipeline_Config.set_semantic_config(3)
-
-    return zones_repo.create(
-        layout_id=layout.id,
-        scancode=BOTTOM_BEZEL_ID,
-        name=BOTTOM_BEZEL_NAME,
-        zone_type=BEZEL,
-        cx=cx,
-        cy=cy,
-        r=None,
-        x1=x1,
-        y1=y1,
-        x2=x2,
-        y2=y2,
-        pipeline_json=Pipeline_Config.get_pipeline_json_from_config(),
-    ).id
-
-
-def ensure_system_bezels(layout_id: int, layouts_repo: LayoutsRepository,
-    zones_repo: LayoutZonesRepository):
-    """Verifies a layout has both system bezels (Top/Mode, Bottom/VKB) and creates them if missing."""
-    layout = layouts_repo.get(layout_id)
-    if not layout:
-        return -1, -1
-
-    zones = zones_repo.list_for_layout(layout_id)
-    top_id, bottom_id = bezels_exist_ids(zones)
-
-    if top_id < 0:
-        top_id = ensure_top_bezel(layout, zones_repo)
-        print("Auto-healed missing Top Bezel for layout ID %d", layout.id)
-
-    if bottom_id < 0:
-        bottom_id = ensure_bottom_bezel(layout, zones_repo)
-        print("Auto-healed missing Bottom Bezel for layout ID %d", layout.id)
-
-    
-    return top_id, bottom_id
-
 def scale_coord(base: float, val: float | None = None) -> float:
     if val is None:
         return 0.0
@@ -877,8 +1113,4 @@ def make_copy_name(name: str) -> str:
     match = matches[-1]
     number = int(match.group(1) or 1) + 1
 
-    return (
-        name[:match.start()]
-        + f"- Copy({number})"
-        + name[match.end():]
-    )
+    return name[: match.start()] + f"- Copy({number})" + name[match.end() :]

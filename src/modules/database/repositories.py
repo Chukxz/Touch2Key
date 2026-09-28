@@ -5,29 +5,31 @@ Validates field names against an explicit ALLOWED_FIELDS set before executing SQ
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, fields as dataclass_fields
 from typing import Any, Optional, TYPE_CHECKING
 
 from modules.utils import (
-    EXCLUDE_KEYS,
+    EXCLUDED_KEYS,
     BEZEL,
     BEZEL_DP_THICKNESS,
     CIRCLE,
     RECTANGLE,
-    bezels_exist_ids,
-    get_bezel_thicknesses,
-    ensure_top_bezel,
-    ensure_bottom_bezel,
     InvalidFieldError,
 )
 
-from modules.core import PipelineConfig
+from modules.core.pipeline import PipelineConfig
 
 from .connection import connection_manager
 
 if TYPE_CHECKING:
     from . import AppSettings, Layout, LayoutZone
+
+from modules.core.bezel_validator import (
+    bezels_exist_ids,
+    get_bezel_thicknesses,
+    ensure_top_bezel,
+    ensure_bottom_bezel,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,15 +49,13 @@ class AppSettings:
     sprint_key: Optional[str]
     adb_rate_cap: float
     pps_alert_threshold: float
+    active_layout_id: Optional[int]
     typematic_enabled: bool
     typematic_delay_ms: float
     typematic_rate_hz: float
-    typematic_exclude_keys: Optional[str]
-    active_layout_id: Optional[int]
-    windows_keyboard_device: Optional[int]
-    windows_mouse_device: Optional[int]
+    typematic_excluded_keys: Optional[str]
     double_tap_enabled: bool
-    system_toggle_enabled: bool
+    bezel_toggle_enabled: bool
     updated_at: str
 
     @classmethod
@@ -67,7 +67,7 @@ class AppSettings:
         d["anchored_joystick"] = bool(d["anchored_joystick"])
         d["typematic_enabled"] = bool(d["typematic_enabled"])
         d["double_tap_enabled"] = bool(d["double_tap_enabled"])
-        d["system_toggle_enabled"] = bool(d["system_toggle_enabled"])
+        d["bezel_toggle_enabled"] = bool(d["bezel_toggle_enabled"])
         return cls(**d)
 
 
@@ -105,6 +105,8 @@ class LayoutZone:
     y2: Optional[float]
     ignore_app_settings: bool
     pipeline_json: str
+    created_at: str
+    updated_at: str
 
     CONFIG_HELPER = PipelineConfig()
 
@@ -160,11 +162,9 @@ class AppSettingsRepository:
         "typematic_enabled",
         "typematic_delay_ms",
         "typematic_rate_hz",
-        "typematic_exclude_keys",
-        "windows_keyboard_device",
-        "windows_mouse_device",
+        "typematic_excluded_keys",
         "double_tap_enabled",
-        "system_toggle_enabled",
+        "bezel_toggle_enabled",
     }
 
     def get(self) -> AppSettings:
@@ -206,8 +206,8 @@ class AppSettingsRepository:
 
             conn.execute("DELETE FROM app_settings WHERE id = 1;")
             conn.execute(
-                "INSERT INTO app_settings (id, active_layout_id, typematic_exclude_keys) "
-                f"VALUES (1, ?, {EXCLUDE_KEYS});",
+                "INSERT INTO app_settings (id, active_layout_id, typematic_excluded_keys) "
+                f"VALUES (1, ?, {EXCLUDED_KEYS});",
                 (active_layout_id,),
             )
         return self.get()

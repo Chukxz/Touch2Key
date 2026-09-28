@@ -12,9 +12,10 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QStyle,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 
 from modules.utils import (
+    LOCK_KEYS,
     M_MIDDLE,
     MODIFIER_KEYS,
     TOGGLE_KEY_ID,
@@ -22,8 +23,12 @@ from modules.utils import (
     get_scancode_from_key,
 )
 
+from modules.platforms import get_lock_states, check_single_instance
+
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection
+    
+VKB_NAME = "Touch2Key_VKB"
 
 # --- Main Alphanumeric Block ---
 # Format: (Label, Scancode, Column Span)
@@ -171,11 +176,13 @@ class VirtualKeyButton(QPushButton):
         scancode: int,
         mod_codes: list[int],
         parent_ref: VirtualKeyboard,
+        lock_codes: list[int] | None = None,
     ):
         super().__init__(key_label, parent_ref)
         self.scancode = scancode
         self.modifier_scancodes = mod_codes
         self.parent_ref = parent_ref
+        self.is_lock_key = scancode in (lock_codes or [])
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # CRITICAL: Do not accept focus, otherwise clicking a key minimizes the full-screen game
@@ -197,6 +204,11 @@ class VirtualKeyButton(QPushButton):
                 color: white;
                 border: 1px solid #357abd;
             }
+            QPushButton[active="true"] {
+                background-color: #c62828;
+                color: white;
+                border: 1px solid #8e1c1c;
+            }
         """)
 
         # Make modifiers "Sticky"
@@ -204,12 +216,17 @@ class VirtualKeyButton(QPushButton):
             self.setCheckable(True)
             self.toggled.connect(self._on_modifier_toggled)
         else:
-            # Standard keys trigger normally
+            # Standard keys (including lock keys) trigger normally: momentary
+            # down+up per tap. Lock keys additionally get a "active" visual
+            # indicator (see set_active), but that's purely cosmetic and
+            # driven externally by polled OS state -- it never changes how
+            # this button sends, only how it looks.
             self.pressed.connect(self._on_standard_pressed)
             self.released.connect(self._on_standard_released)
 
     def _on_modifier_toggled(self, checked: bool):
         # 'checked' is True if the button is currently pressed down
+        self.set_active(checked)
         if checked:
             self._send_ipc_message(0, self.scancode)
         else:
@@ -224,17 +241,47 @@ class VirtualKeyButton(QPushButton):
     def _send_ipc_message(self, state: int, scancode: int):
         self.parent_ref._send_key(state, scancode)
 
+    def set_active(self, active: bool) -> None:
+        """
+        Visual: Shows if the current modifier or lock key is active.
+        """
+        if self.property("active") == active:
+            return
+        self.setProperty("active", active)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
 
 class VirtualKeyboard(QWidget):
+    LOCK_POLL_INTERVAL_MS = 250
+
     def __init__(self, conn: Connection | None):
         super().__init__()
         self.conn = conn
         self._pressed_keys = set()
+
         self.modifier_scancodes = [
             code
-            for key in MODIFIER_KEYS
+            for key in MODIFIER_KEYS.split(",")
             if (code := get_scancode_from_key(key)) is not None
         ]
+
+        # Lock keys: scancodes for the sticky-vs-momentary check above, and
+        # a name->scancode map to translate get_lock_states()'s
+        # "caps_lock"/"num_lock"/"scroll_lock" keys into the button to
+        # update during polling.
+        self.lock_scancodes = [
+            code
+            for key in LOCK_KEYS.split(",")
+            if (code := get_scancode_from_key(key)) is not None
+        ]
+        self.lock_name_to_scancode = {
+            name: code
+            for name in LOCK_KEYS.split(",")
+            if (code := get_scancode_from_key(name)) is not None
+        }
+        self.lock_buttons: dict[int, VirtualKeyButton] = {}
+
         self.setWindowTitle("Touch2Key - Virtual Keyboard")
         # Made wider to accommodate all 3 blocks cleanly
         self.resize(1100, 300)
@@ -252,6 +299,13 @@ class VirtualKeyboard(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, True)
 
         self._setup_ui()
+
+        # Reflect real lock-key state immediately on open (don't wait for
+        # the first timer tick), then keep polling.
+        self._poll_lock_states()
+        self.lock_state_timer = QTimer(self)
+        self.lock_state_timer.timeout.connect(self._poll_lock_states)
+        self.lock_state_timer.start(self.LOCK_POLL_INTERVAL_MS)
 
         # Proactive Fail-Safe: Check if Main Engine is still alive
 
@@ -291,8 +345,28 @@ class VirtualKeyboard(QWidget):
         master_layout.addLayout(numpad_grid, 4)
 
     def _create_btn(self, label: str, scancode: int) -> VirtualKeyButton:
-        btn = VirtualKeyButton(label, scancode, self.modifier_scancodes, self)
+        btn = VirtualKeyButton(
+            label,
+            scancode,
+            self.modifier_scancodes,
+            self,
+            lock_codes=self.lock_scancodes,
+        )
+        if btn.is_lock_key:
+            self.lock_buttons[scancode] = btn
         return btn
+
+    def _poll_lock_states(self) -> None:
+        """Refreshes each lock button's visual 'active' state from live OS
+        state (see get_lock_states in modules.utils). Read-only: never
+        sends anything, never touches _pressed_keys.
+        """
+        states = get_lock_states()
+        if states is not None:
+            for name, scancode in self.lock_name_to_scancode.items():
+                btn = self.lock_buttons.get(scancode)
+                if btn is not None:
+                    btn.set_active(states.get(name, False))
 
     def _send_key(self, state: int, scancode: int):
         """Packs the keystroke and sends it through the IPC pipe."""
@@ -324,6 +398,8 @@ class VirtualKeyboard(QWidget):
 
     def closeEvent(self, event):
         """Ensures the terminal loop dies completely when the window 'X' is clicked."""
+        self.lock_state_timer.stop()
+
         # Release all pressed keys and close the IPC pipe cleanly
 
         self.release_all()
@@ -339,7 +415,12 @@ class VirtualKeyboard(QWidget):
     def _heartbeat_loop(self): ...
 
 
-def run(conn: Connection | None = None):
+def run(conn: Connection | None = None, enforce_single_instance=True):
+    if enforce_single_instance:
+        success, _ = check_single_instance(VKB_NAME)
+        if not success:
+            sys.exit(0)
+    
     app = QApplication(sys.argv)
     app.setWindowIcon(
         QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
@@ -357,4 +438,4 @@ if __name__ == "__main__":
 
 
 def virtual_keyboard_worker(conn: Connection):
-    run(conn)
+    run(conn, False) # Don't enforce single instance checks

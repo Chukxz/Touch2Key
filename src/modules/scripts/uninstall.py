@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Driver, Rules, and Data Uninstaller (GUI & CLI compatible).
 Supports Windows (Interception driver) and Linux (udev rules with pkexec/sudo fallback).
@@ -24,7 +23,6 @@ from modules.utils import (
     DIAGNOSTICS_FOLDER,
     LOGS_FOLDER,
     PROJECT_ROOT,
-    SYSTEM,
     UDEV_RULE_PATH,
 )
 
@@ -33,7 +31,7 @@ logger = logging.getLogger("modules.scripts.uninstall")
 
 def _is_admin() -> bool:
     """Checks if current process has elevated privileges."""
-    if SYSTEM == "Windows":
+    if sys.platform == "win32":
         try:
             return ctypes.windll.shell32.IsUserAnAdmin() != 0
         except Exception:
@@ -54,7 +52,7 @@ def _kill_adb() -> None:
     """Terminates active adb daemon instances across platforms."""
     cmd = (
         ["taskkill", "/F", "/IM", "adb.exe", "/T"]
-        if SYSTEM == "Windows"
+        if sys.platform == "win32"
         else ["pkill", "-f", "adb"]
     )
     try:
@@ -188,7 +186,7 @@ def run(parent=None) -> bool:
     # 1. Platform-Specific Elevation Check
     # Windows requires the entire process to run elevated to talk to the driver installer.
     # Linux can remain unprivileged and elevate only during udev rule removal via pkexec.
-    if SYSTEM == "Windows" and not _is_admin():
+    if sys.platform == "win32" and not _is_admin():
         msg = "Administrator privileges are required to uninstall the Interception driver."
         if is_gui:
             logger.error(msg)
@@ -228,7 +226,7 @@ def run(parent=None) -> bool:
 
     # 4. OS-Specific Driver / Rules Removal
     needs_reboot = False
-    if SYSTEM == "Windows":
+    if sys.platform == "win32":
         installer_exe = (
             BIN_FOLDER
             / "Interception"
@@ -257,7 +255,7 @@ def run(parent=None) -> bool:
             else:
                 print(f"[!] {msg}")
 
-    elif SYSTEM == "Linux":
+    elif sys.plaform == "linux":
         success = _remove_linux_udev_rules(is_gui=is_gui)
         if not success:
             err_msg = (
@@ -288,7 +286,7 @@ def run(parent=None) -> bool:
     # 7. Final Notification / Reboot Workflow
     if is_gui:
         logger.info("Uninstall completed successfully.")
-        if SYSTEM == "Windows" and needs_reboot and not args.no_restart:
+        if sys.platform == "win32" and needs_reboot and not args.no_restart:
             res = QMessageBox.question(
                 parent,
                 "Restart Required",
@@ -306,7 +304,7 @@ def run(parent=None) -> bool:
             )
     else:
         print("\n[+] Uninstall complete.")
-        if SYSTEM == "Windows":
+        if sys.platform == "win32":
             if needs_reboot and not args.no_restart:
                 print("\n" + "=" * 55)
                 print(" SYSTEM RESTART REQUIRED ".center(55, "="))

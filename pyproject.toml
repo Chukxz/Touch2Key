@@ -67,6 +67,10 @@ touch2key-preflight = "modules.scripts.pre_flight:run"
 touch2key-setup = "modules.scripts.setup:run"
 touch2key-uninstall = "modules.scripts.uninstall:run"
 
+# Visualizer and Virtual Keyboard
+touch2key-keyboard = "modules.gui.overlays.virtual_keyboard:run"
+touch2key-visualizer = "modules.gui.overlays.visualizer:run"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

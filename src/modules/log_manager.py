@@ -5,7 +5,6 @@ import datetime
 import logging
 import sys
 from logging.handlers import MemoryHandler
-from pathlib import Path
 from modules.utils import LOGS_FOLDER
 
 

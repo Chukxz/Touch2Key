@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from modules.database import store
-from modules.utils import MapperEvent, EXCLUDE_KEYS
+from modules.utils import MapperEvent, EXCLUDED_KEYS
 from .base_page import BasePage
 
 if TYPE_CHECKING:
@@ -172,7 +172,7 @@ class TypematicPage(BasePage):
             delay = int(getattr(s, "typematic_delay_ms", 250.0))
             rate = float(getattr(s, "typematic_rate_hz", 30.0))
             raw_excludes = str(
-                getattr(s, "typematic_exclude_keys", f"{EXCLUDE_KEYS}")
+                getattr(s, "typematic_EXCLUDED_KEYS", f"{EXCLUDED_KEYS}")
             )
 
             self.enable_check.setChecked(enabled)
@@ -221,7 +221,7 @@ class TypematicPage(BasePage):
         self.rate_spin.setValue(30.0)
         self._on_enable_toggled(True)
         self.exclude_list.clear()
-        self._add_tokens(EXCLUDE_KEYS.split(","))
+        self._add_tokens(EXCLUDED_KEYS.split(","))
         QMessageBox.information(
             self,
             "Defaults",
@@ -242,7 +242,7 @@ class TypematicPage(BasePage):
                 typematic_enabled=int(self.enable_check.isChecked()),
                 typematic_delay_ms=float(self.delay_spin.value()),
                 typematic_rate_hz=float(self.rate_spin.value()),
-                typematic_exclude_keys=serialized_keys,
+                typematic_EXCLUDED_KEYS=serialized_keys,
             )
 
             if self.dispatcher:

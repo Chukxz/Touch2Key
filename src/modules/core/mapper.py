@@ -11,6 +11,12 @@ from modules.utils import (
     LONG_DELAY,
     WINDOW_UPDATE_INTERVAL,
     SCANCODES,
+    VKB_STRUCT,
+    VKB_SLEEP_TIME,
+    TOGGLE_KEY_ID,
+    M_LEFT,
+    M_MIDDLE,
+    M_RIGHT,
     MapperEvent,
     rotate_resolution,
 )
@@ -110,6 +116,11 @@ class Mapper:
         )
         self.aggregate_mouse_moves_thread.start()
 
+        self.vkb_listerner = threading.Thread(
+            target=self._virtual_keyboard_listener, daemon=True
+        )
+        self.vkb_listerner.start()
+
         self.mapper_event_dispatcher.dispatch(
             MapperEvent(action="ON_MENU_MODE_TOGGLE", is_visible=self.last_cursor_state)
         )
@@ -143,7 +154,9 @@ class Mapper:
                         self.emulator["toggle_key"] = s.toggle_key
                         self.toggle_key_scancode = SCANCODES.get(s.toggle_key)
 
-    def rebind_target_window(self, new_window_id: int | None) -> None:
+    def rebind_target_window(
+        self, new_window_id: int | None, new_window_title: str
+    ) -> None:
         """Updates the target HWND / Window ID dynamically on the active engine."""
         with self.lock:
             if new_window_id and self.window_manager.is_window_valid(new_window_id):
@@ -154,9 +167,10 @@ class Mapper:
                 self.game_window_info = self._get_window_info(new_window_id)
                 self.window_lost = False
                 logger.info(
-                    "Engine live-rebound to Window ID: %s (%s)",
+                    "Engine live-rebound to Window ID: %s (%s) with title: %s",
                     self.window_id,
                     self.game_window_class_name,
+                    new_window_title,
                 )
             else:
                 self.window_id = self.window_manager.get_foreground_window()
@@ -170,8 +184,9 @@ class Mapper:
                 )
                 self.window_lost = self.window_id is None
                 logger.warning(
-                    "Target window invalidated. Rebound to foreground HWND: %s",
+                    "Target window invalidated. Rebound to foreground HWND: %s (%s)",
                     self.window_id,
+                    self.game_window_class_name,
                 )
 
     def _get_window_info(self, window_id: int) -> dict:
@@ -231,7 +246,9 @@ class Mapper:
             except Exception as e:
                 logger.debug("Window tracking exception: %s", e)
 
-            sleep_duration = LONG_DELAY if self.window_lost else self.window_update_interval
+            sleep_duration = (
+                LONG_DELAY if self.window_lost else self.window_update_interval
+            )
             self.stop_event.wait(sleep_duration)
 
     def _get_game_window_info(self) -> dict:
@@ -329,6 +346,48 @@ class Mapper:
             sleep_duration = max(0.0, self.touch_reader.move_interval - elapsed)
             self.stop_event.wait(sleep_duration)
 
+    def _virtual_keyboard_listener(self) -> None:
+        """Listenes for the virtual keyboard output and routes it to the bridge"""
+        while self.running and not self.stop_event.is_set():
+            try:
+                payload = self.engine_ref.vkb_reader.recv_bytes()
+                state, scancode = VKB_STRUCT.unpack(payload)
+                
+                is_toggle_mode = scancode == TOGGLE_KEY_ID
+                is_mouse_left = scancode == M_LEFT
+                is_mouse_middle = scancode == M_MIDDLE
+                is_mouse_right = scancode == M_RIGHT
+
+                if state == 0:
+                    if is_toggle_mode:
+                        pass # No-Op on key down
+                    elif is_mouse_left:
+                        self.bridge.left_click_down()
+                    elif is_mouse_middle:
+                        self.bridge.middle_click_down()
+                    elif is_mouse_right:
+                        self.bridge.right_click_down()
+                    else:                        
+                        self.bridge.key_down(scancode)
+                    
+                elif state == 1:
+                    if is_toggle_mode:
+                        self.engine_ref.toggle_mode()
+                    elif is_mouse_left:
+                        self.bridge.left_click_up()
+                    elif is_mouse_middle:
+                        self.bridge.middle_click_up()
+                    elif is_mouse_right:
+                        self.bridge.right_click_up()
+                    else:
+                        self.bridge.key_up(scancode)
+
+            except EOFError:
+                self.stop_event.wait(VKB_SLEEP_TIME)
+            except Exception as e:
+                print(f"\n[WORKER] - Virtual Keyboard crashed: {e}.")
+                self.stop_event.wait(VKB_SLEEP_TIME)
+    
     def _on_worker_respawn(self, worker_type: str) -> None:
         self.mapper_event_dispatcher.dispatch(
             MapperEvent(action="ON_WORKER_RESPAWN", worker_type=worker_type)

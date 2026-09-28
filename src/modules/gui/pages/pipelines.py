@@ -90,16 +90,18 @@ class PipelinesPage(BasePage):
         priority_form.setContentsMargins(0, 0, 0, 0)
         self.priority_number = QDoubleSpinBox()
         self.priority_number.setRange(-100, 200)
+        self.priority_number.setSingleStep(1.0)
         self.priority_number.setValue(0)
         priority_form.addRow("Priority Value:", self.priority_number)
-        self.region_stack.addWidget(self.top_region_bezel_page)
+        self.region_stack.addWidget(self.priority_region_page)
 
         self.top_region_bezel_page = QWidget()
         top_bezel_form = QFormLayout(self.top_region_bezel_page)
         top_bezel_form.setContentsMargins(0, 0, 0, 0)
         self.top_reg_bezel_dp_thickness = QDoubleSpinBox()
-        self.top_reg_bezel_dp_thickness.setValue(BEZEL_DP_THICKNESS)
         self.top_reg_bezel_dp_thickness.setRange(2, 100)
+        self.top_reg_bezel_dp_thickness.setSingleStep(1.0)
+        self.top_reg_bezel_dp_thickness.setValue(BEZEL_DP_THICKNESS)
         self.top_reg_bezel_dp_thickness.setSuffix(" dp")
         top_bezel_form.addRow(
             "Top Bezel DP Thickness:", self.top_reg_bezel_dp_thickness
@@ -111,6 +113,7 @@ class PipelinesPage(BasePage):
         bottom_bezel_form.setContentsMargins(0, 0, 0, 0)
         self.bottom_reg_bezel_dp_thickness = QDoubleSpinBox()
         self.bottom_reg_bezel_dp_thickness.setRange(2, 100)
+        self.bottom_reg_bezel_dp_thickness.setSingleStep(1.0)
         self.bottom_reg_bezel_dp_thickness.setValue(BEZEL_DP_THICKNESS)
         self.bottom_reg_bezel_dp_thickness.setSuffix(" dp")
         bottom_bezel_form.addRow(
@@ -131,9 +134,12 @@ class PipelinesPage(BasePage):
         delta_form.setContentsMargins(0, 0, 0, 0)
         self.trans_sens_x = QDoubleSpinBox()
         self.trans_sens_x.setRange(0.01, 10.0)
+        self.trans_sens_x.setSingleStep(0.01)
         self.trans_sens_x.setValue(1.0)
+        
         self.trans_sens_y = QDoubleSpinBox()
         self.trans_sens_y.setRange(0.01, 10.0)
+        self.trans_sens_y.setSingleStep(0.01)
         self.trans_sens_y.setValue(1.0)
         delta_form.addRow(
             "Sensitivity (X, Y):",
@@ -146,9 +152,12 @@ class PipelinesPage(BasePage):
         joy_form.setContentsMargins(0, 0, 0, 0)
         self.trans_joy_deadzone = QDoubleSpinBox()
         self.trans_joy_deadzone.setRange(0, 1)
+        self.trans_joy_deadzone.setSingleStep(0.01)
         self.trans_joy_deadzone.setValue(0.1)
+        
         self.trans_joy_hysteresis = QDoubleSpinBox()
         self.trans_joy_hysteresis.setRange(0, 45)
+        self.trans_joy_hysteresis.setSingleStep(1.0)
         self.trans_joy_hysteresis.setValue(5.0)
         self.trans_joy_hysteresis.setSuffix("°")
 

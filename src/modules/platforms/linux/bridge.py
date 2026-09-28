@@ -20,11 +20,11 @@ from modules.utils import (
     M_RIGHT,
     MIDDLE_BUTTON_DOWN,
     MIDDLE_BUTTON_UP,
-    PACK_ABS,
-    PACK_BUTTON,
-    PACK_KEY,
-    PACK_REL,
-    PACK_TYPEMATIC_HEADER,
+    PACK_ABS_STRUCT,
+    PACK_BUTTON_STRUCT,
+    PACK_KEY_STRUCT,
+    PACK_REL_STRUCT,
+    PACK_TYPEMATIC_STRUCT,
     RIGHT_BUTTON_DOWN,
     RIGHT_BUTTON_UP,
     SCANCODES,
@@ -95,7 +95,7 @@ class UInputBridge(AbstractBridge):
             codes = list(exclude_scancodes)
 
             payload = bytearray(
-                PACK_TYPEMATIC_HEADER.pack(
+                PACK_TYPEMATIC_STRUCT.pack(
                     KEY_CONFIG, enabled, delay_ns, interval_sec, len(codes)
                 )
             )
@@ -120,6 +120,7 @@ class UInputBridge(AbstractBridge):
             )
             self.k_proc.start()
             self.system_config.set_high_priority(self.k_proc.pid, "Keyboard")
+            self.k_pipe_read.close()
 
             self.m_proc = multiprocessing.Process(
                 target=mouse_worker,
@@ -129,6 +130,8 @@ class UInputBridge(AbstractBridge):
             )
             self.m_proc.start()
             self.system_config.set_high_priority(self.m_proc.pid, "Mouse")
+            self.mb_pipe_read.close()
+            self.m_pipe_read.close()
 
             self.update_typematic(
                 self._cached_typematic["enabled"],
@@ -153,14 +156,14 @@ class UInputBridge(AbstractBridge):
         with self.bridge_lock:
             self._pressed_keys.add(code)
             try:
-                self.k_pipe_write.send_bytes(PACK_KEY.pack(int(code), 1))
+                self.k_pipe_write.send_bytes(PACK_KEY_STRUCT.pack(int(code), 1))
             except OSError:
                 self.selective_release()
 
     def key_up(self, code):
         with self.bridge_lock:
             try:
-                self.k_pipe_write.send_bytes(PACK_KEY.pack(int(code), 0))
+                self.k_pipe_write.send_bytes(PACK_KEY_STRUCT.pack(int(code), 0))
             except OSError:
                 self.selective_release()
             else:
@@ -168,7 +171,7 @@ class UInputBridge(AbstractBridge):
 
     def mouse_move_rel(self, dx, dy):
         try:
-            self.m_pipe_write.send_bytes(PACK_REL.pack(TASK_REL, int(dx), int(dy)))
+            self.m_pipe_write.send_bytes(PACK_REL_STRUCT.pack(TASK_REL, int(dx), int(dy)))
         except OSError:
             self.selective_release()
 
@@ -176,14 +179,14 @@ class UInputBridge(AbstractBridge):
         abs_x = max(0, min(65535, int((x / self.screen_w) * 65535)))
         abs_y = max(0, min(65535, int((y / self.screen_h) * 65535)))
         try:
-            self.m_pipe_write.send_bytes(PACK_ABS.pack(TASK_ABS, int(abs_x), int(abs_y)))
+            self.m_pipe_write.send_bytes(PACK_ABS_STRUCT.pack(TASK_ABS, int(abs_x), int(abs_y)))
         except OSError:
             self.selective_release()
 
     def left_click_down(self):
         with self.bridge_lock:
             try:
-                self.mb_pipe_write.send_bytes(PACK_BUTTON.pack(TASK_BUTTON, LEFT_BUTTON_DOWN))
+                self.mb_pipe_write.send_bytes(PACK_BUTTON_STRUCT.pack(TASK_BUTTON, LEFT_BUTTON_DOWN))
             except OSError:
                 self.selective_release()
             else:
@@ -192,7 +195,7 @@ class UInputBridge(AbstractBridge):
     def left_click_up(self):
         with self.bridge_lock:
             try:
-                self.mb_pipe_write.send_bytes(PACK_BUTTON.pack(TASK_BUTTON, LEFT_BUTTON_UP))
+                self.mb_pipe_write.send_bytes(PACK_BUTTON_STRUCT.pack(TASK_BUTTON, LEFT_BUTTON_UP))
             except OSError:
                 self.selective_release()
             else:
@@ -201,7 +204,7 @@ class UInputBridge(AbstractBridge):
     def right_click_down(self):
         with self.bridge_lock:
             try:
-                self.mb_pipe_write.send_bytes(PACK_BUTTON.pack(TASK_BUTTON, RIGHT_BUTTON_DOWN))
+                self.mb_pipe_write.send_bytes(PACK_BUTTON_STRUCT.pack(TASK_BUTTON, RIGHT_BUTTON_DOWN))
             except OSError:
                 self.selective_release()
             else:
@@ -210,7 +213,7 @@ class UInputBridge(AbstractBridge):
     def right_click_up(self):
         with self.bridge_lock:
             try:
-                self.mb_pipe_write.send_bytes(PACK_BUTTON.pack(TASK_BUTTON, RIGHT_BUTTON_UP))
+                self.mb_pipe_write.send_bytes(PACK_BUTTON_STRUCT.pack(TASK_BUTTON, RIGHT_BUTTON_UP))
             except OSError:
                 self.selective_release()
             else:
@@ -219,7 +222,7 @@ class UInputBridge(AbstractBridge):
     def middle_click_down(self):
         with self.bridge_lock:
             try:
-                self.mb_pipe_write.send_bytes(PACK_BUTTON.pack(TASK_BUTTON, MIDDLE_BUTTON_DOWN))
+                self.mb_pipe_write.send_bytes(PACK_BUTTON_STRUCT.pack(TASK_BUTTON, MIDDLE_BUTTON_DOWN))
             except OSError:
                 self.selective_release()
             else:
@@ -228,7 +231,7 @@ class UInputBridge(AbstractBridge):
     def middle_click_up(self):
         with self.bridge_lock:
             try:
-                self.mb_pipe_write.send_bytes(PACK_BUTTON.pack(TASK_BUTTON, MIDDLE_BUTTON_UP))
+                self.mb_pipe_write.send_bytes(PACK_BUTTON_STRUCT.pack(TASK_BUTTON, MIDDLE_BUTTON_UP))
             except OSError:
                 self.selective_release()
             else:
@@ -240,7 +243,7 @@ class UInputBridge(AbstractBridge):
             with self.bridge_lock:
                 for code in list(self._pressed_keys):
                     try:
-                        self.k_pipe_write.send_bytes(PACK_KEY.pack(int(code), KEY_PING))
+                        self.k_pipe_write.send_bytes(PACK_KEY_STRUCT.pack(int(code), KEY_PING))
                     except OSError:
                         pass
                 if (
@@ -249,7 +252,7 @@ class UInputBridge(AbstractBridge):
                     or self._mouse_middle_down
                 ):
                     try:
-                        self.mb_pipe_write.send_bytes(PACK_BUTTON.pack(TASK_BUTTON, BUTTON_PING))
+                        self.mb_pipe_write.send_bytes(PACK_BUTTON_STRUCT.pack(TASK_BUTTON, BUTTON_PING))
                     except OSError:
                         pass
 
@@ -286,6 +289,8 @@ class UInputBridge(AbstractBridge):
                 )
                 self.k_proc.start()
                 self.system_config.set_high_priority(self.k_proc.pid, "Revived Keyboard")
+                self.k_pipe_read.close()
+                
                 self.update_typematic(
                     self._cached_typematic["enabled"],
                     self._cached_typematic["delay_ms"],
@@ -336,6 +341,8 @@ class UInputBridge(AbstractBridge):
                 )
                 self.m_proc.start()
                 self.system_config.set_high_priority(self.m_proc.pid, "Revived Mouse")
+                self.m_pipe_read.close()
+                self.mb_pipe_read.close()                
 
             if old_proc is not None:
                 old_proc.join(timeout=1.0)
@@ -355,24 +362,24 @@ class UInputBridge(AbstractBridge):
             if self._pressed_keys:
                 for code in list(self._pressed_keys):
                     try:
-                        self.k_pipe_write.send_bytes(PACK_KEY.pack(int(code), 0))
+                        self.k_pipe_write.send_bytes(PACK_KEY_STRUCT.pack(int(code), 0))
                     except OSError:
                         pass
                 self._pressed_keys.clear()
 
             if self._mouse_left_down:
                 try:
-                    self.mb_pipe_write.send_bytes(PACK_BUTTON.pack(TASK_BUTTON, LEFT_BUTTON_UP))
+                    self.mb_pipe_write.send_bytes(PACK_BUTTON_STRUCT.pack(TASK_BUTTON, LEFT_BUTTON_UP))
                 except OSError:
                     pass
             if self._mouse_right_down:
                 try:
-                    self.mb_pipe_write.send_bytes(PACK_BUTTON.pack(TASK_BUTTON, RIGHT_BUTTON_UP))
+                    self.mb_pipe_write.send_bytes(PACK_BUTTON_STRUCT.pack(TASK_BUTTON, RIGHT_BUTTON_UP))
                 except OSError:
                     pass
             if self._mouse_middle_down:
                 try:
-                    self.mb_pipe_write.send_bytes(PACK_BUTTON.pack(TASK_BUTTON, MIDDLE_BUTTON_UP))
+                    self.mb_pipe_write.send_bytes(PACK_BUTTON_STRUCT.pack(TASK_BUTTON, MIDDLE_BUTTON_UP))
                 except OSError:
                     pass
 
@@ -386,14 +393,14 @@ class UInputBridge(AbstractBridge):
             unique_codes = set(SCANCODES.values()) - internal_mouse_codes
             for code in unique_codes:
                 try:
-                    self.k_pipe_write.send_bytes(PACK_KEY.pack(int(code), 0))
+                    self.k_pipe_write.send_bytes(PACK_KEY_STRUCT.pack(int(code), 0))
                 except OSError:
                     pass
             self._pressed_keys.clear()
 
             for btn_up in [LEFT_BUTTON_UP, RIGHT_BUTTON_UP, MIDDLE_BUTTON_UP]:
                 try:
-                    self.mb_pipe_write.send_bytes(PACK_BUTTON.pack(TASK_BUTTON, btn_up))
+                    self.mb_pipe_write.send_bytes(PACK_BUTTON_STRUCT.pack(TASK_BUTTON, btn_up))
                 except OSError:
                     pass
             self._mouse_left_down = self._mouse_right_down = self._mouse_middle_down = False

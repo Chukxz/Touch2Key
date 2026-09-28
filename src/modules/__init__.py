@@ -8,22 +8,26 @@ from .utils import (
 )
 
 from .database import store
-from .core.config import AppConfig
-from .core.layout_loader import LayoutLoader
-from .core.touch_reader import TouchReader
-from .core.mapper import Mapper
-from .core.mouse_mapper import MouseMapper
-from .core.key_mapper import KeyMapper
-from .core.wasd_mapper import WASDMapper
-from .core.pipeline import (
-    Pipeline,
+
+from .core.pipeline import Pipeline
+from .core.pipeline_factory import (
     Button,
-    RelativePointer,
+    MousePointer,
     FixedJoystick,
-    FloatingJoystick,
     AnchoredJoystick,
+    FloatingJoystick,
     SystemToggle,
 )
+from .core.touch_reader import TouchReader
+from .core.config import AppConfig
+from .core.layout_loader import LayoutLoader
+from .core.mapper import Mapper
+from .core.bezel_mapper import BezelMapper
+from .core.key_mapper import KeyMapper
+from .core.mouse_mapper import MouseMapper
+from .core.wasd_mapper import WASDMapper
+from .core.pipeline_output import BridgeOutputSink
+from .core.gestures import TwoFingerTapTracker
 
 __all__ = [
     "MapperEvent",
@@ -37,14 +41,17 @@ __all__ = [
     "LayoutLoader",
     "TouchReader",
     "Mapper",
+    "BezelMapper",
     "MouseMapper",
     "KeyMapper",
     "WASDMapper",
     "Pipeline",
     "Button",
-    "RelativePointer",
+    "MousePointer",
     "FixedJoystick",
     "FloatingJoystick",
     "AnchoredJoystick",
     "SystemToggle",
+    "BridgeOutputSink",
+    "TwoFingerTapTracker",
 ]

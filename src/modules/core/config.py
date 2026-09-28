@@ -37,31 +37,20 @@ class AppConfig:
             self.settings = store.settings.update(left_handed=int(new_val))
         self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
         return self.settings.left_handed
-    
+
     def set_floating(self, enabled: bool) -> bool:
         """Toggles floating mode and dispatches reload."""
         with self.config_lock:
-            self.settings = store.settings.update(
-                floating_joystick=int(enabled)
-            )
+            self.settings = store.settings.update(floating_joystick=enabled)
         self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
         return self.settings.floating_joystick
 
-    def set_anchored_floating(self, enabled: bool) -> bool:
-        """Toggles anchored floating mode and dispatches reload."""
+    def set_anchored(self, enabled: bool) -> bool:
+        """Toggles anchored mode and dispatches reload."""
         with self.config_lock:
-            self.settings = store.settings.update(
-                anchored_floating_joystick=int(enabled)
-            )
+            self.settings = store.settings.update(anchored_joystick=enabled)
         self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
-        return self.settings.anchored_floating_joystick
-
-    def set_snap_radius(self, radius: float) -> float:
-        """Updates the joystick snap radius and dispatches reload."""
-        with self.config_lock:
-            self.settings = store.settings.update(joystick_snap_radius=float(radius))
-        self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
-        return self.settings.joystick_snap_radius
+        return self.settings.anchored_joystick
 
     def get(self, section: str, default: Any = None) -> dict[str, Any]:
         """Backward-compatible mapping accessor over AppSettings properties."""
@@ -78,14 +67,15 @@ class AppConfig:
                 ],
                 "json_dev_dpi": active_layout.dpi if active_layout else s.json_dev_dpi,
                 "image_path": active_layout.image_path if active_layout else "",
+                "double_tap_enabled": s.double_tap_enabled,
+                "bezel_toggle_enabled": s.bezel_toggle_enabled,
             }
         elif section == "joystick":
             active_layout = store.get_active_layout()
             return {
                 "deadzone": s.deadzone,
                 "hysteresis": s.hysteresis,
-                "anchored_floating_joystick": s.anchored_floating_joystick,
-                "joystick_snap_radius": s.joystick_snap_radius,
+                "anchored_joystick": s.anchored_joystick,
                 "mouse_wheel_radius": (
                     active_layout.mouse_wheel_radius if active_layout else 50.0
                 ),
@@ -95,7 +85,8 @@ class AppConfig:
             }
         elif section == "mouse":
             return {
-                "sensitivity": s.sensitivity,
+                "sensitivity_y": s.sensitivity_x,
+                "sensitivity_x": s.sensitivity_y,
             }
         elif section == "keys":
             return {

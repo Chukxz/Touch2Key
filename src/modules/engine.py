@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import os
 import sys
-import subprocess
+import multiprocessing
 import threading
+from typing import TYPE_CHECKING
 
 from modules.database import store
 from modules.platforms import get_platform
@@ -10,9 +13,12 @@ from modules.utils import (
     MapperEventDispatcher,
     TouchEvent,
     TouchPhase,
+    IpcMapperEventDispatcher,
+    IPC_CMD_START,
+    unpack_ipc_start_cmd,
 )
 
-from modules.core import (
+from modules import (
     AppConfig,
     LayoutLoader,
     TouchReader,
@@ -23,10 +29,15 @@ from modules.core import (
     WASDMapper,
     Pipeline,
     TwoFingerTapTracker,
+    BridgeOutputSink,
 )
 
-from modules.cli.list_windows import select_window
+from modules.scripts.list_windows import select_window
 from modules.cli.key_capture import capture_keys, capture_performance_settings
+from modules.gui.overlays import virtual_keyboard_worker
+
+if TYPE_CHECKING:
+    from multiprocessing.connection import Connection
 
 
 class Engine:
@@ -61,12 +72,8 @@ class Engine:
         self.mapper_event_dispatcher = dispatcher or MapperEventDispatcher()
         self.two_finger_tap_tracker = TwoFingerTapTracker()
 
-        self.vkb_process = None
-        self.vkb_pipe_name = (
-            r"\\.\pipe\touch2key_vkb"
-            if sys.platform == "win32"
-            else "/tmp/touch2key_vkb"
-        )
+        self.vkb_reader, self.vkb_writer = multiprocessing.Pipe()
+        self.vkb_process: multiprocessing.Process | None = None
 
         if not self.headless:
             try:
@@ -76,12 +83,9 @@ class Engine:
             except Exception:
                 pass
 
-    def _on_devices_changed(self, event: MapperEvent) -> None:
+    def _on_devices_change(self, k_id: int | None, m_id: int | None) -> None:
         if not self.bridge_class or self.bridge_class.k_proc is None:
             return
-        payload = getattr(event, "payload", {}) or {}
-        k_id = payload.get("keyboard_id")
-        m_id = payload.get("mouse_id")
         self.bridge_class.reload_devices(k_id, m_id)
 
     def toggle_mode(self) -> None:
@@ -102,26 +106,36 @@ class Engine:
             MapperEvent(action="ON_MENU_MODE_TOGGLE", is_visible=new_state)
         )
 
-    def toggle_virtual_keyboard(self) -> None:
-        if self.vkb_process and self.vkb_process.poll() is None:
-            try:
-                self.vkb_process.terminate()
-                self.vkb_process.wait(timeout=0.5)
-            except (subprocess.TimeoutExpired, ProcessLookupError, Exception):
+    def start_virtual_keyboard(self):
+        self.vkb_reader.close()
+        self.vkb_writer.close()
+
+        self.vkb_reader, self.vkb_writer = multiprocessing.Pipe(duplex=False)
+        self.vkb_process = multiprocessing.Process(
+            target=virtual_keyboard_worker,
+            name="Virtual Keyboard",
+            args=(self.vkb_writer,),
+            daemon=True,
+        )
+        self.vkb_process.start()
+        self.vkb_writer.close()
+
+    def close_virtual_keyboard(self):
+        if self.vkb_process is not None and self.vkb_process.is_alive():
+            self.vkb_process.terminate()
+            self.vkb_process.join(timeout=1.0)
+            if self.vkb_process.is_alive():
                 self.vkb_process.kill()
-            self.vkb_process = None
+
+            self.vkb_reader.close()
+            self.vkb_writer.close()
+
+    def toggle_virtual_keyboard(self) -> None:
+        if self.vkb_process is not None and self.vkb_process.is_alive():
+            self.close_virtual_keyboard()
+
         else:
-            self.vkb_process = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "modules.gui.virtual_keyboard",
-                    "--pipe",
-                    self.vkb_pipe_name,
-                    "--pid",
-                    str(os.getpid()),
-                ]
-            )
+            self.start_virtual_keyboard()
 
     def _set_is_visible(self, is_visible: bool = True) -> None:
         with self.lock:
@@ -182,7 +196,9 @@ class Engine:
             return
 
         tiers = self._build_pipeline_tiers()
-        sink = self.key_mapper.output_sink
+        output_sink = BridgeOutputSink(
+            self.mapper.bridge, self.toggle_mode, self.toggle_virtual_keyboard
+        )
 
         if self.is_visible:
             if self.two_finger_tap_tracker.process(touch_event):
@@ -193,21 +209,32 @@ class Engine:
             for tier in tiers:
                 for p in tier:
                     if p.is_system and p.claims(touch_event):
-                        p.process(touch_event, sink)
+                        p.process(touch_event, output_sink)
                         return
 
             if (
                 touch_event.contact_id == 0
                 and not self.two_finger_tap_tracker._contacts
             ):
-                self.mouse_mapper.process_touch(touch_event, self.is_visible)
+                # Menu mode: cursor visible, direct 1:1 absolute coordinate targeting
+                gx, gy = self.mapper.device_to_game_abs(
+                    touch_event.position.x, touch_event.position.y
+                )
+
+                if touch_event.phase is TouchPhase.DOWN:
+                    self.mapper.bridge.left_click_down()
+                elif touch_event.phase is TouchPhase.MOVE:
+                    self.mapper.bridge.mouse_move_abs(int(round(gx)), int(round(gy)))
+                elif touch_event.phase is TouchPhase.UP:
+                    self.mapper.bridge.left_click_up()
+                return
 
         # --- Game Mode Pipeline Dispatch ---
         claimed_existing = False
         for tier in tiers:
             for p in tier:
                 if p.owns(touch_event.contact_id):
-                    p.process(touch_event, sink)
+                    p.process(touch_event, output_sink)
                     claimed_existing = True
 
         if claimed_existing:
@@ -218,7 +245,7 @@ class Engine:
                 tier_claimed = False
                 for p in tier:
                     if p.claims(touch_event):
-                        p.process(touch_event, sink)
+                        p.process(touch_event, output_sink)
                         tier_claimed = True
                         if not p.allow_multi_claim:
                             return
@@ -235,19 +262,10 @@ class Engine:
         typematic_enabled: bool = True,
         typematic_delay_ms: float = 250.0,
         typematic_rate_hz: float = 30.0,
-        typematic_exclude_keys: str | None = None,
+        typematic_excluded_keys: str | None = None,
+        k_device_handle: int | None = None,
+        m_device_handle: int | None = None,
     ) -> None:
-        k_device_handle: int | None = None
-        m_device_handle: int | None = None
-
-        if sys.platform == "win32":
-            from modules.platforms.windows.query_interception_device import (
-                select_keyboard_then_mouse,
-            )
-
-            res = select_keyboard_then_mouse()
-            if res:
-                k_device_handle, m_device_handle = res
 
         config = AppConfig(self.mapper_event_dispatcher)
         self.layout_loader = LayoutLoader(
@@ -268,16 +286,14 @@ class Engine:
             self,
         )
 
-        self.bezel_mapper = BezelMapper(
-            self.mapper, self.toggle_mode, self.toggle_virtual_keyboard
-        )
+        self.bezel_mapper = BezelMapper(self.mapper)
         self.mouse_mapper = MouseMapper(self.mapper)
         self.key_mapper = KeyMapper(
             self.mapper,
             typematic_enabled=typematic_enabled,
             typematic_delay_ms=typematic_delay_ms,
             typematic_rate_hz=typematic_rate_hz,
-            typematic_exclude_keys=typematic_exclude_keys,
+            typematic_excluded_keys=typematic_excluded_keys,
         )
         self.wasd_mapper = WASDMapper(self.mapper)
 
@@ -289,7 +305,7 @@ class Engine:
             "ON_LAYOUT_RELOAD", self._on_layout_reload
         )
         self.mapper_event_dispatcher.register_callback(
-            "ON_DEVICES_CHANGED", self._on_devices_changed
+            "ON_DEVICES_CHANGE", self._on_devices_change
         )
 
         self.bridge_class.start_worker_processes(k_device_handle, m_device_handle)
@@ -313,6 +329,18 @@ class Engine:
         if rate_cap is None or pps is None:
             return
 
+        k_device_handle = None
+        m_device_handle = None
+        
+        if sys.platform == "win32":
+            from modules.platforms.windows.query_interception_device import (
+                select_keyboard_then_mouse,
+            )
+
+            res = select_keyboard_then_mouse()
+            if res:
+                k_device_handle, m_device_handle = res
+
         settings = store.settings.get()
 
         self.start_headless(
@@ -324,7 +352,9 @@ class Engine:
             typematic_enabled=settings.typematic_enabled,
             typematic_delay_ms=settings.typematic_delay_ms,
             typematic_rate_hz=settings.typematic_rate_hz,
-            typematic_exclude_keys=settings.typematic_exclude_keys,
+            typematic_excluded_keys=settings.typematic_excluded_keys,
+            k_device_handle=k_device_handle,
+            m_device_handle=m_device_handle,
         )
 
         if not self.headless:
@@ -351,14 +381,12 @@ class Engine:
                 pass
 
         try:
-            if self.vkb_process and self.vkb_process.poll() is None:
-                self.vkb_process.terminate()
-                self.vkb_process.wait(timeout=1.0)
+            self.close_virtual_keyboard()
 
             if self.touch_reader is not None:
                 self.touch_reader.stop()
             if self.mapper is not None:
-                self.mapper.running = False
+                self.mapper.stop()
             if self.bridge_class is not None:
                 self.bridge_class.shutdown()
                 self.bridge_class.release_all()
@@ -386,3 +414,73 @@ class Engine:
 
         if not self.headless:
             sys.exit(0)
+
+
+def run_engine_process(conn: Connection) -> None:
+    """multiprocessing.Process target: owns one Engine for its entire
+    lifetime, exchanging lifecycle/dispatcher events with the GUI process
+    over `conn` via the packed IPC protocol in modules.utils.
+
+    Message flow:
+      GUI -> engine : IPC_CMD_START (once, first message), then any number of
+                      IPC_CMD_STOP / IPC_CMD_CONFIG_RELOAD /
+                      IPC_CMD_LAYOUT_RELOAD / IPC_CMD_DEVICES_CHANGE
+                      / IPC_CMD_TARGET_WINDOW_CHANGE
+      engine -> GUI : IPC_EVT_STARTED or IPC_EVT_ERROR (once, after the start
+                      attempt), IPC_EVT_STOPPED (once, on shutdown)
+    """
+    dispatcher = IpcMapperEventDispatcher(conn)
+    engine: Engine | None = None
+
+    try:
+        start_payload = conn.recv_bytes()
+        if not start_payload or start_payload[0] != IPC_CMD_START:
+            got = start_payload[0] if start_payload else None
+            dispatcher.send_error(
+                f"Expected IPC_CMD_START as the first message, got opcode {got!r}"
+            )
+            return
+
+        config = unpack_ipc_start_cmd(start_payload)
+
+        engine = Engine(headless=True, dispatcher=dispatcher)
+        engine.start_headless(
+            window_id=config["window_id"],
+            rate_cap=config["rate_cap"],
+            pps=config["pps"],
+            toggle_key=config["toggle_key"],
+            sprint_key=config["sprint_key"],
+            typematic_enabled=config["typematic_enabled"],
+            typematic_delay_ms=config["typematic_delay_ms"],
+            typematic_rate_hz=config["typematic_rate_hz"],
+            typematic_excluded_keys=config["typematic_excluded_keys"],
+        )
+        dispatcher.send_started()
+
+    except Exception as exc:
+        print(f"[ENGINE PROCESS] Startup failure: {exc}")
+        dispatcher.send_error(str(exc))
+        if engine is not None:
+            try:
+                engine._shutdown()
+            except Exception:
+                pass
+        try:
+            conn.close()
+        except OSError:
+            pass
+        return
+
+    dispatcher.run_command_loop()
+
+    try:
+        engine._shutdown()
+    except Exception as exc:
+        print(f"[ENGINE PROCESS] Shutdown failure: {exc}")
+        dispatcher.send_error(str(exc))
+    finally:
+        dispatcher.send_stopped()
+        try:
+            conn.close()
+        except OSError:
+            pass

@@ -9,7 +9,8 @@ from modules.core.pipeline import (
     Point,
     RectangularRegion,
 )
-from modules.core import BridgeOutputSink, Button
+from modules.core.pipeline_output import BridgeOutputSink
+from modules.core.pipeline_factory import Button
 
 from modules.utils import (
     CIRCLE,
@@ -19,9 +20,7 @@ from modules.utils import (
     MOUSE_WHEEL_CODE,
     RECTANGLE,
     SPRINT_DISTANCE_CODE,
-    EXCLUDE_KEYS,
-    TouchEvent,
-    TouchPhase,
+    EXCLUDED_KEYS,
     get_scancode_from_key,
     scale_coord,
 )
@@ -44,7 +43,7 @@ class KeyMapper:
         typematic_enabled: bool = True,
         typematic_delay_ms: float = 250.0,
         typematic_rate_hz: float = 30.0,
-        typematic_exclude_keys: str | None = None,
+        typematic_excluded_keys: str | None = None,
     ):
         self.mapper = mapper
         self.config = mapper.config
@@ -55,10 +54,9 @@ class KeyMapper:
         self.typematic_enabled = typematic_enabled
         self.typematic_delay_ms = typematic_delay_ms
         self.typematic_rate_hz = typematic_rate_hz
-        self.typematic_exclude_keys = typematic_exclude_keys
+        self.typematic_excluded_keys = typematic_excluded_keys
 
         # Tracks touch slot assignments for camera look suppression
-        self.slot_zone_map: dict[int, Any] = {}
         self.lock = threading.Lock()
         self.pipelines = []
         self.ignored_keys = {MOUSE_WHEEL_CODE, SPRINT_DISTANCE_CODE}
@@ -78,7 +76,7 @@ class KeyMapper:
 
     def _resolve_scancode_set(self, raw_tokens: str | None) -> set[int]:
         """Maps comma-separated string tokens into numerical hardware scancodes."""
-        fallback = set(EXCLUDE_KEYS)
+        fallback = set(EXCLUDED_KEYS)
         tokens = (
             {k.strip().lower() for k in raw_tokens.split(",") if k.strip()}
             if raw_tokens
@@ -94,32 +92,24 @@ class KeyMapper:
 
     def _sync_typematic_to_bridge(self) -> None:
         """Dispatches current typematic parameters to the driver worker process."""
-        resolved = self._resolve_scancode_set(self.typematic_exclude_keys)
-        if hasattr(self.bridge, "update_typematic"):
-            self.bridge.update_typematic(
-                enabled=self.typematic_enabled,
-                delay_ms=self.typematic_delay_ms,
-                rate_hz=self.typematic_rate_hz,
-                exclude_scancodes=resolved,
-            )
+        resolved = self._resolve_scancode_set(self.typematic_excluded_keys)
+        self.bridge.update_typematic(
+            enabled=self.typematic_enabled,
+            delay_ms=self.typematic_delay_ms,
+            rate_hz=self.typematic_rate_hz,
+            exclude_scancodes=resolved,
+        )
 
     def _on_config_reload(self) -> None:
         """Hot-reloads settings and updates the low-level bridge."""
-        s = getattr(self.config, "settings", None)
+        s = self.config.settings
         if s:
             self.typematic_enabled = bool(getattr(s, "typematic_enabled", True))
             self.typematic_delay_ms = float(getattr(s, "typematic_delay_ms", 250.0))
             self.typematic_rate_hz = float(getattr(s, "typematic_rate_hz", 30.0))
-            self.typematic_exclude_keys = getattr(s, "typematic_exclude_keys", None)
+            self.typematic_excluded_keys = getattr(s, "typematic_excluded_keys", None)
             self._sync_typematic_to_bridge()
             logger.info("KeyMapper pushed updated typematic parameters to bridge.")
-
-    def get_active_zone_for_slot(self, slot_id: int | None):
-        """Allows MouseMapper to inspect if a touch slot belongs to TRACK_FIRE."""
-        if slot_id is None:
-            return None
-        with self.lock:
-            return self.slot_zone_map.get(slot_id)
 
     def _build_pipelines(self) -> None:
         key_raw_zones = self.mapper.layout_loader.keys_json_data.copy()
@@ -132,7 +122,7 @@ class KeyMapper:
             name = values.get("name", "")
             if name in self.ignored_keys:
                 continue
-            
+
             z_id = int(values.get("id", 0))
             z_type = str(values.get("type", ""))
             pointer = bool(values.get("pointer", False))
@@ -140,31 +130,38 @@ class KeyMapper:
             ignore_app_settings = bool(values.get("ignore_app_settings", False))
             is_mouse_btn = scancode in (M_LEFT, M_RIGHT, M_MIDDLE)
 
-            sens_x = (float(values.get("sensitivity_x", 1.0)) if ignore_app_settings
-                        else self.config.settings.sensitivity_x)
-            sens_y = float((values.get("sensitivity_y", 1.0)) if ignore_app_settings
-                           else self.config.settings.sensitivity_y)
-            
+            sens_x = (
+                float(values.get("sensitivity_x", 1.0))
+                if ignore_app_settings
+                else self.config.settings.sensitivity_x
+            )
+            sens_y = float(
+                (values.get("sensitivity_y", 1.0))
+                if ignore_app_settings
+                else self.config.settings.sensitivity_y
+            )
+
             if z_type == CIRCLE:
                 region = CircularRegion(
                     center=Point(
-                        scale_coord(w, values.get("cx")), scale_coord(h, values.get("cy"))
+                        scale_coord(w, values.get("cx")),
+                        scale_coord(h, values.get("cy")),
                     ),
                     radius=scale_coord(w, values.get("r", values.get("val1", 50.0))),
                 )
             elif z_type == RECTANGLE:
                 region = RectangularRegion(
                     top_left=Point(
-                        scale_coord(w, values.get("x1")), scale_coord(h, values.get("y1"))
+                        scale_coord(w, values.get("x1")),
+                        scale_coord(h, values.get("y1")),
                     ),
                     bottom_right=Point(
-                        scale_coord(w, values.get("x2")), scale_coord(h, values.get("y2"))
+                        scale_coord(w, values.get("x2")),
+                        scale_coord(h, values.get("y2")),
                     ),
                 )
             else:
                 continue
-
-            
 
             pipeline = Button(
                 button=str(scancode),
@@ -180,28 +177,14 @@ class KeyMapper:
             new_pipelines.append(pipeline)
 
         with self.lock:
-            self.pipelines = new_pipelines
-
-    def process_touch(self, touch_event: TouchEvent, is_visible: bool) -> None:
-        if is_visible:
-            return
-
-        slot_id = getattr(touch_event, "slot", None) or getattr(
-            touch_event, "tracking_id", None
-        )
-
-        with self.lock:
+            # Release any active keys held by the previous pipeline before swapping
             for pipeline in self.pipelines:
-                claimed = pipeline.process(touch_event, self.output_sink)
-                if claimed and slot_id is not None:
-                    if touch_event.phase is TouchPhase.DOWN:
-                        self.slot_zone_map[slot_id] = pipeline
-                    elif touch_event.phase is TouchPhase.UP:
-                        self.slot_zone_map.pop(slot_id, None)
+                pipeline.reset(self.output_sink)
+
+            self.pipelines = new_pipelines
 
     def release_all(self) -> None:
         with self.lock:
-            self.slot_zone_map.clear()
             for pipeline in self.pipelines:
                 pipeline.reset(self.output_sink)
 

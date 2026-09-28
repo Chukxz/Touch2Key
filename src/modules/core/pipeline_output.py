@@ -1,35 +1,29 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable
+from dataclasses import dataclass
 from modules.core.pipeline import OutputSink
 from modules.utils import SCANCODES
 
 if TYPE_CHECKING:
     from modules.platforms.base import AbstractBridge
 
-
+@dataclass(slots=True)
 class BridgeOutputSink(OutputSink):
     """Bridges Semantic stage outputs to the hardware driver Bridge."""
-
-    def __init__(
-        self,
-        bridge: AbstractBridge,
-        toggle_mode: Callable[[], None] | None = None,
-        toggle_vkb: Callable[[], None] | None = None,
-    ) -> None:
-        self.bridge = bridge
-        self._toggle_mode = toggle_mode
-        self._toggle_vkb = toggle_vkb
+    bridge: AbstractBridge
+    toggle_mode: Callable[[], None] | None = None
+    toggle_vkb: Callable[[], None] | None = None
 
     def toggle_menu_mode(self) -> None:
         """Invokes Engine.toggle_mode directly."""
-        if self._toggle_mode is not None:
-            self._toggle_mode()
+        if self.toggle_mode is not None:
+            self.toggle_mode()
 
     def toggle_virtual_keyboard(self) -> None:
         """Invokes Engine.toggle_virtual_keyboard directly."""
-        if self._toggle_vkb is not None:
-            self._toggle_vkb()
+        if self.toggle_vkb is not None:
+            self.toggle_vkb()
 
     def key_down(self, key: str) -> None:
         scancode = self._resolve_scancode(key)

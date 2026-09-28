@@ -13,6 +13,7 @@ from modules.utils import (
     LONG_DELAY,
     ROTATION_POLL_INTERVAL,
     SHORT_DELAY,
+    DEF_MOVE_INTERVAL,
     Point,
     TouchEvent,
     TouchPhase,
@@ -55,7 +56,7 @@ class TouchReader:
 
         self.adb_rate_cap = rate_cap
         self.move_interval = (
-            1.0 / self.adb_rate_cap if self.adb_rate_cap > 0 else 0.0001
+            1.0 / self.adb_rate_cap if self.adb_rate_cap > 0 else DEF_MOVE_INTERVAL
         )
         self.last_dispatch_times = [0.0] * self.max_slots
 

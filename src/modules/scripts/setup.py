@@ -10,8 +10,6 @@ import sys
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from modules.utils import SYSTEM
-
 logger = logging.getLogger("modules.scripts.setup")
 
 
@@ -19,25 +17,25 @@ def run(parent=None) -> bool:
     is_gui = QApplication.instance() is not None
 
     if is_gui:
-        logger.info("Starting automated platform configuration for %s", SYSTEM)
+        logger.info("Starting automated platform configuration for %s", sys.platform)
     else:
-        print(f"=== Initializing Environment Setup: {SYSTEM} ===")
+        print(f"=== Initializing Environment Setup: {sys.platform} ===")
 
     try:
         needs_reboot = False
 
-        if SYSTEM == "Windows":
+        if sys.platform == "win32":
             from modules.platforms.windows import setup_windows
 
             needs_reboot = setup_windows(interactive=not is_gui)
 
-        elif SYSTEM == "Linux":
+        elif sys.platform == "linux":
             from modules.platforms.linux import setup_linux
 
             needs_reboot = setup_linux(interactive=not is_gui)
 
         else:
-            msg = f"Unsupported Operating System: {SYSTEM}"
+            msg = f"Unsupported Operating System: {sys.platform}"
             if is_gui:
                 logger.error(msg)
                 QMessageBox.critical(parent, "Setup Error", msg)
@@ -53,14 +51,14 @@ def run(parent=None) -> bool:
                 QMessageBox.information(
                     parent,
                     "Reboot Recommended",
-                    f"Setup completed for {SYSTEM}.\n\n"
+                    f"Setup completed for {sys.platform}.\n\n"
                     "Please restart your PC to finalize driver registration.",
                 )
             else:
                 QMessageBox.information(
                     parent,
                     "Setup Complete",
-                    f"Environment setup for {SYSTEM} completed successfully.",
+                    f"Environment setup for {sys.platform} completed successfully.",
                 )
         else:
             print("[+] Setup completed successfully.")

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from modules.engine import Engine
 from modules.platforms import check_single_instance
 from modules.scripts.pre_flight import run as pre_flight_run
-from modules.utils import DIAGNOSTICS_FOLDER
+from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER
 from modules.log_manager import AppLogManager
 
 from PySide6.QtWidgets import QApplication
@@ -17,11 +17,7 @@ from PySide6.QtWidgets import QApplication
 if TYPE_CHECKING:
     from cProfile import Profile
 
-CLI_APP_NAME = "Touch2Key_CLI"
 cli_profiler: Profile | None = None
-
-parser = argparse.ArgumentParser(description="Touch2Key Main")
-parser.add_argument("--profile", action="store_true", help="Generate profiling data.")
 
 
 def profiler_cleanup(
@@ -57,7 +53,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     # 1. CLI Argument Parsing
     # -----------------------------------------------------------------------
     if parser is None:
-        parser = argparse.ArgumentParser(description="Touch2Key Engine")
+        parser = argparse.ArgumentParser(description="Touch2Key CLI Application")
 
     parser.add_argument(
         "--profile",
@@ -84,7 +80,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     except RuntimeError:
         pass
 
-    success, _ = check_single_instance(CLI_APP_NAME)
+    success, _ = check_single_instance(APP_NAME)
     if not success:
         profiler_cleanup(cli_profiler)
         sys.exit(0)
@@ -93,7 +89,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     # 3. Application Execution
     # -----------------------------------------------------------------------
     app = QApplication(sys.argv)
-    app.setApplicationName("Touch2Key")
+    app.setApplicationName(APP_NAME)
 
     engine = Engine(headless=False)
 

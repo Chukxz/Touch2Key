@@ -24,7 +24,7 @@ from modules.database.legacy_migration import (
     migrate_json_layout,
     migrate_toml_config,
 )
-from modules.utils import JSONS_FOLDER, PROFILES_FOLDER, TOML_PATH, EXCLUDE_KEYS, BEZEL, CIRCLE, RECTANGLE
+from modules.utils import JSONS_FOLDER, PROFILES_FOLDER, TOML_PATH, EXCLUDED_KEYS, BEZEL, CIRCLE, RECTANGLE
 
 # ---------------------------------------------------------------------------
 # Profile Inspection & Management
@@ -70,7 +70,7 @@ def list_layout_zones(layout_id: int) -> None:
     print(f"\n--- Zones / Pipelines for '{layout.name}' (ID: {layout_id}) ---")
     
     for z in zones:
-        if z.zone_type == CIRCLE
+        if z.zone_type == CIRCLE:
             coords = f"Center=({z.cx}, {z.cy}), R={z.r}"
         elif z.zone_type == RECTANGLE or z.zone_type == BEZEL:
             coords = f"Rect=({z.x1}, {z.y1}) -> ({z.x2}, {z.y2})"
@@ -188,8 +188,7 @@ def show_typematic() -> None:
     print(f"  Enabled:       {'Yes' if s.typematic_enabled else 'No'}")
     print(f"  Initial Delay: {s.typematic_delay_ms:.1f} ms")
     print(f"  Repeat Rate:   {s.typematic_rate_hz:.1f} Hz (events/sec)")
-    print(f"  Excluded Keys: {s.typematic_exclude_keys or 'None'}")
-    print()
+    print(f"  Excluded Keys: {s.typematic_excluded_keys or 'None'}")
 
 
 def configure_typematic_interactive() -> None:
@@ -215,15 +214,15 @@ def configure_typematic_interactive() -> None:
     rate = float(rate_in) if rate_in else s.typematic_rate_hz
 
     ex_in = input(
-        f"Excluded keys comma-separated (current: {s.typematic_exclude_keys or ''}): "
+        f"Excluded keys comma-separated (current: {s.typematic_excluded_keys or ''}): "
     ).strip()
-    excludes = s.typematic_exclude_keys if not ex_in else ex_in
+    excludes = s.typematic_excluded_keys if not ex_in else ex_in
 
     store.settings.update(
-        typematic_enabled=int(enabled),
+        typematic_enabled=enabled,
         typematic_delay_ms=delay,
         typematic_rate_hz=rate,
-        typematic_exclude_keys=excludes,
+        typematic_excluded_keys=excludes,
     )
     print("Typematic settings updated successfully.")
     show_typematic()
@@ -232,13 +231,70 @@ def configure_typematic_interactive() -> None:
 def reset_typematic_defaults() -> None:
     """Resets only typematic timing and exclusion keys to factory defaults."""
     store.settings.update(
-        typematic_enabled=1,
+        typematic_enabled=True,
         typematic_delay_ms=250.0,
         typematic_rate_hz=30.0,
-        typematic_exclude_keys=EXCLUDE_KEYS,
+        typematic_excluded_keys=EXCLUDED_KEYS,
     )
     print("Typematic settings reset to factory defaults.")
     show_typematic()
+
+
+
+# ---------------------------------------------------------------------------
+# System Inspection & Configuration
+# ---------------------------------------------------------------------------
+
+
+
+def show_system() -> None:
+    """Prints current double tap and bezel toggle fields configuration."""
+    s = store.settings.get()
+    print("\n--- System Settings ---")
+    print(f"  Double Tap Enabled:       {'Yes' if s.double_tap_enabled else 'No'}")
+    print(f"  Bezels Enabled:       {'Yes' if s.bezel_toggle_enabled else 'No'}")
+    
+    
+def configure_system_interactive() -> None:
+    """Prompts for double tap and bezel toggle fields interactively."""
+    s = store.settings.get()
+    show_system()
+
+    en_double_tap_in = (
+        input(
+            f"Enable double tap toggle? (y/n, current: {'y' if s.double_tap_enabled else 'n'}): "
+        )
+        .strip()
+        .lower()
+    )
+    double_tap_enabled = s.double_tap_enabled if not en_double_tap_in else (en_double_tap_in == "y")
+    
+    en_bezel_in = (
+        input(
+            f"Enable double tap toggle? (y/n, current: {'y' if s.bezel_toggle_enabled else 'n'}): "
+        )
+        .strip()
+        .lower()
+    )
+    bezel_toggle_enabled = s.bezel_toggle_enabled if not en_bezel_in else (en_bezel_in == "y")
+
+    store.settings.update(
+        double_tap_enabled=double_tap_enabled,
+        bezel_toggle_enabled=bezel_toggle_enabled
+    )
+    print("Double Tap and Bezel Toggle settings updated successfully.")
+    show_system()
+    
+
+def reset_system_defaults() -> None:
+    """Resets only double tap and bezel toggle settings to factory defaults."""
+    store.settings.update(
+        double_tap_enabled=True,
+        bezel_toggle_enabled=True
+    )
+    print("Double Tap and Bezel Toggle settings reset to factory defaults.")
+    show_system()
+
 
 
 # ---------------------------------------------------------------------------
@@ -298,6 +354,8 @@ def interactive_menu() -> None:
         print("  [d]    Delete Profile")
         print("  [ty]   View / Configure Typematic (Auto-Repeat) Settings")
         print("  [rty]  Reset Typematic Settings to Defaults")
+        print("  [ss]   View / Configure Double Tap and Bezel Toggle Settings")
+        print("  [rss]  Reset Double Tap and Bezel Toggle Settings to Defaults")
         print("  [i]    Import Layout from JSON")
         print("  [e]    Export Profile to JSON")
         print("  [st]   Export App Settings to settings.toml")
@@ -393,6 +451,16 @@ def interactive_menu() -> None:
             )
             if confirm == "y":
                 reset_typematic_defaults()
+
+        elif choice == "ss":
+            configure_system_interactive()
+
+        elif choice == "rss":
+            confirm = (
+                input("Reset double tap and bezel toggle settings to defaults? (y/N): ").strip().lower()
+            )
+            if confirm == "y":
+                reset_system_defaults()
 
         elif choice == "i":
             raw_path = (
@@ -623,7 +691,7 @@ def run() -> None:
         if args.typematic_rate is not None:
             typematic_updates["typematic_rate_hz"] = args.typematic_rate
         if args.typematic_excludes is not None:
-            typematic_updates["typematic_exclude_keys"] = args.typematic_excludes
+            typematic_updates["typematic_excluded_keys"] = args.typematic_excludes
 
         if typematic_updates:
             store.settings.update(**typematic_updates)

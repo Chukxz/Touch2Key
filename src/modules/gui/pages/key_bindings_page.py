@@ -48,7 +48,7 @@ class KeyCaptureFilter(QObject):
 class KeyBindingsPage(BasePage):
     """Dynamic, non-blocking Key Bindings configuration page backed by SQLite."""
 
-    title = "Key bindings"
+    title = "Key Bindings"
 
     def __init__(
         self,

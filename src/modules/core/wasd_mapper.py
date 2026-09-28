@@ -4,17 +4,19 @@ import logging
 import threading
 from typing import TYPE_CHECKING
 
-from modules.core import (
+from modules.core.pipeline_factory import (
     FixedJoystick,
     FloatingJoystick,
     AnchoredJoystick,
-    BridgeOutputSink,
 )
+
+from modules.core.pipeline_output import BridgeOutputSink
+
 from modules.core.pipeline import (
     Point,
     RectangularRegion,
 )
-from modules.utils import scale_coord, CIRCLE, MOUSE_WHEEL_CODE, TouchEvent
+from modules.utils import scale_coord, CIRCLE, MOUSE_WHEEL_CODE
 
 if TYPE_CHECKING:
     from .mapper import Mapper
@@ -192,16 +194,8 @@ class WASDMapper:
             # Release any active keys held by the previous pipeline before swapping
             if self.pipeline:
                 self.pipeline.reset(self.output_sink)
+
             self.pipeline = pipeline
-
-    def process_touch(self, touch_event: TouchEvent, is_visible: bool) -> None:
-        if is_visible or self.mapper.wasd_block > 0:
-            self.touch_up()
-            return
-
-        with self.lock:
-            if self.pipeline:
-                self.pipeline.process(touch_event, self.output_sink)
 
     def touch_up(self) -> None:
         with self.lock:
