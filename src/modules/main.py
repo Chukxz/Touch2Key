@@ -96,8 +96,9 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     try:
         engine._start()
     except KeyboardInterrupt:
-        engine._shutdown()
+        pass
     finally:
+        engine._shutdown()
         profiler_cleanup(cli_profiler)
 
 
