@@ -82,7 +82,6 @@ class Engine:
         if not self.headless:
             try:
                 import keyboard
-
                 keyboard.add_hotkey("esc", self._shutdown)
             except Exception:
                 pass
@@ -168,6 +167,8 @@ class Engine:
             all_pipelines.append(self.wasd_mapper.pipeline)
         if self.mouse_mapper and self.mouse_mapper.pipeline:
             all_pipelines.append(self.mouse_mapper.pipeline)
+        if self.bezel_mapper:
+            all_pipelines.extend(self.bezel_mapper.pipelines)
 
         if self.layout_loader and self.layout_loader.custom_pipelines:
             all_pipelines.extend(self.layout_loader.custom_pipelines)
@@ -201,6 +202,7 @@ class Engine:
             self.mouse_mapper
             and self.key_mapper
             and self.wasd_mapper
+            and self.bezel_mapper
             and self.mapper
             and self.output_sink
         ):
@@ -214,18 +216,13 @@ class Engine:
                 self.toggle_mode()
                 return
 
-            # Allow system pipelines (Bezels) to intercept touches even in Menu mode
             for tier in tiers:
                 for p in tier:
                     if p.is_system and p.claims(touch_event):
                         p.process(touch_event, output_sink)
                         return
 
-            if (
-                touch_event.contact_id == 0
-                and not self.two_finger_tap_tracker._contacts
-            ):
-                # Menu mode: cursor visible, direct 1:1 absolute coordinate targeting
+            if touch_event.contact_id == 0 and not self.two_finger_tap_tracker._contacts:
                 gx, gy = self.mapper.device_to_game_abs(
                     touch_event.position.x, touch_event.position.y
                 )
@@ -247,10 +244,7 @@ class Engine:
                     p.process(touch_event, output_sink)
                     claimed_existing = True
 
-        if claimed_existing:
-            return
-
-        if touch_event.phase is TouchPhase.DOWN:
+        if not claimed_existing and touch_event.phase is TouchPhase.DOWN:
             for tier in tiers:
                 tier_claimed = False
                 for p in tier:
@@ -258,9 +252,15 @@ class Engine:
                         p.process(touch_event, output_sink)
                         tier_claimed = True
                         if not p.allow_multi_claim:
-                            return
+                            break
                 if tier_claimed:
-                    return
+                    break
+
+        # Dynamically push any mouse deltas accumulated by MouseMapper / Track-Fire Buttons to the OS
+        self.output_sink.flush_mouse_move()
+
+        if touch_event.phase is TouchPhase.UP and getattr(self.touch_reader, 'active_touches', 1) == 0:
+            self.output_sink.reset_mouse_accumulators()
 
     def start_headless(
         self,
@@ -285,22 +285,23 @@ class Engine:
         )
         self.touch_reader = TouchReader(config, self.mapper_event_dispatcher, rate_cap)
 
-        emulator_map = {"toggle_key": toggle_key, "sprint_key": sprint_key}
         self.mapper = Mapper(
             self.layout_loader,
             self.touch_reader,
             self.bridge_class,
             pps,
-            emulator_map,
+            {"toggle_key": toggle_key, "sprint_key": sprint_key},
             window_id,
             self,
         )
 
         self.output_sink = BridgeOutputSink(
-            self.mapper.bridge, self.toggle_mode, self.toggle_virtual_keyboard
+            bridge=self.mapper.bridge,
+            toggle_mode=self.toggle_mode,
+            toggle_vkb=self.toggle_virtual_keyboard
         )
 
-        self.bezel_mapper = BezelMapper(self.mapper)
+        self.bezel_mapper = BezelMapper(self.mapper, self.output_sink)
         self.mouse_mapper = MouseMapper(self.mapper, self.output_sink)
         self.key_mapper = KeyMapper(
             self.mapper,
@@ -315,18 +316,10 @@ class Engine:
         self._tiers = self._build_pipeline_tiers()
 
         self.touch_reader.bind_touch_event(self._process_touch_event)
-        self.mapper_event_dispatcher.register_callback(
-            "ON_MENU_MODE_TOGGLE", self._set_is_visible
-        )
-        self.mapper_event_dispatcher.register_callback(
-            "ON_LAYOUT_RELOAD", self._on_layout_reload
-        )
-        self.mapper_event_dispatcher.register_callback(
-            "ON_CONFIG_RELOAD", self._on_config_reload
-        )
-        self.mapper_event_dispatcher.register_callback(
-            "ON_DEVICES_CHANGE", self._on_devices_change
-        )
+        self.mapper_event_dispatcher.register_callback("ON_MENU_MODE_TOGGLE", self._set_is_visible)
+        self.mapper_event_dispatcher.register_callback("ON_LAYOUT_RELOAD", self._on_layout_reload)
+        self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self._on_config_reload)
+        self.mapper_event_dispatcher.register_callback("ON_DEVICES_CHANGE", self._on_devices_change)
 
         self.bridge_class.start_worker_processes(k_device_handle, m_device_handle)
 
@@ -353,10 +346,7 @@ class Engine:
         m_device_handle = None
 
         if sys.platform == "win32":
-            from modules.platforms.windows.query_interception_device import (
-                select_keyboard_then_mouse,
-            )
-
+            from modules.platforms.windows.query_interception_device import select_keyboard_then_mouse
             res = select_keyboard_then_mouse()
             if res:
                 k_device_handle, m_device_handle = res
@@ -391,7 +381,6 @@ class Engine:
         if not self.headless:
             try:
                 import keyboard
-
                 keyboard.unhook_all_hotkeys()
             except Exception:
                 pass
@@ -401,19 +390,23 @@ class Engine:
 
             if self.touch_reader is not None:
                 self.touch_reader.stop()
+            if self.key_mapper is not None:
+                self.key_mapper.release_all()
+            if self.wasd_mapper is not None:
+                self.wasd_mapper.touch_up()
+            if self.mouse_mapper is not None:
+                self.mouse_mapper.touch_up()
+            if self.bezel_mapper is not None:
+                self.bezel_mapper.release_all()
             if self.mapper is not None:
                 self.mapper.stop()
+                
             if self.bridge_class is not None:
                 self.bridge_class.shutdown()
                 self.bridge_class.release_all()
 
             procs = [
-                p
-                for p in (
-                    self.bridge_class.k_proc,
-                    self.bridge_class.m_proc,
-                )
-                if p is not None
+                p for p in (self.bridge_class.k_proc, self.bridge_class.m_proc) if p is not None
             ]
 
             for p in procs:
@@ -430,18 +423,6 @@ class Engine:
 
 
 def run_engine_process(conn: Connection) -> None:
-    """multiprocessing.Process target: owns one Engine for its entire
-    lifetime, exchanging lifecycle/dispatcher events with the GUI process
-    over `conn` via the packed IPC protocol in modules.utils.
-
-    Message flow:
-      GUI -> engine : IPC_CMD_START (once, first message), then any number of
-                      IPC_CMD_STOP / IPC_CMD_CONFIG_RELOAD /
-                      IPC_CMD_LAYOUT_RELOAD / IPC_CMD_DEVICES_CHANGE
-                      / IPC_CMD_TARGET_WINDOW_CHANGE
-      engine -> GUI : IPC_EVT_STARTED or IPC_EVT_ERROR (once, after the start
-                      attempt), IPC_EVT_STOPPED (once, on shutdown)
-    """
     AppLogManager.setup_logging(is_gui=True, log_prefix="touch2key_engine")
     dispatcher = IpcMapperEventDispatcher(conn)
     engine: Engine | None = None
@@ -450,9 +431,7 @@ def run_engine_process(conn: Connection) -> None:
         start_payload = conn.recv_bytes()
         if not start_payload or start_payload[0] != IPC_CMD_START:
             got = start_payload[0] if start_payload else None
-            dispatcher.send_error(
-                f"Expected IPC_CMD_START as the first message, got opcode {got!r}"
-            )
+            dispatcher.send_error(f"Expected IPC_CMD_START, got {got!r}")
             return
 
         config = unpack_ipc_start_cmd(start_payload)
