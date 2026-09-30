@@ -81,7 +81,7 @@ def get_platform() -> PlatformModules:
         return PlatformModules(Bridge, WindowManager, SystemConfig, Mapping)
 
     else:
-        raise RuntimeError(f"Unsupported platform: {SYSTEM}")
+        raise RuntimeError(f"Unsupported platform: {sys.platform}")
 
 
 def get_specific_mt_key(event) -> str:
@@ -142,4 +142,6 @@ __all__ = [
     "get_platform",
     "get_specific_mt_key",
     "get_specific_qt_key",
+    "capture_one_key",
+    "get_lock_states",
 ]
