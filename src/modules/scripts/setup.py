@@ -5,6 +5,7 @@ Executable in both interactive CLI and GUI application modes.
 
 from __future__ import annotations
 
+import argparse
 import logging
 import sys
 
@@ -16,6 +17,24 @@ logger = logging.getLogger("modules.scripts.setup")
 def run(parent=None) -> bool:
     is_gui = QApplication.instance() is not None
 
+    parser = argparse.ArgumentParser(description="Touch2Key Setup Utility")
+    parser.add_argument(
+        "-y", "--yes", action="store_true", help="Skip confirmation prompt / non-interactive mode"
+    )
+    parser.add_argument(
+        "--no-restart",
+        action="store_true",
+        help="Skip system reboot prompt (Windows only, safely ignored on Linux)",
+    )
+
+    if is_gui:
+        args, _ = parser.parse_known_args()
+    else:
+        args = parser.parse_args()
+
+    # If --yes is passed, force interactive to False so scripts don't block
+    interactive_mode = not is_gui and not args.yes
+
     logger.info("Starting automated platform configuration for %s", sys.platform)
 
     try:
@@ -23,11 +42,11 @@ def run(parent=None) -> bool:
 
         if sys.platform == "win32":
             from modules.platforms.windows import setup_windows
-            needs_reboot = setup_windows(interactive=not is_gui)
+            needs_reboot = setup_windows(interactive=interactive_mode, no_restart=args.no_restart)
 
         elif sys.platform == "linux":
             from modules.platforms.linux import setup_linux
-            needs_reboot = setup_linux(interactive=not is_gui)
+            needs_reboot = setup_linux(interactive=interactive_mode)
 
         else:
             msg = f"Unsupported Operating System: {sys.platform}"
@@ -37,9 +56,9 @@ def run(parent=None) -> bool:
             return False
 
         logger.info("Setup finished successfully (reboot required: %s)", needs_reboot)
-        
+
         if is_gui:
-            if needs_reboot:
+            if needs_reboot and not args.no_restart:
                 QMessageBox.information(
                     parent,
                     "Reboot Recommended",
