@@ -329,19 +329,19 @@ class MainWindow(QMainWindow):
         menubar = self.menuBar()
         tools_menu = menubar.addMenu("Tools")
 
-        # 1. Setup / Repair Action
+        # Setup / Repair Action
         setup_action = QAction("Install / Repair Drivers...", self)
         setup_action.triggered.connect(self._on_run_setup)
         tools_menu.addAction(setup_action)
 
-        # 2. Check ADB Path Action
+        # Check ADB Path Action
         check_adb_action = QAction("Check ADB Binary Path...", self)
         check_adb_action.triggered.connect(self._on_check_adb)
         tools_menu.addAction(check_adb_action)
 
         tools_menu.addSeparator()
 
-        # 3. Uninstall Action
+        # Uninstall Action
         uninstall_action = QAction("Uninstall Touch2Key...", self)
         uninstall_action.triggered.connect(self._on_run_uninstall)
         tools_menu.addAction(uninstall_action)
