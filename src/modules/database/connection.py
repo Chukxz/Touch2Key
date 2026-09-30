@@ -18,7 +18,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS app_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     left_handed INTEGER NOT NULL DEFAULT 0,
-    floating_joystick INTEGER NOT NULL DEFAULT 0
+    floating_joystick INTEGER NOT NULL DEFAULT 0,
     anchored_joystick INTEGER NOT NULL DEFAULT 0,
     json_dev_width INTEGER NOT NULL DEFAULT 360,
     json_dev_height INTEGER NOT NULL DEFAULT 800,
