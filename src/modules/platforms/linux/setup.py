@@ -123,10 +123,11 @@ def setup_udev_rules(interactive: bool = True) -> None:
     )
 
 
-def setup_linux(interactive: bool = True) -> bool:
+def setup_linux(interactive: bool = True, no_restart: bool = False) -> bool:
     """
     Executes full platform setup for Linux.
     Returns False as Linux does not enforce a full system restart for udev reloads.
+    (no_restart is accepted for cross-platform signature symmetry with Windows).
     """
     print("--- Linux Platform Setup ---")
 
