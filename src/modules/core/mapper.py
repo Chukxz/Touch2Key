@@ -116,10 +116,10 @@ class Mapper:
         )
         self.aggregate_mouse_moves_thread.start()
 
-        self.vkb_listerner = threading.Thread(
+        self.vkb_listener = threading.Thread(
             target=self._virtual_keyboard_listener, daemon=True
         )
-        self.vkb_listerner.start()
+        self.vkb_listener.start()
 
         self.mapper_event_dispatcher.dispatch(
             MapperEvent(action="ON_MENU_MODE_TOGGLE", is_visible=self.last_cursor_state)
@@ -276,7 +276,6 @@ class Mapper:
 
     def device_to_game_abs(self, x: float, y: float) -> tuple[float, float]:
         """Maps incoming touch coordinates from device orientation space into
-
         absolute coordinates bounded to the target game window on screen.
         """
         rot = self.touch_reader.get_rotation()
@@ -385,7 +384,7 @@ class Mapper:
             except EOFError:
                 self.stop_event.wait(VKB_SLEEP_TIME)
             except Exception as e:
-                print(f"\n[WORKER] - Virtual Keyboard crashed: {e}.")
+                logger.warning("Virtual Keyboard worker exception: %s", e)
                 self.stop_event.wait(VKB_SLEEP_TIME)
 
     def _on_worker_respawn(self, worker_type: str) -> None:
