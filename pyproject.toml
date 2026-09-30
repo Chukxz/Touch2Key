@@ -63,7 +63,7 @@ touch2key-capture = "modules.scripts.adb_screen_capture:main"
 touch2key-wireless = "modules.cli.wireless_connect:main"
 
 # Lifecycle & Diagnostic Scripts
-touch2key-preflight = "modules.scripts.pre_flight:main"
+touch2key-preflight = "modules.scripts.preflight:main"
 touch2key-setup = "modules.scripts.setup:main"
 touch2key-uninstall = "modules.scripts.uninstall:main"
 
