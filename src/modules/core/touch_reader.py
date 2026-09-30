@@ -9,11 +9,11 @@ from typing import TYPE_CHECKING, Any
 
 from modules.utils import (
     ADB,
+    DEF_MOVE_INTERVAL,
     DEFAULT_ADB_RATE_CAP,
     LONG_DELAY,
     ROTATION_POLL_INTERVAL,
     SHORT_DELAY,
-    DEF_MOVE_INTERVAL,
     Point,
     TouchEvent,
     TouchPhase,
@@ -42,7 +42,7 @@ class TouchReader:
 
         self.device: str | None = None
         self.device_touch_event: str | None = None
-        self.slots: dict[int, dict] = {}
+        self.slots: dict[int, dict[str, Any]] = {}
         self.active_touches = 0
         self.max_slots = 10
         self.rotation = 0
@@ -50,8 +50,12 @@ class TouchReader:
         self.rotation_lock = threading.Lock()
         self.running = True
 
+        # Device screen resolution (pixels)
         self.width = 1080
         self.height = 1920
+        # Hardware digitizer max bounds (scaled into width x height by self.matrix)
+        self.max_x = 1080
+        self.max_y = 1920
         self.matrix = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
 
         self.adb_rate_cap = rate_cap
@@ -100,22 +104,11 @@ class TouchReader:
                 success, dev = ret
                 if success:
                     connecting = False
-                    try:
-                        with self.config.config_lock:
-                            self.device = dev
-                            self._configure_device()
-
-                        if self.process is not None:
-                            try:
-                                self.process.terminate()
-                            except Exception:
-                                pass
-                    except Exception:
-                        with self.config.config_lock:
-                            self.device = None
-                    else:
-                        with self.rotation_lock:
-                            self._update_matrix()
+                    with self.config.config_lock:
+                        self.device = dev
+                    # Stop the USB getevent process without clearing self.device;
+                    # _get_touches() will release held keys and reconfigure on the next loop.
+                    self._stop_process(clear_device=False)
                 else:
                     time.sleep(LONG_DELAY)
             else:
@@ -149,7 +142,12 @@ class TouchReader:
                 pass
         return None
 
-    def _get_max_slots(self) -> int:
+    def _get_device_bounds_and_slots(self) -> tuple[int, int, int]:
+        """Reads max slots and hardware X/Y max bounds via getevent -lp."""
+        slots = 10
+        max_x = self.width
+        max_y = self.height
+
         if (
             ADB is not None
             and self.device is not None
@@ -163,7 +161,7 @@ class TouchReader:
                         self.device,
                         "shell",
                         "getevent",
-                        "-p",
+                        "-lp",
                         self.device_touch_event,
                     ],
                     capture_output=True,
@@ -171,11 +169,21 @@ class TouchReader:
                     timeout=2,
                 )
                 for line in result.stdout.splitlines():
-                    if "ABS_MT_SLOT" in line and "max" in line:
-                        return int(line.split("max")[1].strip().split(",")[0]) + 1
+                    if "max" not in line:
+                        continue
+                    if "ABS_MT_SLOT" in line:
+                        slots = int(line.split("max")[1].strip().split(",")[0]) + 1
+                    elif "ABS_MT_POSITION_X" in line:
+                        parsed_x = int(line.split("max")[1].strip().split(",")[0])
+                        if parsed_x > 0:
+                            max_x = parsed_x
+                    elif "ABS_MT_POSITION_Y" in line:
+                        parsed_y = int(line.split("max")[1].strip().split(",")[0])
+                        if parsed_y > 0:
+                            max_y = parsed_y
             except Exception:
                 pass
-        return 10
+        return slots, max_x, max_y
 
     def _update_rotation(self) -> None:
         patterns = [
@@ -207,16 +215,20 @@ class TouchReader:
             time.sleep(self.rotation_poll_interval)
 
     def _update_matrix(self) -> None:
+        """Builds a 2D affine matrix that scales [0, max_x]x[0, max_y] to [0, width]x[0, height] and rotates."""
         w = float(self.width)
         h = float(self.height)
+        sx = w / float(self.max_x) if self.max_x > 0 else 1.0
+        sy = h / float(self.max_y) if self.max_y > 0 else 1.0
+
         if self.rotation == 0:
-            self.matrix = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+            self.matrix = (sx, 0.0, 0.0, 0.0, sy, 0.0)
         elif self.rotation == 1:
-            self.matrix = (0.0, 1.0, 0.0, -1.0, 0.0, w)
+            self.matrix = (0.0, sy, 0.0, -sx, 0.0, w)
         elif self.rotation == 2:
-            self.matrix = (-1.0, 0.0, w, 0.0, -1.0, h)
+            self.matrix = (-sx, 0.0, w, 0.0, -sy, h)
         elif self.rotation == 3:
-            self.matrix = (0.0, -1.0, h, 1.0, 0.0, 0.0)
+            self.matrix = (0.0, -sy, h, sx, 0.0, 0.0)
 
     def _rotate_coordinates(
         self, x: float | None, y: float | None, matrix: tuple[float, ...]
@@ -238,7 +250,12 @@ class TouchReader:
                 "tid": -1,
                 "phase": None,
                 "timestamp": 0.0,
+                "dirty": False,
             }
+        if slot >= len(self.last_dispatch_times):
+            self.last_dispatch_times.extend(
+                [0.0] * (slot + 1 - len(self.last_dispatch_times))
+            )
 
     @staticmethod
     def _parse_hex_signed(value_hex: str) -> int:
@@ -255,16 +272,18 @@ class TouchReader:
         if self.device_touch_event is None:
             raise RuntimeError("No touchscreen event device found.")
 
-        real_slots = self._get_max_slots()
+        res = get_screen_size(self.device)
+        if res:
+            self.width, self.height = res
+
+        real_slots, self.max_x, self.max_y = self._get_device_bounds_and_slots()
         if real_slots > len(self.last_dispatch_times):
             while len(self.last_dispatch_times) < real_slots:
                 self.last_dispatch_times.append(0.0)
             self.max_slots = real_slots
 
-        res = get_screen_size(self.device)
-        if res:
-            self.width, self.height = res
-        self._update_matrix()
+        with self.rotation_lock:
+            self._update_matrix()
 
     def _get_touches(self) -> None:
         current_slot = 0
@@ -272,6 +291,7 @@ class TouchReader:
             try:
                 with self.config.config_lock:
                     self._configure_device()
+                    active_device = self.device
             except RuntimeError:
                 with self.config.config_lock:
                     self.device = None
@@ -280,14 +300,14 @@ class TouchReader:
 
             if (
                 ADB is not None
-                and self.device is not None
+                and active_device is not None
                 and self.device_touch_event is not None
             ):
                 self.process = subprocess.Popen(
                     [
                         ADB,
                         "-s",
-                        self.device,
+                        active_device,
                         "shell",
                         "getevent",
                         "-l",
@@ -295,7 +315,6 @@ class TouchReader:
                     ],
                     stdout=subprocess.PIPE,
                     text=True,
-                    bufsize=0,
                 )
                 if self.process.stdout is None:
                     self.process = None
@@ -326,24 +345,40 @@ class TouchReader:
                                     {
                                         "phase": TouchPhase.DOWN,
                                         "timestamp": time.perf_counter(),
+                                        "dirty": True,
                                     }
                                 )
                                 self.active_touches += 1
                             elif tid == -1 and prev_id != -1:
                                 self.slots[current_slot]["phase"] = TouchPhase.UP
-                                self.active_touches -= 1
+                                self.slots[current_slot][
+                                    "timestamp"
+                                ] = time.perf_counter()
+                                self.active_touches = max(0, self.active_touches - 1)
                         elif code == "ABS_MT_POSITION_X":
                             self._ensure_slot(current_slot)
-                            self.slots[current_slot]["x"] = int(val_str, 16)
+                            val = min(max(0, int(val_str, 16)), self.max_x)
+                            if self.slots[current_slot]["x"] != val:
+                                self.slots[current_slot]["x"] = val
+                                self.slots[current_slot]["dirty"] = True
                         elif code == "ABS_MT_POSITION_Y":
                             self._ensure_slot(current_slot)
-                            self.slots[current_slot]["y"] = int(val_str, 16)
+                            val = min(max(0, int(val_str, 16)), self.max_y)
+                            if self.slots[current_slot]["y"] != val:
+                                self.slots[current_slot]["y"] = val
+                                self.slots[current_slot]["dirty"] = True
                         elif code == "SYN_REPORT":
                             self._handle_sync()
-                except Exception:
-                    self._handle_sync(lift_up=True)
+                except Exception as e:
+                    logger.info("Touch stream interrupted: %s", e)
+                    logger.debug("Touch stream traceback:", exc_info=True)
+                finally:
+                    if self.active_touches > 0 or any(
+                        s["phase"] is not None for s in self.slots.values()
+                    ):
+                        self._handle_sync(lift_up=True)
 
-            self._stop_process()
+            self._stop_process(clear_device=True, expected_device=active_device)
             if self.running:
                 time.sleep(SHORT_DELAY)
 
@@ -354,22 +389,38 @@ class TouchReader:
 
         for slot, data in list(self.slots.items()):
             if lift_up:
-                data["phase"] = TouchPhase.UP
+                if data["tid"] != -1 or data["phase"] is not None:
+                    data["phase"] = TouchPhase.UP
+                    data["timestamp"] = now
+                else:
+                    continue
+
             if data["phase"] is None:
                 continue
 
+            if data["x"] is None or data["y"] is None:
+                if data["phase"] is TouchPhase.UP:
+                    self.slots[slot] = {
+                        "x": None,
+                        "y": None,
+                        "tid": -1,
+                        "phase": None,
+                        "timestamp": 0.0,
+                        "dirty": False,
+                    }
+                continue
+
             if data["phase"] is TouchPhase.MOVE:
+                if not data["dirty"]:
+                    continue
                 if (now - self.last_dispatch_times[slot]) < self.move_interval:
                     continue
                 self.last_dispatch_times[slot] = now
+                data["timestamp"] = now
 
             rx, ry = self._rotate_coordinates(data["x"], data["y"], matrix)
 
-            if (
-                data["x"] is not None
-                and data["y"] is not None
-                and self.touch_event_processor
-            ):
+            if self.touch_event_processor:
                 try:
                     event = TouchEvent(
                         contact_id=slot,
@@ -379,10 +430,14 @@ class TouchReader:
                     )
                     self.touch_event_processor(event)
                 except Exception:
-                    pass
+                    logger.debug("TouchEvent failed, traceback:", exc_info=True)
 
             if data["phase"] is TouchPhase.DOWN:
                 data["phase"] = TouchPhase.MOVE
+                data["dirty"] = False
+                self.last_dispatch_times[slot] = now
+            elif data["phase"] is TouchPhase.MOVE:
+                data["dirty"] = False
             elif data["phase"] is TouchPhase.UP:
                 self.slots[slot] = {
                     "x": None,
@@ -390,14 +445,19 @@ class TouchReader:
                     "tid": -1,
                     "phase": None,
                     "timestamp": 0.0,
+                    "dirty": False,
                 }
 
         if lift_up:
             self.active_touches = 0
 
-    def _stop_process(self) -> None:
-        with self.config.config_lock:
-            self.device = None
+    def _stop_process(
+        self, clear_device: bool = True, expected_device: str | None = None
+    ) -> None:
+        if clear_device:
+            with self.config.config_lock:
+                if expected_device is None or self.device == expected_device:
+                    self.device = None
         if self.process:
             try:
                 self.process.terminate()

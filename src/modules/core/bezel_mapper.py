@@ -32,6 +32,9 @@ class BezelMapper:
         self.mapper_event_dispatcher.register_callback(
             "ON_LAYOUT_RELOAD", self._build_pipelines
         )
+        self.mapper_event_dispatcher.register_callback(
+            "ON_WORKER_RESPAWN", self._on_worker_respawn
+        )
 
     def _build_pipelines(self):
         bezels_raw_zones = self.mapper.layout_loader.bezels_json_data.copy()
@@ -63,5 +66,17 @@ class BezelMapper:
                 new_pipelines.append(pipeline)
 
         with self.lock:
-            # No need to reset
+            # Release any active bezels
+            for pipeline in self.pipelines:
+                pipeline.reset()
+
             self.pipelines = new_pipelines
+
+    def release_all(self) -> None:
+        with self.lock:
+            for pipeline in self.pipelines:
+                pipeline.reset()
+
+    def _on_worker_respawn(self, worker_type: str) -> None:
+        if worker_type == "keyboard":
+            self.release_all()

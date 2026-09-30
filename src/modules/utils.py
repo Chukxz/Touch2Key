@@ -363,6 +363,12 @@ SPECIAL_MAP_INV = {v: k for k, v in SPECIAL_MAP.items()}
 
 COPY_RE = re.compile(r"- Copy(?:\((\d+)\)|(?=\s|$))")
 
+_ROUTE_SRC_RE = re.compile(
+    r"\bdev\s+(?:wlan\d+|s?wlan\d+|ap\d+)\b.*?\bsrc\s+(\d+\.\d+\.\d+\.\d+)"
+)
+
+_PHYSICAL_SIZE_RE = re.compile(r"Physical size:\s*(\d+)x(\d+)")
+
 
 class InvalidFieldError(ValueError):
     """Raised when update()/create()/create_pipeline_from_zone()
@@ -598,7 +604,6 @@ IPC_EVT_ERROR = 0x82
 PACK_IPC_START_STRUCT = struct.Struct("<Biff?ff")
 PACK_IPC_DEVICES_CHANGE_STRUCT = struct.Struct("<Bii")
 PACK_IPC_MENU_MODE_TOGGLE_STRUCT = struct.Struct("<B?")
-PACK_IPC_AGGREGATION_STRUCT = struct.Struct("<Bffff")
 PACK_IPC_TARGET_WINDOW_CHANGE_STRUCT = struct.Struct("<Bi")
 
 _IPC_NONE_INT = -1
@@ -783,6 +788,15 @@ class IpcMapperEventDispatcher(MapperEventDispatcher):
                     mouse_device_id=m_id,
                 )
             )
+        elif opcode == IPC_CMD_TARGET_WINDOW_CHANGE:
+            window_id, window_title = unpack_ipc_target_window_change_cmd(payload)
+            self.dispatch(
+                MapperEvent(
+                    action="ON_TARGET_WINDOW_CHANGE",
+                    target_window_id=window_id,
+                    target_window_title=window_title,
+                )
+            )
         else:
             print(f"[!] Unknown IPC command opcode: {opcode}")
         return True
@@ -811,9 +825,6 @@ class QtIpcMapperEventDispatcher(QObject):
     engine_started = Signal()
     engine_stopped = Signal()
     engine_error = Signal(str)
-    menu_mode_toggled = Signal(bool)
-    aggregation = Signal(float, float, float, float)
-    worker_respawned = Signal(str)
 
     def __init__(self, conn: Any, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -916,17 +927,16 @@ def get_adb_device():
     return real[0]
 
 
-def get_screen_size(device):
+def get_screen_size(device: str) -> tuple[int, int] | None:
     result = subprocess.run(
         [ADB, "-s", device, "shell", "wm", "size"],
         capture_output=True,
         text=True,
         timeout=10,
     )
-    output = result.stdout.strip()
-    if "Physical size" in output:
-        w, h = map(int, output.split(":")[-1].strip().split("x"))
-        return w, h
+    match = _PHYSICAL_SIZE_RE.search(result.stdout)
+    if match:
+        return int(match.group(1)), int(match.group(2))
     return None
 
 
@@ -957,7 +967,7 @@ def is_device_online(device: str):
         return False
 
 
-def wireless_connect(device: str | None = None, continuous=True):
+def wireless_connect(device: str | None = None, continuous: bool = True):
     while True:
         if not device:
             try:
@@ -968,19 +978,18 @@ def wireless_connect(device: str | None = None, continuous=True):
                     continue
                 return False, ""
         try:
-            routes = (
-                subprocess.check_output(
-                    [ADB, "-s", device, "shell", "ip", "route"], timeout=10
-                )
-                .decode()
-                .splitlines()
-            )
-            socket = [
-                s.split()[-1] for s in routes if "dev ap0" in s or "dev wlan0" in s
-            ]
-            if not socket:
+            routes = subprocess.check_output(
+                [ADB, "-s", device, "shell", "ip", "route"], text=True, timeout=10
+            ).splitlines()
+            ip_addr = None
+            for line in routes:
+                m = _ROUTE_SRC_RE.search(line)
+                if m:
+                    ip_addr = m.group(1)
+                    break
+            if not ip_addr:
                 raise RuntimeError(f"No sockets found for device: {device}.")
-            socket_path = f"{socket[0]}:{PORT}"
+            socket_path = f"{ip_addr}:{PORT}"
 
             if device != socket_path:
                 subprocess.run([ADB, "-s", device, "tcpip", PORT], timeout=10)

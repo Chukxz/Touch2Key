@@ -331,7 +331,7 @@ class Engine:
 
         k_device_handle = None
         m_device_handle = None
-        
+
         if sys.platform == "win32":
             from modules.platforms.windows.query_interception_device import (
                 select_keyboard_then_mouse,

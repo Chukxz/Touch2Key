@@ -189,8 +189,8 @@ class KeyMapper:
                 pipeline.reset(self.output_sink)
 
     def _on_worker_respawn(self, worker_type: str) -> None:
-        self.release_all()
         if worker_type == "keyboard":
+            self.release_all()
             self._sync_typematic_to_bridge()
 
     def stop(self) -> None:

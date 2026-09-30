@@ -352,7 +352,7 @@ class Mapper:
             try:
                 payload = self.engine_ref.vkb_reader.recv_bytes()
                 state, scancode = VKB_STRUCT.unpack(payload)
-                
+
                 is_toggle_mode = scancode == TOP_BEZEL_ID
                 is_mouse_left = scancode == M_LEFT
                 is_mouse_middle = scancode == M_MIDDLE
@@ -367,12 +367,12 @@ class Mapper:
                         self.bridge.middle_click_down()
                     elif is_mouse_right:
                         self.bridge.right_click_down()
-                    else:                        
+                    else:
                         self.bridge.key_down(scancode)
-                    
+
                 elif state == 1:
                     if is_toggle_mode:
-                        pass # No-Op on key up
+                        pass  # No-Op on key up
                     elif is_mouse_left:
                         self.bridge.left_click_up()
                     elif is_mouse_middle:

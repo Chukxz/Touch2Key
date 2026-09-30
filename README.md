@@ -7,7 +7,7 @@
 
 **Touch2Key** is a high-performance, cross-platform input mapper designed to seamlessly translate touch interactions (via Android/ADB) into zero-latency keyboard and mouse inputs on your PC.
 
-This is the Second Touch2Key Published Implementation with full GUI and CLI support.
+This is the Second Touch2Key Published Implementation with full GUI, CLI support and improved functionality.
 The first version with only CLI support + Basic GUI windows, can be accessed [here](https://github.com/Chukxz/touch2key).
 
 Enable **Developer Options** and **Wireless Debugging** (5 GHz Wi-Fi recommended) on your Android device and accept the authorization prompt when connecting.

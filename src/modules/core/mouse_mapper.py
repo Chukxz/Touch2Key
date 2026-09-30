@@ -56,6 +56,9 @@ class MouseMapper:
             "ON_LAYOUT_RELOAD", self._build_pipeline
         )
         self.mapper_event_dispatcher.register_callback(
+            "ON_WORKER_RESPAWN", self._on_worker_respawn
+        )
+        self.mapper_event_dispatcher.register_callback(
             "ON_AGGREGATION", self._aggregate
         )
 
@@ -203,3 +206,7 @@ class MouseMapper:
         self.output_sink.mouse_move(
             sum_dx * self.final_sens_x, sum_dy * self.final_sens_y
         )
+
+    def _on_worker_respawn(self, worker_type: str) -> None:
+        if worker_type == "mouse":
+            self.touch_up()

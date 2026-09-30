@@ -432,7 +432,7 @@ class ToggleSemantic(Semantic[Unit]):
                 else:
                     pass
 
-    def reset(self, output_sink: OutputSink) -> None:
+    def reset(self, output_sink: OutputSink | None = None) -> None:
         self._start_time = None
         self._start_pos = None
 
