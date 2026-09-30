@@ -33,103 +33,43 @@ if TYPE_CHECKING:
 VKB_NAME = "Touch2Key_VKB"
 
 # --- Main Alphanumeric Block ---
-# Format: (Label, key_code, Column Span)
 MAIN_LAYOUT = [
-    # Row 0: Esc, F-Keys and Delete (Span 1 each, 14 total columns)
     [
-        ("Esc", 0x01, 1),
-        ("F1", 0x3B, 1),
-        ("F2", 0x3C, 1),
-        ("F3", 0x3D, 1),
-        ("F4", 0x3E, 1),
-        ("F5", 0x3F, 1),
-        ("F6", 0x40, 1),
-        ("F7", 0x41, 1),
-        ("F8", 0x42, 1),
-        ("F9", 0x43, 1),
-        ("F10", 0x44, 1),
-        ("F11", 0x57, 1),
-        ("F12", 0x58, 1),
-        ("Delete", 0xE053, 2),
+        ("Esc", 0x01, 1), ("F1", 0x3B, 1), ("F2", 0x3C, 1), ("F3", 0x3D, 1),
+        ("F4", 0x3E, 1), ("F5", 0x3F, 1), ("F6", 0x40, 1), ("F7", 0x41, 1),
+        ("F8", 0x42, 1), ("F9", 0x43, 1), ("F10", 0x44, 1), ("F11", 0x57, 1),
+        ("F12", 0x58, 1), ("Delete", 0xE053, 2),
     ],
-    # Row 1: Numbers
     [
-        ("~", 0x29, 1),
-        ("1", 0x02, 1),
-        ("2", 0x03, 1),
-        ("3", 0x04, 1),
-        ("4", 0x05, 1),
-        ("5", 0x06, 1),
-        ("6", 0x07, 1),
-        ("7", 0x08, 1),
-        ("8", 0x09, 1),
-        ("9", 0x0A, 1),
-        ("0", 0x0B, 1),
-        ("-", 0x0C, 1),
-        ("=", 0x0D, 1),
-        ("Backspace", 0x0E, 2),
+        ("~", 0x29, 1), ("1", 0x02, 1), ("2", 0x03, 1), ("3", 0x04, 1),
+        ("4", 0x05, 1), ("5", 0x06, 1), ("6", 0x07, 1), ("7", 0x08, 1),
+        ("8", 0x09, 1), ("9", 0x0A, 1), ("0", 0x0B, 1), ("-", 0x0C, 1),
+        ("=", 0x0D, 1), ("Backspace", 0x0E, 2),
     ],
-    # Row 2: QWERTY
     [
-        ("Tab", 0x0F, 2),
-        ("Q", 0x10, 1),
-        ("W", 0x11, 1),
-        ("E", 0x12, 1),
-        ("R", 0x13, 1),
-        ("T", 0x14, 1),
-        ("Y", 0x15, 1),
-        ("U", 0x16, 1),
-        ("I", 0x17, 1),
-        ("O", 0x18, 1),
-        ("P", 0x19, 1),
-        ("[", 0x1A, 1),
-        ("]", 0x1B, 1),
-        ("\\", 0x2B, 1),
+        ("Tab", 0x0F, 2), ("Q", 0x10, 1), ("W", 0x11, 1), ("E", 0x12, 1),
+        ("R", 0x13, 1), ("T", 0x14, 1), ("Y", 0x15, 1), ("U", 0x16, 1),
+        ("I", 0x17, 1), ("O", 0x18, 1), ("P", 0x19, 1), ("[", 0x1A, 1),
+        ("]", 0x1B, 1), ("\\", 0x2B, 1),
     ],
-    # Row 3: ASDFG
     [
-        ("Caps Lock", 0x3A, 2),
-        ("A", 0x1E, 1),
-        ("S", 0x1F, 1),
-        ("D", 0x20, 1),
-        ("F", 0x21, 1),
-        ("G", 0x22, 1),
-        ("H", 0x23, 1),
-        ("J", 0x24, 1),
-        ("K", 0x25, 1),
-        ("L", 0x26, 1),
-        (";", 0x27, 1),
-        ("'", 0x28, 1),
+        ("Caps Lock", 0x3A, 2), ("A", 0x1E, 1), ("S", 0x1F, 1), ("D", 0x20, 1),
+        ("F", 0x21, 1), ("G", 0x22, 1), ("H", 0x23, 1), ("J", 0x24, 1),
+        ("K", 0x25, 1), ("L", 0x26, 1), (";", 0x27, 1), ("'", 0x28, 1),
         ("Enter", 0x1C, 2),
     ],
-    # Row 4: ZXCVB
     [
-        ("Shift", 0x2A, 2),
-        ("Z", 0x2C, 1),
-        ("X", 0x2D, 1),
-        ("C", 0x2E, 1),
-        ("V", 0x2F, 1),
-        ("B", 0x30, 1),
-        ("N", 0x31, 1),
-        ("M", 0x32, 1),
-        (",", 0x33, 1),
-        (".", 0x34, 1),
-        ("/", 0x35, 1),
-        ("Shift", 0x36, 3),
+        ("Shift", 0x2A, 2), ("Z", 0x2C, 1), ("X", 0x2D, 1), ("C", 0x2E, 1),
+        ("V", 0x2F, 1), ("B", 0x30, 1), ("N", 0x31, 1), ("M", 0x32, 1),
+        (",", 0x33, 1), (".", 0x34, 1), ("/", 0x35, 1), ("Shift", 0x36, 3),
     ],
-    # Row 5: Modifiers
     [
-        ("Ctrl", 0x1D, 2),
-        ("Alt", 0x38, 2),
-        ("Space", 0x39, 7),
-        ("Alt", 0xE038, 2),
-        ("Ctrl", 0xE01D, 2),
+        ("Ctrl", 0x1D, 2), ("Alt", 0x38, 2), ("Space", 0x39, 7),
+        ("Alt", 0xE038, 2), ("Ctrl", 0xE01D, 2),
     ],
 ]
 
 # --- Navigation & Arrows Block ---
-# Format: (Label, key_code, Row, Col, RowSpan, ColSpan)
-
 NAV_LAYOUT = [
     ("Insert", 0xE050, 0, 0, 1, 3),
     ("PrtSc", 0xE037, 0, 3, 1, 3),
@@ -147,7 +87,6 @@ NAV_LAYOUT = [
 ]
 
 # --- Numpad Block ---
-# Format: (Label, key_code, Row, Col, RowSpan, ColSpan)
 NUMPAD_LAYOUT = [
     ("Toggle Cursor", TOP_BEZEL_ID, 0, 0, 1, 4),
     ("7", 0x47, 1, 0, 1, 1),
@@ -191,7 +130,6 @@ class VirtualKeyButton(QPushButton):
         self.is_mod_key = key_code in mod_codes
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-        # CRITICAL: Do not accept focus, otherwise clicking a key minimizes the full-screen game
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         self.setStyleSheet("""
@@ -217,19 +155,13 @@ class VirtualKeyButton(QPushButton):
             }
         """)
 
-        # Make modifiers "Sticky"
         if self.is_mod_key:
             self.setCheckable(True)
             self.toggled.connect(self._on_modifier_toggled)
         else:
-            # Standard keys (incl. lock keys): momentary down+up per tap,
-            # EXCEPT a long-press (held past LONG_PRESS_INTERVAL_MS) on a
-            # non-lock key locks it down (no UP sent on release) until the
-            # next tap explicitly releases it. Lock keys ignore all of this
-            # and just fire down+up every tap.
-            self._locked = False           # key is currently held down via a long-press lock
-            self._long_press_fired = False  # timer crossed the threshold during THIS press
-            self._suppress_release = False  # the paired release for an unlock-tap: no-op it
+            self._locked = False
+            self._long_press_fired = False
+            self._suppress_release = False
             self._timer = QTimer(self)
             self._timer.setSingleShot(True)
             self._timer.setInterval(self.LONG_PRESS_INTERVAL_MS)
@@ -238,7 +170,6 @@ class VirtualKeyButton(QPushButton):
             self._timer.timeout.connect(self._on_long_press_threshold)
 
     def _on_modifier_toggled(self, checked: bool):
-        # 'checked' is True if the button is currently pressed down
         self.set_active(checked)
         if checked:
             self._send_ipc_message(0, self.key_code)
@@ -251,10 +182,6 @@ class VirtualKeyButton(QPushButton):
             return
 
         if self._locked:
-            # This press IS the unlock gesture: release immediately and
-            # consume it fully here. The paired `released` signal that
-            # follows belongs to this same tap -- suppress it below so it
-            # doesn't get reinterpreted as a fresh short tap.
             self._send_ipc_message(1, self.key_code)
             self._locked = False
             self._suppress_release = True
@@ -277,13 +204,9 @@ class VirtualKeyButton(QPushButton):
 
         self._timer.stop()
         if self._long_press_fired:
-            # Crossed the long-press threshold while still held: lock the
-            # key down instead of releasing it. No UP sent -- the DOWN
-            # from _on_standard_pressed stays in effect.
             self._locked = True
             self.set_active(True)
         else:
-            # Ordinary short tap: momentary press.
             self._send_ipc_message(1, self.key_code)
 
     def _on_long_press_threshold(self):
@@ -293,9 +216,6 @@ class VirtualKeyButton(QPushButton):
         self.parent_ref._send_key(state, key_code, self.text().upper())
 
     def set_active(self, active: bool) -> None:
-        """
-        Visual: Shows if the current modifier or lock key is active.
-        """
         if self.property("active") == active:
             return
         self.setProperty("active", active)
@@ -317,10 +237,6 @@ class VirtualKeyboard(QWidget):
             if (code := get_scancode_from_key(key)) is not None
         ]
 
-        # Lock keys: key_codes for the sticky-vs-momentary check above, and
-        # a name->key_code map to translate get_lock_states()'s
-        # "caps_lock"/"num_lock"/"scroll_lock" keys into the button to
-        # update during polling.
         self.lock_key_codes = [
             code
             for key in LOCK_KEYS.split(",")
@@ -336,43 +252,32 @@ class VirtualKeyboard(QWidget):
         self._linux_key_map = {}
         if sys.platform == "linux":
             from modules.platforms.linux.ecodes_map import LINUX_KEY_MAP
-
             self._linux_key_map = LINUX_KEY_MAP
 
         self.setWindowTitle("Touch2Key - Virtual Keyboard")
-        # Made wider to accommodate all 3 blocks cleanly
         self.resize(1100, 300)
         self.setStyleSheet("background-color: #121212;")
 
-        # OSK Window Flags: StaysOnTop, hidden from taskbar, completely non-activating
         self.setWindowFlags(
             Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
             | Qt.WindowType.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-
-        # ADD THIS LINE: Forces the Qt app to exit when this "Tool" window is closed
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, True)
 
         self._setup_ui()
 
-        # Reflect real lock-key state immediately on open (don't wait for
-        # the first timer tick), then keep polling.
         self._poll_lock_states()
         self.lock_state_timer = QTimer(self)
         self.lock_state_timer.timeout.connect(self._poll_lock_states)
         self.lock_state_timer.start(self.LOCK_POLL_INTERVAL_MS)
 
-        # Proactive Fail-Safe: Check if Main Engine is still alive
-
     def _setup_ui(self):
-        """Constructs the 3 distinct blocks (Main, Nav, Numpad) side-by-side."""
         master_layout = QHBoxLayout(self)
         master_layout.setContentsMargins(10, 10, 10, 10)
         master_layout.setSpacing(15)
 
-        # 1. Main Block
         main_grid = QGridLayout()
         main_grid.setSpacing(2)
         for row_idx, row_data in enumerate(MAIN_LAYOUT):
@@ -382,13 +287,11 @@ class VirtualKeyboard(QWidget):
                 main_grid.addWidget(btn, row_idx, col_idx, 1, col_span)
                 col_idx += col_span
 
-        # 2. Nav Block
         nav_grid = QGridLayout()
         nav_grid.setSpacing(2)
         for label, key_code, r, c, r_span, c_span in NAV_LAYOUT:
             nav_grid.addWidget(self._create_btn(label, key_code), r, c, r_span, c_span)
 
-        # 3. Numpad Block
         numpad_grid = QGridLayout()
         numpad_grid.setSpacing(2)
         for label, key_code, r, c, r_span, c_span in NUMPAD_LAYOUT:
@@ -396,7 +299,6 @@ class VirtualKeyboard(QWidget):
                 self._create_btn(label, key_code), r, c, r_span, c_span
             )
 
-        # Add all to master layout (Stretch factors: 15 for Main, 6 for Nav, 4 for Numpad)
         master_layout.addLayout(main_grid, 15)
         master_layout.addLayout(nav_grid, 6)
         master_layout.addLayout(numpad_grid, 4)
@@ -414,10 +316,6 @@ class VirtualKeyboard(QWidget):
         return btn
 
     def _poll_lock_states(self) -> None:
-        """Refreshes each lock button's visual 'active' state from live OS
-        state (see get_lock_states in modules.utils). Read-only: never
-        sends anything, never touches _pressed_keys.
-        """
         states = get_lock_states()
         if states is not None:
             for name, key_code in self.lock_name_to_key_code.items():
@@ -426,14 +324,12 @@ class VirtualKeyboard(QWidget):
                     btn.set_active(states.get(name, False))
 
     def _send_key(self, state: int, key_code: int, key_name: str):
-        """Packs the keystroke and sends it through the IPC pipe."""
-        if state == 0:  # DOWN
+        if state == 0:
             self._pressed_keys.add(key_code)
-        elif state == 1:  # UP
+        elif state == 1:
             self._pressed_keys.discard(key_code)
 
         if self.conn is None:
-            # Standalone Testing Mode ONLY: Print to console
             action = "DOWN" if state == 0 else "UP  "
 
             if sys.platform == "win32":
@@ -455,7 +351,6 @@ class VirtualKeyboard(QWidget):
             print(f"[VirtualKeyboard] {key_name}: {action} | key_code: {key_code_hex}")
             return
 
-        # Production Mode: SILENT IPC Write
         try:
             self.conn.send_bytes(VKB_STRUCT.pack(state, int(key_code)))
         except OSError:
@@ -471,11 +366,7 @@ class VirtualKeyboard(QWidget):
             self._pressed_keys.clear()
 
     def closeEvent(self, event):
-        """Ensures the terminal loop dies completely when the window 'X' is clicked."""
         self.lock_state_timer.stop()
-
-        # Release all pressed keys and close the IPC pipe cleanly
-
         self.release_all()
 
         if self.conn:
@@ -485,9 +376,6 @@ class VirtualKeyboard(QWidget):
                 pass
 
         event.accept()
-
-    def _heartbeat_loop(self): ...
-
 
 def run(conn: Connection | None = None, enforce_single_instance=True):
     if enforce_single_instance:
@@ -502,8 +390,6 @@ def run(conn: Connection | None = None, enforce_single_instance=True):
 
     window = VirtualKeyboard(conn)
     window.show()
-
-    # sys.exit ensures the terminal prompt returns instantly when app closes
     sys.exit(app.exec())
 
 
@@ -512,4 +398,4 @@ if __name__ == "__main__":
 
 
 def virtual_keyboard_worker(conn: Connection):
-    run(conn, False)  # Don't enforce single instance checks
+    run(conn, False)
