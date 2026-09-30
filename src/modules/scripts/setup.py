@@ -46,7 +46,7 @@ def run(parent=None) -> bool:
 
         elif sys.platform == "linux":
             from modules.platforms.linux import setup_linux
-            needs_reboot = setup_linux(interactive=interactive_mode)
+            needs_reboot = setup_linux(interactive=interactive_mode, no_restart=args.no_restart)
 
         else:
             msg = f"Unsupported Operating System: {sys.platform}"
