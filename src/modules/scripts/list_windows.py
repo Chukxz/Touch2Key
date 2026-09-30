@@ -71,7 +71,7 @@ def _select_window_cli() -> Optional[tuple[int, str]]:
             try:
                 choice = input_queue.get(timeout=REFRESH_INTERVAL_SECONDS)
             except queue.Empty:
-                continue  # timeout elapsed, loop back and redraw -- same shape as await_input(150)
+                continue
 
             if choice == "q":
                 return None
@@ -81,18 +81,18 @@ def _select_window_cli() -> Optional[tuple[int, str]]:
             try:
                 window_id = int(choice)
             except ValueError:
-                print(f"\n[!] Invalid input: {choice!r}")
+                logger.warning("Invalid input: %r", choice)
                 continue
 
             if window_id not in rows:
-                print(f"\n[!] Window # {window_id} is not in the current list.")
+                logger.warning("Window # %s is not in the current list.", window_id)
                 continue
 
             title = rows[window_id][1]
-            print(f"\n[+] Window selected: {window_id} ({title})")
+            logger.info("Window selected: %s (%s)", window_id, title)
             return window_id, title
     except KeyboardInterrupt:
-        logger.info("\n[!] Window selection cancelled.")
+        logger.info("Window selection cancelled.")
         return None
 
 
@@ -243,14 +243,9 @@ def _select_window_gui(parent=None) -> Optional[tuple[int, str]]:
 
 
 def select_window(parent=None) -> Optional[tuple[int, str]]:
-    """Dual-mode window query. Automatically selects between CLI prompt and Qt Dialog.
-
-    Both paths block until a selection is made or aborted, and both auto-refresh
-    their view of the live window list at a fixed interval while waiting.
-    """
+    """Dual-mode window query. Automatically selects between CLI prompt and Qt Dialog."""
     try:
         from PySide6.QtWidgets import QApplication
-
         if QApplication.instance() is not None:
             return _select_window_gui(parent=parent)
     except ImportError:
