@@ -4,12 +4,12 @@ from typing import TYPE_CHECKING
 import threading
 
 from modules.utils import BEZEL, scale_coord
-
 from modules.core.pipeline import RectangularRegion, Point
 from modules.core.pipeline_factory import SystemToggle
 
 if TYPE_CHECKING:
     from modules.core.mapper import Mapper
+    from modules.core.pipeline_output import BridgeOutputSink
 
 
 class BezelMapper:
@@ -18,10 +18,12 @@ class BezelMapper:
     def __init__(
         self,
         mapper: Mapper,
+        output_sink: BridgeOutputSink,
     ):
         self.mapper = mapper
         self.config = mapper.config
         self.bridge = mapper.bridge
+        self.output_sink = output_sink
         self.mapper_event_dispatcher = mapper.mapper_event_dispatcher
 
         self.lock = threading.Lock()
@@ -68,14 +70,14 @@ class BezelMapper:
         with self.lock:
             # Release any active bezels
             for pipeline in self.pipelines:
-                pipeline.reset()
+                pipeline.reset(self.output_sink)
 
             self.pipelines = new_pipelines
 
     def release_all(self) -> None:
         with self.lock:
             for pipeline in self.pipelines:
-                pipeline.reset()
+                pipeline.reset(self.output_sink)
 
     def _on_worker_respawn(self, worker_type: str) -> None:
         if worker_type == "keyboard":
