@@ -8,6 +8,7 @@ import logging
 import shutil
 from pathlib import Path
 
+from modules.log_manager import AppLogManager
 from modules.utils import ADB
 
 logger = logging.getLogger("modules.scripts.check_adb")
@@ -31,5 +32,11 @@ def run() -> str | None:
     return None
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Dedicated entry point for touch2key-check-adb script execution."""
+    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_show_adb_path")
     run()
+
+
+if __name__ == "__main__":
+    main()
