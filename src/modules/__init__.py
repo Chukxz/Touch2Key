@@ -7,6 +7,8 @@ from .utils import (
     JSONS_FOLDER,
 )
 
+from .log_manager import AppLogManager
+
 from .database import store
 
 from .core.pipeline import Pipeline

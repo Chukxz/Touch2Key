@@ -10,7 +10,8 @@ import shutil
 from pathlib import Path
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from modules.utils import ADB
+from modules import ADB
+from modules import AppLogManager
 
 logger = logging.getLogger("modules.scripts.pre_flight")
 
@@ -76,14 +77,14 @@ def run(verbose: bool = True, parent=None) -> bool:
 
         if verbose:
             logger.error("Pre-flight checks failed:\n%s", err_msg)
-            
+
         if is_gui and verbose:
             QMessageBox.warning(
                 parent,
                 "Pre-flight Checks Failed",
                 f"System checks did not pass:\n\n{err_msg}",
             )
-            
+
         return False
 
     if verbose:
@@ -93,4 +94,5 @@ def run(verbose: bool = True, parent=None) -> bool:
 
 
 if __name__ == "__main__":
+    AppLogManager.setup_logging()
     run()
