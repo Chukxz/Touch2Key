@@ -17,6 +17,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from modules.database import store
+from modules.log_manager import AppLogManager
 from modules.utils import (
     BIN_FOLDER,
     DATA_FOLDER,
@@ -71,7 +72,6 @@ def _remove_linux_udev_rules(is_gui: bool) -> bool:
         logger.info("No udev rule found at %s. Skipping removal.", rule_path)
         return True
 
-    # Try direct unprivileged removal first (in case running as root)
     if _is_admin():
         try:
             rule_path.unlink()
@@ -83,10 +83,8 @@ def _remove_linux_udev_rules(is_gui: bool) -> bool:
             logger.error("Failed to remove udev rule as root: %s", exc)
             return False
 
-    # Escalate privileges when running unprivileged
     cmd_str = f"rm -f {rule_path} && udevadm control --reload-rules && udevadm trigger"
 
-    # In GUI mode, prefer PolicyKit graphical prompt
     if is_gui and shutil.which("pkexec"):
         logger.info("Invoking PolicyKit (pkexec) to remove udev rule...")
         res = subprocess.run(["pkexec", "sh", "-c", cmd_str], capture_output=True)
@@ -96,7 +94,6 @@ def _remove_linux_udev_rules(is_gui: bool) -> bool:
         logger.warning("pkexec authentication canceled or failed.")
         return False
 
-    # In CLI mode, use standard sudo
     if shutil.which("sudo"):
         logger.warning("Sudo authentication required to delete /etc/udev/rules.d rule...")
         print("[!] Sudo authentication required to delete /etc/udev/rules.d rule...")
@@ -167,7 +164,6 @@ def run(parent=None) -> bool:
     else:
         args = parser.parse_args()
 
-    # 1. Platform-Specific Elevation Check
     if sys.platform == "win32" and not _is_admin():
         msg = "Administrator privileges are required to uninstall the Interception driver."
         logger.error(msg)
@@ -177,7 +173,6 @@ def run(parent=None) -> bool:
             _request_windows_elevation()
         return False
 
-    # 2. Confirmation Prompt
     if not args.yes:
         confirm_text = (
             "Are you sure you want to remove the driver/rules and clean binaries?"
@@ -198,14 +193,12 @@ def run(parent=None) -> bool:
                 print("[!] Aborted.")
                 return False
 
-    # 3. Teardown active handles and background processes
     try:
         store.close()
     except Exception:
         pass
     _kill_adb()
 
-    # 4. OS-Specific Driver / Rules Removal
     needs_reboot = False
     if sys.platform == "win32":
         installer_exe = (
@@ -222,7 +215,7 @@ def run(parent=None) -> bool:
                 needs_reboot = True
                 logger.info("Interception driver uninstalled.")
             else:
-                logger.warning("Interception driver uninstall command failed. Exit code non-zero.")
+                logger.warning("Interception driver uninstall command failed.")
         else:
             logger.warning("Interception installer binary not found in bin/.")
 
@@ -238,12 +231,10 @@ def run(parent=None) -> bool:
                 logger.error(err_msg)
             return False
 
-    # 5. Remove Platform Binaries
     if BIN_FOLDER.exists():
         shutil.rmtree(BIN_FOLDER, ignore_errors=True)
         logger.info("Local platform binaries deleted.")
 
-    # 6. Purge Application Data
     if args.purge or args.purge_all:
         purge_data()
 
@@ -251,7 +242,6 @@ def run(parent=None) -> bool:
         purge_diagnostics()
         purge_logs()
 
-    # 7. Final Notification / Reboot Workflow (Strictly guarded for Windows)
     logger.info("Uninstall completed successfully.")
 
     if is_gui:
@@ -299,6 +289,14 @@ def run(parent=None) -> bool:
     return True
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Dedicated entry point for touch2key-uninstall script execution."""
+    is_gui = QApplication.instance() is not None or "--gui" in sys.argv
+    AppLogManager.setup_logging(is_gui=is_gui, log_prefix="touch2key_uninstall")
+    
     if not run():
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
