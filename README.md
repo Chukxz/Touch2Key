@@ -137,6 +137,7 @@ Because Touch2Key installs system-level drivers and kernel rules, **simply runni
 | :--- | :--- |
 | `touch2key` | Launches the CLI engine. |
 | `touch2key --profile` | Launches the CLI engine and also runs profiling. |
+| `touch2key --use-gui` | Launches the CLI engine with a QApplication context (not the same as a full GUI but with some gui windows). |
 | `touch2key-adb` | Displays full ADB executable path if found. |
 | `touch2key-capture` | ADB screen capture. |
 | `touch2key-gui` | Launches the GUI engine. |
