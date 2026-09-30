@@ -50,26 +50,26 @@ dev = [
 
 [project.scripts]
 # Primary Entry Points
-touch2key = "modules.main:run"
-touch2key-gui = "modules.gui.app:run"
+touch2key = "modules.main:main"
+touch2key-gui = "modules.gui.app:main"
 
 # CLI Profile, Layout & Typematic Management
-touch2key-manage = "modules.cli.manager:run"
-touch2key-plot = "modules.cli.layout_plotter:run"
+touch2key-manage = "modules.cli.manager:main"
+touch2key-plot = "modules.cli.layout_plotter:main"
 
 # Device & Network Tools
-touch2key-adb = "modules.scripts.show_adb_path:run"
-touch2key-capture = "modules.scripts.adb_screen_capture:run"
-touch2key-wireless = "modules.cli.wireless_connect:run"
+touch2key-adb = "modules.scripts.show_adb_path:main"
+touch2key-capture = "modules.scripts.adb_screen_capture:main"
+touch2key-wireless = "modules.cli.wireless_connect:main"
 
 # Lifecycle & Diagnostic Scripts
-touch2key-preflight = "modules.scripts.pre_flight:run"
-touch2key-setup = "modules.scripts.setup:run"
-touch2key-uninstall = "modules.scripts.uninstall:run"
+touch2key-preflight = "modules.scripts.pre_flight:main"
+touch2key-setup = "modules.scripts.setup:main"
+touch2key-uninstall = "modules.scripts.uninstall:main"
 
 # Visualizer and Virtual Keyboard
-touch2key-keyboard = "modules.gui.overlays.virtual_keyboard:run"
-touch2key-visualizer = "modules.gui.overlays.visualizer:run"
+touch2key-keyboard = "modules.gui.overlays.virtual_keyboard:main"
+touch2key-visualizer = "modules.gui.overlays.visualizer:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

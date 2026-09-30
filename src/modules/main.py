@@ -46,7 +46,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         print(f"[!] Unsupported OS: {sys.platform}")
         sys.exit(1)
 
-    # Initialize CLI logging (terminal spam + buffers file output)
+    # Initialize CLI logging
     AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_cli")
 
     # -----------------------------------------------------------------------
@@ -71,6 +71,10 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     # -----------------------------------------------------------------------
     # 2. Boot Sequence
     # -----------------------------------------------------------------------
+    # Initialize QApplication early so pre-flight knows if a GUI context exists
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setApplicationName(APP_NAME)
+
     if not pre_flight_run():
         profiler_cleanup(cli_profiler)
         sys.exit(1)
@@ -88,9 +92,6 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     # -----------------------------------------------------------------------
     # 3. Application Execution
     # -----------------------------------------------------------------------
-    app = QApplication(sys.argv)
-    app.setApplicationName(APP_NAME)
-
     engine = Engine(headless=False)
 
     try:
@@ -102,5 +103,10 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         profiler_cleanup(cli_profiler)
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Dedicated entry point for pyproject.toml scripts and direct execution."""
     run()
+
+
+if __name__ == "__main__":
+    main()

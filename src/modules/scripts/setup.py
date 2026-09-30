@@ -9,6 +9,8 @@ import argparse
 import logging
 import sys
 
+from modules import AppLogManager
+
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 logger = logging.getLogger("modules.scripts.setup")
@@ -19,7 +21,10 @@ def run(parent=None) -> bool:
 
     parser = argparse.ArgumentParser(description="Touch2Key Setup Utility")
     parser.add_argument(
-        "-y", "--yes", action="store_true", help="Skip confirmation prompt / non-interactive mode"
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Skip confirmation prompt / non-interactive mode",
     )
     parser.add_argument(
         "--no-restart",
@@ -42,11 +47,17 @@ def run(parent=None) -> bool:
 
         if sys.platform == "win32":
             from modules.platforms.windows import setup_windows
-            needs_reboot = setup_windows(interactive=interactive_mode, no_restart=args.no_restart)
+
+            needs_reboot = setup_windows(
+                interactive=interactive_mode, no_restart=args.no_restart
+            )
 
         elif sys.platform == "linux":
             from modules.platforms.linux import setup_linux
-            needs_reboot = setup_linux(interactive=interactive_mode, no_restart=args.no_restart)
+
+            needs_reboot = setup_linux(
+                interactive=interactive_mode, no_restart=args.no_restart
+            )
 
         else:
             msg = f"Unsupported Operating System: {sys.platform}"
@@ -85,7 +96,17 @@ def run(parent=None) -> bool:
         return False
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Dedicated entry point for CLI and pyproject.toml execution."""
+    # 1. Initialize logging right at the entry boundary
+    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_setup")
+
+    # 2. Run the script logic
     success = run()
     if not success:
         sys.exit(1)
+
+
+# Allows running directly
+if __name__ == "__main__":
+    main()

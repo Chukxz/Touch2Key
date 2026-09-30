@@ -75,8 +75,17 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         gui_profiler.enable()
 
     # -----------------------------------------------------------------------
-    # 2. Boot Sequence
+    # 2. Boot Sequence (Initialize Qt Application Early)
     # -----------------------------------------------------------------------
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setApplicationName(APP_NAME)
+    app.setQuitOnLastWindowClosed(True)
+
+    # Now pre-flight can correctly detect the active QApplication instance for GUI warnings
     if not pre_flight_run():
         profiler_cleanup(gui_profiler)
         sys.exit(1)
@@ -94,14 +103,6 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     # -----------------------------------------------------------------------
     # 3. Application Execution
     # -----------------------------------------------------------------------
-    QApplication.setHighDpiScaleFactorRoundingPolicy(
-        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
-    )
-
-    app = QApplication(sys.argv)
-    app.setApplicationName(APP_NAME)
-    app.setQuitOnLastWindowClosed(True)
-
     window = MainWindow()
     window.show()
 
@@ -115,5 +116,10 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     sys.exit(exit_code)
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Dedicated entry point for pyproject.toml scripts and direct execution."""
     run()
+
+
+if __name__ == "__main__":
+    main()

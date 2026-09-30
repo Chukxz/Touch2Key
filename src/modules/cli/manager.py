@@ -12,6 +12,8 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
+from modules import AppLogManager
+
 from modules.database import reset_layout_zones_to_app_settings, store
 from modules.database.config_io import (
     export_bundle,
@@ -23,11 +25,33 @@ from modules.database.legacy_migration import (
     migrate_json_layout,
     migrate_toml_config,
 )
-from modules.utils import JSONS_FOLDER, PROFILES_FOLDER, TOML_PATH, EXCLUDED_KEYS, BEZEL, CIRCLE, RECTANGLE
+from modules.utils import (
+    JSONS_FOLDER,
+    PROFILES_FOLDER,
+    TOML_PATH,
+    EXCLUDED_KEYS,
+    BEZEL,
+    CIRCLE,
+    RECTANGLE,
+)
 
 # ---------------------------------------------------------------------------
 # Profile Inspection & Management
 # ---------------------------------------------------------------------------
+
+
+def set_profile_image(layout_id: int, image_path: Path) -> bool:
+    target = store.layouts.get(layout_id)
+    if not target:
+        print(f"Error: Layout ID {layout_id} not found.")
+        return False
+    if not image_path.exists():
+        print(f"Error: Image file '{image_path}' does not exist.")
+        return False
+
+    store.layouts.update(layout_id, image_path=str(image_path.resolve()))
+    print(f"Updated profile '{target.name}' background image to: {image_path.name}")
+    return True
 
 
 def list_profiles() -> None:
@@ -67,13 +91,13 @@ def list_layout_zones(layout_id: int) -> None:
         return
 
     print(f"\n--- Zones / Pipelines for '{layout.name}' (ID: {layout_id}) ---")
-    
+
     for z in zones:
         if z.zone_type == CIRCLE:
             coords = f"Center=({z.cx}, {z.cy}), R={z.r}"
         elif z.zone_type == RECTANGLE or z.zone_type == BEZEL:
             coords = f"Rect=({z.x1}, {z.y1}) -> ({z.x2}, {z.y2})"
-        
+
         cam_flag = " [MoveCam/TrackFire]" if z.pointer else ""
         print(
             f"  [{z.id}] {z.name or 'Unnamed'} | Key: {z.scancode} | "
@@ -171,7 +195,9 @@ def clear_zones(layout_id: int) -> bool:
         return False
 
     store.zones.delete_all_for_layout(layout_id)
-    print(f"All touch zones (bezels reseeded) cleared for layout '{target.name}' (ID: {layout_id}).")
+    print(
+        f"All touch zones (bezels reseeded) cleared for layout '{target.name}' (ID: {layout_id})."
+    )
     return True
 
 
@@ -239,11 +265,9 @@ def reset_typematic_defaults() -> None:
     show_typematic()
 
 
-
 # ---------------------------------------------------------------------------
 # System Inspection & Configuration
 # ---------------------------------------------------------------------------
-
 
 
 def show_system() -> None:
@@ -252,8 +276,8 @@ def show_system() -> None:
     print("\n--- System Settings ---")
     print(f"  Double Tap Enabled:       {'Yes' if s.double_tap_enabled else 'No'}")
     print(f"  Bezels Enabled:       {'Yes' if s.bezel_toggle_enabled else 'No'}")
-    
-    
+
+
 def configure_system_interactive() -> None:
     """Prompts for double tap and bezel toggle fields interactively."""
     s = store.settings.get()
@@ -266,8 +290,10 @@ def configure_system_interactive() -> None:
         .strip()
         .lower()
     )
-    double_tap_enabled = s.double_tap_enabled if not en_double_tap_in else (en_double_tap_in == "y")
-    
+    double_tap_enabled = (
+        s.double_tap_enabled if not en_double_tap_in else (en_double_tap_in == "y")
+    )
+
     en_bezel_in = (
         input(
             f"Enable double tap toggle? (y/n, current: {'y' if s.bezel_toggle_enabled else 'n'}): "
@@ -275,25 +301,22 @@ def configure_system_interactive() -> None:
         .strip()
         .lower()
     )
-    bezel_toggle_enabled = s.bezel_toggle_enabled if not en_bezel_in else (en_bezel_in == "y")
+    bezel_toggle_enabled = (
+        s.bezel_toggle_enabled if not en_bezel_in else (en_bezel_in == "y")
+    )
 
     store.settings.update(
-        double_tap_enabled=double_tap_enabled,
-        bezel_toggle_enabled=bezel_toggle_enabled
+        double_tap_enabled=double_tap_enabled, bezel_toggle_enabled=bezel_toggle_enabled
     )
     print("Double Tap and Bezel Toggle settings updated successfully.")
     show_system()
-    
+
 
 def reset_system_defaults() -> None:
     """Resets only double tap and bezel toggle settings to factory defaults."""
-    store.settings.update(
-        double_tap_enabled=True,
-        bezel_toggle_enabled=True
-    )
+    store.settings.update(double_tap_enabled=True, bezel_toggle_enabled=True)
     print("Double Tap and Bezel Toggle settings reset to factory defaults.")
     show_system()
-
 
 
 # ---------------------------------------------------------------------------
@@ -456,7 +479,9 @@ def interactive_menu() -> None:
 
         elif choice == "rss":
             confirm = (
-                input("Reset double tap and bezel toggle settings to defaults? (y/N): ").strip().lower()
+                input("Reset double tap and bezel toggle settings to defaults? (y/N): ")
+                .strip()
+                .lower()
             )
             if confirm == "y":
                 reset_system_defaults()
@@ -542,6 +567,12 @@ def run() -> None:
     )
     parser.add_argument(
         "-s", "--set-active", type=int, metavar="ID", help="Set active layout by ID"
+    )
+    parser.add_argument(
+        "--set-image",
+        nargs=2,
+        metavar=("ID", "IMAGE_PATH"),
+        help="Set background image path for layout by ID",
     )
     parser.add_argument(
         "--list-zones",
@@ -704,6 +735,8 @@ def run() -> None:
             show_typematic()
         elif args.list:
             list_profiles()
+        elif args.set_image is not None:
+            set_profile_image(int(args.set_image[0]), Path(args.set_image[1]))
         elif args.set_active is not None:
             set_active_profile(args.set_active)
         elif args.list_zones is not None:
@@ -764,17 +797,14 @@ if __name__ == "__main__":
     run()
 
 
-
 # In cli.py
-def set_profile_image(layout_id: int, image_path: Path) -> bool:
-    target = store.layouts.get(layout_id)
-    if not target:
-        print(f"Error: Layout ID {layout_id} not found.")
-        return False
-    if not image_path.exists():
-        print(f"Error: Image file '{image_path}' does not exist.")
-        return False
 
-    store.layouts.update(layout_id, image_path=str(image_path.resolve()))
-    print(f"Updated profile '{target.name}' background image to: {image_path.name}")
-    return True
+
+def main() -> None:
+    """Dedicated entry point for touch2key-manage."""
+    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_manage")
+    run()
+
+
+if __name__ == "__main__":
+    main()
