@@ -1,6 +1,5 @@
 """
 Pre-flight environment and dependency checks.
-Outputs via logging / QMessageBox in GUI mode and standard print in CLI mode.
 """
 
 from __future__ import annotations
@@ -75,25 +74,20 @@ def run(verbose: bool = True, parent=None) -> bool:
 
         err_msg = "\n".join(err_lines)
 
-        if is_gui:
+        if verbose:
             logger.error("Pre-flight checks failed:\n%s", err_msg)
-            if verbose:
-                QMessageBox.warning(
-                    parent,
-                    "Pre-flight Checks Failed",
-                    f"System checks did not pass:\n\n{err_msg}",
-                )
-        else:
-            if verbose:
-                print("[!] Pre-flight checks failed:")
-                for line in err_lines:
-                    print(f"    {line}")
+            
+        if is_gui and verbose:
+            QMessageBox.warning(
+                parent,
+                "Pre-flight Checks Failed",
+                f"System checks did not pass:\n\n{err_msg}",
+            )
+            
         return False
 
-    if is_gui:
+    if verbose:
         logger.info("Pre-flight checks passed successfully.")
-    elif verbose:
-        print("[+] Pre-flight checks passed.")
 
     return True
 
