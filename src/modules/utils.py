@@ -363,7 +363,7 @@ SPECIAL_MAP = {
 
 SPECIAL_MAP_INV = {v: k for k, v in SPECIAL_MAP.items()}
 
-COPY_RE = re.compile(r"- Copy(?:\((\d+)\)|(?=\s|$))")
+COPY_RE = re.compile(r"- Copy(?:\s*\((\d+)\)|(?=\s|$))")
 
 _ROUTE_SRC_RE = re.compile(
     r"\bdev\s+(?:wlan\d+|s?wlan\d+|ap\d+)\b.*?\bsrc\s+(\d+\.\d+\.\d+\.\d+)"
@@ -1117,5 +1117,5 @@ def make_copy_name(name: str) -> str:
     match = matches[-1]
     number = int(match.group(1) or 1) + 1
 
-    return name[: match.start()] + f"- Copy({number})" + name[match.end() :]
-
+    # Added a space before the parenthesis
+    return name[: match.start()] + f"- Copy ({number})" + name[match.end() :]
