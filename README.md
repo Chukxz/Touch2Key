@@ -19,7 +19,7 @@ Touch2Key can be paired with game streamers like **Sunshine/Moonlight** or **Apo
 ## Architecture & Core Features
 
 * **5-Stage Input Pipeline:** Every touch contact is processed through an isolated, modular 5-stage pipeline:
-  $$\text{Region} \longrightarrow \text{Origin} \longrightarrow \text{Constraint} \longrightarrow \text{Transformation} \longrightarrow \text{Semantic}$$
+  `Region` -> `Origin` -> `Constraint` -> `Transformation` -> `Semantic`
   Decoupling spatial detection, reference baselines, mechanical bounds, mathematical transforms, and driver emissions eliminates state drift and input fighting.
 
 * **Prioritized Deterministic Dispatching:** Touch contacts are routed using a strict 4-key precedence sort:
@@ -40,7 +40,7 @@ Touch2Key can be paired with game streamers like **Sunshine/Moonlight** or **Apo
 * **Hybrid Mode Switching (In-Game vs. Menu/Lobby):**
   * **In-Game Mode (Cursor Hidden):** Custom HUD zones capture taps/drags to drive game controls.
   * **Menu Mode (Cursor Visible):** Game buttons deactivate automatically, passing single-touch events through as absolute desktop clicks (`device_to_game_abs`) for clean lobby, map, and inventory navigation.
-  * **Hardware-Free Return Gates:** Return to Game Mode without touching the physical keyboard using a **synchronized two-finger stationary tap** or by tapping the **top bezel notch strip**.
+  * **Hardware-Free Return Gates & Bezel Toggles:** Return to Game Mode or control visibility using configurable **Double-Tap triggers** and dedicated **Bezel Toggle strips** along screen borders.
 
 * **Dynamic Camera & Joystick Integration:**
   * **Track-Fire Buttons:** Configurable `move_camera` zones emit simultaneous keypresses and camera deltas (aim while shooting).
@@ -69,7 +69,7 @@ On startup, the engine launches an interactive Window Selector dialog that lists
 ## Key Customization & Storage
 
 * **Startup Capture Dialog:** Binds core control keys (such as **Toggle** and **Sprint**) and configures performance limits (Rate Cap and Polls Per Second).
-* **SQLite & TOML Storage:** Layout zones, priorities, and hitbox coordinates are stored persistently in SQLite tables (`touch2key.db`) with foreign-key cascade protection, while runtime defaults are managed via `settings.toml`.
+* **SQLite & TOML Storage:** Layout zones, priorities, and hitbox coordinates are stored persistently in SQLite tables (`touch2key.db`) with foreign-key cascade protection, while runtime defaults (including system gestures and typematic rules) are managed via `settings.toml`.
 
 ---
 
@@ -91,21 +91,21 @@ On startup, the engine launches an interactive Window Selector dialog that lists
 ### Setup
 * **Install:** Remember to create a virtual environment on your machine by using the appropriate `venv` command and activating it (depending on your OS), after navigating to the `Touch2Key` directory on your machine before running the `pip install .` command as it is the standard python practice to avoid package conflicts and ensure isolation.
 
-   ```bash
-   git clone [https://github.com/Chukxz/Touch2Key.git](https://github.com/Chukxz/Touch2Key.git)
-   cd Touch2Key
-   python -m venv .venv
-   
-   # Windows: .venv\Scripts\activate
-   # Linux: source .venv/bin/activate
-   
-   pip install .
-   ```
+```bash
+git clone [https://github.com/Chukxz/Touch2Key.git](https://github.com/Chukxz/Touch2Key.git)
+cd Touch2Key
+python -m venv .venv
+
+# Windows: .venv\Scripts\activate
+# Linux: source .venv/bin/activate
+
+pip install .
+```
 
 * **Setup:** Run setup (Usually requires an internet connection).
-   ```bash
-   touch2key-setup
-   ```
+```bash
+touch2key-setup
+```
 
 *(Note: Windows requires a system reboot after installation to fully load the driver).*
 
@@ -149,14 +149,15 @@ Because Touch2Key installs system-level drivers and kernel rules, **simply runni
 | `touch2key-keyboard` | Test the virtual keyboard program output.|
 | `touch2key-visualizer` | Visualize the keyboard and mouse events with support for cursor toggling visualization. |
 
-### Typematic Commands (via Layout Manager)
-You can directly configure the hardware auto-repeat settings via `touch2key-manage`:
+### Typematic & System Commands (via Layout Manager)
+You can directly configure hardware auto-repeat behavior, double taps, and bezel toggles via `touch2key-manage`:
 ```bash
 touch2key-manage --show-typematic
 touch2key-manage --set-typematic on --typematic-delay 200 --typematic-rate 35
 touch2key-manage --typematic-excludes "w,a,s,d,shift,ctrl,alt"
 touch2key-manage --reset-typematic
 ```
+*(Alternatively, choose option `[ss]` inside the interactive terminal menu to configure double-tap and bezel toggle fields interactively, or `[rss]` to reset them).*
 
 ---
 
