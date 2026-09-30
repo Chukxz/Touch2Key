@@ -4,6 +4,7 @@ Android screen capture script via ADB with resolution, rotation, and DPI metadat
 
 from __future__ import annotations
 
+import sys
 import datetime
 import logging
 from pathlib import Path
@@ -54,7 +55,9 @@ def capture_android_screen(custom_img_name: str | None = None, parent=None) -> P
     full_save_path = (IMAGES_FOLDER / filename).resolve()
     android_tmp = "/data/local/tmp/temp_cap.png"
 
-    logger.info("Capturing %sx%s screen (Orientation: %s)...", width, height, img_rotation)
+    logger.info(
+        "Capturing %sx%s screen (Orientation: %s)...", width, height, img_rotation
+    )
 
     try:
         subprocess.run(
@@ -114,7 +117,7 @@ def capture_android_screen(custom_img_name: str | None = None, parent=None) -> P
 def run() -> None:
     # Initialize CLI logging so print/log statements show in terminal and log files
     AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_capture")
-    
+
     logger.info("Initializing screen capture...")
     try:
         capture_android_screen()

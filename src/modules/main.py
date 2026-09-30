@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from modules.engine import Engine
 from modules.platforms import check_single_instance
-from modules.scripts.pre_flight import run as pre_flight_run
+from modules.scripts.preflight import run as pre_flight_run
 from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER
 from modules.log_manager import AppLogManager
 

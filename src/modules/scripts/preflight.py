@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from modules import ADB
 from modules import AppLogManager
 
-logger = logging.getLogger("modules.scripts.pre_flight")
+logger = logging.getLogger("modules.scripts.preflight")
 
 
 def check_adb() -> bool:
@@ -96,7 +96,7 @@ def run(verbose: bool = True, parent=None) -> bool:
 def main() -> None:
     """Dedicated entry point for CLI and pyproject.toml execution."""
     # 1. Initialize logging right at the entry boundary
-    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_pre_flight")
+    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_preflight")
 
     # 2. Run the script logic
     success = run()
