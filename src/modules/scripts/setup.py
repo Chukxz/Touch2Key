@@ -16,37 +16,29 @@ logger = logging.getLogger("modules.scripts.setup")
 def run(parent=None) -> bool:
     is_gui = QApplication.instance() is not None
 
-    if is_gui:
-        logger.info("Starting automated platform configuration for %s", sys.platform)
-    else:
-        print(f"=== Initializing Environment Setup: {sys.platform} ===")
+    logger.info("Starting automated platform configuration for %s", sys.platform)
 
     try:
         needs_reboot = False
 
         if sys.platform == "win32":
             from modules.platforms.windows import setup_windows
-
             needs_reboot = setup_windows(interactive=not is_gui)
 
         elif sys.platform == "linux":
             from modules.platforms.linux import setup_linux
-
             needs_reboot = setup_linux(interactive=not is_gui)
 
         else:
             msg = f"Unsupported Operating System: {sys.platform}"
+            logger.error(msg)
             if is_gui:
-                logger.error(msg)
                 QMessageBox.critical(parent, "Setup Error", msg)
-            else:
-                print(f"[!] {msg}")
             return False
 
+        logger.info("Setup finished successfully (reboot required: %s)", needs_reboot)
+        
         if is_gui:
-            logger.info(
-                "Setup finished successfully (reboot required: %s)", needs_reboot
-            )
             if needs_reboot:
                 QMessageBox.information(
                     parent,
@@ -60,21 +52,17 @@ def run(parent=None) -> bool:
                     "Setup Complete",
                     f"Environment setup for {sys.platform} completed successfully.",
                 )
-        else:
-            print("[+] Setup completed successfully.")
 
         return True
 
     except Exception as exc:
+        logger.exception("Platform setup execution halted with an error")
         if is_gui:
-            logger.exception("Platform setup execution halted with an error")
             QMessageBox.critical(
                 parent,
                 "Setup Failed",
                 f"Platform configuration failed:\n\n{exc}",
             )
-        else:
-            print(f"\n[!] Setup failed: {exc}")
         return False
 
 
