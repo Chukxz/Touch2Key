@@ -7,6 +7,7 @@ import threading
 from typing import TYPE_CHECKING
 
 from modules.database import store
+from modules.log_manager import AppLogManager
 from modules.platforms import get_platform
 from modules.utils import (
     MapperEvent,
@@ -61,14 +62,17 @@ class Engine:
         self.touch_reader: TouchReader | None = None
         self.layout_loader: LayoutLoader | None = None
         self.mapper: Mapper | None = None
+        self.output_sink: BridgeOutputSink | None = None
         self.bezel_mapper: BezelMapper | None = None
         self.mouse_mapper: MouseMapper | None = None
         self.key_mapper: KeyMapper | None = None
         self.wasd_mapper: WASDMapper | None = None
+        self._tiers: list[list[Pipeline]] = []
 
         self.is_visible = False
         self.lock = threading.Lock()
         self.is_shutting_down = False
+        self._stop_event = threading.Event()
         self.mapper_event_dispatcher = dispatcher or MapperEventDispatcher()
         self.two_finger_tap_tracker = TwoFingerTapTracker()
 
@@ -133,7 +137,6 @@ class Engine:
     def toggle_virtual_keyboard(self) -> None:
         if self.vkb_process is not None and self.vkb_process.is_alive():
             self.close_virtual_keyboard()
-
         else:
             self.start_virtual_keyboard()
 
@@ -151,6 +154,10 @@ class Engine:
     def _on_layout_reload(self) -> None:
         if self.layout_loader is not None:
             self.layout_loader.reload()
+        self._tiers = self._build_pipeline_tiers()
+
+    def _on_config_reload(self) -> None:
+        self._tiers = self._build_pipeline_tiers()
 
     def _build_pipeline_tiers(self) -> list[list[Pipeline]]:
         all_pipelines: list[Pipeline] = []
@@ -191,14 +198,16 @@ class Engine:
 
     def _process_touch_event(self, touch_event: TouchEvent) -> None:
         if not (
-            self.mouse_mapper and self.key_mapper and self.wasd_mapper and self.mapper
+            self.mouse_mapper
+            and self.key_mapper
+            and self.wasd_mapper
+            and self.mapper
+            and self.output_sink
         ):
             return
 
-        tiers = self._build_pipeline_tiers()
-        output_sink = BridgeOutputSink(
-            self.mapper.bridge, self.toggle_mode, self.toggle_virtual_keyboard
-        )
+        tiers = self._tiers or self._build_pipeline_tiers()
+        output_sink = self.output_sink
 
         if self.is_visible:
             if self.two_finger_tap_tracker.process(touch_event):
@@ -222,6 +231,7 @@ class Engine:
                 )
 
                 if touch_event.phase is TouchPhase.DOWN:
+                    self.mapper.bridge.mouse_move_abs(int(round(gx)), int(round(gy)))
                     self.mapper.bridge.left_click_down()
                 elif touch_event.phase is TouchPhase.MOVE:
                     self.mapper.bridge.mouse_move_abs(int(round(gx)), int(round(gy)))
@@ -286,16 +296,23 @@ class Engine:
             self,
         )
 
+        self.output_sink = BridgeOutputSink(
+            self.mapper.bridge, self.toggle_mode, self.toggle_virtual_keyboard
+        )
+
         self.bezel_mapper = BezelMapper(self.mapper)
-        self.mouse_mapper = MouseMapper(self.mapper)
+        self.mouse_mapper = MouseMapper(self.mapper, self.output_sink)
         self.key_mapper = KeyMapper(
             self.mapper,
+            self.output_sink,
             typematic_enabled=typematic_enabled,
             typematic_delay_ms=typematic_delay_ms,
             typematic_rate_hz=typematic_rate_hz,
             typematic_excluded_keys=typematic_excluded_keys,
         )
-        self.wasd_mapper = WASDMapper(self.mapper)
+        self.wasd_mapper = WASDMapper(self.mapper, self.output_sink)
+
+        self._tiers = self._build_pipeline_tiers()
 
         self.touch_reader.bind_touch_event(self._process_touch_event)
         self.mapper_event_dispatcher.register_callback(
@@ -303,6 +320,9 @@ class Engine:
         )
         self.mapper_event_dispatcher.register_callback(
             "ON_LAYOUT_RELOAD", self._on_layout_reload
+        )
+        self.mapper_event_dispatcher.register_callback(
+            "ON_CONFIG_RELOAD", self._on_config_reload
         )
         self.mapper_event_dispatcher.register_callback(
             "ON_DEVICES_CHANGE", self._on_devices_change
@@ -358,17 +378,13 @@ class Engine:
         )
 
         if not self.headless:
-            try:
-                import keyboard
-
-                keyboard.wait()
-            except Exception:
-                pass
+            self._stop_event.wait()
 
     def _shutdown(self) -> None:
         if self.is_shutting_down:
             return
         self.is_shutting_down = True
+        self._stop_event.set()
 
         self.mapper_event_dispatcher.unregister_all()
 
@@ -412,9 +428,6 @@ class Engine:
 
         store.close()
 
-        if not self.headless:
-            sys.exit(0)
-
 
 def run_engine_process(conn: Connection) -> None:
     """multiprocessing.Process target: owns one Engine for its entire
@@ -429,6 +442,7 @@ def run_engine_process(conn: Connection) -> None:
       engine -> GUI : IPC_EVT_STARTED or IPC_EVT_ERROR (once, after the start
                       attempt), IPC_EVT_STOPPED (once, on shutdown)
     """
+    AppLogManager.setup_logging(is_gui=True, log_prefix="touch2key_engine")
     dispatcher = IpcMapperEventDispatcher(conn)
     engine: Engine | None = None
 
