@@ -321,6 +321,7 @@ SCANCODES = {
 SCANCODES_INV = {v: k for k, v in SCANCODES.items()}
 
 SPECIAL_MAP = {
+    "esc": "ESC",
     "escape": "ESC",
     "enter": "ENTER",
     "backspace": "BACKSPACE",
@@ -336,16 +337,17 @@ SPECIAL_MAP = {
     ",": "COMMA",
     ".": "DOT",
     "/": "SLASH",
+    "shift": "RSHIFT",
+    "alt": "RALT",
+    "ctrl": "RCTRL",
+    "control": "RCTRL",
     "lshift": "LSHIFT",
     "rshift": "RSHIFT",
     "lalt": "LALT",
     "ralt": "RALT",
     "lctrl": "LCTRL",
     "rctrl": "RCTRL",
-    "shift": "RSHIFT",
-    "alt": "RALT",
-    "ctrl": "RCTRL",
-    "control": "RCTRL",
+    "space": "SPACE",
     " ": "SPACE",
     "*": "NUM_MULTIPLY",
     "caps_lock": "CAPSLOCK",
@@ -579,14 +581,6 @@ class MapperEventDispatcher:
 # ---------------------------------------------------------------------------
 # Engine <-> GUI process IPC protocol
 # ---------------------------------------------------------------------------
-# Every message sent over the engine<->GUI multiprocessing.Pipe is one
-# `send_bytes`/`recv_bytes` frame: 1 opcode byte, then a fixed-width struct
-# payload (if the opcode has one), then a trailing UTF-8 string (if the
-# opcode carries one). Pipe framing gives each call its own boundary, so a
-# trailing string needs no length prefix of its own -- it's just "whatever's
-# left after the fixed part".
-#
-# GUI -> engine process (commands)
 IPC_CMD_START = 0x01
 IPC_CMD_STOP = 0x02
 IPC_CMD_CONFIG_RELOAD = 0x03
@@ -594,20 +588,17 @@ IPC_CMD_LAYOUT_RELOAD = 0x04
 IPC_CMD_DEVICES_CHANGE = 0x05
 IPC_CMD_TARGET_WINDOW_CHANGE = 0x86
 
-# Engine process -> GUI (lifecycle + forwarded dispatcher events)
 IPC_EVT_STARTED = 0x80
 IPC_EVT_STOPPED = 0x81
 IPC_EVT_ERROR = 0x82
 
-# All little-endian, no implicit padding ("<" prefix). Optional ints use -1
-# as the "None" sentinel; optional strings use "" as the "None" sentinel.
-PACK_IPC_START_STRUCT = struct.Struct("<Biff?ff")
+# Using signed 64-bit integers ("q") for window IDs to prevent 32-bit overflow
+PACK_IPC_START_STRUCT = struct.Struct("<Bqff?ff")
 PACK_IPC_DEVICES_CHANGE_STRUCT = struct.Struct("<Bii")
-PACK_IPC_MENU_MODE_TOGGLE_STRUCT = struct.Struct("<B?")
-PACK_IPC_TARGET_WINDOW_CHANGE_STRUCT = struct.Struct("<Bi")
+PACK_IPC_TARGET_WINDOW_CHANGE_STRUCT = struct.Struct("<Bq")
 
 _IPC_NONE_INT = -1
-_IPC_STR_SEP = "\x1f"  # unit separator
+_IPC_STR_SEP = "\x1f"
 
 
 def _pack_opt_int(value: int | None) -> int:
@@ -736,14 +727,7 @@ def unpack_ipc_error_evt(payload: bytes) -> str:
 
 
 class IpcMapperEventDispatcher(MapperEventDispatcher):
-    """Engine-process-side dispatcher.
-
-    Drop-in replacement for MapperEventDispatcher: everything registered
-    in-process (AppConfig/LayoutLoader/Mapper callbacks) still fires exactly
-    as before. Incoming command bytes from the GUI are turned into local
-    dispatches so existing in-process callbacks (e.g. Engine._on_devices_change)
-    fire unchanged regardless of whether the event originated locally or over IPC.
-    """
+    """Engine-process-side dispatcher."""
 
     def __init__(self, conn: Connection) -> None:
         super().__init__()
@@ -767,11 +751,6 @@ class IpcMapperEventDispatcher(MapperEventDispatcher):
         self.send_ipc(pack_ipc_error_evt(message))
 
     def handle_command(self, payload: bytes) -> bool:
-        """Decodes one incoming GUI->engine command and dispatches it locally.
-
-        Returns False for IPC_CMD_STOP (caller should stop the engine and its
-        reader loop), True for everything else handled.
-        """
         opcode = payload[0]
         if opcode == IPC_CMD_STOP:
             return False
@@ -802,7 +781,6 @@ class IpcMapperEventDispatcher(MapperEventDispatcher):
         return True
 
     def run_command_loop(self) -> None:
-        """Blocks, servicing GUI->engine commands until IPC_CMD_STOP or the pipe closes."""
         while True:
             try:
                 payload = self.conn.recv_bytes()
@@ -813,14 +791,7 @@ class IpcMapperEventDispatcher(MapperEventDispatcher):
 
 
 class QtIpcMapperEventDispatcher(QObject):
-    """GUI-process-side counterpart to IpcMapperEventDispatcher.
-
-    Wraps the GUI's end of the engine<->GUI Pipe. A background thread reads
-    incoming lifecycle/forwarded-dispatcher bytes and re-emits them as Qt
-    signals (safe to connect to cross-thread; Qt queues the delivery onto
-    whatever thread the receiver lives in). Plain methods send commands
-    (start/stop/config reload/layout reload/devices change/windows change) to the engine.
-    """
+    """GUI-process-side counterpart to IpcMapperEventDispatcher."""
 
     engine_started = Signal()
     engine_stopped = Signal()
@@ -915,7 +886,6 @@ class QtIpcMapperEventDispatcher(QObject):
             self.conn.close()
         except OSError:
             pass
-
 
 def get_adb_device():
     out = subprocess.check_output([ADB, "devices"], timeout=10).decode().splitlines()
@@ -1076,10 +1046,13 @@ def get_hue_modified_alpha_from_hsv(color):
 
 
 def get_scancode_and_bridge_key_from_key(key: str):
-    mapped_key = key
-    val = SCANCODES.get(mapped_key)
+    if not key:
+        return None, None
+    key_lower = key.lower()
+    mapped_key = key_lower
+    val = SCANCODES.get(mapped_key.upper())
     if val is None:
-        mapped_key = SPECIAL_MAP.get(key)
+        mapped_key = SPECIAL_MAP.get(key_lower)
         if mapped_key:
             val = SCANCODES.get(mapped_key)
     return hex(val) if val is not None else None, (
@@ -1088,12 +1061,14 @@ def get_scancode_and_bridge_key_from_key(key: str):
 
 
 def get_scancode_from_key(key: str):
-    code = SCANCODES.get(key)
+    if not key:
+        return None
+    key_lower = key.lower()
+    code = SCANCODES.get(key_lower.upper())
     if code is None:
-        canonical = SPECIAL_MAP.get(key)
+        canonical = SPECIAL_MAP.get(key_lower)
         if canonical:
             code = SCANCODES.get(canonical)
-
     return code
 
 
@@ -1143,3 +1118,4 @@ def make_copy_name(name: str) -> str:
     number = int(match.group(1) or 1) + 1
 
     return name[: match.start()] + f"- Copy({number})" + name[match.end() :]
+
