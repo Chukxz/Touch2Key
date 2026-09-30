@@ -1,3 +1,7 @@
+"""
+Android screen capture script via ADB with resolution, rotation, and DPI metadata synchronization.
+"""
+
 from __future__ import annotations
 
 import datetime
@@ -7,6 +11,7 @@ import subprocess
 from PIL import Image
 
 from modules.database import store
+from modules.log_manager import AppLogManager
 from modules.utils import (
     ADB,
     IMAGES_FOLDER,
@@ -107,12 +112,21 @@ def capture_android_screen(custom_img_name: str | None = None, parent=None) -> P
 
 
 def run() -> None:
+    # Initialize CLI logging so print/log statements show in terminal and log files
+    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_capture")
+    
     logger.info("Initializing screen capture...")
     try:
         capture_android_screen()
     except Exception as exc:
         logger.error("Capture process error: %s", exc)
+        sys.exit(1)
+
+
+def main() -> None:
+    """Dedicated entry point for pyproject.toml script execution."""
+    run()
 
 
 if __name__ == "__main__":
-    run()
+    main()
