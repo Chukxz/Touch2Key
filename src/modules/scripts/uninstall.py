@@ -99,7 +99,6 @@ def _remove_linux_udev_rules(is_gui: bool) -> bool:
     # In CLI mode, use standard sudo
     if shutil.which("sudo"):
         logger.warning("Sudo authentication required to delete /etc/udev/rules.d rule...")
-        # Since this needs to prompt for password in terminal, we use print/interactive subprocess
         print("[!] Sudo authentication required to delete /etc/udev/rules.d rule...")
         res = subprocess.run(["sudo", "sh", "-c", cmd_str])
         if res.returncode == 0:
@@ -158,7 +157,9 @@ def run(parent=None) -> bool:
         help="Delete data directory, diagnostics/profiling files, and session logs",
     )
     parser.add_argument(
-        "--no-restart", action="store_true", help="Skip system reboot prompt on Windows"
+        "--no-restart",
+        action="store_true",
+        help="Skip system reboot prompt (Windows only, safely ignored on Linux)",
     )
 
     if is_gui:
@@ -250,9 +251,9 @@ def run(parent=None) -> bool:
         purge_diagnostics()
         purge_logs()
 
-    # 7. Final Notification / Reboot Workflow
+    # 7. Final Notification / Reboot Workflow (Strictly guarded for Windows)
     logger.info("Uninstall completed successfully.")
-    
+
     if is_gui:
         if sys.platform == "win32" and needs_reboot and not args.no_restart:
             res = QMessageBox.question(
