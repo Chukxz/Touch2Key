@@ -172,7 +172,7 @@ class TypematicPage(BasePage):
             delay = int(getattr(s, "typematic_delay_ms", 250.0))
             rate = float(getattr(s, "typematic_rate_hz", 30.0))
             raw_excludes = str(
-                getattr(s, "typematic_EXCLUDED_KEYS", f"{EXCLUDED_KEYS}")
+                getattr(s, "typematic_excluded_keys", f"{EXCLUDED_KEYS}")
             )
 
             self.enable_check.setChecked(enabled)
@@ -242,7 +242,7 @@ class TypematicPage(BasePage):
                 typematic_enabled=int(self.enable_check.isChecked()),
                 typematic_delay_ms=float(self.delay_spin.value()),
                 typematic_rate_hz=float(self.rate_spin.value()),
-                typematic_EXCLUDED_KEYS=serialized_keys,
+                typematic_excluded_keys=serialized_keys,
             )
 
             if self.dispatcher:
