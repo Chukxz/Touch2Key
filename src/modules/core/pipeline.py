@@ -26,25 +26,40 @@ from modules.utils import (
 @dataclass(slots=True)
 class OutputSink(ABC):
     @abstractmethod
-    def key_down(self, key: str) -> None: ...
+    def key_down(self, key: str) -> None:
+        raise NotImplementedError
 
     @abstractmethod
-    def key_up(self, key: str) -> None: ...
+    def key_up(self, key: str) -> None:
+        raise NotImplementedError
 
     @abstractmethod
-    def mouse_move(self, dx: float, dy: float) -> None: ...
+    def mouse_move(self, dx: float, dy: float) -> None:
+        raise NotImplementedError
+    
+    @abstractmethod
+    def flush_mouse_move(self) -> None:
+        raise NotImplementedError
+    
+    @abstractmethod
+    def reset_mouse_accumulators(self) -> None:
+        raise NotImplementedError
 
     @abstractmethod
-    def mouse_up(self, button: str) -> None: ...
+    def mouse_up(self, button: str) -> None:
+        raise NotImplementedError
 
     @abstractmethod
-    def mouse_down(self, button: str) -> None: ...
+    def mouse_down(self, button: str) -> None:
+        raise NotImplementedError
 
     @abstractmethod
-    def toggle_menu_mode(self) -> None: ...
+    def toggle_menu_mode(self) -> None:
+        raise NotImplementedError
 
     @abstractmethod
-    def toggle_virtual_keyboard(self) -> None: ...
+    def toggle_virtual_keyboard(self) -> None:
+        raise NotImplementedError
 
 
 @dataclass(slots=True)
