@@ -8,7 +8,7 @@ import argparse
 import cProfile
 import multiprocessing
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QApplication
 from modules.database import store
 from modules.gui.main_window import MainWindow
 from modules.platforms import check_single_instance
-from modules.scripts.pre_flight import run as pre_flight_run
+from modules.scripts.preflight import run as pre_flight_run
 from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER
 from modules.log_manager import AppLogManager
 
@@ -81,7 +81,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
 
-    app = QApplication.instance() or QApplication(sys.argv)
+    app = cast(QApplication, QApplication.instance() or QApplication(sys.argv))
     app.setApplicationName(APP_NAME)
     app.setQuitOnLastWindowClosed(True)
 
