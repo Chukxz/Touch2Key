@@ -40,6 +40,8 @@ from modules.utils import MapperEventDispatcher, QtIpcMapperEventDispatcher
 from modules.gui.overlays.visualizer import run as run_visualizer
 from modules.gui.log_handler import install_gui_logging
 
+from modules.scripts.show_adb_path import run as show_adb_path_run
+
 logger = logging.getLogger("modules.gui.main_window")
 
 
@@ -227,11 +229,7 @@ class MainWindow(QMainWindow):
         self._switch_page(0, "Dashboard")
 
     def _setup_logging(self) -> None:
-        # Use the thread-safe handler from log_handler.py
-        # We hook onto the root logger ("") to catch both GUI and cross-process relayed logs
         handler = install_gui_logging(logger_name="", level=logging.INFO)
-        
-        # Connect the signal to append plaintext safely on the main UI thread
         handler.emitter.message.connect(
             lambda msg, level: self.log_console.appendPlainText(msg)
         )
@@ -331,15 +329,40 @@ class MainWindow(QMainWindow):
         menubar = self.menuBar()
         tools_menu = menubar.addMenu("Tools")
 
+        # 1. Setup / Repair Action
         setup_action = QAction("Install / Repair Drivers...", self)
         setup_action.triggered.connect(self._on_run_setup)
         tools_menu.addAction(setup_action)
 
+        # 2. Check ADB Path Action
+        check_adb_action = QAction("Check ADB Binary Path...", self)
+        check_adb_action.triggered.connect(self._on_check_adb)
+        tools_menu.addAction(check_adb_action)
+
         tools_menu.addSeparator()
 
+        # 3. Uninstall Action
         uninstall_action = QAction("Uninstall Touch2Key...", self)
         uninstall_action.triggered.connect(self._on_run_uninstall)
         tools_menu.addAction(uninstall_action)
+
+    def _on_check_adb(self):
+        """Runs the ADB diagnostic check and displays the result."""
+        resolved_path = show_adb_path_run()
+        if resolved_path:
+            QMessageBox.information(
+                self,
+                "ADB Path Located",
+                f"ADB executable resolved to:\n\n{resolved_path}",
+            )
+        else:
+            QMessageBox.warning(
+                self,
+                "ADB Missing",
+                "ADB executable could not be found.\n\n"
+                "Please run Setup to download the Android Platform Tools, or ensure "
+                "adb is installed in your system PATH.",
+            )
 
     def _on_run_setup(self):
         reply = QMessageBox.question(
