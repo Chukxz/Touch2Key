@@ -1998,8 +1998,6 @@ class LayoutsPlotterWidget(QWidget):
     def save_to_database(self, user_name: str, as_copy=False):
         output = []
         for _, data in self.shapes.items():
-            # Non-destructive pipeline merge: Preserve existing 5-stage config
-
             entry = {
                 "name": data["bridge_key"],
                 "scancode": data["m_code"],
@@ -2019,11 +2017,9 @@ class LayoutsPlotterWidget(QWidget):
             )
 
             region_idx = 1
-
             if data["type"] == CIRCLE:
                 region_idx = 1
                 entry["val1"] = data["r"]
-
             elif data["type"] == RECTANGLE:
                 region_idx = 2
                 (x_min, y_min), (x_max, y_max) = data["bb"]
@@ -2032,14 +2028,36 @@ class LayoutsPlotterWidget(QWidget):
                 entry["val3"] = x_max
                 entry["val4"] = y_max
 
-            Pipeline_Config.set_region_config(region_idx)
-            Pipeline_Config.set_origin_config(1)
-            Pipeline_Config.set_constraint_config(0)
-            Pipeline_Config.set_transform_config(1)
-            Pipeline_Config.set_semantic_config(0)
+            # Seed defaults if this is a brand new shape
+            if data.get("pipeline_json", "{}") == "{}":
+                if data["bridge_key"] == MOUSE_WHEEL_SIMULATOR_CODE:
+                    Pipeline_Config.set_origin_config(idx=0)
+                    Pipeline_Config.set_constraint_config(idx=1)
+                    Pipeline_Config.set_transform_config(idx=2)
+                    Pipeline_Config.set_semantic_config(idx=1)
+                elif data["bridge_key"] == SPRINT_DISTANCE_CODE:
+                    Pipeline_Config.set_origin_config(idx=1)
+                    Pipeline_Config.set_constraint_config(idx=0)
+                    Pipeline_Config.set_transform_config(idx=1)
+                else:
+                    Pipeline_Config.set_origin_config(idx=1)
+                    Pipeline_Config.set_constraint_config(idx=0)
+                    Pipeline_Config.set_transform_config(idx=1)
+                    Pipeline_Config.set_semantic_config(idx=0)
+
+            # Update Region (Shape Type & Priority) and Semantic (Pointer)
+            # Because keep_previous=True is the default, omitting other arguments 
+            # naturally preserves existing joystick origins/transforms/constraints.
+            Pipeline_Config.set_region_config(
+                idx=region_idx,
+                priority=data.get("priority", 0)
+            )
+            
+            Pipeline_Config.set_semantic_config(
+                pointer=data.get("pointer", False)
+            )
 
             entry["pipeline_json"] = Pipeline_Config.get_pipeline_json_from_config()
-
             output.append(entry)
 
         rel_img_path = (
@@ -2050,7 +2068,6 @@ class LayoutsPlotterWidget(QWidget):
         existing_layout = store.layouts.get_by_name(user_name)
 
         if existing_layout:
-            
             if as_copy:
                 user_name = make_copy_name(user_name)
                 new_layout = store.layouts.create(
@@ -2063,7 +2080,7 @@ class LayoutsPlotterWidget(QWidget):
                     image_path=rel_img_path,
                 )
                 layout_id = new_layout.id
-                
+
             else:
                 layout_id = existing_layout.id
                 store.layouts.update(
@@ -2087,7 +2104,7 @@ class LayoutsPlotterWidget(QWidget):
                 image_path=rel_img_path,
             )
             layout_id = new_layout.id
-            
+
         for item in output:
             if item["type"] == CIRCLE:
                 store.zones.create(
