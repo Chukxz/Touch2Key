@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """CLI Layout & Profile Manager.
 
 Provides terminal-based profile switching, duplication, renaming,
