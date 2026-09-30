@@ -392,10 +392,13 @@ def run(conn: Connection | None = None, enforce_single_instance=True):
     window.show()
     sys.exit(app.exec())
 
-
-if __name__ == "__main__":
-    run()
-
-
 def virtual_keyboard_worker(conn: Connection):
     run(conn, False)
+
+def main() -> None:
+    """Dedicated entry point for touch2key-vkb."""
+    AppLogManager.setup_logging(is_gui=True, log_prefix="touch2key_vkb")
+    run()
+
+if __name__ == "__main__":
+    main()
