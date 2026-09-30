@@ -37,36 +37,16 @@ from modules.gui.pages import (
 )
 
 from modules.utils import MapperEventDispatcher, QtIpcMapperEventDispatcher
-
 from modules.gui.overlays.visualizer import run as run_visualizer
+from modules.gui.log_handler import install_gui_logging
 
 logger = logging.getLogger("modules.gui.main_window")
 
 
-class QtLogHandler(logging.Handler):
-    """Custom logging handler routing records into the GUI console dock."""
-
-    def __init__(self, text_widget: QPlainTextEdit):
-        super().__init__()
-        self.text_widget = text_widget
-
-    def emit(self, record: logging.LogRecord) -> None:
-        msg = self.format(record)
-        self.text_widget.appendPlainText(msg)
-
-
 class EngineProcessController(QObject):
-    """Owns the engine subprocess plus the GUI-side IPC dispatcher wired to it.
+    """Owns the engine subprocess plus the GUI-side IPC dispatcher wired to it."""
 
-    The engine runs in a separate multiprocessing.Process (not a QThread) so
-    a crash there can't take the GUI process down with it. All
-    communication -- start/stop/config-reload/layout-reload/devices-change/
-    target-windows-change outbound, started/stopped/error inbound --
-    goes over a multiprocessing.Pipe using the packed struct protocol in
-    modules.utils.
-    """
-
-    dispatcher_ready = Signal(object)  # emits the new QtIpcMapperEventDispatcher
+    dispatcher_ready = Signal(object)
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
@@ -97,7 +77,6 @@ class EngineProcessController(QObject):
         if self.is_running():
             return
 
-        # Clean up any leftover state from a previous run
         if self.dispatcher is not None:
             self.dispatcher.close()
             self.dispatcher.deleteLater()
@@ -125,7 +104,7 @@ class EngineProcessController(QObject):
             daemon=True,
         )
         self.process.start()
-        engine_conn.close()  # parent doesn't need its own handle to the child's end
+        engine_conn.close()
 
         self.dispatcher.send_start(
             window_id,
@@ -146,7 +125,6 @@ class EngineProcessController(QObject):
         self.dispatcher.send_stop()
 
     def shutdown(self, timeout: float = 2.0) -> None:
-        """Hard-stop used on app close: signal stop, then force-terminate if needed."""
         self._watchdog.stop()
         if self.dispatcher is not None:
             self.dispatcher.send_stop()
@@ -164,9 +142,7 @@ class EngineProcessController(QObject):
         if self.process is not None and not self.process.is_alive():
             self._watchdog.stop()
             if self.dispatcher is not None:
-                self.dispatcher.engine_error.emit(
-                    "Engine process terminated unexpectedly"
-                )
+                self.dispatcher.engine_error.emit("Engine process terminated unexpectedly")
                 self.dispatcher.engine_stopped.emit()
 
 
@@ -178,15 +154,13 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Touch2Key")
         self.resize(1180, 780)
 
-        # Stable, in-process dispatcher used by GUI pages for GUI-internal
-        # pub/sub -- unchanged from before. MainWindow bridges the subset of
-        # these events that need to reach the (now out-of-process) engine.
         self.dispatcher = MapperEventDispatcher()
         self.engine_controller = EngineProcessController(self)
 
-        self._setup_logging()
         self._setup_ui()
+        self._setup_logging()
         self._wire_engine_signals()
+        self._setup_driver_menu()
 
     def _setup_ui(self) -> None:
         central = QWidget()
@@ -194,9 +168,6 @@ class MainWindow(QMainWindow):
         main_layout = QHBoxLayout(central)
         main_layout.setContentsMargins(8, 8, 8, 8)
 
-        # -------------------------------------------------------------------
-        # Navigation Sidebar
-        # -------------------------------------------------------------------
         nav_panel = QVBoxLayout()
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
@@ -227,7 +198,6 @@ class MainWindow(QMainWindow):
 
         nav_panel.addStretch()
 
-        # Engine Action Button
         self.sidebar_engine_btn = QPushButton("Start Engine")
         self.sidebar_engine_btn.setStyleSheet(
             "font-weight: bold; background-color: #2e7d32; color: white; padding: 8px;"
@@ -235,7 +205,6 @@ class MainWindow(QMainWindow):
         self.sidebar_engine_btn.clicked.connect(self._toggle_engine)
         nav_panel.addWidget(self.sidebar_engine_btn)
 
-        # Visualizer Action Button
         self.sidebar_visualizer_btn = QPushButton("Run Visualizer")
         self.sidebar_visualizer_btn.setStyleSheet(
             "font-weight: bold; background-color: #2e7d32; color: white; padding: 8px;"
@@ -246,9 +215,6 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(nav_panel, stretch=1)
         main_layout.addWidget(self.stack, stretch=5)
 
-        # -------------------------------------------------------------------
-        # Bottom Dock: Diagnostics & Log Stream
-        # -------------------------------------------------------------------
         self.log_dock = QDockWidget("Application Logs", self)
         self.log_console = QPlainTextEdit()
         self.log_console.setReadOnly(True)
@@ -258,42 +224,27 @@ class MainWindow(QMainWindow):
         self.log_dock.setWidget(self.log_console)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.log_dock)
 
-        # Activate initial view
         self._switch_page(0, "Dashboard")
 
     def _setup_logging(self) -> None:
-        handler = QtLogHandler(self.log_console)
-        formatter = logging.Formatter(
-            "[%(asctime)s] [%(levelname)s] [%(name)s]: %(message)s", "%H:%M:%S"
+        # Use the thread-safe handler from log_handler.py
+        # We hook onto the root logger ("") to catch both GUI and cross-process relayed logs
+        handler = install_gui_logging(logger_name="", level=logging.INFO)
+        
+        # Connect the signal to append plaintext safely on the main UI thread
+        handler.emitter.message.connect(
+            lambda msg, level: self.log_console.appendPlainText(msg)
         )
-        handler.setFormatter(formatter)
-        logging.getLogger().addHandler(handler)
-        logging.getLogger().setLevel(logging.INFO)
 
     def _wire_engine_signals(self) -> None:
-        # A fresh QtIpcMapperEventDispatcher is created per start_engine() call;
-        # this fires once per instance and re-wires it each time.
         self.engine_controller.dispatcher_ready.connect(self._wire_engine_dispatcher)
 
-        # Bridge GUI-page-originated events outward to the engine process,
-        # whenever one is running. Pages don't need to know the engine is
-        # out-of-process -- they still just dispatch on self.dispatcher.
-        self.dispatcher.register_callback(
-            "ON_CONFIG_RELOAD", self._forward_config_reload_to_engine
-        )
-        self.dispatcher.register_callback(
-            "ON_LAYOUT_RELOAD", self._forward_layout_reload_to_engine
-        )
-        self.dispatcher.register_callback(
-            "ON_DEVICES_CHANGE", self._forward_devices_change_to_engine
-        )
-        self.dispatcher.register_callback(
-            "ON_TARGET_WINDOW_CHANGE", self._forward_target_window_change_to_engine
-        )
+        self.dispatcher.register_callback("ON_CONFIG_RELOAD", self._forward_config_reload_to_engine)
+        self.dispatcher.register_callback("ON_LAYOUT_RELOAD", self._forward_layout_reload_to_engine)
+        self.dispatcher.register_callback("ON_DEVICES_CHANGE", self._forward_devices_change_to_engine)
+        self.dispatcher.register_callback("ON_TARGET_WINDOW_CHANGE", self._forward_target_window_change_to_engine)
 
-    def _wire_engine_dispatcher(
-        self, ipc_dispatcher: QtIpcMapperEventDispatcher
-    ) -> None:
+    def _wire_engine_dispatcher(self, ipc_dispatcher: QtIpcMapperEventDispatcher) -> None:
         ipc_dispatcher.engine_started.connect(self._on_engine_started)
         ipc_dispatcher.engine_stopped.connect(self._on_engine_stopped)
         ipc_dispatcher.engine_error.connect(self._on_engine_error)
@@ -306,21 +257,13 @@ class MainWindow(QMainWindow):
         if self.engine_controller.dispatcher is not None:
             self.engine_controller.dispatcher.send_layout_reload()
 
-    def _forward_devices_change_to_engine(
-        self, keyboard_device_id: int | None, mouse_device_id: int | None
-    ) -> None:
+    def _forward_devices_change_to_engine(self, keyboard_device_id: int | None, mouse_device_id: int | None) -> None:
         if self.engine_controller.dispatcher is not None:
-            self.engine_controller.dispatcher.send_devices_change(
-                keyboard_device_id, mouse_device_id
-            )
+            self.engine_controller.dispatcher.send_devices_change(keyboard_device_id, mouse_device_id)
 
-    def _forward_target_window_change_to_engine(
-        self, target_window_id: int | None, target_window_title: str
-    ) -> None:
+    def _forward_target_window_change_to_engine(self, target_window_id: int | None, target_window_title: str) -> None:
         if self.engine_controller.dispatcher is not None:
-            self.engine_controller.dispatcher.send_target_window_change(
-                target_window_id, target_window_title
-            )
+            self.engine_controller.dispatcher.send_target_window_change(target_window_id, target_window_title)
 
     def _switch_page(self, index: int, title: str) -> None:
         self.stack.setCurrentIndex(index)
@@ -385,25 +328,20 @@ class MainWindow(QMainWindow):
         )
 
     def _setup_driver_menu(self):
-        """Creates a 'Tools' menu for system-level driver actions."""
         menubar = self.menuBar()
         tools_menu = menubar.addMenu("Tools")
 
-        # 1. Setup / Repair Action
         setup_action = QAction("Install / Repair Drivers...", self)
         setup_action.triggered.connect(self._on_run_setup)
         tools_menu.addAction(setup_action)
 
         tools_menu.addSeparator()
 
-        # 2. Uninstall Action
         uninstall_action = QAction("Uninstall Touch2Key...", self)
-        # Optional: Make the text red in the menu using a stylesheet or icon
         uninstall_action.triggered.connect(self._on_run_uninstall)
         tools_menu.addAction(uninstall_action)
 
     def _on_run_setup(self):
-        """Triggers the setup script with Admin privileges (UAC prompt)."""
         reply = QMessageBox.question(
             self,
             "Driver Setup",
@@ -415,21 +353,12 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.standardButton.Yes:
             if sys.platform == "win32":
                 import ctypes
-
-                # "runas" forces the Windows UAC Admin prompt
-                ctypes.windll.shell32.ShellExecuteW(
-                    None, "runas", sys.executable, "-m modules.scripts.setup", None, 1
-                )
+                ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, "-m modules.scripts.setup", None, 1)
             else:
                 import subprocess
-
-                # Linux GUI Admin prompt
-                subprocess.Popen(
-                    ["pkexec", sys.executable, "-m", "modules.scripts.setup"]
-                )
+                subprocess.Popen(["pkexec", sys.executable, "-m", "modules.scripts.setup"])
 
     def _on_run_uninstall(self):
-        """Triggers the uninstaller as Admin and closes the app to release file locks."""
         reply = QMessageBox.warning(
             self,
             "Uninstall Touch2Key",
@@ -441,24 +370,11 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.standardButton.Yes:
             if sys.platform == "win32":
                 import ctypes
-
-                # Launch uninstaller as Admin in a detached process
-                ctypes.windll.shell32.ShellExecuteW(
-                    None,
-                    "runas",
-                    sys.executable,
-                    "-m modules.scripts.uninstall",
-                    None,
-                    1,
-                )
+                ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, "-m modules.scripts.uninstall", None, 1)
             else:
                 import subprocess
+                subprocess.Popen(["pkexec", sys.executable, "-m", "modules.scripts.uninstall"])
 
-                subprocess.Popen(
-                    ["pkexec", sys.executable, "-m", "modules.scripts.uninstall"]
-                )
-
-            # CRITICAL: Kill the GUI immediately so the SQLite DB and files unlock!
             QCoreApplication.quit()
 
     def closeEvent(self, event) -> None:
