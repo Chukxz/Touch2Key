@@ -52,6 +52,7 @@ VKB_STRUCT = struct.Struct("<BH")
 if TYPE_CHECKING:
     from multiprocessing import Process
     from multiprocessing.connection import Connection
+    from PySide6.QtWidgets import QWidget
 
 # ---------------------------------------------------------------------------
 # Project & Data Paths
@@ -886,6 +887,7 @@ class QtIpcMapperEventDispatcher(QObject):
             self.conn.close()
         except OSError:
             pass
+
 
 def get_adb_device():
     out = subprocess.check_output([ADB, "devices"], timeout=10).decode().splitlines()

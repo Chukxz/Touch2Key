@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import sys
+import time
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
@@ -22,6 +24,90 @@ from modules.utils import (
 )
 
 logger = logging.getLogger("modules.gui.dialogs")
+
+
+# ==========================================
+# CLI Headless Capture Handlers
+# ==========================================
+
+
+def _capture_keys_cli() -> tuple[str | None, str | None] | None:
+    settings = store.settings.get()
+    default_toggle = settings.toggle_key
+    default_sprint = settings.sprint_key
+
+    try:
+        # --- Capture Toggle Key ---
+        print(f"\n[?] Enter TOGGLE key for Camera/Menu mode (e.g. lctl, space, f)")
+        toggle_input = (
+            input(f"    (Default: '{default_toggle}' | Press Enter to keep default): ")
+            .strip()
+            .lower()
+        )
+
+        toggle_key = default_toggle if not toggle_input else toggle_input
+
+        # --- Capture Sprint Key ---
+        print(f"\n[?] Enter SPRINT key (e.g. lshift, w, c)")
+        sprint_input = (
+            input(f"    (Default: '{default_sprint}' | Press Enter to keep default): ")
+            .strip()
+            .lower()
+        )
+
+        sprint_key = default_sprint if not sprint_input else sprint_input
+
+        store.settings.update(
+            toggle_key=toggle_key or "",
+            sprint_key=sprint_key or "",
+        )
+        return toggle_key, sprint_key
+
+    except KeyboardInterrupt:
+        logger.info("Key capture cancelled.")
+        return None
+
+
+def _capture_performance_settings_cli() -> tuple[float | None, float | None] | None:
+    settings = store.settings.get()
+    default_rate = settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP
+    default_pps = settings.pps_alert_threshold or DEFAULT_PPS
+
+    try:
+        # --- Capture Rate Cap ---
+        print(f"\n[?] Enter the ADB rate cap (Hz) for touch event polling")
+        rate_input = input(f"    (Min 60 | Default {default_rate:g}): ").strip().lower()
+
+        rate_cap = default_rate if not rate_input else float(rate_input)
+        if rate_cap < 60.0:
+            rate_cap = 60.0
+
+        # --- Capture PPS Threshold ---
+        print(f"\n[?] Enter the Alert Threshold (PPS) for touch event rate monitoring")
+        pps_input = (
+            input(f"    (Min 30, Max 120 | Default {default_pps:g}): ").strip().lower()
+        )
+
+        pps = default_pps if not pps_input else float(pps_input)
+        if pps < 30.0:
+            pps = 30.0
+        elif pps > 120.0:
+            pps = 120.0
+
+        store.settings.update(
+            adb_rate_cap=float(rate_cap),
+            pps_alert_threshold=float(pps),
+        )
+        return rate_cap, pps
+
+    except (KeyboardInterrupt, ValueError):
+        logger.info("Performance settings capture cancelled or invalid.")
+        return None
+
+
+# ==========================================
+# GUI Dialog Implementations
+# ==========================================
 
 
 class KeyCaptureDialog(QDialog):
@@ -201,66 +287,87 @@ class NumericCaptureDialog(QDialog):
         self.done(QDialog.DialogCode.Accepted)
 
 
+# ==========================================
+# Dual-Mode Public Entry Points
+# ==========================================
+
+
 def capture_keys() -> tuple[str | None, str | None] | None:
-    """Interactively captures toggle and sprint keys and commits them to store.settings."""
-    settings = store.settings.get()
-    default_toggle = settings.toggle_key
-    default_sprint = settings.sprint_key
+    """Interactively captures toggle and sprint keys (GUI or CLI)."""
+    try:
+        from PySide6.QtWidgets import QApplication
 
-    toggle_dialog = KeyCaptureDialog(
-        "Press the key to use as the TOGGLE key\nfor Camera/Menu mode toggle\n(or click Skip to use the default)",
-        skippable=True,
-        default_key=default_toggle,
-    )
-    if toggle_dialog.exec() == QDialog.DialogCode.Rejected:
-        return None
-    toggle_key = toggle_dialog.captured_key
+        if QApplication.instance() is not None:
+            settings = store.settings.get()
+            default_toggle = settings.toggle_key
+            default_sprint = settings.sprint_key
 
-    sprint_dialog = KeyCaptureDialog(
-        "Press the key to use as the SPRINT key\n(or click Skip to use the default)",
-        skippable=True,
-        default_key=default_sprint,
-    )
-    if sprint_dialog.exec() == QDialog.DialogCode.Rejected:
-        return None
-    sprint_key = sprint_dialog.captured_key
+            toggle_dialog = KeyCaptureDialog(
+                "Press the key to use as the TOGGLE key\nfor Camera/Menu mode toggle\n(or click Skip to use the default)",
+                skippable=True,
+                default_key=default_toggle,
+            )
+            if toggle_dialog.exec() == QDialog.DialogCode.Rejected:
+                return None
+            toggle_key = toggle_dialog.captured_key
 
-    store.settings.update(
-        toggle_key=toggle_key or "",
-        sprint_key=sprint_key or "",
-    )
-    return toggle_key, sprint_key
+            sprint_dialog = KeyCaptureDialog(
+                "Press the key to use as the SPRINT key\n(or click Skip to use the default)",
+                skippable=True,
+                default_key=default_sprint,
+            )
+            if sprint_dialog.exec() == QDialog.DialogCode.Rejected:
+                return None
+            sprint_key = sprint_dialog.captured_key
+
+            store.settings.update(
+                toggle_key=toggle_key or "",
+                sprint_key=sprint_key or "",
+            )
+            return toggle_key, sprint_key
+    except ImportError:
+        pass
+
+    return _capture_keys_cli()
 
 
 def capture_performance_settings() -> tuple[float | None, float | None] | None:
-    """Interactively captures rate cap and PPS and commits them to store.settings."""
-    settings = store.settings.get()
-    default_rate = settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP
-    default_pps = settings.pps_alert_threshold or DEFAULT_PPS
+    """Interactively captures rate cap and PPS (GUI or CLI)."""
+    try:
+        from PySide6.QtWidgets import QApplication
 
-    rate_dialog = NumericCaptureDialog(
-        "Enter the ADB rate cap (Hz)\nfor touch event polling\n(or click Skip to use the default)",
-        default_value=default_rate,
-        min_value=60.0,
-    )
-    if rate_dialog.exec() == QDialog.DialogCode.Rejected:
-        return None
-    rate_cap = rate_dialog.result_value
+        if QApplication.instance() is not None:
+            settings = store.settings.get()
+            default_rate = settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP
+            default_pps = settings.pps_alert_threshold or DEFAULT_PPS
 
-    pps_dialog = NumericCaptureDialog(
-        "Enter the Alert Threshold (PPS)\nfor touch event rate monitoring\n(or click Skip to use the default)",
-        default_value=default_pps,
-        min_value=30.0,
-        max_value=120.0,
-    )
-    if pps_dialog.exec() == QDialog.DialogCode.Rejected:
-        return None
-    pps = pps_dialog.result_value
+            rate_dialog = NumericCaptureDialog(
+                "Enter the ADB rate cap (Hz)\nfor touch event polling\n(or click Skip to use the default)",
+                default_value=default_rate,
+                min_value=60.0,
+            )
+            if rate_dialog.exec() == QDialog.DialogCode.Rejected:
+                return None
+            rate_cap = rate_dialog.result_value
 
-    if rate_cap is not None and pps is not None:
-        store.settings.update(
-            adb_rate_cap=float(rate_cap),
-            pps_alert_threshold=float(pps),
-        )
+            pps_dialog = NumericCaptureDialog(
+                "Enter the Alert Threshold (PPS)\nfor touch event rate monitoring\n(or click Skip to use the default)",
+                default_value=default_pps,
+                min_value=30.0,
+                max_value=120.0,
+            )
+            if pps_dialog.exec() == QDialog.DialogCode.Rejected:
+                return None
+            pps = pps_dialog.result_value
 
-    return rate_cap, pps
+            if rate_cap is not None and pps is not None:
+                store.settings.update(
+                    adb_rate_cap=float(rate_cap),
+                    pps_alert_threshold=float(pps),
+                )
+
+            return rate_cap, pps
+    except ImportError:
+        pass
+
+    return _capture_performance_settings_cli()

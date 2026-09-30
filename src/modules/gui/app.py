@@ -9,8 +9,9 @@ import cProfile
 import multiprocessing
 import sys
 from typing import TYPE_CHECKING, cast
+import signal
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QCoreApplication, QTimer
 from PySide6.QtWidgets import QApplication
 
 from modules.database import store
@@ -84,6 +85,14 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     app = cast(QApplication, QApplication.instance() or QApplication(sys.argv))
     app.setApplicationName(APP_NAME)
     app.setQuitOnLastWindowClosed(True)
+
+    # Allow Python signals to be processed periodically by running a dummy timer
+    timer = QTimer()
+    timer.start(500)
+    timer.timeout.connect(lambda: None)  # Kickstarts the Python interpreter loop
+
+    # Handle Ctrl+C cleanly
+    signal.signal(signal.SIGINT, lambda *_: QCoreApplication.quit())
 
     # Now pre-flight can correctly detect the active QApplication instance for GUI warnings
     if not pre_flight_run():

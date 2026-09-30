@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
-import queue
-import threading
+import sys
+import time
+import os
 from typing import Optional
 
 from modules.platforms import get_platform
@@ -11,6 +12,14 @@ from modules.utils import WINDOWS_HEADERS
 logger = logging.getLogger("modules.platforms.windows.select_window")
 
 REFRESH_INTERVAL_SECONDS = 1.0
+
+# Platform-specific imports for non-blocking console input
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import select
+    import termios
+    import tty
 
 
 def _gather_window_rows(window_manager) -> dict[int, list]:
@@ -22,75 +31,200 @@ def _gather_window_rows(window_manager) -> dict[int, list]:
         width, height = window_manager.get_window_dimensions(window_id)
         if width == 0 or height == 0:
             continue
-        rows[window_id] = [window_id, meta["title"], meta["class_name"], left, top, width, height]
+        rows[window_id] = [
+            window_id,
+            meta["title"],
+            meta["class_name"],
+            left,
+            top,
+            width,
+            height,
+        ]
     return rows
 
 
-# ==========================================
-# CLI Headless Query Engine
-# ==========================================
+def _print_window_table(
+    rows: dict[int, list], current_input: str = "", last_warning: str = ""
+) -> str:
+    # Use native OS command for clean terminal clearing on both Windows and Linux
+    os.system("cls" if sys.platform == "win32" else "clear")
+    table_str = ""
 
-
-def _print_window_table(rows: dict[int, list]) -> None:
-    print("\033[2J\033[H", end="")  # clear screen, cursor home
-    print("[?] Select target window (auto-refreshing every 1s, 'q' to abort):\n")
+    table_str += "[?] Select target window (auto-refreshing every 1s, 'q' to abort):\n"
     if not rows:
-        print("    [!] No visible windows detected.")
+        table_str += "    [!] No visible windows detected.\n"
     else:
-        print("    " + " | ".join(f"{h:<12}" for h in WINDOWS_HEADERS))
+        header_str = " | ".join(
+            [
+                f"{WINDOWS_HEADERS[0]:<10}",
+                f"{WINDOWS_HEADERS[1]:<35}",
+                f"{WINDOWS_HEADERS[2]:<25}",
+                f"{WINDOWS_HEADERS[3]:<6}",
+                f"{WINDOWS_HEADERS[4]:<6}",
+                f"{WINDOWS_HEADERS[5]:<6}",
+                f"{WINDOWS_HEADERS[6]:<6}",
+            ]
+        )
+
+        table_str += f"    {header_str}\n"
+        table_str += "    " + "-" * len(header_str) + "\n"
+
         for row in rows.values():
-            print("    " + " | ".join(f"{str(v):<12}" for v in row))
-    print("\n>> Enter window # + Enter to select, 'q' + Enter to abort: ", end="", flush=True)
+            wid, title, cls_name, left, top, width, height = row
+
+            safe_title = (title[:32] + "...") if len(title) > 35 else title
+            safe_cls = (cls_name[:22] + "...") if len(cls_name) > 25 else cls_name
+
+            row_str = " | ".join(
+                [
+                    f"{wid:<10}",
+                    f"{safe_title:<35}",
+                    f"{safe_cls:<25}",
+                    f"{left:<6}",
+                    f"{top:<6}",
+                    f"{width:<6}",
+                    f"{height:<6}",
+                ]
+            )
+            table_str += f"    {row_str}\n"
+
+    print(table_str + last_warning)
+
+    print(
+        f"\n>> Enter window # + Enter to select, 'q' + Enter to abort: {current_input}",
+        end="",
+        flush=True,
+    )
+
+    return table_str
 
 
-def _stdin_reader(input_queue: "queue.Queue[str]") -> None:
-    """Runs on a daemon thread; blocks on input() and forwards each line."""
-    while True:
-        try:
-            line = input()
-        except (EOFError, KeyboardInterrupt):
-            input_queue.put("q")
-            return
-        input_queue.put(line.strip().lower())
+def _poll_key_windows() -> tuple[Optional[str], Optional[str]]:
+    """Non-blocking key check for Windows."""
+    if msvcrt.kbhit():
+        ch = msvcrt.getch()
+        if ch in (b"\r", b"\n"):
+            return "enter", None
+        elif ch in (b"\x08", b"\x7f"):  # Backspace
+            return "backspace", None
+        elif ch == b"\x03":  # Ctrl+C
+            raise KeyboardInterrupt
+        else:
+            try:
+                decoded = ch.decode("utf-8", errors="ignore")
+                if decoded.isprintable():
+                    return "char", decoded
+            except Exception:
+                pass
+    return None, None
+
+
+def _poll_key_unix() -> tuple[Optional[str], Optional[str]]:
+    """Non-blocking key check for Linux / macOS."""
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        if select.select([sys.stdin], [], [], 0)[0]:
+            ch = sys.stdin.read(1)
+            if ch in ("\r", "\n"):
+                return "enter", None
+            elif ch in ("\x7f", "\b"):  # Backspace
+                return "backspace", None
+            elif ch == "\x03":  # Ctrl+C
+                raise KeyboardInterrupt
+            elif ch.isprintable():
+                return "char", ch
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    return None, None
 
 
 def _select_window_cli() -> Optional[tuple[int, str]]:
     window_manager = get_platform().WindowManager()
-    input_queue: "queue.Queue[str]" = queue.Queue()
-
-    reader = threading.Thread(target=_stdin_reader, args=(input_queue,), daemon=True)
-    reader.start()
-
-    rows: dict[int, list] = {}
+    buffer: list[str] = []
+    is_typing = False
+    table_str = ""
+    last_warning = ""
 
     try:
         while True:
             rows = _gather_window_rows(window_manager)
-            _print_window_table(rows)
 
-            try:
-                choice = input_queue.get(timeout=REFRESH_INTERVAL_SECONDS)
-            except queue.Empty:
-                continue
+            if not is_typing:
+                table_str = _print_window_table(
+                    rows, "".join(buffer), last_warning=last_warning
+                )
 
-            if choice == "q":
-                return None
-            if choice == "":
-                continue
+            elapsed = 0.0
+            while elapsed < REFRESH_INTERVAL_SECONDS:
+                action, val = (
+                    _poll_key_windows() if sys.platform == "win32" else _poll_key_unix()
+                )
 
-            try:
-                window_id = int(choice)
-            except ValueError:
-                logger.warning("Invalid input: %r", choice)
-                continue
+                if action == "enter":
+                    print()
+                    line = "".join(buffer).strip().lower()
+                    if line == "q":
+                        return None
+                    if line == "":
+                        buffer.clear()
+                        is_typing = False
+                        break
 
-            if window_id not in rows:
-                logger.warning("Window # %s is not in the current list.", window_id)
-                continue
+                    try:
+                        window_id = int(line)
+                    except ValueError:
+                        logger.warning("Invalid input: %r", line)
+                        buffer.clear()
+                        is_typing = False
+                        break
 
-            title = rows[window_id][1]
-            logger.info("Window selected: %s (%s)", window_id, title)
-            return window_id, title
+                    if window_id not in rows:
+                        last_warning = (
+                            f"Window {window_id} is not in the current list.\n"
+                        )
+                        logger.warning(
+                            "Window # %s is not in the current list.", window_id
+                        )
+                        buffer.clear()
+                        is_typing = False
+                        break
+
+                    title = rows[window_id][1]
+                    logger.info("Window selected: %s (%s)", window_id, title)
+                    return window_id, title
+
+                elif action == "backspace":
+                    if buffer:
+                        buffer.pop()
+                        if not buffer:
+                            is_typing = False
+
+                    os.system("cls" if sys.platform == "win32" else "clear")
+                    print(table_str)
+                    # Added trailing spaces ("   ") to blank out any leftover trailing characters
+                    print(
+                        f"\r>> Enter window # + Enter to select, 'q' + Enter to abort: {''.join(buffer)}   ",
+                        end="",
+                        flush=True,
+                    )
+
+                elif action == "char" and val:
+                    buffer.append(val)
+                    is_typing = True
+
+                    os.system("cls" if sys.platform == "win32" else "clear")
+                    print(table_str)
+                    print(
+                        f"\r>> Enter window # + Enter to select, 'q' + Enter to abort: {''.join(buffer)}",
+                        end="",
+                        flush=True,
+                    )
+
+                time.sleep(0.05)
+                elapsed += 0.05
+
     except KeyboardInterrupt:
         logger.info("Window selection cancelled.")
         return None
@@ -138,7 +272,9 @@ def _create_gui_dialog():
             header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
             header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
 
-            self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            self.table.setSelectionBehavior(
+                QAbstractItemView.SelectionBehavior.SelectRows
+            )
             self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
             self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
             self.table.verticalHeader().setVisible(False)
@@ -224,7 +360,9 @@ def _create_gui_dialog():
             id_item = self.table.item(row, 0)
             title_item = self.table.item(row, 1)
 
-            self.selected_window_id = id_item.data(Qt.ItemDataRole.UserRole) if id_item else None
+            self.selected_window_id = (
+                id_item.data(Qt.ItemDataRole.UserRole) if id_item else None
+            )
             self.selected_window_title = title_item.text() if title_item else ""
 
             self.done(QDialog.DialogCode.Accepted)
@@ -246,6 +384,7 @@ def select_window(parent=None) -> Optional[tuple[int, str]]:
     """Dual-mode window query. Automatically selects between CLI prompt and Qt Dialog."""
     try:
         from PySide6.QtWidgets import QApplication
+
         if QApplication.instance() is not None:
             return _select_window_gui(parent=parent)
     except ImportError:

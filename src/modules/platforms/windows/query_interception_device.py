@@ -69,7 +69,7 @@ def _select_device_cli(
             print(f"    {str(dev_id):<10} │ {vid:<9} │ {pid:<9} │ {clean}")
 
     print(
-        "\n>> Press a physical key/button on the target device (or enter device # manually, 'q' to abort): "
+        f"\n>> Waiting for physical input ({"tap a key" if is_keyboard else "click mouse"} on target device)..."
     )
 
     target_filter_fn = context.is_keyboard if is_keyboard else context.is_mouse
@@ -98,7 +98,9 @@ def _select_device_cli(
                         raw_hwid = context.devices[dev].get_HWID() or ""
                         clean = raw_hwid.split("\x00")[0].strip()
                         vid, pid = _extract_vid_pid(clean)
-                        print(f"[+] Hardware detected: Device {dev} (VID: {vid}, PID: {pid}) -> {clean}")
+                        print(
+                            f"[+] Hardware detected: Device {dev} (VID: {vid}, PID: {pid}) -> {clean}"
+                        )
                         return dev
     except KeyboardInterrupt:
         logger.info("\n[!] Input capture cancelled.")
@@ -118,7 +120,7 @@ def _select_devices_cli() -> Optional[tuple[int, int]]:
             ctx,
             KEYBOARD_RANGE,
             is_keyboard=True,
-            prompt="Tap any non-modifier key on the KEYBOARD to bind:",
+            prompt="Tap any non-modifier key on the target KEYBOARD to bind:",
         )
         if k_id is None:
             return None
@@ -127,7 +129,7 @@ def _select_devices_cli() -> Optional[tuple[int, int]]:
             ctx,
             MOUSE_RANGE,
             is_keyboard=False,
-            prompt="Left-click on the MOUSE to bind:",
+            prompt="Left-click on the target MOUSE to bind:",
         )
         if m_id is None:
             return None
@@ -372,6 +374,11 @@ def _select_devices_gui(parent=None) -> Optional[tuple[int, int]]:
         return None
     finally:
         ctx.destroy()
+
+
+# ==========================================
+# Dual-Mode Public Entry Point
+# ==========================================
 
 
 def select_keyboard_then_mouse(parent=None) -> Optional[tuple[int, int]]:

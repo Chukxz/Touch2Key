@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QVBoxLayout,
     QWidget,
+    QSizePolicy,
 )
 
 from modules.database import store
@@ -144,7 +145,9 @@ class EngineProcessController(QObject):
         if self.process is not None and not self.process.is_alive():
             self._watchdog.stop()
             if self.dispatcher is not None:
-                self.dispatcher.engine_error.emit("Engine process terminated unexpectedly")
+                self.dispatcher.engine_error.emit(
+                    "Engine process terminated unexpectedly"
+                )
                 self.dispatcher.engine_stopped.emit()
 
 
@@ -218,11 +221,20 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.stack, stretch=5)
 
         self.log_dock = QDockWidget("Application Logs", self)
+        self.log_dock.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+
         self.log_console = QPlainTextEdit()
         self.log_console.setReadOnly(True)
+        # Add expanding policy to the inner console widget too!
+        self.log_console.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         self.log_console.setStyleSheet(
             "background-color: #1e1e1e; color: #d4d4d4; font-family: monospace;"
         )
+
         self.log_dock.setWidget(self.log_console)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.log_dock)
 
@@ -237,12 +249,22 @@ class MainWindow(QMainWindow):
     def _wire_engine_signals(self) -> None:
         self.engine_controller.dispatcher_ready.connect(self._wire_engine_dispatcher)
 
-        self.dispatcher.register_callback("ON_CONFIG_RELOAD", self._forward_config_reload_to_engine)
-        self.dispatcher.register_callback("ON_LAYOUT_RELOAD", self._forward_layout_reload_to_engine)
-        self.dispatcher.register_callback("ON_DEVICES_CHANGE", self._forward_devices_change_to_engine)
-        self.dispatcher.register_callback("ON_TARGET_WINDOW_CHANGE", self._forward_target_window_change_to_engine)
+        self.dispatcher.register_callback(
+            "ON_CONFIG_RELOAD", self._forward_config_reload_to_engine
+        )
+        self.dispatcher.register_callback(
+            "ON_LAYOUT_RELOAD", self._forward_layout_reload_to_engine
+        )
+        self.dispatcher.register_callback(
+            "ON_DEVICES_CHANGE", self._forward_devices_change_to_engine
+        )
+        self.dispatcher.register_callback(
+            "ON_TARGET_WINDOW_CHANGE", self._forward_target_window_change_to_engine
+        )
 
-    def _wire_engine_dispatcher(self, ipc_dispatcher: QtIpcMapperEventDispatcher) -> None:
+    def _wire_engine_dispatcher(
+        self, ipc_dispatcher: QtIpcMapperEventDispatcher
+    ) -> None:
         ipc_dispatcher.engine_started.connect(self._on_engine_started)
         ipc_dispatcher.engine_stopped.connect(self._on_engine_stopped)
         ipc_dispatcher.engine_error.connect(self._on_engine_error)
@@ -255,20 +277,33 @@ class MainWindow(QMainWindow):
         if self.engine_controller.dispatcher is not None:
             self.engine_controller.dispatcher.send_layout_reload()
 
-    def _forward_devices_change_to_engine(self, keyboard_device_id: int | None, mouse_device_id: int | None) -> None:
+    def _forward_devices_change_to_engine(
+        self, keyboard_device_id: int | None, mouse_device_id: int | None
+    ) -> None:
         if self.engine_controller.dispatcher is not None:
-            self.engine_controller.dispatcher.send_devices_change(keyboard_device_id, mouse_device_id)
+            self.engine_controller.dispatcher.send_devices_change(
+                keyboard_device_id, mouse_device_id
+            )
 
-    def _forward_target_window_change_to_engine(self, target_window_id: int | None, target_window_title: str) -> None:
+    def _forward_target_window_change_to_engine(
+        self, target_window_id: int | None, target_window_title: str
+    ) -> None:
         if self.engine_controller.dispatcher is not None:
-            self.engine_controller.dispatcher.send_target_window_change(target_window_id, target_window_title)
+            self.engine_controller.dispatcher.send_target_window_change(
+                target_window_id, target_window_title
+            )
 
     def _switch_page(self, index: int, title: str) -> None:
         self.stack.setCurrentIndex(index)
+        page_widget = self.stack.currentWidget()
+        if page_widget is not None:
+            logger.debug(
+                f"Page '{title}' Min Size Hint: {page_widget.minimumSizeHint()}"
+            )
+
         if title in self.nav_buttons:
             self.nav_buttons[title].setChecked(True)
 
-        page_widget = self.stack.currentWidget()
         if isinstance(page_widget, BasePage):
             page_widget.on_page_shown()
 
@@ -376,10 +411,16 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.standardButton.Yes:
             if sys.platform == "win32":
                 import ctypes
-                ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, "-m modules.scripts.setup", None, 1)
+
+                ctypes.windll.shell32.ShellExecuteW(
+                    None, "runas", sys.executable, "-m modules.scripts.setup", None, 1
+                )
             else:
                 import subprocess
-                subprocess.Popen(["pkexec", sys.executable, "-m", "modules.scripts.setup"])
+
+                subprocess.Popen(
+                    ["pkexec", sys.executable, "-m", "modules.scripts.setup"]
+                )
 
     def _on_run_uninstall(self):
         reply = QMessageBox.warning(
@@ -393,10 +434,21 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.standardButton.Yes:
             if sys.platform == "win32":
                 import ctypes
-                ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, "-m modules.scripts.uninstall", None, 1)
+
+                ctypes.windll.shell32.ShellExecuteW(
+                    None,
+                    "runas",
+                    sys.executable,
+                    "-m modules.scripts.uninstall",
+                    None,
+                    1,
+                )
             else:
                 import subprocess
-                subprocess.Popen(["pkexec", sys.executable, "-m", "modules.scripts.uninstall"])
+
+                subprocess.Popen(
+                    ["pkexec", sys.executable, "-m", "modules.scripts.uninstall"]
+                )
 
             QCoreApplication.quit()
 

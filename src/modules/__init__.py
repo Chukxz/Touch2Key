@@ -32,6 +32,7 @@ from .core.pipeline_output import BridgeOutputSink
 from .core.gestures import TwoFingerTapTracker
 
 __all__ = [
+    "AppLogManager",
     "MapperEvent",
     "TouchEvent",
     "MapperEventDispatcher",

@@ -72,8 +72,8 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     # 2. Boot Sequence
     # -----------------------------------------------------------------------
     # Initialize QApplication early so pre-flight knows if a GUI context exists
-    app = QApplication.instance() or QApplication(sys.argv)
-    app.setApplicationName(APP_NAME)
+    # app = QApplication.instance() or QApplication(sys.argv)
+    # app.setApplicationName(APP_NAME)
 
     if not pre_flight_run():
         profiler_cleanup(cli_profiler)

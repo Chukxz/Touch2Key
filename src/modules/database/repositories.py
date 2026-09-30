@@ -55,7 +55,8 @@ class AppSettings:
     typematic_excluded_keys: Optional[str]
     double_tap_enabled: bool
     bezel_toggle_enabled: bool
-    updated_at: str
+    created_at: str | None = None
+    updated_at: str | None = None
 
     @classmethod
     def from_row(cls, row) -> AppSettings:
@@ -109,7 +110,9 @@ class LayoutZone:
     updated_at: str
 
     # Give each instance its own helper object without requiring it in __init__
-    CONFIG_HELPER: PipelineConfig = field(default_factory=PipelineConfig, init=False, repr=False)
+    CONFIG_HELPER: PipelineConfig = field(
+        default_factory=PipelineConfig, init=False, repr=False
+    )
 
     def set_parsed_config_from_json(self):
         if self.CONFIG_HELPER.should_get_config:

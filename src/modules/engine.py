@@ -4,6 +4,7 @@ import os
 import sys
 import multiprocessing
 import threading
+import logging
 from typing import TYPE_CHECKING
 
 from modules.database import store
@@ -36,6 +37,9 @@ from modules import (
 from modules.scripts.list_windows import select_window
 from modules.cli.key_capture import capture_keys, capture_performance_settings
 from modules.gui.overlays import virtual_keyboard_worker
+
+logger = logging.getLogger("modules.engine")
+
 
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection
@@ -82,6 +86,7 @@ class Engine:
         if not self.headless:
             try:
                 import keyboard
+
                 keyboard.add_hotkey("esc", self._shutdown)
             except Exception:
                 pass
@@ -222,7 +227,10 @@ class Engine:
                         p.process(touch_event, output_sink)
                         return
 
-            if touch_event.contact_id == 0 and not self.two_finger_tap_tracker._contacts:
+            if (
+                touch_event.contact_id == 0
+                and not self.two_finger_tap_tracker._contacts
+            ):
                 gx, gy = self.mapper.device_to_game_abs(
                     touch_event.position.x, touch_event.position.y
                 )
@@ -259,7 +267,10 @@ class Engine:
         # Dynamically push any mouse deltas accumulated by MouseMapper / Track-Fire Buttons to the OS
         self.output_sink.flush_mouse_move()
 
-        if touch_event.phase is TouchPhase.UP and getattr(self.touch_reader, 'active_touches', 1) == 0:
+        if (
+            touch_event.phase is TouchPhase.UP
+            and getattr(self.touch_reader, "active_touches", 1) == 0
+        ):
             self.output_sink.reset_mouse_accumulators()
 
     def start_headless(
@@ -298,7 +309,7 @@ class Engine:
         self.output_sink = BridgeOutputSink(
             bridge=self.mapper.bridge,
             toggle_mode=self.toggle_mode,
-            toggle_vkb=self.toggle_virtual_keyboard
+            toggle_vkb=self.toggle_virtual_keyboard,
         )
 
         self.bezel_mapper = BezelMapper(self.mapper, self.output_sink)
@@ -316,10 +327,18 @@ class Engine:
         self._tiers = self._build_pipeline_tiers()
 
         self.touch_reader.bind_touch_event(self._process_touch_event)
-        self.mapper_event_dispatcher.register_callback("ON_MENU_MODE_TOGGLE", self._set_is_visible)
-        self.mapper_event_dispatcher.register_callback("ON_LAYOUT_RELOAD", self._on_layout_reload)
-        self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self._on_config_reload)
-        self.mapper_event_dispatcher.register_callback("ON_DEVICES_CHANGE", self._on_devices_change)
+        self.mapper_event_dispatcher.register_callback(
+            "ON_MENU_MODE_TOGGLE", self._set_is_visible
+        )
+        self.mapper_event_dispatcher.register_callback(
+            "ON_LAYOUT_RELOAD", self._on_layout_reload
+        )
+        self.mapper_event_dispatcher.register_callback(
+            "ON_CONFIG_RELOAD", self._on_config_reload
+        )
+        self.mapper_event_dispatcher.register_callback(
+            "ON_DEVICES_CHANGE", self._on_devices_change
+        )
 
         self.bridge_class.start_worker_processes(k_device_handle, m_device_handle)
 
@@ -346,7 +365,10 @@ class Engine:
         m_device_handle = None
 
         if sys.platform == "win32":
-            from modules.platforms.windows.query_interception_device import select_keyboard_then_mouse
+            from modules.platforms.windows.query_interception_device import (
+                select_keyboard_then_mouse,
+            )
+
             res = select_keyboard_then_mouse()
             if res:
                 k_device_handle, m_device_handle = res
@@ -381,6 +403,7 @@ class Engine:
         if not self.headless:
             try:
                 import keyboard
+
                 keyboard.unhook_all_hotkeys()
             except Exception:
                 pass
@@ -400,13 +423,15 @@ class Engine:
                 self.bezel_mapper.release_all()
             if self.mapper is not None:
                 self.mapper.stop()
-                
+
             if self.bridge_class is not None:
                 self.bridge_class.shutdown()
                 self.bridge_class.release_all()
 
             procs = [
-                p for p in (self.bridge_class.k_proc, self.bridge_class.m_proc) if p is not None
+                p
+                for p in (self.bridge_class.k_proc, self.bridge_class.m_proc)
+                if p is not None
             ]
 
             for p in procs:
@@ -449,6 +474,10 @@ def run_engine_process(conn: Connection) -> None:
             typematic_excluded_keys=config["typematic_excluded_keys"],
         )
         dispatcher.send_started()
+
+    except KeyboardInterrupt:
+        logger.info("Engine received shutdown signal, exiting cleanly.")
+        sys.exit(0)
 
     except Exception as exc:
         print(f"[ENGINE PROCESS] Startup failure: {exc}")

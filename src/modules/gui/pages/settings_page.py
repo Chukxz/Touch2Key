@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QWidget,
+    QVBoxLayout,
 )
 
 from modules.database import store
@@ -45,20 +46,23 @@ class SettingsPage(BasePage):
 
         # 1. Input & Controls Group
         input_group = QGroupBox("Touch & Input Controls")
-        input_form = QFormLayout(input_group)
+        input_layout = QVBoxLayout(input_group)
 
         self.left_handed_check = QCheckBox("Left-handed mode")
-        input_form.addRow(self.left_handed_check)
+        input_layout.addWidget(self.left_handed_check)
 
         self.floating_check = QCheckBox("Floating Joystick")
         self.floating_check.setToolTip("Floats dynamically, is overriden by anchored.")
-        input_form.addRow(self.floating_check)
+        input_layout.addWidget(self.floating_check)
 
         self.anchored_check = QCheckBox("Anchored Floating Joystick")
         self.anchored_check.setToolTip(
             "Locks touches near center to the anchor, floats dynamically elsewhere. Overrides floating."
         )
-        input_form.addRow(self.anchored_check)
+        input_layout.addWidget(self.anchored_check)
+
+        # Form layout specifically for the tuning spinboxes
+        input_form = QFormLayout()
 
         self.sensitivity_spin_x = QDoubleSpinBox()
         self.sensitivity_spin_x.setRange(0.1, 10.0)
@@ -80,6 +84,8 @@ class SettingsPage(BasePage):
         self.hysteresis_spin.setSingleStep(1.0)
         self.hysteresis_spin.setSuffix("°")
         input_form.addRow("Hysteresis:", self.hysteresis_spin)
+
+        input_layout.addLayout(input_form)
 
         self.content_layout().addWidget(input_group)
 
