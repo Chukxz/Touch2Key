@@ -157,6 +157,7 @@ touch2key-manage --show-typematic
 touch2key-manage --set-typematic on --typematic-delay 200 --typematic-rate 35
 touch2key-manage --typematic-excludes "w,a,s,d,shift,ctrl,alt"
 touch2key-manage --reset-typematic
+touch2key-manage --set-image 1 path/to/hud_screenshot.png
 ```
 *(Alternatively, choose option `[ss]` inside the interactive terminal menu to configure double-tap and bezel toggle fields interactively, or `[rss]` to reset them).*
 
