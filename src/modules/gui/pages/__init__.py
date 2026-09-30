@@ -4,7 +4,7 @@ from .devices_page import DevicesPage
 from .key_bindings_page import KeyBindingsPage
 from .layouts_editor_page import LayoutsEditorPage
 from .performance_page import PerformancePage
-from .pipelines import PipelinesPage
+from .pipelines_page import PipelinesPage
 from .profiles_page import ProfilesPage
 from .settings_page import SettingsPage
 from .typematic_page import TypematicPage
