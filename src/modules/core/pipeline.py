@@ -101,7 +101,7 @@ class RectangularRegion(Region):
 
 
 # ---------------------------------------------------------------------------
-# Constraints, Origins, Transforms, self.semantics
+# Constraints, Origins, Transforms, Semantics
 # ---------------------------------------------------------------------------
 
 
