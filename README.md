@@ -102,10 +102,13 @@ python -m venv .venv
 pip install .
 ```
 
-* **Setup:** Run setup (Usually requires an internet connection).
-```bash
-touch2key-setup
-```
+### CLI Mode
+
+| Action | Command | Description |
+| :--- | :--- | :--- |
+| **Standard** | `touch2key-setup` | Runs the OS configuration wizard and installs drivers/binaries. |
+| **Skip Confirmation** | `touch2key-setup [--yes, -y]` | Skip confirmation prompts / run non-interactively. |
+| **Skip Reboot** | `touch2key-setup --no-restart` | Skip reboot prompt after setup (Windows). |
 
 *(Note: Windows requires a system reboot after installation to fully load the driver).*
 
@@ -143,8 +146,6 @@ Because Touch2Key installs system-level drivers and kernel rules, **simply runni
 | `touch2key-preflight` | Diagnostic checks. |
 | `touch2key-setup` | OS configuration wizard. |
 | `touch2key-uninstall` | Safely removes drivers, rules and binaries. |
-| `touch2key-uninstall --purge` | Uninstalls and removes jsons/images and the settings toml file. |
-| `touch2key-uninstall --purge-all` | Purges and removes the profiling (.prof) file. |
 | `touch2key-wireless` | Forces ADB wireless connection. |
 | `touch2key-keyboard` | Test the virtual keyboard program output.|
 | `touch2key-visualizer` | Visualize the keyboard and mouse events with support for cursor toggling visualization. |
