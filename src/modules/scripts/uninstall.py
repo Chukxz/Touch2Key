@@ -68,10 +68,7 @@ def _remove_linux_udev_rules(is_gui: bool) -> bool:
     """
     rule_path = Path(UDEV_RULE_PATH)
     if not rule_path.exists():
-        if is_gui:
-            logger.info("No udev rule found at %s. Skipping removal.", rule_path)
-        else:
-            print(f"[+] No udev rule found at {rule_path}.")
+        logger.info("No udev rule found at %s. Skipping removal.", rule_path)
         return True
 
     # Try direct unprivileged removal first (in case running as root)
@@ -80,16 +77,10 @@ def _remove_linux_udev_rules(is_gui: bool) -> bool:
             rule_path.unlink()
             subprocess.run(["udevadm", "control", "--reload-rules"], check=True)
             subprocess.run(["udevadm", "trigger"], check=True)
-            if is_gui:
-                logger.info("Udev rule removed and subsystem reloaded as root.")
-            else:
-                print("[+] Udev rule removed and subsystem reloaded.")
+            logger.info("Udev rule removed and subsystem reloaded as root.")
             return True
         except Exception as exc:
-            if is_gui:
-                logger.error("Failed to remove udev rule as root: %s", exc)
-            else:
-                print(f"[!] Error removing udev rule: {exc}")
+            logger.error("Failed to remove udev rule as root: %s", exc)
             return False
 
     # Escalate privileges when running unprivileged
@@ -107,29 +98,27 @@ def _remove_linux_udev_rules(is_gui: bool) -> bool:
 
     # In CLI mode, use standard sudo
     if shutil.which("sudo"):
+        logger.warning("Sudo authentication required to delete /etc/udev/rules.d rule...")
+        # Since this needs to prompt for password in terminal, we use print/interactive subprocess
         print("[!] Sudo authentication required to delete /etc/udev/rules.d rule...")
         res = subprocess.run(["sudo", "sh", "-c", cmd_str])
         if res.returncode == 0:
-            print("[+] Udev rule removed via sudo.")
+            logger.info("Udev rule removed via sudo.")
             return True
-        print("[!] Sudo authentication failed.")
+        logger.error("Sudo authentication failed.")
         return False
 
     return False
 
 
-def purge_data(is_gui: bool) -> None:
+def purge_data() -> None:
     """Deletes entire data directory (database, profiles, images, jsons, settings.toml)."""
     if DATA_FOLDER.exists():
         shutil.rmtree(DATA_FOLDER, ignore_errors=True)
-
-    if is_gui:
-        logger.info("Purged data directory: %s", DATA_FOLDER)
-    else:
-        print(f"    - User data directory purged ({DATA_FOLDER}).")
+    logger.info("Purged data directory: %s", DATA_FOLDER)
 
 
-def purge_diagnostics(is_gui: bool) -> None:
+def purge_diagnostics() -> None:
     """Deletes diagnostics/ and any stray .prof profiling files in the project root."""
     if DIAGNOSTICS_FOLDER.exists():
         shutil.rmtree(DIAGNOSTICS_FOLDER, ignore_errors=True)
@@ -137,13 +126,10 @@ def purge_diagnostics(is_gui: bool) -> None:
     for prof_file in PROJECT_ROOT.glob("*.prof"):
         prof_file.unlink(missing_ok=True)
 
-    if is_gui:
-        logger.info("Purged diagnostics folder and root profiling files.")
-    else:
-        print("    - Diagnostics and profiling files purged.")
+    logger.info("Purged diagnostics folder and root profiling files.")
 
 
-def purge_logs(is_gui: bool) -> None:
+def purge_logs() -> None:
     """Deletes logs/ and any root session log files."""
     if LOGS_FOLDER.exists():
         shutil.rmtree(LOGS_FOLDER, ignore_errors=True)
@@ -151,10 +137,7 @@ def purge_logs(is_gui: bool) -> None:
     for log_file in PROJECT_ROOT.glob("*.log"):
         log_file.unlink(missing_ok=True)
 
-    if is_gui:
-        logger.info("Purged logs directory: %s", LOGS_FOLDER)
-    else:
-        print(f"    - Session logs purged ({LOGS_FOLDER}).")
+    logger.info("Purged logs directory: %s", LOGS_FOLDER)
 
 
 def run(parent=None) -> bool:
@@ -184,15 +167,12 @@ def run(parent=None) -> bool:
         args = parser.parse_args()
 
     # 1. Platform-Specific Elevation Check
-    # Windows requires the entire process to run elevated to talk to the driver installer.
-    # Linux can remain unprivileged and elevate only during udev rule removal via pkexec.
     if sys.platform == "win32" and not _is_admin():
         msg = "Administrator privileges are required to uninstall the Interception driver."
+        logger.error(msg)
         if is_gui:
-            logger.error(msg)
             QMessageBox.critical(parent, "Elevation Required", msg)
         else:
-            print(f"[!] {msg}")
             _request_windows_elevation()
         return False
 
@@ -239,23 +219,13 @@ def run(parent=None) -> bool:
             )
             if res.returncode == 0:
                 needs_reboot = True
-                if is_gui:
-                    logger.info("Interception driver uninstalled.")
-                else:
-                    print("[+] Interception driver uninstalled.")
+                logger.info("Interception driver uninstalled.")
             else:
-                if is_gui:
-                    logger.warning("Interception driver uninstall command failed.")
-                else:
-                    print("[!] Driver uninstallation reported a non-zero exit code.")
+                logger.warning("Interception driver uninstall command failed. Exit code non-zero.")
         else:
-            msg = "Interception installer binary not found in bin/."
-            if is_gui:
-                logger.warning(msg)
-            else:
-                print(f"[!] {msg}")
+            logger.warning("Interception installer binary not found in bin/.")
 
-    elif sys.plaform == "linux":
+    elif sys.platform == "linux":
         success = _remove_linux_udev_rules(is_gui=is_gui)
         if not success:
             err_msg = (
@@ -264,28 +234,26 @@ def run(parent=None) -> bool:
             if is_gui:
                 QMessageBox.critical(parent, "Permission Denied", err_msg)
             else:
-                print(f"[!] {err_msg}")
+                logger.error(err_msg)
             return False
 
     # 5. Remove Platform Binaries
     if BIN_FOLDER.exists():
         shutil.rmtree(BIN_FOLDER, ignore_errors=True)
-        if is_gui:
-            logger.info("Local platform binaries deleted.")
-        else:
-            print("    - Local platform binaries deleted.")
+        logger.info("Local platform binaries deleted.")
 
     # 6. Purge Application Data
     if args.purge or args.purge_all:
-        purge_data(is_gui=is_gui)
+        purge_data()
 
     if args.purge_all:
-        purge_diagnostics(is_gui=is_gui)
-        purge_logs(is_gui=is_gui)
+        purge_diagnostics()
+        purge_logs()
 
     # 7. Final Notification / Reboot Workflow
+    logger.info("Uninstall completed successfully.")
+    
     if is_gui:
-        logger.info("Uninstall completed successfully.")
         if sys.platform == "win32" and needs_reboot and not args.no_restart:
             res = QMessageBox.question(
                 parent,
@@ -303,7 +271,6 @@ def run(parent=None) -> bool:
                 parent, "Uninstall Complete", "Uninstallation finished successfully."
             )
     else:
-        print("\n[+] Uninstall complete.")
         if sys.platform == "win32":
             if needs_reboot and not args.no_restart:
                 print("\n" + "=" * 55)
