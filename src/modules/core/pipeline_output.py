@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from modules.core.pipeline import OutputSink
 from modules.utils import SCANCODES
 
 if TYPE_CHECKING:
     from modules.platforms.base import AbstractBridge
+
 
 @dataclass(slots=True)
 class BridgeOutputSink(OutputSink):
@@ -14,6 +16,11 @@ class BridgeOutputSink(OutputSink):
     bridge: AbstractBridge
     toggle_mode: Callable[[], None] | None = None
     toggle_vkb: Callable[[], None] | None = None
+    
+    # Accumulators for fractional mouse movements to prevent slow-aim pixel loss
+    _acc_x: float = field(init=False, default=0.0)
+    _acc_y: float = field(init=False, default=0.0)
+    _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def toggle_menu_mode(self) -> None:
         """Invokes Engine.toggle_mode directly."""
@@ -54,10 +61,28 @@ class BridgeOutputSink(OutputSink):
             self.bridge.middle_click_up()
 
     def mouse_move(self, dx: float, dy: float) -> None:
-        idx = int(round(dx))
-        idy = int(round(dy))
-        if idx != 0 or idy != 0:
-            self.bridge.mouse_move_rel(idx, idy)
+        """Accumulates fractional deltas from ANY pipeline (MouseMapper, Pointer buttons, etc.)"""
+        with self._lock:
+            self._acc_x += dx
+            self._acc_y += dy
+
+    def flush_mouse_move(self) -> None:
+        """Dispatches aggregated whole pixels to the OS and retains the fractional remainder."""
+        with self._lock:
+            idx = int(round(self._acc_x))
+            idy = int(round(self._acc_y))
+            
+            if idx != 0 or idy != 0:
+                self.bridge.mouse_move_rel(idx, idy)
+                # Subtract the dispatched whole pixels, keeping the remainder
+                self._acc_x -= idx
+                self._acc_y -= idy
+                
+    def reset_mouse_accumulators(self) -> None:
+        """Called when no fingers are actively moving the cursor."""
+        with self._lock:
+            self._acc_x = 0.0
+            self._acc_y = 0.0
 
     @staticmethod
     def _resolve_scancode(key: str) -> int | None:
