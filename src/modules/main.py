@@ -46,7 +46,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         print(f"[!] Unsupported OS: {sys.platform}")
         sys.exit(1)
 
-    # Initialize CLI logging
+    # Initialize CLI logging (is_gui explicitly kept false)
     AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_cli")
 
     # -----------------------------------------------------------------------
@@ -62,6 +62,13 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         help="Enable cProfile execution tracing",
     )
 
+    parser.add_argument(
+        "--use-gui",
+        action="store_true",
+        default=False,
+        help="Initialize QApplication context",
+    )
+
     args = parser.parse_args()
 
     if args.profile:
@@ -71,9 +78,9 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     # -----------------------------------------------------------------------
     # 2. Boot Sequence
     # -----------------------------------------------------------------------
-    # Initialize QApplication early so pre-flight knows if a GUI context exists
-    # app = QApplication.instance() or QApplication(sys.argv)
-    # app.setApplicationName(APP_NAME)
+    if args.use_gui:
+        app = QApplication.instance() or QApplication(sys.argv)
+        app.setApplicationName(APP_NAME)
 
     if not pre_flight_run():
         profiler_cleanup(cli_profiler)
@@ -92,6 +99,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     # -----------------------------------------------------------------------
     # 3. Application Execution
     # -----------------------------------------------------------------------
+    # headless explicitly kept false
     engine = Engine(headless=False)
 
     try:
