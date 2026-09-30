@@ -33,13 +33,13 @@ logger = logging.getLogger("modules.core.key_mapper")
 
 class KeyMapper:
     """Manages zone-mapped buttons, track-fire pipelines, and coordinates
-
     typematic configurations directly with the low-level hardware bridge.
     """
 
     def __init__(
         self,
         mapper: Mapper,
+        output_sink: BridgeOutputSink,
         typematic_enabled: bool = True,
         typematic_delay_ms: float = 250.0,
         typematic_rate_hz: float = 30.0,
@@ -48,7 +48,7 @@ class KeyMapper:
         self.mapper = mapper
         self.config = mapper.config
         self.bridge = mapper.bridge
-        self.output_sink = BridgeOutputSink(self.bridge)
+        self.output_sink = output_sink
         self.mapper_event_dispatcher = mapper.mapper_event_dispatcher
 
         self.typematic_enabled = typematic_enabled
@@ -192,6 +192,3 @@ class KeyMapper:
         if worker_type == "keyboard":
             self.release_all()
             self._sync_typematic_to_bridge()
-
-    def stop(self) -> None:
-        self.release_all()
