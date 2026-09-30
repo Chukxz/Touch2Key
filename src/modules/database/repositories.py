@@ -5,7 +5,7 @@ Validates field names against an explicit ALLOWED_FIELDS set before executing SQ
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields as dataclass_fields
+from dataclasses import dataclass, field, fields as dataclass_fields
 from typing import Any, Optional, TYPE_CHECKING
 
 from modules.utils import (
@@ -18,7 +18,6 @@ from modules.utils import (
 )
 
 from modules.core.pipeline import PipelineConfig
-
 from .connection import connection_manager
 
 if TYPE_CHECKING:
@@ -64,6 +63,7 @@ class AppSettings:
         d = dict(row)
         # Coerce booleans in a single generic pass
         d["left_handed"] = bool(d["left_handed"])
+        d["floating_joystick"] = bool(d["floating_joystick"])
         d["anchored_joystick"] = bool(d["anchored_joystick"])
         d["typematic_enabled"] = bool(d["typematic_enabled"])
         d["double_tap_enabled"] = bool(d["double_tap_enabled"])
@@ -108,7 +108,8 @@ class LayoutZone:
     created_at: str
     updated_at: str
 
-    CONFIG_HELPER = PipelineConfig()
+    # Give each instance its own helper object without requiring it in __init__
+    CONFIG_HELPER: PipelineConfig = field(default_factory=PipelineConfig, init=False, repr=False)
 
     def set_parsed_config_from_json(self):
         if self.CONFIG_HELPER.should_get_config:
