@@ -278,5 +278,10 @@ def run(
     sys.exit(app.exec())
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Dedicated entry point for touch2key-visualizer."""
+    AppLogManager.setup_logging(is_gui=True, log_prefix="touch2key_visualizer")
     run()
+
+if __name__ == "__main__":
+    main()
