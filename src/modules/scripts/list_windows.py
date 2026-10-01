@@ -175,6 +175,7 @@ def _select_window_cli() -> Optional[tuple[int, str]]:
                     try:
                         window_id = int(line)
                     except ValueError:
+                        last_warning = f"Invalid input: {line!r}"
                         logger.warning("Invalid input: %r", line)
                         buffer.clear()
                         is_typing = False
@@ -182,7 +183,7 @@ def _select_window_cli() -> Optional[tuple[int, str]]:
 
                     if window_id not in rows:
                         last_warning = (
-                            f"Window {window_id} is not in the current list.\n"
+                            f"Window # {window_id} is not in the current list.\n"
                         )
                         logger.warning(
                             "Window # %s is not in the current list.", window_id
@@ -200,6 +201,7 @@ def _select_window_cli() -> Optional[tuple[int, str]]:
                         buffer.pop()
                         if not buffer:
                             is_typing = False
+                            last_warning = ""
 
                     os.system("cls" if sys.platform == "win32" else "clear")
                     print(table_str)
