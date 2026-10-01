@@ -69,7 +69,7 @@ def _select_device_cli(
             print(f"    {str(dev_id):<10} │ {vid:<9} │ {pid:<9} │ {clean}")
 
     print(
-        f"\n>> Waiting for physical input ({"tap a key" if is_keyboard else "click mouse"} on target device)..."
+        f"\n>> Waiting for physical input ({"tap a key" if is_keyboard else "left-click mouse"} on target device)..."
     )
 
     target_filter_fn = context.is_keyboard if is_keyboard else context.is_mouse
