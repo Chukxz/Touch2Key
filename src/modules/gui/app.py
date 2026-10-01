@@ -13,12 +13,13 @@ import signal
 
 from PySide6.QtCore import Qt, QCoreApplication, QTimer
 from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QIcon
 
 from modules.database import store
 from modules.gui.main_window import MainWindow
 from modules.platforms import check_single_instance
 from modules.scripts.preflight import run as pre_flight_run
-from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER
+from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER, ICONS_FOLDER
 from modules.log_manager import AppLogManager
 
 if TYPE_CHECKING:
@@ -85,6 +86,10 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     app = cast(QApplication, QApplication.instance() or QApplication(sys.argv))
     app.setApplicationName(APP_NAME)
     app.setQuitOnLastWindowClosed(True)
+
+    app_icon_path = ICONS_FOLDER / "app.png"
+    if app_icon_path.exists():
+        app.setWindowIcon(QIcon(str(app_icon_path)))
 
     # Allow Python signals to be processed periodically by running a dummy timer
     timer = QTimer()

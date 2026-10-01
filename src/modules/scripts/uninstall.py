@@ -95,7 +95,9 @@ def _remove_linux_udev_rules(is_gui: bool) -> bool:
         return False
 
     if shutil.which("sudo"):
-        logger.warning("Sudo authentication required to delete /etc/udev/rules.d rule...")
+        logger.warning(
+            "Sudo authentication required to delete /etc/udev/rules.d rule..."
+        )
         print("[!] Sudo authentication required to delete /etc/udev/rules.d rule...")
         res = subprocess.run(["sudo", "sh", "-c", cmd_str])
         if res.returncode == 0:
@@ -136,6 +138,25 @@ def purge_logs() -> None:
     logger.info("Purged logs directory: %s", LOGS_FOLDER)
 
 
+def remove_desktop_shortcut() -> None:
+    desktop = Path.home() / "Desktop"
+
+    if sys.platform == "win32":
+        shortcut_file = desktop / "Touch2Key.lnk"
+        shortcut_file.unlink(missing_ok=True)
+    elif sys.platform == "linux":
+        desktop_file = desktop / "touch2key.desktop"
+        desktop_file.unlink(missing_ok=True)
+
+        # Also clean from local app directory just in case
+        app_dir_file = (
+            Path.home() / ".local" / "share" / "applications" / "touch2key.desktop"
+        )
+        app_dir_file.unlink(missing_ok=True)
+
+    logger.info("Desktop shortcuts removed from: %s", desktop)
+
+
 def run(parent=None) -> bool:
     is_gui = QApplication.instance() is not None
 
@@ -174,9 +195,7 @@ def run(parent=None) -> bool:
         return False
 
     if not args.yes:
-        confirm_text = (
-            "Are you sure you want to remove the driver/rules and clean binaries?"
-        )
+        confirm_text = "Are you sure you want to remove the driver/rules/shortcuts and clean binaries?"
         if is_gui:
             res = QMessageBox.question(
                 parent,
@@ -242,6 +261,8 @@ def run(parent=None) -> bool:
         purge_diagnostics()
         purge_logs()
 
+    remove_desktop_shortcut()
+
     logger.info("Uninstall completed successfully.")
 
     if is_gui:
@@ -293,7 +314,7 @@ def main() -> None:
     """Dedicated entry point for touch2key-uninstall script execution."""
     is_gui = QApplication.instance() is not None or "--gui" in sys.argv
     AppLogManager.setup_logging(is_gui=is_gui, log_prefix="touch2key_uninstall")
-    
+
     if not run():
         sys.exit(1)
 

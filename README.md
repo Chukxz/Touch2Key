@@ -106,7 +106,7 @@ pip install .
 
 | Action | Command | Description |
 | :--- | :--- | :--- |
-| **Standard** | `touch2key-setup` | Runs the OS configuration wizard and installs drivers/binaries. |
+| **Standard** | `touch2key-setup` | Runs the OS configuration wizard and installs drivers/rules/binaries and shortcuts. |
 | **Skip Confirmation** | `touch2key-setup [--yes, -y]` | Skip confirmation prompts / run non-interactively. |
 | **Skip Reboot** | `touch2key-setup --no-restart` | Skip reboot prompt after setup (Windows). |
 
@@ -121,9 +121,9 @@ Because Touch2Key installs system-level drivers and kernel rules, **simply runni
 
 | Action | Command | Description |
 | :--- | :--- | :--- |
-| **Standard** | `touch2key-uninstall` | Removes drivers/rules/binaries; preserves all user data. |
-| **Purge** | `touch2key-uninstall --purge` | Removes drivers/rules/binaries **AND** deletes all user data — all saved jsons/images/profiles files, settings toml file and database files. |
-| **Purge-All** | `touch2key-uninstall --purge-all` | Removes drivers/rules/binaries **AND** deletes all user and diagnostic data — all saved jsons/images/profiles files, settings toml file, database files **AND** the diagnostics (profiling — .prof) and log files. |
+| **Standard** | `touch2key-uninstall` | Removes drivers/rules/binaries/shortcuts; preserves all user data. |
+| **Purge** | `touch2key-uninstall --purge` | Removes drivers/rules/binaries/shortcuts **AND** deletes all user data — all saved jsons/images/profiles files, settings toml file and database files. |
+| **Purge-All** | `touch2key-uninstall --purge-all` | Removes drivers/rules/binaries/shortcuts **AND** deletes all user and diagnostic data — all saved jsons/images/profiles files, settings toml file, database files **AND** the diagnostics (profiling — .prof) and log files. |
 | **Skip Confirmation** | `touch2key-uninstall [--yes, -y]` | Skip confirmation prompt. |
 | **Skip Reboot** | `touch2key-uninstall --no-restart` | Skip reboot prompt (Windows). |
 
@@ -145,8 +145,8 @@ Because Touch2Key installs system-level drivers and kernel rules, **simply runni
 | `touch2key-manage` | Interactive Layout, Profile, and Typematic Manager. |
 | `touch2key-plot` | Mapping visualizer. |
 | `touch2key-preflight` | Diagnostic checks. |
-| `touch2key-setup` | OS configuration wizard. |
-| `touch2key-uninstall` | Safely removes drivers, rules and binaries. |
+| `touch2key-setup` | Runs the OS configuration wizard and installs drivers/rules/binaries and shortcuts. |
+| `touch2key-uninstall` | Safely removes drivers, rules, binaries and shortcuts. |
 | `touch2key-wireless` | Forces ADB wireless connection. |
 | `touch2key-keyboard` | Test the virtual keyboard program output.|
 | `touch2key-visualizer` | Visualize the keyboard and mouse events with support for cursor toggling visualization. |

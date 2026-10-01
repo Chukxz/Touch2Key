@@ -5,10 +5,10 @@ import time
 import ctypes
 from typing import TYPE_CHECKING
 
-from modules.utils import get_scancode_from_key, scale_coord
+from modules import AppLogManager
+from modules.utils import get_scancode_from_key, scale_coord, ICONS_FOLDER
 from modules.database import store
 from modules.platforms import get_platform, check_single_instance, get_specific_qt_key
-
 
 from PySide6.QtWidgets import QApplication, QMainWindow, QGraphicsScene, QGraphicsView
 from PySide6.QtGui import (
@@ -21,6 +21,7 @@ from PySide6.QtGui import (
     QPainter,
 )
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QIcon
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QGraphicsItem
@@ -274,6 +275,10 @@ def run(
         sys.exit(0)
 
     app = QApplication(sys.argv)
+    app_icon_path = ICONS_FOLDER / "app.png"
+    if app_icon_path.exists():
+        app.setWindowIcon(QIcon(str(app_icon_path)))
+
     MainWindow(toggle_key_scancode)
     sys.exit(app.exec())
 
@@ -282,6 +287,7 @@ def main() -> None:
     """Dedicated entry point for touch2key-visualizer."""
     AppLogManager.setup_logging(is_gui=True, log_prefix="touch2key_visualizer")
     run()
+
 
 if __name__ == "__main__":
     main()

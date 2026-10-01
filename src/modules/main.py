@@ -4,15 +4,16 @@ import sys
 import multiprocessing
 import argparse
 import cProfile
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from modules.engine import Engine
 from modules.platforms import check_single_instance
 from modules.scripts.preflight import run as pre_flight_run
-from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER
+from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER, ICONS_FOLDER
 from modules.log_manager import AppLogManager
 
 from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QIcon
 
 if TYPE_CHECKING:
     from cProfile import Profile
@@ -79,8 +80,12 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     # 2. Boot Sequence
     # -----------------------------------------------------------------------
     if args.use_gui:
-        app = QApplication.instance() or QApplication(sys.argv)
+        app = cast(QApplication, QApplication.instance() or QApplication(sys.argv))
         app.setApplicationName(APP_NAME)
+
+        app_icon_path = ICONS_FOLDER / "app.png"
+        if app_icon_path.exists():
+            app.setWindowIcon(QIcon(str(app_icon_path)))
 
     if not pre_flight_run():
         profiler_cleanup(cli_profiler)

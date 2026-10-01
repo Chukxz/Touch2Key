@@ -10,9 +10,9 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QSizePolicy,
-    QStyle,
 )
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QIcon
 
 from modules.utils import (
     LOCK_KEYS,
@@ -22,8 +22,11 @@ from modules.utils import (
     MODIFIER_KEYS,
     TOP_BEZEL_ID,
     VKB_STRUCT,
+    ICONS_FOLDER,
     get_scancode_from_key,
 )
+
+from modules import AppLogManager
 
 from modules.platforms import get_lock_states, check_single_instance
 
@@ -35,37 +38,88 @@ VKB_NAME = "Touch2Key_VKB"
 # --- Main Alphanumeric Block ---
 MAIN_LAYOUT = [
     [
-        ("Esc", 0x01, 1), ("F1", 0x3B, 1), ("F2", 0x3C, 1), ("F3", 0x3D, 1),
-        ("F4", 0x3E, 1), ("F5", 0x3F, 1), ("F6", 0x40, 1), ("F7", 0x41, 1),
-        ("F8", 0x42, 1), ("F9", 0x43, 1), ("F10", 0x44, 1), ("F11", 0x57, 1),
-        ("F12", 0x58, 1), ("Delete", 0xE053, 2),
+        ("Esc", 0x01, 1),
+        ("F1", 0x3B, 1),
+        ("F2", 0x3C, 1),
+        ("F3", 0x3D, 1),
+        ("F4", 0x3E, 1),
+        ("F5", 0x3F, 1),
+        ("F6", 0x40, 1),
+        ("F7", 0x41, 1),
+        ("F8", 0x42, 1),
+        ("F9", 0x43, 1),
+        ("F10", 0x44, 1),
+        ("F11", 0x57, 1),
+        ("F12", 0x58, 1),
+        ("Delete", 0xE053, 2),
     ],
     [
-        ("~", 0x29, 1), ("1", 0x02, 1), ("2", 0x03, 1), ("3", 0x04, 1),
-        ("4", 0x05, 1), ("5", 0x06, 1), ("6", 0x07, 1), ("7", 0x08, 1),
-        ("8", 0x09, 1), ("9", 0x0A, 1), ("0", 0x0B, 1), ("-", 0x0C, 1),
-        ("=", 0x0D, 1), ("Backspace", 0x0E, 2),
+        ("~", 0x29, 1),
+        ("1", 0x02, 1),
+        ("2", 0x03, 1),
+        ("3", 0x04, 1),
+        ("4", 0x05, 1),
+        ("5", 0x06, 1),
+        ("6", 0x07, 1),
+        ("7", 0x08, 1),
+        ("8", 0x09, 1),
+        ("9", 0x0A, 1),
+        ("0", 0x0B, 1),
+        ("-", 0x0C, 1),
+        ("=", 0x0D, 1),
+        ("Backspace", 0x0E, 2),
     ],
     [
-        ("Tab", 0x0F, 2), ("Q", 0x10, 1), ("W", 0x11, 1), ("E", 0x12, 1),
-        ("R", 0x13, 1), ("T", 0x14, 1), ("Y", 0x15, 1), ("U", 0x16, 1),
-        ("I", 0x17, 1), ("O", 0x18, 1), ("P", 0x19, 1), ("[", 0x1A, 1),
-        ("]", 0x1B, 1), ("\\", 0x2B, 1),
+        ("Tab", 0x0F, 2),
+        ("Q", 0x10, 1),
+        ("W", 0x11, 1),
+        ("E", 0x12, 1),
+        ("R", 0x13, 1),
+        ("T", 0x14, 1),
+        ("Y", 0x15, 1),
+        ("U", 0x16, 1),
+        ("I", 0x17, 1),
+        ("O", 0x18, 1),
+        ("P", 0x19, 1),
+        ("[", 0x1A, 1),
+        ("]", 0x1B, 1),
+        ("\\", 0x2B, 1),
     ],
     [
-        ("Caps Lock", 0x3A, 2), ("A", 0x1E, 1), ("S", 0x1F, 1), ("D", 0x20, 1),
-        ("F", 0x21, 1), ("G", 0x22, 1), ("H", 0x23, 1), ("J", 0x24, 1),
-        ("K", 0x25, 1), ("L", 0x26, 1), (";", 0x27, 1), ("'", 0x28, 1),
+        ("Caps Lock", 0x3A, 2),
+        ("A", 0x1E, 1),
+        ("S", 0x1F, 1),
+        ("D", 0x20, 1),
+        ("F", 0x21, 1),
+        ("G", 0x22, 1),
+        ("H", 0x23, 1),
+        ("J", 0x24, 1),
+        ("K", 0x25, 1),
+        ("L", 0x26, 1),
+        (";", 0x27, 1),
+        ("'", 0x28, 1),
         ("Enter", 0x1C, 2),
     ],
     [
-        ("Shift", 0x2A, 2), ("Z", 0x2C, 1), ("X", 0x2D, 1), ("C", 0x2E, 1),
-        ("V", 0x2F, 1), ("B", 0x30, 1), ("N", 0x31, 1), ("M", 0x32, 1),
-        (",", 0x33, 1), (".", 0x34, 1), ("/", 0x35, 1), ("Shift", 0x36, 3),
+        ("Shift", 0x2A, 2),
+        ("Z", 0x2C, 1),
+        ("X", 0x2D, 1),
+        ("C", 0x2E, 1),
+        ("V", 0x2F, 1),
+        ("B", 0x30, 1),
+        ("N", 0x31, 1),
+        ("M", 0x32, 1),
+        (",", 0x33, 1),
+        (".", 0x34, 1),
+        ("/", 0x35, 1),
+        ("Shift", 0x36, 3),
     ],
     [
-        ("Ctrl", 0x1D, 2), ("Alt", 0x38, 2), ("Space", 0x39, 7),
-        ("Alt", 0xE038, 2), ("Ctrl", 0xE01D, 2),
+        ("Ctrl", 0x1D, 2),
+        ("Alt", 0x38, 2),
+        ("Space", 0x39, 7),
+        ("Alt", 0xE038, 2),
+        ("Ctrl", 0xE01D, 2),
     ],
 ]
 
@@ -252,6 +306,7 @@ class VirtualKeyboard(QWidget):
         self._linux_key_map = {}
         if sys.platform == "linux":
             from modules.platforms.linux.ecodes_map import LINUX_KEY_MAP
+
             self._linux_key_map = LINUX_KEY_MAP
 
         self.setWindowTitle("Touch2Key - Virtual Keyboard")
@@ -377,6 +432,7 @@ class VirtualKeyboard(QWidget):
 
         event.accept()
 
+
 def run(conn: Connection | None = None, enforce_single_instance=True):
     if enforce_single_instance:
         success, _ = check_single_instance(VKB_NAME)
@@ -384,21 +440,24 @@ def run(conn: Connection | None = None, enforce_single_instance=True):
             sys.exit(0)
 
     app = QApplication(sys.argv)
-    app.setWindowIcon(
-        QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
-    )
+    app_icon_path = ICONS_FOLDER / "app.png"
+    if app_icon_path.exists():
+        app.setWindowIcon(QIcon(str(app_icon_path)))
 
     window = VirtualKeyboard(conn)
     window.show()
     sys.exit(app.exec())
 
+
 def virtual_keyboard_worker(conn: Connection):
     run(conn, False)
+
 
 def main() -> None:
     """Dedicated entry point for touch2key-vkb."""
     AppLogManager.setup_logging(is_gui=True, log_prefix="touch2key_vkb")
     run()
+
 
 if __name__ == "__main__":
     main()

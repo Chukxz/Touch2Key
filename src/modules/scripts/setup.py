@@ -8,12 +8,56 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
+import subprocess
 
 from modules import AppLogManager
 
 from PySide6.QtWidgets import QApplication, QMessageBox
+from modules.utils import PROJECT_ROOT, ICONS_FOLDER
 
 logger = logging.getLogger("modules.scripts.setup")
+
+
+def create_desktop_shortcut() -> None:
+    desktop = Path.home() / "Desktop"
+    if not desktop.exists():
+        return  # Headless or containerized environment without a desktop
+
+    if sys.platform == "win32":
+        shortcut_path = desktop / "Touch2Key.lnk"
+        target_script = PROJECT_ROOT / "modules" / "gui" / "app.py"
+        icon_path = ICONS_FOLDER / "app.ico"
+
+        ps_script = f"""
+        $WshShell = New-Object -ComObject WScript.Shell
+        $Shortcut = $WshShell.CreateShortcut("{shortcut_path}")
+        $Shortcut.TargetPath = "pythonw.exe"
+        $Shortcut.Arguments = '"{target_script}"'
+        $Shortcut.WorkingDirectory = "{PROJECT_ROOT}"
+        $Shortcut.IconLocation = "{icon_path}"
+        $Shortcut.Save()
+        """
+        subprocess.run(["powershell", "-Command", ps_script], capture_output=True)
+
+    elif sys.platform == "linux":
+        desktop_file = desktop / "touch2key.desktop"
+        exec_path = f"{sys.executable} {PROJECT_ROOT / 'modules' / 'gui' / 'app.py'}"
+        icon_path = ICONS_FOLDER / "app.png"
+
+        content = f"""[Desktop Entry]
+Type=Application
+Name=Touch2Key
+Exec={exec_path}
+Path={PROJECT_ROOT}
+Icon={icon_path}
+Terminal=false
+Categories=Utility;Application;
+"""
+        desktop_file.write_text(content.strip())
+        desktop_file.chmod(0o755)
+
+    logger.info("Desktop shortcuts created at %s", desktop)
 
 
 def run(parent=None) -> bool:
@@ -41,6 +85,8 @@ def run(parent=None) -> bool:
     interactive_mode = not is_gui and not args.yes
 
     logger.info("Starting automated platform configuration for %s", sys.platform)
+
+    create_desktop_shortcut()
 
     try:
         needs_reboot = False

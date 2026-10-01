@@ -61,32 +61,37 @@ CURRENT_DIR = Path(__file__).resolve().parent
 SRC_DIR = CURRENT_DIR.parent
 PROJECT_ROOT = SRC_DIR.parent
 
-# Binaries & Driver Rules
-BIN_FOLDER = PROJECT_ROOT / "bin"
-ADB_NAME = "adb.exe" if sys.platform == "win32" else "adb"
-ADB = BIN_FOLDER / "platform-tools" / ADB_NAME
-UDEV_RULE_PATH = Path("/etc/udev/rules.d/99-touch2key.rules")
-
 # Centralized Data Directory
+ASSETS_FOLDER = PROJECT_ROOT / "assets"
+BIN_FOLDER = PROJECT_ROOT / "bin"
 DATA_FOLDER = PROJECT_ROOT / "data"
 DB_FOLDER = DATA_FOLDER / "db"
+DIAGNOSTICS_FOLDER = PROJECT_ROOT / "diagnostics"
+ICONS_FOLDER = ASSETS_FOLDER / "icons"
 IMAGES_FOLDER = DATA_FOLDER / "images"
 JSONS_FOLDER = DATA_FOLDER / "jsons"
+LOGS_FOLDER = PROJECT_ROOT / "logs"
 PROFILES_FOLDER = DATA_FOLDER / "profiles"
 TOML_PATH = DATA_FOLDER / "settings.toml"
 DB_PATH = DB_FOLDER / "touch2key.db"
-DIAGNOSTICS_FOLDER = PROJECT_ROOT / "diagnostics"
-LOGS_FOLDER = PROJECT_ROOT / "logs"
 
 # Auto-create runtime directories on module import
+ASSETS_FOLDER.mkdir(parents=True, exist_ok=True)
 BIN_FOLDER.mkdir(parents=True, exist_ok=True)
 DATA_FOLDER.mkdir(parents=True, exist_ok=True)
 DB_FOLDER.mkdir(parents=True, exist_ok=True)
 DIAGNOSTICS_FOLDER.mkdir(parents=True, exist_ok=True)
+ICONS_FOLDER.mkdir(parents=True, exist_ok=True)
 IMAGES_FOLDER.mkdir(parents=True, exist_ok=True)
 JSONS_FOLDER.mkdir(parents=True, exist_ok=True)
 LOGS_FOLDER.mkdir(parents=True, exist_ok=True)
 PROFILES_FOLDER.mkdir(parents=True, exist_ok=True)
+
+# Binaries & Driver Rules
+ADB_NAME = "adb.exe" if sys.platform == "win32" else "adb"
+ADB = BIN_FOLDER / "platform-tools" / ADB_NAME
+UDEV_RULE_PATH = Path("/etc/udev/rules.d/99-touch2key.rules")
+
 
 # ---------------------------------------------------------------------------
 # Constants

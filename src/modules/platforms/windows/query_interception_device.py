@@ -149,7 +149,6 @@ def _create_gui_dialogs(context: Interception):
     from PySide6.QtGui import QFont
     from PySide6.QtWidgets import (
         QAbstractItemView,
-        QAbstractScrollArea,
         QDialog,
         QHBoxLayout,
         QHeaderView,
@@ -248,11 +247,16 @@ def _create_gui_dialogs(context: Interception):
             self.table.setFont(QFont("Courier", 9))
 
             # Enable smooth pixel-based scrolling and dynamic scrollbars
-            self.table.setVerticalScrollMode(QAbstractScrollArea.ScrollMode.ScrollPerPixel)
-            self.table.setHorizontalScrollMode(QAbstractScrollArea.ScrollMode.ScrollPerPixel)
+            self.table.setVerticalScrollMode(
+                QAbstractItemView.ScrollMode.ScrollPerPixel
+            )
+            self.table.setHorizontalScrollMode(
+                QAbstractItemView.ScrollMode.ScrollPerPixel
+            )
             self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-            self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-
+            self.table.setHorizontalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            )
 
             header = self.table.horizontalHeader()
             header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)

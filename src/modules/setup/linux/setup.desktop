@@ -1,8 +1,0 @@
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=Setup Touch2Key
-Comment=Install or repair Touch2Key drivers and ADB binaries
-Exec=pkexec touch2key-setup
-Terminal=true
-Categories=Utility;
