@@ -358,7 +358,7 @@ def _select_devices_gui(parent=None) -> Optional[tuple[int, int]]:
             KEYBOARD_RANGE,
             is_kb=True,
             title="Configure Keyboard Device",
-            prompt="Tap any physical key on the keyboard you wish to bind:",
+            prompt="Tap any non-modifier key on the keyboard you wish to bind:",
             parent=parent,
         )
         if kb_dlg.exec() != QDialog.DialogCode.Accepted:
