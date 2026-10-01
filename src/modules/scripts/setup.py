@@ -26,7 +26,7 @@ def create_desktop_shortcut() -> None:
 
     if sys.platform == "win32":
         shortcut_path = desktop / "Touch2Key.lnk"
-        target_script = PROJECT_ROOT / "modules" / "gui" / "app.py"
+        target_script = PROJECT_ROOT / "src" / "modules" / "gui" / "app.py"
         icon_path = ICONS_FOLDER / "app.ico"
 
         ps_script = f"""
@@ -42,7 +42,9 @@ def create_desktop_shortcut() -> None:
 
     elif sys.platform == "linux":
         desktop_file = desktop / "touch2key.desktop"
-        exec_path = f"{sys.executable} {PROJECT_ROOT / 'modules' / 'gui' / 'app.py'}"
+        exec_path = (
+            f"{sys.executable} {PROJECT_ROOT / 'src' / 'modules' / 'gui' / 'app.py'}"
+        )
         icon_path = ICONS_FOLDER / "app.png"
 
         content = f"""[Desktop Entry]

@@ -165,7 +165,7 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._setup_logging()
         self._wire_engine_signals()
-        self._setup_driver_menu()
+        self._setup_tools()
 
     def _setup_ui(self) -> None:
         central = QWidget()
@@ -360,44 +360,36 @@ class MainWindow(QMainWindow):
             self, "Engine Error", f"Mapping engine encountered an error:\n{err_msg}"
         )
 
-    def _setup_driver_menu(self):
-        menubar = self.menuBar()
-        tools_menu = menubar.addMenu("Tools")
+    def _setup_tools(self):
+        # Create a toolbar (you can also add it to a specific area like Qt.TopToolBarArea)
+        toolbar = self.addToolBar("Tools")
+        toolbar.setMovable(False)  # Lock the toolbar in place
 
         # Setup / Repair Action
         setup_action = QAction("Install / Repair Drivers...", self)
         setup_action.triggered.connect(self._on_run_setup)
-        tools_menu.addAction(setup_action)
+        toolbar.addAction(setup_action)
+
+        toolbar.addSeparator()
+
+        # Preflight Action
+        preflight_action = QAction("Run Preflight Checks...", self)
+        preflight_action.triggered.connect(self._on_run_preflight)
+        toolbar.addAction(preflight_action)
+
+        toolbar.addSeparator()
 
         # Check ADB Path Action
         check_adb_action = QAction("Check ADB Binary Path...", self)
         check_adb_action.triggered.connect(self._on_check_adb)
-        tools_menu.addAction(check_adb_action)
+        toolbar.addAction(check_adb_action)
 
-        tools_menu.addSeparator()
+        toolbar.addSeparator()
 
         # Uninstall Action
         uninstall_action = QAction("Uninstall Touch2Key...", self)
         uninstall_action.triggered.connect(self._on_run_uninstall)
-        tools_menu.addAction(uninstall_action)
-
-    def _on_check_adb(self):
-        """Runs the ADB diagnostic check and displays the result."""
-        resolved_path = show_adb_path_run()
-        if resolved_path:
-            QMessageBox.information(
-                self,
-                "ADB Path Located",
-                f"ADB executable resolved to:\n\n{resolved_path}",
-            )
-        else:
-            QMessageBox.warning(
-                self,
-                "ADB Missing",
-                "ADB executable could not be found.\n\n"
-                "Please run Setup to download the Android Platform Tools, or ensure "
-                "adb is installed in your system PATH.",
-            )
+        toolbar.addAction(uninstall_action)
 
     def _on_run_setup(self):
         reply = QMessageBox.question(
@@ -420,6 +412,52 @@ class MainWindow(QMainWindow):
 
                 subprocess.Popen(
                     ["pkexec", sys.executable, "-m", "modules.scripts.setup"]
+                )
+
+    def _on_check_adb(self):
+        """Runs the ADB diagnostic check and displays the result."""
+        resolved_path = show_adb_path_run()
+        if resolved_path:
+            QMessageBox.information(
+                self,
+                "ADB Path Located",
+                f"ADB executable resolved to:\n\n{resolved_path}",
+            )
+        else:
+            QMessageBox.warning(
+                self,
+                "ADB Missing",
+                "ADB executable could not be found.\n\n"
+                "Please run Setup to download the Android Platform Tools, or ensure "
+                "adb is installed in your system PATH.",
+            )
+
+    def _on_run_preflight(self):
+        reply = QMessageBox.question(
+            self,
+            "Preflight Checks",
+            "This will run a series of diagnostic checks to verify system configuration.\n\n"
+            "Continue?",
+            QMessageBox.standardButton.Yes | QMessageBox.standardButton.No,
+        )
+
+        if reply == QMessageBox.standardButton.Yes:
+            if sys.platform == "win32":
+                import ctypes
+
+                ctypes.windll.shell32.ShellExecuteW(
+                    None,
+                    "runas",
+                    sys.executable,
+                    "-m modules.scripts.preflight",
+                    None,
+                    1,
+                )
+            else:
+                import subprocess
+
+                subprocess.Popen(
+                    ["pkexec", sys.executable, "-m", "modules.scripts.preflight"]
                 )
 
     def _on_run_uninstall(self):

@@ -62,15 +62,15 @@ def run(verbose: bool = True, parent=None) -> bool:
         err_lines = []
         if "ADB" in failed:
             err_lines.append(
-                "• ADB binary not found. Run setup to download platform-tools."
+                "• ADB binary not found. Run Setup or 'touch2key-setup' to download platform-tools."
             )
         if sys.platform == "win32" and "Driver" in failed:
             err_lines.append(
-                "• Interception driver not accessible. Run setup or restart your PC."
+                "• Interception driver not accessible. Run Setup or 'touch2key-setup' to install drivers or restart your PC."
             )
         elif sys.platform == "linux" and "Driver" in failed:
             err_lines.append(
-                "• /dev/uinput access missing. Run 'sudo setup' to configure udev rules."
+                "• /dev/uinput access missing. Run 'sudo touch2key-setup' to configure udev rules."
             )
 
         err_msg = "\n".join(err_lines)
