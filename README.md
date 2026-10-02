@@ -111,8 +111,11 @@ The app sets up an icon shortcut on your desktop (that launches the GUI directly
 ### Prerequisites
 * Python 3.10+
 * Android device with **USB Debugging** enabled
-* **Windows users:** Administrator privileges required *only* during initial setup (to install the Interception driver). Daily execution runs under a standard user account.
-* **Linux users:** `sudo` access required *only* during initial setup (to write `udev` rules for `uinput` and input device permissions). Daily execution runs under a standard user account.
+### Prerequisites
+* Python 3.10+
+* Android device with **USB Debugging** enabled
+* **Windows users:** Administrator privileges required during **initial setup** (to install the Interception driver) and **uninstallation**. Daily execution runs under a standard user account.
+* **Linux users:** `sudo` access required during **initial setup** (for `uinput`/`udev` rules) and **uninstallation**. Daily execution runs under a standard user account.
 
 ### Setup
 * **Install:** Remember to create a virtual environment on your machine by using the appropriate `venv` command and activating it (depending on your OS) after navigating to the `Touch2Key` directory on your machine before running the `pip install .` command as it is the standard python practice to avoid package conflicts and ensure isolation.
@@ -142,7 +145,9 @@ pip install .
 
 ## Uninstallation
 
-Because Touch2Key installs system-level drivers and kernel rules, **simply running `pip uninstall Touch2Key` is not sufficient.** You should first run the included uninstaller before uninstalling via pip to avoid any issues or residual files.
+Because Touch2Key installs system-level drivers and kernel rules, **simply running `pip uninstall Touch2Key` is not sufficient.** You should first run the included uninstaller before uninstalling via pip.
+
+> **Elevation Note:** Running the uninstaller requires **Administrator** (Windows) or **sudo** (Linux) privileges to successfully unregister the kernel drivers and system rules.
 
 ### Uninstallation Commands
 
