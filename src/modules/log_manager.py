@@ -5,7 +5,16 @@ import datetime
 import logging
 import sys
 from logging.handlers import MemoryHandler
-from modules.utils import LOGS_FOLDER
+from modules.utils import LOGS_FOLDER, DIAGNOSTICS_FOLDER, prune_directory
+
+
+def initialize_cleanup() -> None:
+    """Prunes old log and diagnostics files based on age and count limits."""
+    # Logs: 2 months (60 days), max 100 files
+    prune_directory(LOGS_FOLDER, max_age_days=60, max_count=100)
+
+    # Diagnostics: 2 months (60 days), max 20 files
+    prune_directory(DIAGNOSTICS_FOLDER, max_age_days=60, max_count=20)
 
 
 class _StreamToLogger:
@@ -52,17 +61,20 @@ class AppLogManager:
         log_file_path = LOGS_FOLDER / f"{log_prefix}_{timestamp}.log"
 
         root_logger = logging.getLogger()
-        root_logger.setLevel(level)
+        # 1. Root logger must capture DEBUG so log files get everything,
+        # regardless of whether the console/GUI is filtering them out.
+        root_logger.setLevel(logging.DEBUG)
 
         formatter = logging.Formatter(
             "[%(asctime)s] [%(levelname)s] [%(name)s]: %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
 
-        # 1. Delayed File Target (Flushed on exit)
+        # 2. Delayed File Target (Flushed on exit) - Captures all logs (DEBUG+)
         cls._target_file_handler = logging.FileHandler(
             log_file_path, mode="w", encoding="utf-8"
         )
+        cls._target_file_handler.setLevel(logging.DEBUG)
         cls._target_file_handler.setFormatter(formatter)
 
         # Buffer up to 100,000 records in memory
@@ -73,21 +85,23 @@ class AppLogManager:
         )
         root_logger.addHandler(cls._memory_handler)
 
-        # 2. Dual Console Handlers (CLI Mode: stdout for info, stderr for warnings/errors)
+        # 3. Dual Console Handlers (Respects the display `level`, e.g., INFO)
         if not is_gui:
-            # Standard output handler (DEBUG & INFO only)
             stdout_handler = logging.StreamHandler(cls._orig_stdout)
             stdout_handler.setFormatter(formatter)
-            stdout_handler.addFilter(lambda record: record.levelno < logging.WARNING)
+            stdout_handler.setLevel(level)
+            # Only display logs between `level` and WARNING on stdout
+            stdout_handler.addFilter(
+                lambda record: level <= record.levelno < logging.WARNING
+            )
             root_logger.addHandler(stdout_handler)
 
-            # Standard error handler (WARNING, ERROR, CRITICAL)
             stderr_handler = logging.StreamHandler(cls._orig_stderr)
             stderr_handler.setFormatter(formatter)
             stderr_handler.setLevel(logging.WARNING)
             root_logger.addHandler(stderr_handler)
 
-        # 3. Intercept all global print() and sys.stderr outputs
+        # 4. Intercept all global print() and sys.stderr outputs
         stdout_logger = logging.getLogger("STDOUT")
         stderr_logger = logging.getLogger("STDERR")
         sys.stdout = _StreamToLogger(stdout_logger, logging.INFO, cls._orig_stdout)

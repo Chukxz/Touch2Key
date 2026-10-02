@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Literal, Any
 
 from PySide6.QtCore import QObject, Signal
+from PySide6.QtWidgets import QMessageBox
 
 APP_NAME = "Touch2Key"
 
@@ -52,7 +53,7 @@ VKB_STRUCT = struct.Struct("<BH")
 if TYPE_CHECKING:
     from multiprocessing import Process
     from multiprocessing.connection import Connection
-    from PySide6.QtWidgets import QWidget
+    from logging import Logger
 
 # ---------------------------------------------------------------------------
 # Project & Data Paths
@@ -1126,3 +1127,39 @@ def make_copy_name(name: str) -> str:
 
     # Added a space before the parenthesis
     return name[: match.start()] + f"- Copy ({number})" + name[match.end() :]
+
+
+def prune_directory(
+    target_dir: Path, max_age_days: int = 60, max_count: int = 100
+) -> None:
+    """
+    Prunes files in a specific directory based on age and maximum file count.
+    Default: A maximum age of 60 days (2 months) and a maximum count of 100.
+    """
+    if not target_dir.exists():
+        return
+
+    current_time = time.time()
+    max_age_seconds = max_age_days * 86400
+
+    # 1. Prune by age (older than max_age_days)
+    for file_path in target_dir.glob("*"):
+        if file_path.is_file():
+            try:
+                file_age = current_time - file_path.stat().st_mtime
+                if file_age > max_age_seconds:
+                    file_path.unlink(missing_ok=True)
+            except Exception:
+                pass  # Skip locked or inaccessible files
+
+    # 2. Prune by count (keep only the newest max_count files)
+    files = sorted(
+        [f for f in target_dir.glob("*") if f.is_file()],
+        key=lambda f: f.stat().st_mtime,
+    )
+    while len(files) > max_count:
+        oldest_file = files.pop(0)
+        try:
+            oldest_file.unlink(missing_ok=True)
+        except Exception:
+            pass

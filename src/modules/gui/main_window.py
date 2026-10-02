@@ -163,9 +163,9 @@ class MainWindow(QMainWindow):
         self.engine_controller = EngineProcessController(self)
 
         self._setup_ui()
+        self._setup_tools()
         self._setup_logging()
         self._wire_engine_signals()
-        self._setup_tools()
 
     def _setup_ui(self) -> None:
         central = QWidget()
@@ -203,7 +203,7 @@ class MainWindow(QMainWindow):
 
         nav_panel.addStretch()
 
-        self.sidebar_engine_btn = QPushButton("Start Engine")
+        self.sidebar_engine_btn = QPushButton("Toggle Engine ON")
         self.sidebar_engine_btn.setStyleSheet(
             "font-weight: bold; background-color: #2e7d32; color: white; padding: 8px;"
         )
@@ -335,7 +335,7 @@ class MainWindow(QMainWindow):
             )
 
     def _on_engine_started(self) -> None:
-        self.sidebar_engine_btn.setText("Stop Engine")
+        self.sidebar_engine_btn.setText("Toggle Engine OFF")
         self.sidebar_engine_btn.setStyleSheet(
             "font-weight: bold; background-color: #c62828; color: white; padding: 8px;"
         )
@@ -343,7 +343,7 @@ class MainWindow(QMainWindow):
         logger.info("Touch mapping engine started successfully")
 
     def _on_engine_stopped(self) -> None:
-        self.sidebar_engine_btn.setText("Start Engine")
+        self.sidebar_engine_btn.setText("Toggle Engine ON")
         self.sidebar_engine_btn.setStyleSheet(
             "font-weight: bold; background-color: #2e7d32; color: white; padding: 8px;"
         )
@@ -351,7 +351,7 @@ class MainWindow(QMainWindow):
         logger.info("Touch mapping engine stopped")
 
     def _on_engine_error(self, err_msg: str) -> None:
-        self.sidebar_engine_btn.setText("Start Engine")
+        self.sidebar_engine_btn.setText("Toggle Engine ON")
         self.sidebar_engine_btn.setStyleSheet(
             "font-weight: bold; background-color: #2e7d32; color: white; padding: 8px;"
         )
@@ -364,6 +364,7 @@ class MainWindow(QMainWindow):
         # Create a toolbar (you can also add it to a specific area like Qt.TopToolBarArea)
         toolbar = self.addToolBar("Tools")
         toolbar.setMovable(False)  # Lock the toolbar in place
+        toolbar.setMinimumHeight(40)
 
         # Setup / Repair Action
         setup_action = QAction("Install / Repair Drivers...", self)
@@ -397,10 +398,10 @@ class MainWindow(QMainWindow):
             "Driver Setup",
             "This will install or repair the necessary system drivers.\n\n"
             "Your OS will prompt you for Administrator permissions. Continue?",
-            QMessageBox.standardButton.Yes | QMessageBox.standardButton.No,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
-        if reply == QMessageBox.standardButton.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             if sys.platform == "win32":
                 import ctypes
 
@@ -438,10 +439,10 @@ class MainWindow(QMainWindow):
             "Preflight Checks",
             "This will run a series of diagnostic checks to verify system configuration.\n\n"
             "Continue?",
-            QMessageBox.standardButton.Yes | QMessageBox.standardButton.No,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
-        if reply == QMessageBox.standardButton.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             if sys.platform == "win32":
                 import ctypes
 
@@ -466,10 +467,10 @@ class MainWindow(QMainWindow):
             "Uninstall Touch2Key",
             "This will remove the system drivers and completely close the application.\n\n"
             "Your OS will prompt you for Administrator permissions. Continue?",
-            QMessageBox.standardButton.Yes | QMessageBox.standardButton.No,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
-        if reply == QMessageBox.standardButton.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             if sys.platform == "win32":
                 import ctypes
 

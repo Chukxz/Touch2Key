@@ -22,7 +22,8 @@ class QtLogHandler(logging.Handler):
         self.emitter = _LogEmitter()
         self.setFormatter(
             logging.Formatter(
-                "%(asctime)s [%(levelname)s] %(name)s: %(message)s", "%H:%M:%S"
+                "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
             )
         )
         self._in_emit = False
@@ -54,8 +55,14 @@ def install_gui_logging(
         return _installed_handler
 
     handler = QtLogHandler(level)
+    # Ensure the Qt handler respects the display level (e.g. INFO)
+    handler.setLevel(level)
+
     target_logger = logging.getLogger(logger_name)
-    target_logger.setLevel(level)
+    # Target logger allows DEBUG through so files capture it,
+    # even if the GUI handler filters it out.
+    target_logger.setLevel(logging.DEBUG)
     target_logger.addHandler(handler)
+
     _installed_handler = handler
     return handler

@@ -18,7 +18,12 @@ from PySide6.QtWidgets import (
 )
 
 from modules.database import store
-from modules.database.config_io import export_bundle, export_layout_json, import_any
+from modules.database.config_io import (
+    export_bundle,
+    export_layout_json,
+    export_settings_toml,
+    import_any,
+)
 from modules.utils import JSONS_FOLDER, PROFILES_FOLDER, MapperEvent
 from .base_page import BasePage
 
@@ -70,10 +75,12 @@ class ProfilesPage(BasePage):
         btn_row_2 = QHBoxLayout()
         self.import_btn = QPushButton("Import (.json / .toml / Bundle)")
         self.export_json_btn = QPushButton("Export Selected (.json)")
+        self.export_toml_btn = QPushButton("Export Selected (.toml)")
         self.export_bundle_btn = QPushButton("Export Selected Bundle")
 
         btn_row_2.addWidget(self.import_btn)
         btn_row_2.addWidget(self.export_json_btn)
+        btn_row_2.addWidget(self.export_toml_btn)
         btn_row_2.addWidget(self.export_bundle_btn)
         self.content_layout().addLayout(btn_row_2)
 
@@ -104,6 +111,7 @@ class ProfilesPage(BasePage):
 
         self.import_btn.clicked.connect(self._on_import_clicked)
         self.export_json_btn.clicked.connect(self._on_export_json_clicked)
+        self.export_toml_btn.clicked.connect(self._on_export_toml_clicked)
         self.export_bundle_btn.clicked.connect(self._on_export_bundle_clicked)
 
         self.clear_zones_btn.clicked.connect(self._on_clear_zones)
@@ -359,6 +367,51 @@ class ProfilesPage(BasePage):
             )
         except Exception as exc:
             logger.exception("Failed to export profile JSON")
+            QMessageBox.critical(self, "Export Failed", str(exc))
+
+    def _on_export_toml_clicked(self) -> None:
+        layout_id = self._get_selected_layout_id()
+        if layout_id is None:
+            return
+
+        layout = store.layouts.get(layout_id)
+        if not layout:
+            return
+
+        PROFILES_FOLDER.mkdir(parents=True, exist_ok=True)
+        default_save_path = str(PROFILES_FOLDER / f"{layout.name}.toml")
+
+        save_path_str, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Settings TOML As",
+            default_save_path,
+            "TOML files (*.toml);;All files (*.*)",
+        )
+        if not save_path_str:
+            return
+
+        try:
+            # Optionally link the corresponding JSON layout path if it exists
+            json_path = JSONS_FOLDER / f"{layout.name}.json"
+            linked_json = json_path if json_path.exists() else None
+
+            out_file = export_settings_toml(
+                Path(save_path_str), linked_json_path=linked_json
+            )
+
+            logger.info(
+                "Exported settings TOML for profile %s to %s", layout.name, out_file
+            )
+            QMessageBox.information(
+                self,
+                "Export Successful",
+                f"Exported settings TOML to:\n{out_file.name}",
+            )
+        except Exception as exc:
+            logger.exception("Failed to export settings TOML")
+            logging.critical(
+                f"Export Failed: {exc}"
+            )  # Ensures critical error hits logs
             QMessageBox.critical(self, "Export Failed", str(exc))
 
     def _on_export_bundle_clicked(self) -> None:

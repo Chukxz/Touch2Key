@@ -47,7 +47,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         print(f"[!] Unsupported OS: {sys.platform}")
         sys.exit(1)
 
-    # Initialize CLI logging (is_gui explicitly kept false)
+    # Initialize CLI logging (terminal output + buffers file output)
     AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_cli")
 
     # -----------------------------------------------------------------------

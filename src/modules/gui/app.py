@@ -118,7 +118,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     # 3. Application Execution
     # -----------------------------------------------------------------------
     window = MainWindow()
-    window.show()
+    window.showMaximized()
 
     exit_code = 0
     try:

@@ -139,6 +139,7 @@ def purge_logs() -> None:
 
 
 def remove_desktop_shortcut() -> None:
+    """Removes Touch2Key desktop shortcut for Windows and Linux."""
     desktop = Path.home() / "Desktop"
 
     if sys.platform == "win32":
@@ -158,6 +159,7 @@ def remove_desktop_shortcut() -> None:
 
 
 def run(parent=None) -> bool:
+    """Main uninstallation routine, compatible with GUI and CLI modes."""
     is_gui = QApplication.instance() is not None
 
     parser = argparse.ArgumentParser(description="Touch2Key Uninstaller")

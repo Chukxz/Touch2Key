@@ -20,6 +20,7 @@ logger = logging.getLogger("modules.scripts.setup")
 
 
 def create_desktop_shortcut() -> None:
+    """Creates a desktop shortcut for the Touch2Key application."""
     desktop = Path.home() / "Desktop"
     if not desktop.exists():
         return  # Headless or containerized environment without a desktop
@@ -63,6 +64,7 @@ Categories=Utility;Application;
 
 
 def run(parent=None) -> bool:
+    """Main setup routine, compatible with GUI and CLI modes."""
     is_gui = QApplication.instance() is not None
 
     parser = argparse.ArgumentParser(description="Touch2Key Setup Utility")
