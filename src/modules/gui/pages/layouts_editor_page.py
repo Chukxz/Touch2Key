@@ -1,3 +1,7 @@
+"""
+HUD Layout Editor hosting the visual Plotter canvas and SQLite layout synchronization.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -22,7 +26,14 @@ from modules.database import store
 from modules.database.config_io import export_bundle, export_layout_json, import_any
 from modules.gui.widgets.layouts_plotter_widget import LayoutsPlotterWidget
 from modules.scripts.adb_screen_capture import capture_android_screen
-from modules.utils import CIRCLE, JSONS_FOLDER, PROFILES_FOLDER, RECTANGLE, MapperEvent
+from modules.utils import (
+    CIRCLE,
+    IMAGES_FOLDER,
+    JSONS_FOLDER,
+    PROFILES_FOLDER,
+    RECTANGLE,
+    MapperEvent,
+)
 from .base_page import BasePage
 
 if TYPE_CHECKING:
@@ -58,12 +69,14 @@ class LayoutsEditorPage(BasePage):
         self.import_btn = QPushButton("Import Config / Layout")
         self.export_btn = QPushButton("Export Layout (.json)")
         self.export_bundle_btn = QPushButton("Export Bundle")
+        self.select_image_btn = QPushButton("Select Image")
         self.capture_btn = QPushButton("Capture Reference Screenshot")
 
         top_toolbar.addWidget(self.switch_layout_btn)
         top_toolbar.addWidget(self.import_btn)
         top_toolbar.addWidget(self.export_btn)
         top_toolbar.addWidget(self.export_bundle_btn)
+        top_toolbar.addWidget(self.select_image_btn)
         top_toolbar.addWidget(self.capture_btn)
         top_toolbar.addStretch()
 
@@ -110,6 +123,7 @@ class LayoutsEditorPage(BasePage):
         self.import_btn.clicked.connect(self.import_config_or_layout)
         self.export_btn.clicked.connect(self.open_export_dialog)
         self.export_bundle_btn.clicked.connect(self._on_export_bundle)
+        self.select_image_btn.clicked.connect(self._select_background_image)
         self.capture_btn.clicked.connect(self._trigger_screenshot_capture)
 
         self.priority_spin.valueChanged.connect(self.on_priority_changed)
@@ -416,7 +430,58 @@ class LayoutsEditorPage(BasePage):
             logger.exception("Bundle export failed")
             QMessageBox.critical(self, "Export Failed", str(exc))
 
+    def _select_background_image(self) -> None:
+        active = store.get_active_layout()
+        if active is None:
+            QMessageBox.warning(
+                self,
+                "No Active Layout",
+                "Please select or create an active layout before setting an image.",
+            )
+            return
+
+        IMAGES_FOLDER.mkdir(parents=True, exist_ok=True)
+        file_path_str, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Background Image from Folder",
+            str(IMAGES_FOLDER),
+            "Images (*.png *.jpg *.jpeg *.bmp);;All files (*.*)",
+        )
+        if not file_path_str:
+            return
+
+        img_path = Path(file_path_str)
+        try:
+            store.layouts.update(active.id, image_path=str(img_path.resolve()))
+            self.refresh_active_layout_display()
+            self.plotter_widget.reload_active_layout()
+            self._notify_engine_reload()
+            logger.info(
+                "Updated active layout ID %s background image to '%s'",
+                active.id,
+                img_path.name,
+            )
+            QMessageBox.information(
+                self,
+                "Image Updated",
+                f"Background image successfully set to:\n{img_path.name}",
+            )
+        except Exception as exc:
+            logger.exception("Failed to update background image")
+            QMessageBox.critical(
+                self, "Error", f"Failed to set background image:\n{exc}"
+            )
+
     def _trigger_screenshot_capture(self) -> None:
+        active = store.get_active_layout()
+        if active is None:
+            QMessageBox.warning(
+                self,
+                "No Active Layout",
+                "Please select or create an active layout before capturing a screenshot.",
+            )
+            return
+
         try:
             capture_android_screen(parent=self)
             self.refresh_active_layout_display()
