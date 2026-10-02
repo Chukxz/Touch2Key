@@ -43,9 +43,8 @@ Touch2Key can be paired with game streamers like **Sunshine/Moonlight** or **Apo
   * **Hardware-Free Return Gates & Bezel Toggles:** Return to Game Mode or control visibility using configurable **Double-Tap triggers** and dedicated **Bezel Toggle strips** along screen borders.
 
 * **Dynamic Camera & Joystick Integration:**
-  * **Track-Fire Buttons:** Configurable `move_camera` zones emit simultaneous keypresses and camera deltas (aim while shooting).
-  * **Fixed vs. Floating Joysticks:** Fixed HUD joysticks free the rest of the display for full-screen camera look. Floating joysticks partition screen halves dynamically based on user handedness.
-  * **Anchored-Floating Joysticks:** Snap to fixed HUD artwork on touch while leashing dynamic origins during extended thumb drift.
+  * **Buttons:** Configurable `pointer` zones emit simultaneous keypresses and camera deltas (e.g. for aiming while shooting).
+  * **Fixed vs. Anchored/Floating Joysticks:** Fixed HUD joysticks free the rest of the display for full-screen camera look. Anchored and Floating joysticks partition screen halves dynamically based on user handedness and subsequently leash. Anchored joysticks initially snap (bounded by the snap radius), to fixed joystick HUD coordinates in the joystick region unlike Floating joysticks that report the initial touch position in the HUD region.
 
 * **Platform-Native Injection:** Low-level Windows NT kernel injection via the Interception driver and Linux `evdev`/`uinput` subsystem (X11 supported).
 
@@ -137,8 +136,8 @@ Because Touch2Key installs system-level drivers and kernel rules, **simply runni
 | Action | Command | Description |
 | :--- | :--- | :--- |
 | **Standard** | `touch2key-uninstall` | Removes drivers/rules/binaries/shortcuts; preserves all user data. |
-| **Purge** | `touch2key-uninstall --purge` | Removes drivers/rules/binaries/shortcuts **AND** deletes all user data — all saved jsons/images/profiles files, settings toml file and database files. |
-| **Purge-All** | `touch2key-uninstall --purge-all` | Removes drivers/rules/binaries/shortcuts **AND** deletes all user and diagnostic data — all saved jsons/images/profiles files, settings toml file, database files **AND** the diagnostics (profiling — .prof) and log files. |
+| **Purge** | `touch2key-uninstall --purge` | Removes drivers/rules/binaries/shortcuts **AND** deletes all user data — all saved jsons/images/profiles (bundles) files, settings toml file and database files. |
+| **Purge-All** | `touch2key-uninstall --purge-all` | Removes drivers/rules/binaries/shortcuts **AND** deletes all user and diagnostic data — all saved jsons/images/profiles (bundles) files, settings toml file, database files **AND** the diagnostics (profiling — .prof) and log files. |
 | **Skip Confirmation** | `touch2key-uninstall [--yes, -y]` | Skip confirmation prompt. |
 | **Skip Reboot** | `touch2key-uninstall --no-restart` | Skip reboot prompt (Windows). |
 
