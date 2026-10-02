@@ -59,7 +59,8 @@ Touch2Key can be paired with game streamers like **Sunshine/Moonlight** or **Apo
 
 ## Window Selection & Persistence
 
-On startup, the engine launches an interactive Window Selector dialog that lists all active desktop windows with their process titles and window classes.
+On startup in CLI mode, the engine launches an interactive Window Selector dialog or refreshing terminal (depends on the --use-gui flag), that lists all active desktop windows with their process titles and window classes. In GUI mode configuration is dynamic and not tied to startup.
+The Interception mouse and keyboard device can also be configured when running on Windows.
 
 * **Initial Binding:** Select your target emulator or native PC game window. The engine binds directly to its process and window ID.
 * **Self-Healing Window Tracking:** If the target window is lost due to a crash or restart, the engine uses the captured window class name to automatically re-acquire the largest active visible instance, maintaining your mapping session without manual intervention.
@@ -68,8 +69,8 @@ On startup, the engine launches an interactive Window Selector dialog that lists
 
 ## Key Customization & Storage
 
-* **Startup Capture Dialog:** Binds core control keys (such as **Toggle** and **Sprint**) and configures performance limits (Rate Cap and Polls Per Second).
-* **SQLite & TOML Storage:** Layout zones, priorities, and hitbox coordinates are stored persistently in SQLite tables (`touch2key.db`) with foreign-key cascade protection, while runtime defaults (including system gestures and typematic rules) are managed via `settings.toml`.
+* **Capture Dialog:** Binds core control keys (such as **Toggle** and **Sprint**) and configures performance limits (Rate Cap and Polls Per Second).
+* **SQLite & TOML Storage:** Layout zones, priorities, and hitbox coordinates are stored persistently in SQLite tables (`touch2key.db`) with foreign-key cascade protection, along with runtime defaults (including system gestures and typematic rules).
 
 ---
 
@@ -78,6 +79,20 @@ On startup, the engine launches an interactive Window Selector dialog that lists
 * **Auto-Adaptive Multi-Touch:** Automatically queries Android touchscreen driver configurations (`ABS_MT_*` event capabilities and slot counts) over ADB upon connection.
 * **Wired & Wireless ADB:** Supports high-speed direct USB and wireless TCP/IP debugging (`adb tcpip 5555`).
 * **Resilient Event Stream:** Cable disconnects or Wi-Fi drops automatically pause the input pump and resume processing once ADB reconnects, avoiding application crashes or hung keys.
+
+---
+
+## Automated Maintenance & Privacy
+Touch2Key features built-in housekeeping to ensure logs and diagnostic files never bloat your storage, while still keeping enough history for effective troubleshooting.
+
+* **Application Logs:** Automatically pruned after **60 days (2 months)** or capped at a maximum of **100 files**, whichever comes first.
+* **Diagnostic Dumps:** Retained for up to **60 days** and capped at the **20 most recent files**.
+* **Local Storage:** All logs and runtime data are securely stored locally inside your centralized `data/` directory and are completely isolated from permanent application assets.
+
+---
+
+## Icon Shortcuts
+The app sets up an icon shortcut in your desktop (that launches the GUI directly), when setup is run either from the GUI (GUI script command: touch2key-gui) or from the terminal (CLI setup command: touch2key-setup) aside from managing essential stuff like binaries, drivers and rules. Uninstallation also works similarly and always removes the icon shortcut aside from also managing those same essential stuff and the application data.
 
 ---
 
