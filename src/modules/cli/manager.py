@@ -33,6 +33,7 @@ from modules.utils import (
     BEZEL,
     CIRCLE,
     RECTANGLE,
+    IMAGES_FOLDER,
 )
 
 # ---------------------------------------------------------------------------
@@ -40,18 +41,41 @@ from modules.utils import (
 # ---------------------------------------------------------------------------
 
 
-def set_profile_image(layout_id: int, image_path: Path) -> bool:
+def set_profile_image(layout_id: int, image_path_input: str | Path) -> bool:
+    """Sets background image for a layout with fallback check in IMAGES_FOLDER."""
     target = store.layouts.get(layout_id)
     if not target:
         print(f"Error: Layout ID {layout_id} not found.")
         return False
-    if not image_path.exists():
-        print(f"Error: Image file '{image_path}' does not exist.")
-        return False
 
-    store.layouts.update(layout_id, image_path=str(image_path.resolve()))
-    print(f"Updated profile '{target.name}' background image to: {image_path.name}")
+    path = Path(image_path_input)
+    if not path.exists():
+        alt_path = IMAGES_FOLDER / image_path_input
+        if alt_path.exists():
+            path = alt_path
+        else:
+            print(f"Error: Image file '{image_path_input}' not found (checked direct path and {IMAGES_FOLDER}).")
+            return False
+
+    store.layouts.update(layout_id, image_path=str(path.resolve()))
+    print(f"Updated profile '{target.name}' background image to: {path.name}")
     return True
+
+
+def show_left_handed() -> None:
+    s = store.settings.get()
+    print(f"\n--- Left-Handed Mode ---")
+    print(f"  Left-Handed: {'Yes' if s.left_handed else 'No'}\n")
+
+
+def configure_left_handed_interactive() -> None:
+    s = store.settings.get()
+    show_left_handed()
+    val_in = input(f"Enable left-handed mode? (y/n, current: {'y' if s.left_handed else 'n'}): ").strip().lower()
+    if val_in in ("y", "n"):
+        store.settings.update(left_handed=(val_in == "y"))
+        print("Left-handed mode updated successfully.")
+    show_left_handed()
 
 
 def list_profiles() -> None:
@@ -155,11 +179,11 @@ def rename_profile(layout_id: int, new_name: str) -> bool:
     clean_name = new_name.strip()
     if not clean_name:
         print("Error: New name cannot be empty.")
-        return False
+        return None
 
     if store.layouts.get_by_name(clean_name) is not None:
         print(f"Error: A layout named '{clean_name}' already exists.")
-        return False
+        return None
 
     try:
         store.layouts.update(layout_id, name=clean_name)
@@ -167,7 +191,7 @@ def rename_profile(layout_id: int, new_name: str) -> bool:
         return True
     except Exception as exc:
         print(f"Failed to rename profile: {exc}")
-        return False
+        return None
 
 
 def delete_profile(layout_id: int) -> bool:
@@ -296,7 +320,7 @@ def configure_system_interactive() -> None:
 
     en_bezel_in = (
         input(
-            f"Enable double tap toggle? (y/n, current: {'y' if s.bezel_toggle_enabled else 'n'}): "
+            f"Enable bezel toggle? (y/n, current: {'y' if s.bezel_toggle_enabled else 'n'}): "
         )
         .strip()
         .lower()
@@ -368,6 +392,8 @@ def interactive_menu() -> None:
         list_profiles()
         print("\n\nCommands:")
         print("  [s]    Select / Switch Active Profile")
+        print("  [si]   Set Profile Background Image")
+        print("  [lh]   View / Configure Left-Handed Mode")
         print("  [lz]   List Zones / Pipelines for Profile")
         print("  [cp]   Duplicate Profile")
         print("  [rn]   Rename Profile")
@@ -396,6 +422,15 @@ def interactive_menu() -> None:
             raw_id = input("Enter Layout ID to activate: ").strip()
             if raw_id.isdigit():
                 set_active_profile(int(raw_id))
+
+        elif choice == "si":
+            raw_id = input("Enter Layout ID: ").strip()
+            img_path = input(f"Enter image filename or path [Search dir: {IMAGES_FOLDER}]: ").strip().strip('"')
+            if raw_id.isdigit() and img_path:
+                set_profile_image(int(raw_id), img_path)
+
+        elif choice == "lh":
+            configure_left_handed_interactive()
 
         elif choice == "lz":
             raw_id = input("Enter Layout ID to view zones: ").strip()
@@ -575,6 +610,16 @@ def run() -> None:
         help="Set background image path for layout by ID",
     )
     parser.add_argument(
+        "--show-left-handed",
+        action="store_true",
+        help="Display left-handed mode status",
+    )
+    parser.add_argument(
+        "--set-left-handed",
+        choices=["on", "off"],
+        help="Enable or disable left-handed mode",
+    )
+    parser.add_argument(
         "--list-zones",
         type=int,
         metavar="ID",
@@ -710,6 +755,16 @@ def run() -> None:
     args = parser.parse_args()
 
     try:
+        if args.set_left_handed is not None:
+            store.settings.update(left_handed=(args.set_left_handed == "on"))
+            print("Left-handed mode updated successfully.")
+            show_left_handed()
+            return
+
+        if args.show_left_handed:
+            show_left_handed()
+            return
+
         # Check typematic mutation flags
         typematic_updates = {}
         if args.set_typematic is not None:
@@ -736,7 +791,7 @@ def run() -> None:
         elif args.list:
             list_profiles()
         elif args.set_image is not None:
-            set_profile_image(int(args.set_image[0]), Path(args.set_image[1]))
+            set_profile_image(int(args.set_image[0]), args.set_image[1])
         elif args.set_active is not None:
             set_active_profile(args.set_active)
         elif args.list_zones is not None:
@@ -795,9 +850,6 @@ def run() -> None:
 
 if __name__ == "__main__":
     run()
-
-
-# In cli.py
 
 
 def main() -> None:
