@@ -54,7 +54,9 @@ def set_profile_image(layout_id: int, image_path_input: str | Path) -> bool:
         if alt_path.exists():
             path = alt_path
         else:
-            print(f"Error: Image file '{image_path_input}' not found (checked direct path and {IMAGES_FOLDER}).")
+            print(
+                f"Error: Image file '{image_path_input}' not found (checked direct path and {IMAGES_FOLDER})."
+            )
             return False
 
     store.layouts.update(layout_id, image_path=str(path.resolve()))
@@ -71,7 +73,13 @@ def show_left_handed() -> None:
 def configure_left_handed_interactive() -> None:
     s = store.settings.get()
     show_left_handed()
-    val_in = input(f"Enable left-handed mode? (y/n, current: {'y' if s.left_handed else 'n'}): ").strip().lower()
+    val_in = (
+        input(
+            f"Enable left-handed mode? (y/n, current: {'y' if s.left_handed else 'n'}): "
+        )
+        .strip()
+        .lower()
+    )
     if val_in in ("y", "n"):
         store.settings.update(left_handed=(val_in == "y"))
         print("Left-handed mode updated successfully.")
@@ -179,11 +187,11 @@ def rename_profile(layout_id: int, new_name: str) -> bool:
     clean_name = new_name.strip()
     if not clean_name:
         print("Error: New name cannot be empty.")
-        return None
+        return False
 
     if store.layouts.get_by_name(clean_name) is not None:
         print(f"Error: A layout named '{clean_name}' already exists.")
-        return None
+        return False
 
     try:
         store.layouts.update(layout_id, name=clean_name)
@@ -191,7 +199,7 @@ def rename_profile(layout_id: int, new_name: str) -> bool:
         return True
     except Exception as exc:
         print(f"Failed to rename profile: {exc}")
-        return None
+        return False
 
 
 def delete_profile(layout_id: int) -> bool:
@@ -425,7 +433,11 @@ def interactive_menu() -> None:
 
         elif choice == "si":
             raw_id = input("Enter Layout ID: ").strip()
-            img_path = input(f"Enter image filename or path [Search dir: {IMAGES_FOLDER}]: ").strip().strip('"')
+            img_path = (
+                input(f"Enter image filename or path [Search dir: {IMAGES_FOLDER}]: ")
+                .strip()
+                .strip('"')
+            )
             if raw_id.isdigit() and img_path:
                 set_profile_image(int(raw_id), img_path)
 
