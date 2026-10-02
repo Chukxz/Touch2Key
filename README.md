@@ -157,17 +157,30 @@ Because Touch2Key installs system-level drivers and kernel rules, **simply runni
 
 ---
 
+### CLI Global Hotkeys
+
+When running the engine in CLI mode, the following hotkeys are active to control runtime behavior on the fly. **They are guarded to only trigger when your terminal window is the active foreground window**, preventing accidental conflicts while playing your game (protected by a **0.4s** debounce cooldown):
+
+| Hotkey | Action | Description |
+| :--- | :--- | :--- |
+| **Esc** | Shutdown | Gracefully terminates the CLI engine session. |
+| **F5** | Handedness Toggle | Dynamically switches layout orientation between left and right-handed modes. |
+| **F6** | Layout Reload | Instantly reloads the active layout configuration from the database. |
+| **F7** | Config Reload | Refreshes global engine settings live without requiring a full restart. |
+
+---
+
 ## Command Line Interface (CLI)
 
 | Command | Description |
 | :--- | :--- |
-| `touch2key` | Launches the CLI engine. |
-| `touch2key --profile` | Launches the CLI engine and also runs profiling. |
-| `touch2key --use-gui` | Launches the CLI engine with a QApplication context (not the same as a full GUI but with some GUI windows). |
+| `touch2key` | Launches the engine in CLI mode. |
+| `touch2key --profile` | Launches the engine in CLI mode and also runs profiling. |
+| `touch2key --use-gui` | Launches the engine in CLI mode with a QApplication context (not the same as a full GUI but with some GUI windows). |
 | `touch2key-adb` | Displays full ADB executable path if found. |
 | `touch2key-capture` | ADB screen capture. |
-| `touch2key-gui` | Launches the GUI engine. |
-| `touch2key-gui --profile` | Launches the GUI engine and also runs profiling. |
+| `touch2key-gui` | Launches the engine in GUI mode. |
+| `touch2key-gui --profile` | Launches the engine in GUI mode and also runs profiling. |
 | `touch2key-manage` | Interactive Layout, Profile, Image, and Typematic Manager. |
 | `touch2key-plot` | Mapping visualizer. |
 | `touch2key-preflight` | Diagnostic checks. |
