@@ -79,7 +79,7 @@ The Interception mouse and keyboard device can also be configured when running o
 ## Connectivity & Device Management
 
 * **Auto-Adaptive Multi-Touch:** Automatically queries Android touchscreen driver configurations (`ABS_MT_*` event capabilities and slot counts) over ADB upon connection.
-* **Wired & Wireless ADB:** Native high-speed direct USB routing. For wireless play, simply connect your PC to the phone's Wi-Fi hotspot and plug in the USB cable. Once the TCP/IP handshake completes and the application logs a successful wireless connection, you can unplug the cable and play completely wirelessly.
+* **Wired & Wireless ADB:** Native high-speed direct USB routing. For wireless play, simply connect your PC to the phone's Wi-Fi hotspot and plug in the USB cable. Once the `adb tcpip 5555` handshake completes and the application logs a successful wireless connection, you can unplug the cable and play completely wirelessly.
 * **Resilient Event Stream:** Cable disconnects or Wi-Fi drops automatically pause the input pump and resume processing once ADB reconnects, avoiding application crashes or hung keys.
 
 ---
