@@ -42,7 +42,11 @@ The first version with only CLI support and basic GUI windows can be accessed [h
 * **Hybrid Mode Switching (In-Game vs. Menu/Lobby):**
   * **In-Game Mode (Cursor Hidden):** Custom HUD zones capture taps/drags to drive game controls.
   * **Menu Mode (Cursor Visible):** Game buttons deactivate automatically, passing single-touch events through as absolute desktop clicks (`device_to_game_abs`) for clean lobby, map, and inventory navigation.
-  * **Hardware-Free Return Gates & Bezel Toggles:** Return to Game Mode or control visibility using configurable **Double-Tap triggers** and dedicated **Bezel Toggle strips** along screen borders.
+  * **Hardware-Free Return Gates & Bezel Toggles:** Control the engine state directly from the touchscreen without reaching for your PC keyboard. *Both systems are independently toggleable in your global settings, and the required bezel zones are automatically seeded and guaranteed to exist in every layout:*
+    * **Top Bezel:** Instantly toggles cursor visibility (switches between Game Mode and Menu Mode).
+    * **Bottom Bezel:** Loads the Virtual Keyboard. This runs in production mode sending direct IPC commands to the engine for zero-latency typing, bypassing standalone CLI testing modes.
+    * **Double-Tap Quick Return:** If the cursor is currently *visible* (Menu Mode), double-tapping anywhere on the screen will instantly hide it and return you to Game Mode. (Double-tap is ignored while already in-game to prevent accidental triggers).
+
 
 * **Dynamic Camera & Joystick Integration:**
   * **Buttons:** Configurable `pointer` zones emit simultaneous keypresses and camera deltas (e.g., for aiming while shooting).
@@ -53,6 +57,8 @@ The first version with only CLI support and basic GUI windows can be accessed [h
 * **Zero-Latency Processing:** Dedicated multiprocessing workers and helper threads with sub-millisecond heartbeat monitors and real-time status logging.
 
 * **Interactive Plotting GUI & Layout Editor:** Comprehensive PySide6/Matplotlib interface supporting direct visual placement, live priority adjustments (`P`/`O` keys or toolbar spinboxes), dynamic zone sizing, and SQLite database storage.
+
+* **Live Input Visualizer (`touch2key-visualizer`):** A dedicated real-time testing environment. It dynamically loads your active layout zones to highlight exact hitboxes as you trigger them, and explicitly respects your configured game `toggle_key` so you can verify cursor state toggling and mappings safely outside of a live game environment.
 
 * **Anti-Cheat Safe:** Humanized dwell times and randomized click durations for strictly user-initiated actions. No macros, automated scripts, or game-state tampering.
 
@@ -168,8 +174,8 @@ Because Touch2Key installs system-level drivers and kernel rules, **simply runni
 | `touch2key-setup` | Runs the OS configuration wizard and installs drivers/rules/binaries and shortcuts. |
 | `touch2key-uninstall` | Safely removes drivers, rules, binaries, and shortcuts. |
 | `touch2key-wireless` | Forces ADB wireless connection. |
-| `touch2key-keyboard` | Test the virtual keyboard program output. |
-| `touch2key-visualizer` | Visualize the keyboard and mouse events with support for cursor toggling visualization. |
+| `touch2key-keyboard` | Test the virtual keyboard program output in standalone mode. |
+| `touch2key-visualizer` | Live event visualizer that dynamically loads active layout zones to highlight triggered hitboxes, and respects your configured game toggle key for cursor state testing. |
 
 ### Typematic & System Commands (via Layout Manager)
 You can directly configure hardware auto-repeat behavior, double taps, bezel toggles, and left-handed mode via `touch2key-manage`:
