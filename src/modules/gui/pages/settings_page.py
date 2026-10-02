@@ -52,7 +52,7 @@ class SettingsPage(BasePage):
         input_layout.addWidget(self.left_handed_check)
 
         self.floating_check = QCheckBox("Floating Joystick")
-        self.floating_check.setToolTip("Floats dynamically, is overriden by anchored.")
+        self.floating_check.setToolTip("Floats dynamically, is overridden by anchored.")
         input_layout.addWidget(self.floating_check)
 
         self.anchored_check = QCheckBox("Anchored Floating Joystick")
@@ -209,11 +209,9 @@ class SettingsPage(BasePage):
 
     def load_settings(self) -> None:
         try:
-            # Get the Database app Settings
             settings = store.settings.get()
 
             # Block all Signals
-
             self.left_handed_check.blockSignals(True)
             self.floating_check.blockSignals(True)
             self.anchored_check.blockSignals(True)
@@ -232,8 +230,7 @@ class SettingsPage(BasePage):
             self.double_tap_enabled_check.blockSignals(True)
             self.bezel_toggle_enabled_check.blockSignals(True)
 
-            # Set to Defaults
-
+            # Set Values
             self.left_handed_check.setChecked(settings.left_handed)
             self.floating_check.setChecked(settings.floating_joystick)
             self.anchored_check.setChecked(settings.anchored_joystick)
@@ -253,7 +250,6 @@ class SettingsPage(BasePage):
             self.bezel_toggle_enabled_check.setChecked(settings.bezel_toggle_enabled)
 
             # Unblock all Signals
-
             self.left_handed_check.blockSignals(False)
             self.floating_check.blockSignals(False)
             self.anchored_check.blockSignals(False)
@@ -284,7 +280,7 @@ class SettingsPage(BasePage):
 
     def _on_floating_joystick_changed(self, checked: bool) -> None:
         try:
-            store.settings.update(anchored_joystick=checked)
+            store.settings.update(floating_joystick=checked)
             self._notify_reload()
         except Exception as exc:
             logger.exception("Failed to update floating_joystick setting")
@@ -364,14 +360,14 @@ class SettingsPage(BasePage):
             store.settings.update(double_tap_enabled=checked)
             self._notify_reload()
         except Exception as exc:
-            logger.exception("Failed to update typematic enabled setting")
+            logger.exception("Failed to update double_tap enabled setting")
 
     def _on_bezel_toggle_enabled_changed(self, checked: bool) -> None:
         try:
             store.settings.update(bezel_toggle_enabled=checked)
             self._notify_reload()
         except Exception as exc:
-            logger.exception("Failed to update typematic enabled setting")
+            logger.exception("Failed to update bezel_toggle enabled setting")
 
     def _on_reset_defaults(self) -> None:
         reply = QMessageBox.question(
