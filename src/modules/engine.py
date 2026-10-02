@@ -5,6 +5,7 @@ import sys
 import multiprocessing
 import threading
 import logging
+import time
 from typing import TYPE_CHECKING
 
 from modules.database import store
@@ -83,13 +84,73 @@ class Engine:
         self.vkb_reader, self.vkb_writer = multiprocessing.Pipe()
         self.vkb_process: multiprocessing.Process | None = None
 
+        # Debounce tracking for hotkeys
+        self._last_hotkey_time = 0.0
+        self._hotkey_cooldown = 0.4
+
+        # Dynamic launch context logging & global hotkey binding
         if not self.headless:
             try:
                 import keyboard
 
                 keyboard.add_hotkey("esc", self._shutdown)
-            except Exception:
-                pass
+                keyboard.add_hotkey("f5", self._toggle_handedness_cli)
+                keyboard.add_hotkey("f6", self._reload_layout_cli)
+                keyboard.add_hotkey("f7", self._reload_config_cli)
+
+                logger.info(
+                    "[CLI Interactive Launch] Active Global Hotkeys: [Esc] Exit Engine | [F5] Toggle Handedness | [F6] Reload Layout | [F7] Reload Config"
+                )
+            except Exception as exc:
+                logger.debug("Failed to register CLI global hotkeys: %s", exc)
+        else:
+            logger.info(
+                "[Headless / GUI Worker Launch] Engine running in background worker mode (terminal hotkeys bypassed)."
+            )
+
+    def _check_debounce(self) -> bool:
+        """Enforces a strict cooldown between hotkey triggers."""
+        now = time.perf_counter()
+        if now - self._last_hotkey_time < self._hotkey_cooldown:
+            return False
+        self._last_hotkey_time = now
+        return True
+
+    def _toggle_handedness_cli(self) -> None:
+        if not self._check_debounce():
+            return
+        try:
+            s = store.settings.get()
+            new_val = not s.left_handed
+            store.settings.update(left_handed=new_val)
+            logger.info("CLI Hotkey Triggered [F5]: Left-Handed mode set to %s", new_val)
+            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+        except Exception as exc:
+            logger.error("Failed to toggle handedness via hotkey: %s", exc)
+
+    def _reload_layout_cli(self) -> None:
+        if not self._check_debounce():
+            return
+        try:
+            if self.layout_loader is not None:
+                self.layout_loader.reload()
+            else:
+                self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+            logger.info("CLI Hotkey Triggered [F6]: Layout reloaded.")
+        except Exception as exc:
+            logger.error("Failed to reload layout via hotkey: %s", exc)
+
+    def _reload_config_cli(self) -> None:
+        if not self._check_debounce():
+            return
+        try:
+            if self.layout_loader and hasattr(self.layout_loader, "config"):
+                self.layout_loader.config.reload_config()
+            else:
+                self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+            logger.info("CLI Hotkey Triggered [F7]: Configuration reloaded.")
+        except Exception as exc:
+            logger.error("Failed to reload configuration via hotkey: %s", exc)
 
     def _on_devices_change(self, k_id: int | None, m_id: int | None) -> None:
         if not self.bridge_class or self.bridge_class.k_proc is None:
