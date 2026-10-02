@@ -93,13 +93,25 @@ class Engine:
             try:
                 import keyboard
 
-                keyboard.add_hotkey("esc", self._shutdown)
-                keyboard.add_hotkey("f5", self._toggle_handedness_cli)
-                keyboard.add_hotkey("f6", self._reload_layout_cli)
-                keyboard.add_hotkey("f7", self._reload_config_cli)
+                # Capture the current terminal/console window handle upon startup
+                self._terminal_window_handle = self.window_manager.get_foreground_window()
+
+                def _guard_hotkey(callback):
+                    """Wraps hotkey callbacks to ensure they only fire if the terminal window is focused."""
+                    try:
+                        current_fg = self.window_manager.get_foreground_window()
+                        if current_fg == self._terminal_window_handle:
+                            callback()
+                    except Exception as exc:
+                        logger.debug("Failed to verify foreground window for hotkey: %s", exc)
+
+                keyboard.add_hotkey("esc", lambda: _guard_hotkey(self._shutdown))
+                keyboard.add_hotkey("f5", lambda: _guard_hotkey(self._toggle_handedness_cli))
+                keyboard.add_hotkey("f6", lambda: _guard_hotkey(self._reload_layout_cli))
+                keyboard.add_hotkey("f7", lambda: _guard_hotkey(self._reload_config_cli))
 
                 logger.info(
-                    "[CLI Interactive Launch] Active Global Hotkeys: [Esc] Exit Engine | [F5] Toggle Handedness | [F6] Reload Layout | [F7] Reload Config"
+                    "[CLI Interactive Launch] Active Global Hotkeys (Terminal-Focussed): [Esc] Exit Engine | [F5] Toggle Handedness | [F6] Reload Layout | [F7] Reload Config"
                 )
             except Exception as exc:
                 logger.debug("Failed to register CLI global hotkeys: %s", exc)
