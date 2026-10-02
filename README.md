@@ -201,7 +201,7 @@ touch2key-manage --reset-typematic
 touch2key-manage --set-image 1 path/to/hud_screenshot.png
 touch2key-manage --set-left-handed on
 ```
-*(Alternatively, choose options like `[ss]` inside the interactive terminal menu to configure double-tap and bezel toggle fields interactively, or `[rss]` to reset them).*
+*(Choose options like `[ss]` inside the interactive terminal menu to configure double-tap and bezel toggle fields interactively, or `[rss]` to reset them).*
 
 ---
 
