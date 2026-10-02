@@ -10,9 +10,11 @@
 This is the Second Touch2Key Published Implementation with full GUI, CLI support, and improved functionality. 
 The first version with only CLI support and basic GUI windows can be accessed [here](https://github.com/Chukxz/touch2keybare).
 
-Enable **Developer Options** and **Wireless Debugging** (5 GHz Wi-Fi recommended) on your Android device and accept the authorization prompt when connecting.
-
-Touch2Key can be paired with game streamers like **Sunshine/Moonlight** or **Apollo/Artemis** for full visual and audio streaming. Disable all virtual controller/mouse inputs within your streaming host to prevent mapping conflicts.
+> **Setup Note:** Enable **Developer Options** and **USB Debugging** on your Android device, and accept the RSA fingerprint authorization prompt when connecting your device to your PC. 
+> 
+> **For Wireless Play:** Connect your PC's Wi-Fi to your phone's hotspot and plug in the USB cable to establish the initial handshake. Once the application logs that the device has connected wirelessly, you can safely unplug the cable!
+> 
+> *Note: If pairing with game streamers like **Sunshine/Moonlight** or **Apollo/Artemis**, disable all virtual controller/mouse inputs within your streaming host to prevent mapping conflicts.*
 
 ---
 
@@ -77,7 +79,7 @@ The Interception mouse and keyboard device can also be configured when running o
 ## Connectivity & Device Management
 
 * **Auto-Adaptive Multi-Touch:** Automatically queries Android touchscreen driver configurations (`ABS_MT_*` event capabilities and slot counts) over ADB upon connection.
-* **Wired & Wireless ADB:** Supports high-speed direct USB and wireless TCP/IP debugging (`adb tcpip 5555`).
+* **Wired & Wireless ADB:** Native high-speed direct USB routing. For wireless play, simply connect your PC to the phone's Wi-Fi hotspot and plug in the USB cable. Once the TCP/IP handshake completes and the application logs a successful wireless connection, you can unplug the cable and play completely wirelessly.
 * **Resilient Event Stream:** Cable disconnects or Wi-Fi drops automatically pause the input pump and resume processing once ADB reconnects, avoiding application crashes or hung keys.
 
 ---
@@ -102,7 +104,7 @@ The app sets up an icon shortcut on your desktop (that launches the GUI directly
 
 ### Prerequisites
 * Python 3.10+
-* Android device with USB/Wireless Debugging enabled
+* Android device with **USB Debugging** enabled
 * Linux users: X11 session with `sudo` access for `uinput`/`udev` rules
 
 ### Setup
