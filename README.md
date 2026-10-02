@@ -111,8 +111,8 @@ The app sets up an icon shortcut on your desktop (that launches the GUI directly
 ### Prerequisites
 * Python 3.10+
 * Android device with **USB Debugging** enabled
-* **Windows users:** Administrator privileges (required for Interception driver installation and kernel-level input injection)
-* **Linux users:** X11 session with `sudo` access for `uinput`/`udev` rules
+* **Windows users:** Administrator privileges required *only* during initial setup (to install the Interception driver). Daily execution runs under a standard user account.
+* **Linux users:** `sudo` access required *only* during initial setup (to write `udev` rules for `uinput` and input device permissions). Daily execution runs under a standard user account.
 
 ### Setup
 * **Install:** Remember to create a virtual environment on your machine by using the appropriate `venv` command and activating it (depending on your OS) after navigating to the `Touch2Key` directory on your machine before running the `pip install .` command as it is the standard python practice to avoid package conflicts and ensure isolation.
