@@ -9,11 +9,11 @@ and typematic (keyboard repeat) configuration and reset routines.
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Optional
 
 from modules import AppLogManager
-
 from modules.database import reset_layout_zones_to_app_settings, store
 from modules.database.config_io import (
     export_bundle,
@@ -26,14 +26,14 @@ from modules.database.legacy_migration import (
     migrate_toml_config,
 )
 from modules.utils import (
-    JSONS_FOLDER,
-    PROFILES_FOLDER,
-    TOML_PATH,
-    EXCLUDED_KEYS,
     BEZEL,
     CIRCLE,
-    RECTANGLE,
+    EXCLUDED_KEYS,
     IMAGES_FOLDER,
+    JSONS_FOLDER,
+    PROFILES_FOLDER,
+    RECTANGLE,
+    TOML_PATH,
 )
 
 # ---------------------------------------------------------------------------
@@ -485,17 +485,22 @@ def interactive_menu() -> None:
             raw_id = input(
                 "Enter Layout ID to reset zones (Leave blank for active): "
             ).strip()
-            target_id = int(raw_id) if raw_id.isdigit() else None
-            active = (
-                store.layouts.get(target_id) if target_id else store.get_active_layout()
-            )
-            if active:
-                count = reset_layout_zones_to_app_settings(active.id)
-                print(
-                    f"Reset {count} zones in layout '{active.name}' to default AppSettings."
+            try:
+                target_id = int(raw_id) if raw_id else None
+                active = (
+                    store.layouts.get(target_id)
+                    if target_id
+                    else store.get_active_layout()
                 )
-            else:
-                print("No layout selected or active.")
+                if active:
+                    count = reset_layout_zones_to_app_settings(active.id)
+                    print(
+                        f"Reset {count} zones in layout '{active.name}' to default AppSettings."
+                    )
+                else:
+                    print("No layout selected or active.")
+            except ValueError:
+                print("Invalid layout ID provided.")
 
         elif choice == "d":
             raw_id = input("Enter Layout ID to delete: ").strip()
@@ -561,8 +566,8 @@ def interactive_menu() -> None:
             raw_id = input(
                 "Enter Layout ID to bundle (Leave blank for active): "
             ).strip()
-            target_id = int(raw_id) if raw_id.isdigit() else None
             try:
+                target_id = int(raw_id) if raw_id else None
                 active = (
                     store.layouts.get(target_id)
                     if target_id
@@ -858,10 +863,6 @@ def run() -> None:
             interactive_menu()
     finally:
         store.close()
-
-
-if __name__ == "__main__":
-    run()
 
 
 def main() -> None:
