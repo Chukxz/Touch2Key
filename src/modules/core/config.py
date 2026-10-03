@@ -85,8 +85,8 @@ class AppConfig:
             }
         elif section == "mouse":
             return {
-                "sensitivity_y": s.sensitivity_x,
-                "sensitivity_x": s.sensitivity_y,
+                "sensitivity_x": s.sensitivity_x,
+                "sensitivity_y": s.sensitivity_y,
             }
         elif section == "keys":
             return {
