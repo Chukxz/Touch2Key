@@ -84,7 +84,7 @@ class Engine:
         self.vkb_process: multiprocessing.Process | None = None
 
         self.double_tap_enabled = True
-        self.bezels_enabled = True
+        self.bezel_toggle_enabled = True
 
         # Debounce tracking for hotkeys
         self._last_hotkey_time = 0.0
@@ -96,7 +96,9 @@ class Engine:
                 import keyboard
 
                 # Capture the current terminal/console window handle upon startup
-                self._terminal_window_handle = self.window_manager.get_foreground_window()
+                self._terminal_window_handle = (
+                    self.window_manager.get_foreground_window()
+                )
 
                 def _guard_hotkey(callback):
                     """Wraps hotkey callbacks to ensure they only fire if the terminal window is focused."""
@@ -105,12 +107,20 @@ class Engine:
                         if current_fg == self._terminal_window_handle:
                             callback()
                     except Exception as exc:
-                        logger.debug("Failed to verify foreground window for hotkey: %s", exc)
+                        logger.debug(
+                            "Failed to verify foreground window for hotkey: %s", exc
+                        )
 
                 keyboard.add_hotkey("esc", lambda: _guard_hotkey(self._shutdown))
-                keyboard.add_hotkey("f5", lambda: _guard_hotkey(self._toggle_handedness_cli))
-                keyboard.add_hotkey("f6", lambda: _guard_hotkey(self._reload_layout_cli))
-                keyboard.add_hotkey("f7", lambda: _guard_hotkey(self._reload_config_cli))
+                keyboard.add_hotkey(
+                    "f5", lambda: _guard_hotkey(self._toggle_handedness_cli)
+                )
+                keyboard.add_hotkey(
+                    "f6", lambda: _guard_hotkey(self._reload_layout_cli)
+                )
+                keyboard.add_hotkey(
+                    "f7", lambda: _guard_hotkey(self._reload_config_cli)
+                )
 
                 logger.info(
                     "[CLI Interactive Launch] Active Global Hotkeys (Terminal-Focussed): [Esc] Exit Engine | [F5] Toggle Handedness | [F6] Reload Layout | [F7] Reload Config"
@@ -137,8 +147,12 @@ class Engine:
             s = store.settings.get()
             new_val = not s.left_handed
             store.settings.update(left_handed=new_val)
-            logger.info("CLI Hotkey Triggered [F5]: Left-Handed mode set to %s", new_val)
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+            logger.info(
+                "CLI Hotkey Triggered [F5]: Left-Handed mode set to %s", new_val
+            )
+            self.mapper_event_dispatcher.dispatch(
+                MapperEvent(action="ON_CONFIG_RELOAD")
+            )
         except Exception as exc:
             logger.error("Failed to toggle handedness via hotkey: %s", exc)
 
@@ -226,7 +240,7 @@ class Engine:
     def _on_config_reload(self) -> None:
         settings = store.settings.get()
         self.double_tap_enabled = settings.double_tap_enabled
-        self.bezels_enabled = settings.bezels_enabled
+        self.bezel_toggle_enabled = settings.bezel_toggle_enabled
         self._tiers = self._build_pipeline_tiers()
 
     def _build_pipeline_tiers(self) -> list[list[Pipeline]]:
@@ -280,13 +294,19 @@ class Engine:
         output_sink = self.output_sink
 
         if self.is_visible:
-            if self.double_tap_enabled and self.two_finger_tap_tracker.process(touch_event):
+            if self.double_tap_enabled and self.two_finger_tap_tracker.process(
+                touch_event
+            ):
                 self.toggle_mode()
                 return
 
             for tier in tiers:
                 for p in tier:
-                    if p.is_system and self.bezels_enabled and p.claims(touch_event):
+                    if (
+                        p.is_system
+                        and self.bezel_toggle_enabled
+                        and p.claims(touch_event)
+                    ):
                         p.process(touch_event, output_sink)
                         return
 
@@ -311,7 +331,7 @@ class Engine:
         claimed_existing = False
         for tier in tiers:
             for p in tier:
-                if p.is_system and not self.bezels_enabled:
+                if p.is_system and not self.bezel_toggle_enabled:
                     continue
                 if p.owns(touch_event.contact_id):
                     p.process(touch_event, output_sink)
@@ -321,7 +341,7 @@ class Engine:
             for tier in tiers:
                 tier_claimed = False
                 for p in tier:
-                    if p.is_system and not self.bezels_enabled:
+                    if p.is_system and not self.bezel_toggle_enabled:
                         continue
                     if p.claims(touch_event):
                         p.process(touch_event, output_sink)
@@ -357,7 +377,7 @@ class Engine:
 
         settings = store.settings.get()
         self.double_tap_enabled = settings.double_tap_enabled
-        self.bezels_enabled = settings.bezels_enabled
+        self.bezel_toggle_enabled = settings.bezel_toggle_enabled
 
         self.layout_loader = LayoutLoader(
             self.mapper_event_dispatcher,
