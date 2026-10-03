@@ -129,7 +129,7 @@ class LayoutLoader:
                     z_dict["x2"] = (z.x2 or 0.0) / self.width
                     z_dict["y2"] = (z.y2 or 0.0) / self.height
 
-                if z.zone_type == "BEZEL":
+                if z.zone_type == BEZEL:
                     normalized_bezels.append((z.scancode, z_dict))
                 else:
                     normalized_keys.append((z.scancode, z_dict))
@@ -146,7 +146,6 @@ class LayoutLoader:
             )
 
     def reload(self) -> None:
-        self._load_layout()
         self.config.reload_config()
         if self.mapper_event_dispatcher is not None:
             self.mapper_event_dispatcher.dispatch(
