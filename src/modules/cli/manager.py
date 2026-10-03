@@ -623,7 +623,7 @@ def run() -> None:
     parser.add_argument(
         "--set-image",
         nargs=2,
-        metavar=("ID", "IMAGE_PATH"),
+        metavar=("LAYOUT_ID", "IMAGE_PATH"),
         help="Set background image path for layout by ID",
     )
     parser.add_argument(
