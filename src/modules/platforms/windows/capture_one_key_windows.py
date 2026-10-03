@@ -89,5 +89,6 @@ def capture_one_key_windows(timeout_ms: int | None = None) -> int | None:
 
 
 if __name__ == "__main__":
-    key = capture_one_key_windows(timeout_ms=5000)
-    print(f"Captured scancode: {hex(key) if key else None}")
+    print("Waiting for key press on Windows (10s timeout)...")
+    code = capture_one_key_windows(timeout_ms=10000)
+    print(f"Captured scancode: {hex(code) if code else None}")
