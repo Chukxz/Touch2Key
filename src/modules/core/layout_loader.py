@@ -53,11 +53,6 @@ class LayoutLoader:
 
         self._load_layout()
 
-        if self.mapper_event_dispatcher is not None:
-            self.mapper_event_dispatcher.register_callback(
-                "ON_LAYOUT_RELOAD", self._load_layout
-            )
-
     def get_mouse_wheel_info(self) -> tuple[float, float]:
         with self.layout_lock:
             return self.mouse_wheel_radius, self.sprint_distance
@@ -142,6 +137,7 @@ class LayoutLoader:
         )
 
     def reload(self) -> None:
+        self._load_layout()
         self.config.reload_config()
         if self.mapper_event_dispatcher is not None:
             self.mapper_event_dispatcher.dispatch(
