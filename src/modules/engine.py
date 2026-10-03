@@ -83,6 +83,9 @@ class Engine:
         self.vkb_reader, self.vkb_writer = multiprocessing.Pipe()
         self.vkb_process: multiprocessing.Process | None = None
 
+        self.double_tap_enabled = True
+        self.bezels_enabled = True
+
         # Debounce tracking for hotkeys
         self._last_hotkey_time = 0.0
         self._hotkey_cooldown = 0.4
@@ -142,15 +145,14 @@ class Engine:
     def _reload_layout_cli(self) -> None:
         if not self._check_debounce():
             return
-        
+
         self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
         logger.info("CLI Hotkey Triggered [F6]: Layout reload event dispatched.")
-
 
     def _reload_config_cli(self) -> None:
         if not self._check_debounce():
             return
-        
+
         self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
         logger.info("CLI Hotkey Triggered [F7]: Configuration reload event dispatched.")
 
@@ -222,6 +224,9 @@ class Engine:
         self._tiers = self._build_pipeline_tiers()
 
     def _on_config_reload(self) -> None:
+        settings = store.settings.get()
+        self.double_tap_enabled = settings.double_tap_enabled
+        self.bezels_enabled = settings.bezels_enabled
         self._tiers = self._build_pipeline_tiers()
 
     def _build_pipeline_tiers(self) -> list[list[Pipeline]]:
@@ -275,13 +280,13 @@ class Engine:
         output_sink = self.output_sink
 
         if self.is_visible:
-            if store.settings.get().double_tap_enabled and self.two_finger_tap_tracker.process(touch_event):
+            if self.double_tap_enabled and self.two_finger_tap_tracker.process(touch_event):
                 self.toggle_mode()
                 return
 
             for tier in tiers:
                 for p in tier:
-                    if p.is_system and store.settings.get().bezels_enabled and p.claims(touch_event):
+                    if p.is_system and self.bezels_enabled and p.claims(touch_event):
                         p.process(touch_event, output_sink)
                         return
 
@@ -306,7 +311,7 @@ class Engine:
         claimed_existing = False
         for tier in tiers:
             for p in tier:
-                if p.is_system and not store.settings.get().bezels_enabled:
+                if p.is_system and not self.bezels_enabled:
                     continue
                 if p.owns(touch_event.contact_id):
                     p.process(touch_event, output_sink)
@@ -316,6 +321,8 @@ class Engine:
             for tier in tiers:
                 tier_claimed = False
                 for p in tier:
+                    if p.is_system and not self.bezels_enabled:
+                        continue
                     if p.claims(touch_event):
                         p.process(touch_event, output_sink)
                         tier_claimed = True
@@ -347,6 +354,10 @@ class Engine:
         k_device_handle: int | None = None,
         m_device_handle: int | None = None,
     ) -> None:
+
+        settings = store.settings.get()
+        self.double_tap_enabled = settings.double_tap_enabled
+        self.bezels_enabled = settings.bezels_enabled
 
         self.layout_loader = LayoutLoader(
             self.mapper_event_dispatcher,
