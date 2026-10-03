@@ -47,7 +47,6 @@ The first version with only CLI support and basic GUI windows can be accessed [h
     * **Bottom Bezel:** Loads the Virtual Keyboard. This runs in production mode sending direct IPC commands to the engine for zero-latency typing, bypassing standalone CLI testing modes.
     * **Double-Tap Quick Return:** If the cursor is currently *visible* (Menu Mode), double-tapping anywhere on the screen will instantly hide it and return you to Game Mode. (Double-tap is ignored while already in-game to prevent accidental triggers).
 
-
 * **Dynamic Camera & Joystick Integration:**
   * **Buttons:** Configurable `pointer` zones emit simultaneous keypresses and camera deltas (e.g., for aiming while shooting).
   * **Fixed vs. Anchored/Floating Joysticks:** Fixed HUD joysticks free the rest of the display for full-screen camera look. Anchored and Floating joysticks partition screen halves dynamically based on user handedness and subsequently leash. Anchored joysticks initially snap (bounded by the snap radius) to fixed joystick HUD coordinates in the joystick region unlike Floating joysticks that report the initial touch position in the HUD region.
@@ -108,9 +107,6 @@ The app sets up an icon shortcut on your desktop (that launches the GUI directly
 
 ## Installation
 
-### Prerequisites
-* Python 3.10+
-* Android device with **USB Debugging** enabled
 ### Prerequisites
 * Python 3.10+
 * Android device with **USB Debugging** enabled
@@ -203,10 +199,13 @@ touch2key-manage --show-typematic
 touch2key-manage --set-typematic on --typematic-delay 200 --typematic-rate 35
 touch2key-manage --typematic-excludes "w,a,s,d,shift,ctrl,alt"
 touch2key-manage --reset-typematic
+touch2key-manage --show-system
+touch2key-manage --set-double-tap off
+touch2key-manage --set-bezel-toggle on
+touch2key-manage --reset-system
 touch2key-manage --set-image 1 path/to/hud_screenshot.png
 touch2key-manage --set-left-handed on
 ```
-*(Choose options like `[ss]` inside the interactive terminal menu to configure double-tap and bezel toggle fields interactively, or `[rss]` to reset them).*
 
 ---
 
@@ -221,3 +220,4 @@ To support editable mode, run `pip install -e .[dev]` (add the `-e` flag) during
 
 ## License
 MIT License.
+>>>>
