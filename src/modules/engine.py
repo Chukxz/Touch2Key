@@ -275,13 +275,13 @@ class Engine:
         output_sink = self.output_sink
 
         if self.is_visible:
-            if self.two_finger_tap_tracker.process(touch_event):
+            if store.settings.get().double_tap_enabled and self.two_finger_tap_tracker.process(touch_event):
                 self.toggle_mode()
                 return
 
             for tier in tiers:
                 for p in tier:
-                    if p.is_system and p.claims(touch_event):
+                    if p.is_system and store.settings.get().bezels_enabled and p.claims(touch_event):
                         p.process(touch_event, output_sink)
                         return
 
@@ -306,6 +306,8 @@ class Engine:
         claimed_existing = False
         for tier in tiers:
             for p in tier:
+                if p.is_system and not store.settings.get().bezels_enabled:
+                    continue
                 if p.owns(touch_event.contact_id):
                     p.process(touch_event, output_sink)
                     claimed_existing = True
