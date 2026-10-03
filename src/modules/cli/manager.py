@@ -704,6 +704,28 @@ def run() -> None:
         help="Reset only typematic/auto-repeat settings to factory defaults",
     )
 
+    # System Settings CLI flags
+    parser.add_argument(
+        "--show-system",
+        action="store_true",
+        help="Display system settings (double tap and bezel toggles)",
+    )
+    parser.add_argument(
+        "--set-double-tap",
+        choices=["on", "off"],
+        help="Enable or disable the double-tap menu gesture",
+    )
+    parser.add_argument(
+        "--set-bezel-toggle",
+        choices=["on", "off"],
+        help="Enable or disable system bezel touch toggles",
+    )
+    parser.add_argument(
+        "--reset-system",
+        action="store_true",
+        help="Reset system settings to factory defaults",
+    )
+
     parser.add_argument(
         "-i",
         "--import-json",
@@ -786,7 +808,7 @@ def run() -> None:
         typematic_updates = {}
         if args.set_typematic is not None:
             typematic_updates["typematic_enabled"] = (
-                1 if args.set_typematic == "on" else 0
+                True if args.set_typematic == "on" else False
             )
         if args.typematic_delay is not None:
             typematic_updates["typematic_delay_ms"] = args.typematic_delay
@@ -803,9 +825,36 @@ def run() -> None:
 
         if args.reset_typematic:
             reset_typematic_defaults()
+            return
         elif args.show_typematic:
             show_typematic()
-        elif args.list:
+            return
+
+        # Check system mutation flags
+        system_updates = {}
+        if args.set_double_tap is not None:
+            system_updates["double_tap_enabled"] = (
+                True if args.set_double_tap == "on" else False
+            )
+        if args.set_bezel_toggle is not None:
+            system_updates["bezel_toggle_enabled"] = (
+                True if args.set_bezel_toggle == "on" else False
+            )
+
+        if system_updates:
+            store.settings.update(**system_updates)
+            print("System settings updated successfully.")
+            show_system()
+            return
+
+        if args.reset_system:
+            reset_system_defaults()
+            return
+        elif args.show_system:
+            show_system()
+            return
+
+        if args.list:
             list_profiles()
         elif args.set_image is not None:
             set_profile_image(int(args.set_image[0]), args.set_image[1])
