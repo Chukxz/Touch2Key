@@ -203,7 +203,7 @@ touch2key-manage --show-system
 touch2key-manage --set-double-tap off
 touch2key-manage --set-bezel-toggle on
 touch2key-manage --reset-system
-touch2key-manage --set-image 1 path/to/hud_screenshot.png
+touch2key-manage --set-image <layout_id> path/to/hud_screenshot.png  # e.g., --set-image 1 hud.png
 touch2key-manage --set-left-handed on
 ```
 
