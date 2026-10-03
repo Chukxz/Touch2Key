@@ -21,7 +21,6 @@ from .core.pipeline_factory import (
     SystemToggle,
 )
 from .core.touch_reader import TouchReader
-from .core.config import AppConfig
 from .core.layout_loader import LayoutLoader
 from .core.mapper import Mapper
 from .core.bezel_mapper import BezelMapper
@@ -40,7 +39,6 @@ __all__ = [
     "IMAGES_FOLDER",
     "JSONS_FOLDER",
     "store",
-    "AppConfig",
     "LayoutLoader",
     "TouchReader",
     "Mapper",

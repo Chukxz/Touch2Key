@@ -21,6 +21,8 @@ from modules.utils import (
     scale_coord,
 )
 
+from modules.database import store
+
 if TYPE_CHECKING:
     from .mapper import Mapper
 
@@ -38,7 +40,6 @@ class KeyMapper:
         typematic_excluded_keys: str | None = None,
     ):
         self.mapper = mapper
-        self.config = mapper.config
         self.bridge = mapper.bridge
         self.output_sink = output_sink
         self.mapper_event_dispatcher = mapper.mapper_event_dispatcher
@@ -55,13 +56,23 @@ class KeyMapper:
         self._build_pipelines()
         self._sync_typematic_to_bridge()
 
-        self.mapper_event_dispatcher.register_callback("ON_LAYOUT_RELOAD", self._build_pipelines)
-        self.mapper_event_dispatcher.register_callback("ON_WORKER_RESPAWN", self._on_worker_respawn)
-        self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self._on_config_reload)
+        self.mapper_event_dispatcher.register_callback(
+            "ON_LAYOUT_RELOAD", self._build_pipelines
+        )
+        self.mapper_event_dispatcher.register_callback(
+            "ON_WORKER_RESPAWN", self._on_worker_respawn
+        )
+        self.mapper_event_dispatcher.register_callback(
+            "ON_CONFIG_RELOAD", self._on_config_reload
+        )
 
     def _resolve_scancode_set(self, raw_tokens: str | None) -> set[int]:
         fallback = set(EXCLUDED_KEYS)
-        tokens = {k.strip().lower() for k in raw_tokens.split(",") if k.strip()} if raw_tokens else fallback
+        tokens = (
+            {k.strip().lower() for k in raw_tokens.split(",") if k.strip()}
+            if raw_tokens
+            else fallback
+        )
         resolved_codes = set()
         for token in tokens:
             code = get_scancode_from_key(token)
@@ -79,19 +90,28 @@ class KeyMapper:
         )
 
     def _on_config_reload(self) -> None:
-        s = self.config.settings
-        if s:
-            self.typematic_enabled = bool(getattr(s, "typematic_enabled", True))
-            self.typematic_delay_ms = float(getattr(s, "typematic_delay_ms", 250.0))
-            self.typematic_rate_hz = float(getattr(s, "typematic_rate_hz", 30.0))
-            self.typematic_excluded_keys = getattr(s, "typematic_excluded_keys", None)
-            self._sync_typematic_to_bridge()
-            logger.info("KeyMapper pushed updated typematic parameters to bridge.")
+        s = store.settings.get()
+        self.typematic_enabled = bool(getattr(s, "typematic_enabled", True))
+        self.typematic_delay_ms = float(getattr(s, "typematic_delay_ms", 250.0))
+        self.typematic_rate_hz = float(getattr(s, "typematic_rate_hz", 30.0))
+        self.typematic_excluded_keys = getattr(s, "typematic_excluded_keys", None)
+        self._sync_typematic_to_bridge()
+        logger.info("KeyMapper pushed updated typematic parameters to bridge.")
 
     def _build_pipelines(self) -> None:
+        settings = store.settings.get()
+        layout = store.get_active_layout()
+        if layout is None:
+            logger.warning(
+                "No active layout found in SQLite database. Key pipelines will be empty."
+            )
+            self.release_all()
+            self.pipelines = []
+            return
+
         key_raw_zones = self.mapper.layout_loader.keys_json_data.copy()
-        w = float(self.mapper.layout_loader.width)
-        h = float(self.mapper.layout_loader.height)
+        w = float(layout.width)
+        h = float(layout.height)
 
         new_pipelines = []
 
@@ -107,18 +127,35 @@ class KeyMapper:
             ignore_app_settings = bool(values.get("ignore_app_settings", False))
             is_mouse_btn = scancode in (M_LEFT, M_RIGHT, M_MIDDLE)
 
-            sens_x = float(values.get("sensitivity_x", 1.0)) if ignore_app_settings else self.config.settings.sensitivity_x
-            sens_y = float(values.get("sensitivity_y", 1.0)) if ignore_app_settings else self.config.settings.sensitivity_y
+            sens_x = (
+                float(values.get("sensitivity_x", 1.0))
+                if ignore_app_settings
+                else settings.sensitivity_x
+            )
+            sens_y = (
+                float(values.get("sensitivity_y", 1.0))
+                if ignore_app_settings
+                else settings.sensitivity_y
+            )
 
             if z_type == CIRCLE:
                 region = CircularRegion(
-                    center=Point(scale_coord(w, values.get("cx")), scale_coord(h, values.get("cy"))),
+                    center=Point(
+                        scale_coord(w, values.get("cx")),
+                        scale_coord(h, values.get("cy")),
+                    ),
                     radius=scale_coord(w, values.get("r", values.get("val1", 50.0))),
                 )
             elif z_type == RECTANGLE:
                 region = RectangularRegion(
-                    top_left=Point(scale_coord(w, values.get("x1")), scale_coord(h, values.get("y1"))),
-                    bottom_right=Point(scale_coord(w, values.get("x2")), scale_coord(h, values.get("y2"))),
+                    top_left=Point(
+                        scale_coord(w, values.get("x1")),
+                        scale_coord(h, values.get("y1")),
+                    ),
+                    bottom_right=Point(
+                        scale_coord(w, values.get("x2")),
+                        scale_coord(h, values.get("y2")),
+                    ),
                 )
             else:
                 continue

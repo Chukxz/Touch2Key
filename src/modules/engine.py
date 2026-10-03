@@ -22,7 +22,6 @@ from modules.utils import (
 )
 
 from modules import (
-    AppConfig,
     LayoutLoader,
     TouchReader,
     Mapper,
@@ -143,26 +142,17 @@ class Engine:
     def _reload_layout_cli(self) -> None:
         if not self._check_debounce():
             return
-        try:
-            if self.layout_loader is not None:
-                self.layout_loader.reload()
-            else:
-                self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
-            logger.info("CLI Hotkey Triggered [F6]: Layout reloaded.")
-        except Exception as exc:
-            logger.error("Failed to reload layout via hotkey: %s", exc)
+        
+        self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+        logger.info("CLI Hotkey Triggered [F6]: Layout reload event dispatched.")
+
 
     def _reload_config_cli(self) -> None:
         if not self._check_debounce():
             return
-        try:
-            if self.layout_loader and hasattr(self.layout_loader, "config"):
-                self.layout_loader.config.reload_config()
-            else:
-                self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
-            logger.info("CLI Hotkey Triggered [F7]: Configuration reloaded.")
-        except Exception as exc:
-            logger.error("Failed to reload configuration via hotkey: %s", exc)
+        
+        self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+        logger.info("CLI Hotkey Triggered [F7]: Configuration reload event dispatched.")
 
     def _on_devices_change(self, k_id: int | None, m_id: int | None) -> None:
         if not self.bridge_class or self.bridge_class.k_proc is None:
@@ -229,8 +219,6 @@ class Engine:
             self.two_finger_tap_tracker.reset()
 
     def _on_layout_reload(self) -> None:
-        if self.layout_loader is not None:
-            self.layout_loader.reload()
         self._tiers = self._build_pipeline_tiers()
 
     def _on_config_reload(self) -> None:
@@ -247,9 +235,6 @@ class Engine:
             all_pipelines.append(self.mouse_mapper.pipeline)
         if self.bezel_mapper:
             all_pipelines.extend(self.bezel_mapper.pipelines)
-
-        if self.layout_loader and self.layout_loader.custom_pipelines:
-            all_pipelines.extend(self.layout_loader.custom_pipelines)
 
         all_pipelines.sort(
             key=lambda p: (
@@ -361,13 +346,12 @@ class Engine:
         m_device_handle: int | None = None,
     ) -> None:
 
-        config = AppConfig(self.mapper_event_dispatcher)
         self.layout_loader = LayoutLoader(
-            config=config,
+            self.mapper_event_dispatcher,
             foreground_window=self.foreground_window,
             toggle_mode_callback=self.toggle_mode,
         )
-        self.touch_reader = TouchReader(config, self.mapper_event_dispatcher, rate_cap)
+        self.touch_reader = TouchReader(self.mapper_event_dispatcher, rate_cap)
 
         self.mapper = Mapper(
             self.layout_loader,

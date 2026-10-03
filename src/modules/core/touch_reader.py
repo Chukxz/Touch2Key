@@ -23,8 +23,9 @@ from modules.utils import (
     wireless_connect,
 )
 
+from modules.database import store
+
 if TYPE_CHECKING:
-    from .config import AppConfig
     from modules.utils import MapperEventDispatcher
 
 logger = logging.getLogger("modules.core.touch_reader")
@@ -33,11 +34,9 @@ logger = logging.getLogger("modules.core.touch_reader")
 class TouchReader:
     def __init__(
         self,
-        config: AppConfig,
         dispatcher: MapperEventDispatcher,
         rate_cap: float = DEFAULT_ADB_RATE_CAP,
     ):
-        self.config = config
         self.mapper_event_dispatcher = dispatcher
 
         self.device: str | None = None
@@ -48,6 +47,7 @@ class TouchReader:
         self.rotation = 0
         self.rotation_poll_interval = ROTATION_POLL_INTERVAL
         self.rotation_lock = threading.Lock()
+        self.device_lock = threading.Lock()
         self.running = True
 
         # Device screen resolution (pixels)
@@ -80,16 +80,15 @@ class TouchReader:
 
     def _on_config_reload(self) -> None:
         """Dynamically updates rate-limiting intervals and matrix transforms."""
-        with self.config.config_lock:
-            new_cap = getattr(self.config.settings, "adb_rate_cap", self.adb_rate_cap)
-            if new_cap > 0 and new_cap != self.adb_rate_cap:
-                self.adb_rate_cap = float(new_cap)
-                self.move_interval = 1.0 / self.adb_rate_cap
-                logger.info(
-                    "TouchReader pacing updated on the fly: %.1f Hz (%.4fs interval)",
-                    self.adb_rate_cap,
-                    self.move_interval,
-                )
+        new_cap = store.settings.get().adb_rate_cap
+        if new_cap > 0 and new_cap != self.adb_rate_cap:
+            self.adb_rate_cap = float(new_cap)
+            self.move_interval = 1.0 / self.adb_rate_cap
+            logger.info(
+                "TouchReader pacing updated on the fly: %.1f Hz (%.4fs interval)",
+                self.adb_rate_cap,
+                self.move_interval,
+            )
 
         with self.rotation_lock:
             self._update_matrix()
@@ -97,14 +96,14 @@ class TouchReader:
     def _connect_wirelessly(self) -> None:
         connecting = True
         while self.running and connecting:
-            with self.config.config_lock:
+            with self.device_lock:
                 device = self.device
             ret = wireless_connect(device, False)
             if ret:
                 success, dev = ret
                 if success:
                     connecting = False
-                    with self.config.config_lock:
+                    with self.device_lock:
                         self.device = dev
                     # Stop the USB getevent process without clearing self.device;
                     # _get_touches() will release held keys and reconfigure on the next loop.
@@ -289,11 +288,11 @@ class TouchReader:
         current_slot = 0
         while self.running:
             try:
-                with self.config.config_lock:
+                with self.device_lock:
                     self._configure_device()
                     active_device = self.device
             except RuntimeError:
-                with self.config.config_lock:
+                with self.device_lock:
                     self.device = None
                 time.sleep(LONG_DELAY)
                 continue
@@ -455,7 +454,7 @@ class TouchReader:
         self, clear_device: bool = True, expected_device: str | None = None
     ) -> None:
         if clear_device:
-            with self.config.config_lock:
+            with self.device_lock:
                 if expected_device is None or self.device == expected_device:
                     self.device = None
         if self.process:

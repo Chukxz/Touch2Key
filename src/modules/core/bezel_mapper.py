@@ -2,14 +2,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 import threading
+import logging
 
 from modules.utils import BEZEL, scale_coord
 from modules.core.pipeline import RectangularRegion, Point
 from modules.core.pipeline_factory import SystemToggle
+from modules.database import store
 
 if TYPE_CHECKING:
     from modules.core.mapper import Mapper
     from modules.core.pipeline_output import BridgeOutputSink
+    
+logger = logging.getLogger("modules.core.bezel_mapper")
 
 
 class BezelMapper:
@@ -27,9 +31,18 @@ class BezelMapper:
         self.mapper_event_dispatcher.register_callback("ON_WORKER_RESPAWN", self._on_worker_respawn)
 
     def _build_pipelines(self):
+        layout = store.get_active_layout()
+        if layout is None:
+            logger.warning(
+                "No active layout found in SQLite database. Bezel pipelines will be empty."
+            )
+            self.release_all()
+            self.pipelines = []
+            return
+        
         bezels_raw_zones = self.mapper.layout_loader.bezels_json_data.copy()
-        w = float(self.mapper.layout_loader.width)
-        h = float(self.mapper.layout_loader.height)
+        w = float(layout.width)
+        h = float(layout.height)
 
         new_pipelines = []
 

@@ -42,7 +42,6 @@ class Mapper:
         ref: Engine,
     ):
         self.layout_loader = layout_loader
-        self.config = self.layout_loader.config
         self.mapper_event_dispatcher = self.layout_loader.mapper_event_dispatcher
         self.touch_reader = touch_reader
         self.bridge = bridge
@@ -51,8 +50,6 @@ class Mapper:
         self.event_count = 0
         self.last_pulse_time = time.perf_counter()
         self.engine_ref = ref
-        self.is_floating_joystick: bool = False
-        self.is_anchored_joystick: bool = False
 
         self.window_manager = get_platform().WindowManager()
         self.screen_w, self.screen_h = self.window_manager.get_screen_dimensions()
@@ -67,7 +64,9 @@ class Mapper:
             self.window_id = window_id
         else:
             self.window_id = self.window_manager.get_foreground_window()
-            logger.info("Defaulting to foreground target window: HWND %s", self.window_id)
+            logger.info(
+                "Defaulting to foreground target window: HWND %s", self.window_id
+            )
 
         self.game_window_class_name: str | None = (
             self.window_manager.get_window_class_name(self.window_id)
@@ -92,14 +91,22 @@ class Mapper:
 
         self._update_config()
 
-        self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self._update_config)
-        self.mapper_event_dispatcher.register_callback("ON_TARGET_WINDOW_CHANGE", self.rebind_target_window)
+        self.mapper_event_dispatcher.register_callback(
+            "ON_CONFIG_RELOAD", self._update_config
+        )
+        self.mapper_event_dispatcher.register_callback(
+            "ON_TARGET_WINDOW_CHANGE", self.rebind_target_window
+        )
 
         self.running = True
-        self.window_thread = threading.Thread(target=self._update_game_window_info, daemon=True)
+        self.window_thread = threading.Thread(
+            target=self._update_game_window_info, daemon=True
+        )
         self.window_thread.start()
 
-        self.vkb_listener = threading.Thread(target=self._virtual_keyboard_listener, daemon=True)
+        self.vkb_listener = threading.Thread(
+            target=self._virtual_keyboard_listener, daemon=True
+        )
         self.vkb_listener.start()
 
         self.mapper_event_dispatcher.dispatch(
@@ -108,47 +115,55 @@ class Mapper:
         self.bridge.set_respawn_callback(self._on_worker_respawn)
 
     def _update_config(self) -> None:
-        with self.lock:
-            self.device_width = self.layout_loader.width
-            self.device_height = self.layout_loader.height
-            self.dpi = self.layout_loader.dpi
+        settings = store.settings.get()
+        layout = store.get_active_layout()
+        if layout is None:
+            logger.warning(
+                "No active layout found in SQLite database. Mapper configuration update aborted."
+            )
+            return
 
-            try:
-                s = store.settings.get()
-                self.is_floating_joystick = bool(s.floating_joystick)
-                self.is_anchored_joystick = bool(s.anchored_joystick)
-                if s.pps_alert_threshold > 0:
-                    self.pps = float(s.pps_alert_threshold)
-                if s.toggle_key:
-                    self.emulator["toggle_key"] = s.toggle_key
-                    self.toggle_key_scancode = SCANCODES.get(s.toggle_key)
-            except Exception:
-                s = getattr(self.config, "settings", None)
-                if s:
-                    self.is_floating_joystick = getattr(s, "floating_joystick", False)
-                    self.is_anchored_joystick = getattr(s, "anchored_joystick", False)
-                    if hasattr(s, "pps_alert_threshold") and s.pps_alert_threshold > 0:
-                        self.pps = float(s.pps_alert_threshold)
-                    if hasattr(s, "toggle_key") and s.toggle_key:
-                        self.emulator["toggle_key"] = s.toggle_key
-                        self.toggle_key_scancode = SCANCODES.get(s.toggle_key)
+        self.device_width = layout.width
+        self.device_height = layout.height
+        self.dpi = layout.dpi
 
-    def rebind_target_window(self, new_window_id: int | None, new_window_title: str) -> None:
+        if settings.pps_alert_threshold > 0:
+            self.pps = float(settings.pps_alert_threshold)
+        if settings.toggle_key:
+            self.emulator["toggle_key"] = settings.toggle_key
+            self.toggle_key_scancode = SCANCODES.get(settings.toggle_key)
+
+    def rebind_target_window(
+        self, new_window_id: int | None, new_window_title: str
+    ) -> None:
         with self.lock:
             if new_window_id and self.window_manager.is_window_valid(new_window_id):
                 self.window_id = new_window_id
-                self.game_window_class_name = self.window_manager.get_window_class_name(new_window_id)
+                self.game_window_class_name = self.window_manager.get_window_class_name(
+                    new_window_id
+                )
                 self.game_window_info = self._get_window_info(new_window_id)
                 self.window_lost = False
-                logger.info("Engine live-rebound to Window ID: %s (%s)", self.window_id, self.game_window_class_name)
+                logger.info(
+                    "Engine live-rebound to Window ID: %s (%s)",
+                    self.window_id,
+                    self.game_window_class_name,
+                )
             else:
                 self.window_id = self.window_manager.get_foreground_window()
                 self.game_window_class_name = (
-                    self.window_manager.get_window_class_name(self.window_id) if self.window_id else None
+                    self.window_manager.get_window_class_name(self.window_id)
+                    if self.window_id
+                    else None
                 )
-                self.game_window_info = self._get_window_info(self.window_id) if self.window_id else None
+                self.game_window_info = (
+                    self._get_window_info(self.window_id) if self.window_id else None
+                )
                 self.window_lost = self.window_id is None
-                logger.warning("Target window invalidated. Rebound to foreground HWND: %s", self.window_id)
+                logger.warning(
+                    "Target window invalidated. Rebound to foreground HWND: %s",
+                    self.window_id,
+                )
 
     def _get_window_info(self, window_id: int) -> dict:
         width, height = self.window_manager.get_window_dimensions(window_id)
@@ -161,9 +176,17 @@ class Mapper:
         )
         if is_visible != self.last_cursor_state:
             self.last_cursor_state = is_visible
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_MENU_MODE_TOGGLE", is_visible=is_visible))
+            self.mapper_event_dispatcher.dispatch(
+                MapperEvent(action="ON_MENU_MODE_TOGGLE", is_visible=is_visible)
+            )
 
-        return {"window_id": window_id, "left": x, "top": y, "width": width, "height": height}
+        return {
+            "window_id": window_id,
+            "left": x,
+            "top": y,
+            "width": width,
+            "height": height,
+        }
 
     def _update_game_window_info(self) -> None:
         while self.running and not self.stop_event.is_set():
@@ -173,7 +196,9 @@ class Mapper:
                     if self.game_window_info:
                         current_window_id = self.game_window_info.get("window_id")
 
-                if current_window_id and self.window_manager.is_window_valid(current_window_id):
+                if current_window_id and self.window_manager.is_window_valid(
+                    current_window_id
+                ):
                     new_info = self._get_window_info(current_window_id)
                     with self.lock:
                         self.game_window_info = new_info
@@ -197,11 +222,15 @@ class Mapper:
             except Exception as e:
                 logger.debug("Window tracking exception: %s", e)
 
-            sleep_duration = LONG_DELAY if self.window_lost else self.window_update_interval
+            sleep_duration = (
+                LONG_DELAY if self.window_lost else self.window_update_interval
+            )
             self.stop_event.wait(sleep_duration)
 
     def _get_game_window_info(self) -> dict:
-        window_ids = self.window_manager.find_window_ids_by_class(self.game_window_class_name)
+        window_ids = self.window_manager.find_window_ids_by_class(
+            self.game_window_class_name
+        )
         target_info = None
         max_diag = 0
 
@@ -216,12 +245,16 @@ class Mapper:
                 target_info = info
 
         if target_info is None:
-            raise RuntimeError(f"No visible window found for class: '{self.game_window_class_name}'.")
+            raise RuntimeError(
+                f"No visible window found for class: '{self.game_window_class_name}'."
+            )
         return target_info
 
     def device_to_game_abs(self, x: float, y: float) -> tuple[float, float]:
         rot = self.touch_reader.get_rotation()
-        rot_dev_w, rot_dev_h = rotate_resolution(self.device_width, self.device_height, rot)
+        rot_dev_w, rot_dev_h = rotate_resolution(
+            self.device_width, self.device_height, rot
+        )
         rot_dev_w = max(1.0, float(rot_dev_w))
         rot_dev_h = max(1.0, float(rot_dev_h))
 
@@ -248,8 +281,15 @@ class Mapper:
             self.event_count = 0
             self.last_pulse_time = now
             pps = current_count / elapsed
-            status = "HEALTHY" if pps >= self.pps else ("IDLE" if pps == 0 else "LOW RATE")
-            logger.info("Rate: %5.1f Hz | Status: %s | WASD Block: %d", pps, status, self.wasd_block)
+            status = (
+                "HEALTHY" if pps >= self.pps else ("IDLE" if pps == 0 else "LOW RATE")
+            )
+            logger.info(
+                "Rate: %5.1f Hz | Status: %s | WASD Block: %d",
+                pps,
+                status,
+                self.wasd_block,
+            )
 
     def _virtual_keyboard_listener(self) -> None:
         while self.running and not self.stop_event.is_set():
@@ -293,7 +333,9 @@ class Mapper:
                 self.stop_event.wait(VKB_SLEEP_TIME)
 
     def _on_worker_respawn(self, worker_type: str) -> None:
-        self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_WORKER_RESPAWN", worker_type=worker_type))
+        self.mapper_event_dispatcher.dispatch(
+            MapperEvent(action="ON_WORKER_RESPAWN", worker_type=worker_type)
+        )
 
     def stop(self) -> None:
         self.running = False

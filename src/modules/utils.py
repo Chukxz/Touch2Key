@@ -482,8 +482,16 @@ class MapperEventDispatcher:
                     return
 
                 callbacks = self.callback_registry[event_type]
+
                 if func not in callbacks:
                     callbacks.append(func)
+                    print(
+                        f"[+] Registered callback {func.__name__} for event {event_type}"
+                    )
+                else:
+                    print(
+                        f"[!] Callback {func.__name__} already registered for event {event_type}"
+                    )
 
         except Exception as exc:
             func_name = getattr(func, "__name__", repr(func))
@@ -505,8 +513,16 @@ class MapperEventDispatcher:
                     return
 
                 callbacks = self.callback_registry[event_type]
+
                 if func in callbacks:
                     callbacks.remove(func)
+                    print(
+                        f"[+] Unregistered callback {func.__name__} for event {event_type}"
+                    )
+                else:
+                    print(
+                        f"[!] Callback {func.__name__} not found for event {event_type}"
+                    )
 
         except Exception as exc:
             func_name = getattr(func, "__name__", repr(func))
@@ -524,6 +540,10 @@ class MapperEventDispatcher:
                         for cb in callbacks
                         if getattr(cb, "__self__", None) is not owner
                     ]
+                    print(
+                        f"[+] Unregistered callbacks for owner {owner} in event {event_type}"
+                    )
+                print(f"[+] Unregistered all callbacks for owner {owner}")
 
         except Exception as exc:
             print(f"[!] Error unregistering callbacks for owner {owner}: {exc}")
@@ -533,6 +553,8 @@ class MapperEventDispatcher:
         with self._lock:
             for event_type in self.callback_registry:
                 self.callback_registry[event_type].clear()
+                print(f"[+] Cleared all callbacks for event {event_type}")
+            print("[+] Unregistered all callbacks for all events")
 
     def dispatch(self, event: MapperEvent) -> None:
         with self._lock:
@@ -543,6 +565,9 @@ class MapperEventDispatcher:
         for callback in callbacks:
             try:
                 callback(*args)
+                print(
+                    f"[+] Dispatched event {event.action} to callback {callback.__name__}"
+                )
             except Exception as exc:
                 func_name = getattr(callback, "__name__", repr(callback))
                 print(

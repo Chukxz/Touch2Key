@@ -4,20 +4,17 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Any
 
-from modules.database import Layout, LayoutZone, store
+from modules.database import store
 from modules.utils import (
-    BASELINE_DPI,
-    BASELINE_HEIGHT,
-    BASELINE_WIDTH,
     BEZEL,
     CIRCLE,
     RECTANGLE,
-    MapperEvent,
 )
+
 from modules.core.bezel_validator import ensure_system_bezels
 
 if TYPE_CHECKING:
-    from .config import AppConfig
+    from modules.utils import MapperEventDispatcher
 
 logger = logging.getLogger("modules.core.layout_loader")
 
@@ -29,46 +26,27 @@ class LayoutLoader:
 
     def __init__(
         self,
-        config: AppConfig,
+        dispatcher: MapperEventDispatcher,
         foreground_window: Any = None,
         toggle_mode_callback: Any | None = None,
     ):
-        self.config = config
-        self.mapper_event_dispatcher = config.mapper_event_dispatcher
+        self.mapper_event_dispatcher = dispatcher
         self.foreground_window = foreground_window
         self.toggle_mode_callback = toggle_mode_callback
-
         self.layout_lock = threading.Lock()
-        self.active_layout: Layout | None = None
-        self.zones: list[LayoutZone] = []
-
-        self.width: int = BASELINE_WIDTH
-        self.height: int = BASELINE_HEIGHT
-        self.dpi: int = BASELINE_DPI
-        self.mouse_wheel_radius: float = 150.0
-        self.sprint_distance: float = 100.0
 
         self.keys_json_data: list[tuple[str, dict[str, Any]]] = []
         self.bezels_json_data: list[tuple[str, dict[str, Any]]] = []
 
-        self._load_layout()
+        self.load_layout()
+        self.mapper_event_dispatcher.register_callback("ON_LAYOUT_RELOAD", self.load_layout)
 
-    def get_mouse_wheel_info(self) -> tuple[float, float]:
-        with self.layout_lock:
-            return self.mouse_wheel_radius, self.sprint_distance
-
-    def _load_layout(self) -> None:
-        """Loads metadata and parses bezel pipelines."""
+    def load_layout(self) -> None:
+        """Loads metadata and parses bezel and keys pipelines."""
         layout = store.get_active_layout()
         if layout is None:
             logger.warning("No active layout found in SQLite database.")
-            settings = store.settings.get()
             with self.layout_lock:
-                self.active_layout = None
-                self.zones = []
-                self.width = settings.json_dev_width or BASELINE_WIDTH
-                self.height = settings.json_dev_height or BASELINE_HEIGHT
-                self.dpi = settings.json_dev_dpi or BASELINE_DPI
                 self.keys_json_data = []
                 self.bezels_json_data = []
             return
@@ -80,9 +58,6 @@ class LayoutLoader:
         # Guard against zero or negative dimensions
         layout_w = max(int(layout.width or 0), 1)
         layout_h = max(int(layout.height or 0), 1)
-
-        normalized_keys: list[tuple[str, dict[str, Any]]] = []
-        normalized_bezels: list[tuple[str, dict[str, Any]]] = []
 
         for z in zones:
             z.set_parsed_config_from_json()
@@ -113,20 +88,9 @@ class LayoutLoader:
                 z_dict["y2"] = (z.y2 or 0.0) / layout_h
 
             if z.zone_type == BEZEL:
-                normalized_bezels.append((z.scancode, z_dict))
+                self.bezels_json_data.append((z.scancode, z_dict))
             else:
-                normalized_keys.append((z.scancode, z_dict))
-
-        with self.layout_lock:
-            self.active_layout = layout
-            self.zones = zones
-            self.width = layout_w
-            self.height = layout_h
-            self.dpi = layout.dpi
-            self.mouse_wheel_radius = layout.mouse_wheel_radius
-            self.sprint_distance = layout.sprint_distance
-            self.bezels_json_data = normalized_bezels
-            self.keys_json_data = normalized_keys
+                self.keys_json_data.append((z.scancode, z_dict))
 
         logger.info(
             "Active layout '%s' loaded. (%dx%d, %d zones)",
@@ -135,12 +99,3 @@ class LayoutLoader:
             layout_h,
             len(zones),
         )
-
-    def reload(self) -> None:
-        self._load_layout()
-        self.config.reload_config()
-        if self.mapper_event_dispatcher is not None:
-            self.mapper_event_dispatcher.dispatch(
-                MapperEvent(action="ON_LAYOUT_RELOAD")
-            )
-        logger.info("Layout hot-reloaded and dispatched.")
