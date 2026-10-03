@@ -624,7 +624,7 @@ def run() -> None:
         "--set-image",
         nargs=2,
         metavar=("LAYOUT_ID", "IMAGE_PATH"),
-        help="Set background image path for layout by ID",
+        help="Set background image path for a specific layout by its ID (e.g., --set-image 1 hud.png)",
     )
     parser.add_argument(
         "--show-left-handed",
