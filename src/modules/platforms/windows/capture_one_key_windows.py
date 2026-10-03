@@ -33,33 +33,61 @@ def capture_one_key_windows(timeout_ms: int | None = None) -> int | None:
     """
     result: dict[str, int | None] = {"code": None}
 
+    user32 = ctypes.windll.user32
+
+    # Configure explicit signatures for 64-bit safety (using LPARAM / c_ssize_t for pointer-sized results)
+    user32.SetWindowsHookExW.argtypes = [
+        ctypes.c_int,
+        LowLevelKeyboardProc,
+        wintypes.HMODULE,
+        wintypes.DWORD,
+    ]
+    user32.SetWindowsHookExW.restype = wintypes.HHOOK
+
+    user32.CallNextHookEx.argtypes = [
+        wintypes.HHOOK,
+        ctypes.c_int,
+        wintypes.WPARAM,
+        wintypes.LPARAM,
+    ]
+    user32.CallNextHookEx.restype = wintypes.LPARAM  # Pointer-sized signed integer
+
+    user32.UnhookWindowsHookEx.argtypes = [wintypes.HHOOK]
+    user32.UnhookWindowsHookEx.restype = wintypes.BOOL
+
     def _proc(nCode, wParam, lParam):
         if nCode == 0 and wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
             kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
             scan_byte = kb.scanCode & 0xFF
             is_extended = bool(kb.flags & LLKHF_EXTENDED)
             result["code"] = (0xE000 | scan_byte) if is_extended else scan_byte
-            ctypes.windll.user32.PostQuitMessage(0)
-        return ctypes.windll.user32.CallNextHookEx(None, nCode, wParam, lParam)
+            user32.PostQuitMessage(0)
+        return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
     proc = LowLevelKeyboardProc(_proc)
-    hook_id = ctypes.windll.user32.SetWindowsHookExW(
-        WH_KEYBOARD_LL, proc, ctypes.windll.kernel32.GetModuleHandleW(None), 0
-    )
+
+    # Pass None (0) for hMod to avoid error 126
+    hook_id = user32.SetWindowsHookExW(WH_KEYBOARD_LL, proc, None, 0)
     if not hook_id:
-        raise OSError("SetWindowsHookExW failed")
+        err = ctypes.windll.kernel32.GetLastError()
+        raise OSError(f"SetWindowsHookExW failed with error code: {err}")
 
     try:
         if timeout_ms is not None:
-            ctypes.windll.user32.SetTimer(None, 1, timeout_ms, None)
+            user32.SetTimer(None, 1, timeout_ms, None)
 
         msg = wintypes.MSG()
-        while ctypes.windll.user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
-            ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
-            ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))
+        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            user32.TranslateMessage(ctypes.byref(msg))
+            user32.DispatchMessageW(ctypes.byref(msg))
             if result["code"] is not None:
                 break
     finally:
-        ctypes.windll.user32.UnhookWindowsHookEx(hook_id)
+        user32.UnhookWindowsHookEx(hook_id)
 
     return result["code"]
+
+
+if __name__ == "__main__":
+    key = capture_one_key_windows(timeout_ms=5000)
+    print(f"Captured scancode: {hex(key) if key else None}")
