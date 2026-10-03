@@ -45,9 +45,8 @@ class LayoutLoader:
         self.width: int = BASELINE_WIDTH
         self.height: int = BASELINE_HEIGHT
         self.dpi: int = BASELINE_DPI
-        self.mouse_wheel_radius: float = 50.0
-        self.sprint_distance: float = 10.0
-        self.bezel_height: float = 14.0
+        self.mouse_wheel_radius: float = 150.0
+        self.sprint_distance: float = 100.0
 
         self.keys_json_data: list[tuple[str, dict[str, Any]]] = []
         self.bezels_json_data: list[tuple[str, dict[str, Any]]] = []
