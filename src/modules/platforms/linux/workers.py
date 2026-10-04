@@ -45,12 +45,13 @@ from .ecodes_map import BTN_MAP, KEYBOARD_CAP, LINUX_KEY_MAP, MOUSE_CAP
 
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection
+    from multiprocessing.queues import Queue
 
 
-def _release_all_keys(ui_device, ecodes, keys_set, reason=""):
-    print(f"\n[WORKER] - {reason}.")
+def _release_all_keys(log_queue: Queue, ui_device, ecodes, keys_set, reason=""):
+    log_queue.put(f"{reason}.")
     if keys_set:
-        print(f"\n[WORKER] - Releasing {len(keys_set)} keys.")
+        log_queue.put(f"Releasing {len(keys_set)} keys.")
         for linux_code in list(keys_set):
             ui_device.write(ecodes.EV_KEY, linux_code, 0)
         ui_device.syn()
@@ -58,6 +59,7 @@ def _release_all_keys(ui_device, ecodes, keys_set, reason=""):
 
 
 def _release_all_buttons(
+    log_queue: Queue,
     ui_device,
     ecodes,
     left_down,
@@ -67,10 +69,10 @@ def _release_all_buttons(
     btn5_down,
     reason="",
 ):
-    print(f"\n[WORKER] - {reason}.")
+    log_queue.put(f"{reason}.")
     buttons_set_sum = sum([left_down, right_down, middle_down, btn4_down, btn5_down])
     if buttons_set_sum > 0:
-        print(f"\n[WORKER] - Releasing {buttons_set_sum} buttons.")
+        log_queue.put(f"Releasing {buttons_set_sum} buttons.")
         if left_down:
             ui_device.write(ecodes.EV_KEY, ecodes.BTN_LEFT, 0)
         if right_down:
@@ -84,7 +86,7 @@ def _release_all_buttons(
         ui_device.syn()
 
 
-def keyboard_worker(k_pipe_read: Connection):
+def keyboard_worker(k_pipe_read: Connection, log_queue: Queue):
     """Dedicated process for Linux evdev keyboard events with typematic engine."""
     from evdev import UInput, ecodes
 
@@ -141,7 +143,7 @@ def keyboard_worker(k_pipe_read: Connection):
 
                     key_queue.task_done()
                 except Exception as e:
-                    print(f"\n[WORKER] - Key Injection Error (Queue): {e}.")
+                    log_queue.put(f"Key Injection Error (Queue): {e}.")
 
             if typematic_cfg["enabled"] and repeat_key is not None:
                 if repeat_key not in typematic_cfg["non_spamming"]:
@@ -201,12 +203,14 @@ def keyboard_worker(k_pipe_read: Connection):
                     continue
 
             else:
-                _release_all_keys(ui_device, ecodes, pressed_keys, "Keyboard Timeout")
+                _release_all_keys(
+                    log_queue, ui_device, ecodes, pressed_keys, "Keyboard Timeout"
+                )
                 pressed_keys.clear()
         except EOFError:
             state["running"] = False
         except Exception as e:
-            print(f"\n[WORKER] - Keyboard Worker crashed: {e}.")
+            log_queue.put(f"Keyboard Worker crashed: {e}.")
             state["running"] = False
 
     state["running"] = False
@@ -214,7 +218,7 @@ def keyboard_worker(k_pipe_read: Connection):
     ui_device.close()
 
 
-def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection):
+def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Queue):
     """Dedicated process for Linux evdev mouse events."""
     from evdev import UInput, ecodes
 
@@ -267,6 +271,7 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection):
                 else:
                     with send_lock:
                         _release_all_buttons(
+                            log_queue,
                             ui_device,
                             ecodes,
                             left_down,
@@ -281,7 +286,7 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection):
             except EOFError:
                 state["running"] = False
             except Exception as e:
-                print(f"\n[WORKER] - Mouse Button Worker crashed: {e}.")
+                log_queue.put(f"Mouse Button Worker crashed: {e}.")
                 state["running"] = False
 
     button_thread = threading.Thread(
@@ -374,7 +379,7 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection):
         except EOFError:
             state["running"] = False
         except Exception as e:
-            print(f"\n[WORKER] - Mouse Movement Worker crashed: {e}.")
+            log_queue.put(f"Mouse Movement Worker crashed: {e}.")
             state["running"] = False
 
     state["running"] = False

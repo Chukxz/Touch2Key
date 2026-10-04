@@ -51,12 +51,13 @@ from modules.utils import (
 
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection
+    from multiprocessing.queues import Queue
 
 
-def _release_all_keys(k_ctx, k_handle, K_Stroke, keys_set, reason=""):
-    print(f"\n[WORKER] - {reason}.")
+def _release_all_keys(log_queue: Queue, k_ctx, k_handle, K_Stroke, keys_set, reason=""):
+    log_queue.put(f"{reason}.")
     if keys_set:
-        print(f"\n[WORKER] - Releasing {len(keys_set)} keys.")
+        log_queue.put(f"Releasing {len(keys_set)} keys.")
         for win_code in list(keys_set):
             k_state = 1
             if win_code > 0xFF:
@@ -70,6 +71,7 @@ def _release_all_keys(k_ctx, k_handle, K_Stroke, keys_set, reason=""):
 
 
 def _release_all_buttons(
+    log_queue: Queue,
     m_ctx,
     m_handle,
     M_Stroke,
@@ -80,10 +82,10 @@ def _release_all_buttons(
     btn5_down,
     reason="",
 ):
-    print(f"\n[WORKER] - {reason}.")
+    log_queue.put(f"{reason}.")
     buttons_set_sum = sum([left_down, right_down, middle_down, btn4_down, btn5_down])
     if buttons_set_sum > 0:
-        print(f"\n[WORKER] - Releasing {buttons_set_sum} buttons.")
+        log_queue.put(f"Releasing {buttons_set_sum} buttons.")
         if left_down:
             m_ctx.send(m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, LEFT_BUTTON_UP, 0, 0, 0))
         if right_down:
@@ -100,12 +102,14 @@ def _release_all_buttons(
             m_ctx.send(m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, BUTTON_5_UP, 0, 0, 0))
 
 
-def keyboard_worker(k_pipe_read: Connection, k_device_handle: int | None):
+def keyboard_worker(
+    k_pipe_read: Connection,
+    log_queue: Queue,
+    k_device_handle: int | None,
+):
     """Dedicated process for Windows Interception driver keyboard events with typematic engine."""
     if k_device_handle is None:
-        print(
-            "\n[WORKER] - Keyboard worker has an invalid Interception keyboard handle."
-        )
+        log_queue.put("Keyboard worker has an invalid Interception keyboard handle.")
         return
 
     from interception.interception import Interception
@@ -162,7 +166,7 @@ def keyboard_worker(k_pipe_read: Connection, k_device_handle: int | None):
 
                     key_queue.task_done()
                 except Exception as e:
-                    print(f"\n[WORKER] - Key Injection Error: {e}.")
+                    log_queue.put(f"Keyboard: Key Injection Error: {e}.")
 
             if typematic_cfg["enabled"] and repeat_key is not None:
                 if repeat_key not in typematic_cfg["non_spamming"]:
@@ -221,13 +225,18 @@ def keyboard_worker(k_pipe_read: Connection, k_device_handle: int | None):
 
             else:
                 _release_all_keys(
-                    k_ctx, k_device_handle, KeyStroke, pressed_keys, "Keyboard Timeout"
+                    log_queue,
+                    k_ctx,
+                    k_device_handle,
+                    KeyStroke,
+                    pressed_keys,
+                    "Keyboard Timeout",
                 )
                 pressed_keys.clear()
         except EOFError:
             state["running"] = False
         except Exception as e:
-            print(f"\n[WORKER] - Keyboard Worker crashed: {e}.")
+            log_queue.put(f"Keyboard Worker crashed: {e}.")
             state["running"] = False
 
     state["running"] = False
@@ -235,11 +244,14 @@ def keyboard_worker(k_pipe_read: Connection, k_device_handle: int | None):
 
 
 def mouse_worker(
-    m_pipe_read: Connection, mb_pipe_read: Connection, m_device_handle: int | None
+    m_pipe_read: Connection,
+    mb_pipe_read: Connection,
+    log_queue: Queue,
+    m_device_handle: int | None,
 ):
     """Dedicated process for Windows Interception driver mouse events."""
     if m_device_handle is None:
-        print("\n[WORKER] - Mouse worker has an invalid Interception mouse handle.")
+        log_queue.put("Mouse worker has an invalid Interception mouse handle.")
         return
 
     ctypes.windll.ntdll.NtSetTimerResolution(
@@ -299,6 +311,7 @@ def mouse_worker(
                 else:
                     with send_lock:
                         _release_all_buttons(
+                            log_queue,
                             m_ctx,
                             m_device_handle,
                             MouseStroke,
@@ -314,7 +327,7 @@ def mouse_worker(
             except EOFError:
                 state["running"] = False
             except Exception as e:
-                print(f"\n[WORKER] - Mouse Button Worker crashed: {e}.")
+                log_queue.put(f"Mouse Button Worker crashed: {e}.")
                 state["running"] = False
 
     button_thread = threading.Thread(
@@ -401,7 +414,7 @@ def mouse_worker(
                     else:
                         pending_task = next_payload
                         break
-                
+
                 with send_lock:
                     # Vertical wheel
                     if acc_dw_y != 0:
@@ -415,7 +428,7 @@ def mouse_worker(
                                 0,
                             ),
                         )
-                    
+
                     # Horizontal wheel (tilt wheel)
                     if acc_dw_x != 0:
                         m_ctx.send(
@@ -428,15 +441,15 @@ def mouse_worker(
                                 0,
                             ),
                         )
-                    
+
                     acc_dw_x, acc_dw_y = 0.0, 0.0
-                        
+
                 _sleep(CONSTANT_DWELL)
 
         except EOFError:
             state["running"] = False
         except Exception as e:
-            print(f"\n[WORKER] - Mouse Movement Worker crashed: {e}.")
+            log_queue.put(f"Mouse Movement Worker crashed: {e}.")
             state["running"] = False
 
     state["running"] = False

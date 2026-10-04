@@ -3,6 +3,7 @@ from __future__ import annotations
 import multiprocessing
 import struct
 import threading
+import logging
 from datetime import datetime as _datetime
 
 from ..base import AbstractBridge
@@ -34,6 +35,8 @@ from modules.utils import (
     TASK_REL,
     TASK_WHEEL,
 )
+
+logger = logging.getLogger("modules.platforms.windows.bridge")
 
 
 class InterceptionBridge(AbstractBridge):
@@ -76,6 +79,10 @@ class InterceptionBridge(AbstractBridge):
         self.k_device_handle = None
         self.m_device_handle = None
 
+        self.log_queue = multiprocessing.Queue()
+        self._log_consumer_thread: threading.Thread | None = None
+        self._stop_log_event = threading.Event()
+
     def set_respawn_callback(self, callback):
         self._respawn_callback = callback
 
@@ -110,7 +117,25 @@ class InterceptionBridge(AbstractBridge):
             except OSError:
                 pass
 
+    def _consume_worker_logs(self) -> None:
+        """Background thread in the engine process that reads from the queue and logs."""
+        while not self._stop_log_event.is_set():
+            try:
+                # Use a timeout so the thread can periodically check stop_event
+                msg = self.log_queue.get(timeout=0.1)
+                if msg:
+                    logger.info("\n[Worker] %s", msg)
+            except Exception:
+                continue
+
     def start_worker_processes(self, k_device_handle, m_device_handle):
+        # Start the background consumer thread in the engine to read worker logs
+        self._stop_log_event.clear()
+        self._log_consumer_thread = threading.Thread(
+            target=self._consume_worker_logs, daemon=True
+        )
+        self._log_consumer_thread.start()
+
         with self.bridge_lock:
             self.k_device_handle = k_device_handle
             self.m_device_handle = m_device_handle
@@ -118,7 +143,7 @@ class InterceptionBridge(AbstractBridge):
             self.k_proc = multiprocessing.Process(
                 target=keyboard_worker,
                 name="Keyboard Worker",
-                args=(self.k_pipe_read, self.k_device_handle),
+                args=(self.k_pipe_read, self.log_queue, self.k_device_handle),
                 daemon=True,
             )
             self.k_proc.start()
@@ -128,7 +153,12 @@ class InterceptionBridge(AbstractBridge):
             self.m_proc = multiprocessing.Process(
                 target=mouse_worker,
                 name="Mouse Worker",
-                args=(self.m_pipe_read, self.mb_pipe_read, self.m_device_handle),
+                args=(
+                    self.m_pipe_read,
+                    self.mb_pipe_read,
+                    self.log_queue,
+                    self.m_device_handle,
+                ),
                 daemon=True,
             )
             self.m_proc.start()
@@ -147,7 +177,7 @@ class InterceptionBridge(AbstractBridge):
             if not self.heartbeat_thread.is_alive():
                 self.heartbeat_thread.start()
 
-            print(
+            logger.info(
                 f"\n[BRIDGE] - Interception Dual Engine Started. K-PID: {self.k_proc.pid} | M-PID: {self.m_proc.pid}."
             )
 
@@ -155,7 +185,7 @@ class InterceptionBridge(AbstractBridge):
         self, new_k_handle: int | None, new_m_handle: int | None
     ) -> None:
         with self.bridge_lock:
-            print(
+            logger.info(
                 f"\n[BRIDGE] - Hot-Reloading Devices -> K:{new_k_handle}, M:{new_m_handle}"
             )
             self.release_all()
@@ -179,7 +209,7 @@ class InterceptionBridge(AbstractBridge):
             self.k_proc = multiprocessing.Process(
                 target=keyboard_worker,
                 name="Keyboard Worker (Reloaded)",
-                args=(self.k_pipe_read, self.k_device_handle),
+                args=(self.k_pipe_read, self.log_queue, self.k_device_handle),
                 daemon=True,
             )
             self.k_proc.start()
@@ -212,7 +242,12 @@ class InterceptionBridge(AbstractBridge):
             self.m_proc = multiprocessing.Process(
                 target=mouse_worker,
                 name="Mouse Worker (Reloaded)",
-                args=(self.m_pipe_read, self.mb_pipe_read, self.m_device_handle),
+                args=(
+                    self.m_pipe_read,
+                    self.mb_pipe_read,
+                    self.log_queue,
+                    self.m_device_handle,
+                ),
                 daemon=True,
             )
             self.m_proc.start()
@@ -220,7 +255,7 @@ class InterceptionBridge(AbstractBridge):
             self.mb_pipe_read.close()
             self.m_pipe_read.close()
 
-            print(
+            logger.info(
                 f"[BRIDGE] - Workers Reloaded. K-PID: {self.k_proc.pid} | M-PID: {self.m_proc.pid}"
             )
 
@@ -267,7 +302,7 @@ class InterceptionBridge(AbstractBridge):
                 )
             except OSError:
                 pass
-            
+
     def left_click_down(self):
         with self.bridge_lock:
             try:
@@ -374,7 +409,7 @@ class InterceptionBridge(AbstractBridge):
 
     def _respawn_keyboard(self):
         try:
-            print(
+            logger.info(
                 f"\n[BRIDGE] - Keyboard Worker Died: {_datetime.now().strftime('%H:%M:%S')}!"
             )
             with self.bridge_lock:
@@ -387,7 +422,7 @@ class InterceptionBridge(AbstractBridge):
                 self.k_pipe_read, self.k_pipe_write = multiprocessing.Pipe(duplex=False)
                 self.k_proc = multiprocessing.Process(
                     target=keyboard_worker,
-                    args=(self.k_pipe_read, self.k_device_handle),
+                    args=(self.k_pipe_read, self.log_queue, self.k_device_handle),
                     daemon=True,
                 )
                 self.k_proc.start()
@@ -410,7 +445,9 @@ class InterceptionBridge(AbstractBridge):
                 try:
                     self._respawn_callback("keyboard")
                 except Exception as e:
-                    print(f"\n[BRIDGE] - Respawn callback (keyboard) failed: {e}.")
+                    logger.info(
+                        f"\n[BRIDGE] - Respawn callback (keyboard) failed: {e}."
+                    )
         finally:
             with self._k_respawn_lock:
                 self._k_respawning = False
@@ -426,7 +463,7 @@ class InterceptionBridge(AbstractBridge):
 
     def _respawn_mouse(self):
         try:
-            print(
+            logger.info(
                 f"\n[BRIDGE] - Mouse Worker Died: {_datetime.now().strftime('%H:%M:%S')}!"
             )
             with self.bridge_lock:
@@ -445,7 +482,12 @@ class InterceptionBridge(AbstractBridge):
                 self.m_proc = multiprocessing.Process(
                     target=mouse_worker,
                     name="Mouse Worker",
-                    args=(self.m_pipe_read, self.mb_pipe_read, self.m_device_handle),
+                    args=(
+                        self.m_pipe_read,
+                        self.mb_pipe_read,
+                        self.log_queue,
+                        self.m_device_handle,
+                    ),
                     daemon=True,
                 )
                 self.m_proc.start()
@@ -460,7 +502,7 @@ class InterceptionBridge(AbstractBridge):
                 try:
                     self._respawn_callback("mouse")
                 except Exception as e:
-                    print(f"\n[BRIDGE] - Respawn callback (mouse) failed: {e}.")
+                    logger.info(f"\n[BRIDGE] - Respawn callback (mouse) failed: {e}.")
         finally:
             with self._m_respawn_lock:
                 self._m_respawning = False
@@ -503,7 +545,7 @@ class InterceptionBridge(AbstractBridge):
             )
 
     def release_all(self):
-        print("\n[BRIDGE] - Emergency Release (Interception)...")
+        logger.info("\n[BRIDGE] - Emergency Release (Interception)...")
         with self.bridge_lock:
             self.health_check()
             internal_mouse_codes = {M_LEFT, M_RIGHT, M_MIDDLE}
@@ -525,8 +567,11 @@ class InterceptionBridge(AbstractBridge):
             self._mouse_left_down = self._mouse_right_down = self._mouse_middle_down = (
                 False
             )
-        print("[BRIDGE] - Release signals dispatched.")
+        logger.info("[BRIDGE] - Release signals dispatched.")
 
     def shutdown(self):
+        self._stop_log_event.set()
+        if self._log_consumer_thread and self._log_consumer_thread.is_alive():
+            self._log_consumer_thread.join(timeout=1.0)
         self._stop_heartbeat.set()
         self.release_all()

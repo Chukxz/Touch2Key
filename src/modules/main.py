@@ -34,6 +34,8 @@ def profiler_cleanup(
 
 def run(parser: argparse.ArgumentParser | None = None) -> None:
     global cli_profiler
+    # Initialize CLI logging (terminal output + buffers file output)
+    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_cli")
 
     # -----------------------------------------------------------------------
     # 0. OS & Environment Validation
@@ -46,9 +48,6 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     elif sys.platform != "win32":
         print(f"[!] Unsupported OS: {sys.platform}")
         sys.exit(1)
-
-    # Initialize CLI logging (terminal output + buffers file output)
-    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_cli")
 
     # -----------------------------------------------------------------------
     # 1. CLI Argument Parsing

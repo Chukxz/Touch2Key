@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import sys
 import os
+import threading
 import logging
 import multiprocessing
 
@@ -72,6 +72,7 @@ class EngineProcessController(QObject):
     def start_engine(
         self,
         window_id: int | None,
+        log_queue: multiprocessing.Queue,
     ) -> None:
         if self.is_running():
             return
@@ -96,17 +97,17 @@ class EngineProcessController(QObject):
         self.dispatcher.engine_error.connect(lambda _msg: self._watchdog.stop())
         self.dispatcher_ready.emit(self.dispatcher)
 
+        # Pass log_queue to run_engine_process
         self.process = multiprocessing.Process(
             target=run_engine_process,
             name="Touch2Key-Engine",
-            args=(engine_conn,),
+            args=(engine_conn, log_queue),
+            daemon=False,
         )
         self.process.start()
         engine_conn.close()
 
-        self.dispatcher.send_start(
-            window_id,
-        )
+        self.dispatcher.send_start(window_id)
         self._watchdog.start()
 
     def stop_engine(self) -> None:
@@ -153,6 +154,13 @@ class MainWindow(QMainWindow):
         self._setup_tools()
         self._setup_logging()
         self._wire_engine_signals()
+        
+        self.log_queue = multiprocessing.Queue()
+        self._stop_log_thread = threading.Event()
+        self._log_thread = threading.Thread(
+            target=self._consume_engine_logs, daemon=True
+        )
+        self._log_thread.start()
 
         pid = os.getpid()
         logger.info(f"GUI Process PID: {pid}")
@@ -324,13 +332,15 @@ class MainWindow(QMainWindow):
             self.sidebar_engine_btn.setEnabled(False)
             self.engine_controller.start_engine(
                 window_id=self.engine_controller.window_id,
+                log_queue=self.log_queue,
             )
-
+            
     def _start_engine_from_dashboard(self) -> None:
         if not self.engine_controller.is_running():
             self.dashboard_page.start_btn.setEnabled(False)
             self.engine_controller.start_engine(
-                window_id=self.engine_controller.window_id
+                window_id=self.engine_controller.window_id,
+                log_queue=self.log_queue,
             )
 
     def _stop_engine_from_dashboard(self) -> None:
@@ -473,7 +483,23 @@ class MainWindow(QMainWindow):
             if uninstalled:
                 QCoreApplication.quit()
 
+    def _consume_engine_logs(self) -> None:
+        """Background thread pulling log records from the queue and writing to the GUI console."""
+        while not self._stop_log_thread.is_set():
+            try:
+                record = self.log_queue.get(timeout=0.2)
+                if record:
+                    # Format the log record nicely
+                    msg = record.getMessage() if hasattr(record, "getMessage") else str(record)
+                    level = getattr(record, "levelname", "INFO")
+                    formatted = f"[{level}] {msg}"
+                    # Safely push to the GUI text console on the main thread via signal or direct append if thread-safe
+                    self.log_console.appendPlainText(formatted)
+            except Exception:
+                continue
+
     def closeEvent(self, event) -> None:
+        self._stop_log_thread.set()
         if self.engine_controller.is_running():
             self.engine_controller.shutdown()
         store.close()

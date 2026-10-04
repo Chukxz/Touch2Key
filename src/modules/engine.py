@@ -45,6 +45,7 @@ logger = logging.getLogger("modules.engine")
 
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection
+    from multiprocessing.queues import Queue
 
 
 class Engine:
@@ -559,7 +560,7 @@ class Engine:
         store.close()
 
 
-def run_engine_process(conn: Connection) -> None:
+def run_engine_process(conn: Connection, log_queue: Queue) -> None:
     AppLogManager.setup_logging(is_gui=True, log_prefix="touch2key_engine")
     dispatcher = IpcMapperEventDispatcher(conn)
     engine: Engine | None = None
