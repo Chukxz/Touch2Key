@@ -5,10 +5,9 @@ import time
 import ctypes
 from typing import TYPE_CHECKING
 
-from modules import AppLogManager
 from modules.utils import get_scancode_from_key, scale_coord, ICONS_FOLDER
 from modules.database import store
-from modules.platforms import get_platform, check_single_instance, get_specific_qt_key
+from modules.platforms import get_platform, get_specific_qt_key
 
 from PySide6.QtWidgets import QApplication, QMainWindow, QGraphicsScene, QGraphicsView
 from PySide6.QtGui import (
@@ -70,11 +69,11 @@ class DiagnosticView(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        instruction = self.scene.addText(
-            "DIAGNOSTIC MODE: Press ESC to exit.", QFont("Arial", 10)
+        self.instruction = self.scene.addText(
+            "DIAGNOSTIC MODE: Press ESC to exit (when cursor is visible).", QFont("Arial", 10)
         )
-        instruction.setDefaultTextColor(QColor("#444444"))
-        instruction.setPos(50, 30)
+        self.instruction.setDefaultTextColor(QColor("#444444"))
+        self.instruction.setPos(50, 30)
 
         self.active_buttons = self.scene.addText(
             "", QFont("Courier", 16, QFont.Weight.Bold)
@@ -82,9 +81,20 @@ class DiagnosticView(QGraphicsView):
         self.active_buttons.setDefaultTextColor(QColor("lime"))
         self.active_buttons.setZValue(100)
 
+        self.trail_rects: list[QGraphicsItem] = []
+        self.max_trail_length = 50
+
+    def _add_trail_rect(self, x: int, y: int):
+        if self.scene is not None:
+            rect = self.scene.addRect(x, y, 1, 1, QPen(QColor("#1a1a1a")))
+            self.trail_rects.append(rect)
+            if len(self.trail_rects) > self.max_trail_length:
+                old_rect = self.trail_rects.pop(0)
+                self.scene.removeItem(old_rect)
+
     def _set_active_buttons_pos(self, x, y):
         if self.scene is not None:
-            self.scene.addRect(x, y, 1, 1, QPen(QColor("#1a1a1a")))
+            self._add_trail_rect(x, y)
             self.active_buttons.setPos(x + 20, y - 20)
 
     def _set_labelled_ripple(self, x, y, name, scancode: int, color):
@@ -116,7 +126,7 @@ class DiagnosticView(QGraphicsView):
         pos = event.position().toPoint()
 
         if self.scene is not None:
-            self.scene.addRect(pos.x(), pos.y(), 1, 1, QPen(QColor("#1a1a1a")))
+            self._add_trail_rect(pos.x(), pos.y())
             self.active_buttons.setPos(pos.x() + 20, pos.y() - 20)
 
         super().mouseMoveEvent(event)
@@ -197,11 +207,6 @@ class MainWindow(QMainWindow):
                 QGuiApplication.restoreOverrideCursor()
 
     def _update_active_display(self) -> None:
-        """Rebuilds the on-screen indicator from current held-state, rather
-        than overwriting it with just the latest key -- so multiple keys
-        and/or mouse buttons held simultaneously all show at once, and
-        anything released drops out immediately.
-        """
         parts = list(self.pressed_keys.values()) + sorted(self.pressed_mouse_buttons)
         self.view.active_buttons.setPlainText(f"[{' + '.join(parts)}]" if parts else "")
 
@@ -241,10 +246,6 @@ class MainWindow(QMainWindow):
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event: QKeyEvent):
-        # Autorepeat can synthesize a release+press pair for a key that's
-        # genuinely still held (X11 quirk) -- Qt marks that release with
-        # isAutoRepeat()==True. Ignoring it here means a held key can only
-        # leave pressed_keys on a real release, not a repeat-cycle artifact.
         if event.isAutoRepeat():
             super().keyReleaseEvent(event)
             return
@@ -257,10 +258,6 @@ class MainWindow(QMainWindow):
         super().keyReleaseEvent(event)
 
     def focusOutEvent(self, event):
-        # If focus leaves this window while a key/button is physically
-        # held, the OS may never deliver the matching release event here
-        # (e.g. Alt-Tab). Without this, that entry would stay stuck in the
-        # held set forever with no way to self-correct.
         self.pressed_keys.clear()
         self.pressed_mouse_buttons.clear()
         self._update_active_display()
@@ -285,7 +282,6 @@ def run(
 
 def main() -> None:
     """Dedicated entry point for touch2key-visualizer."""
-    AppLogManager.setup_logging(is_gui=True, log_prefix="touch2key_visualizer")
     run()
 
 
