@@ -125,7 +125,7 @@ MAIN_LAYOUT = [
 
 # --- Navigation & Arrows Block ---
 NAV_LAYOUT = [
-    ("Insert", 0xE050, 0, 0, 1, 3),
+    ("Insert", 0xE052, 0, 0, 1, 3),
     ("PrtSc", 0xE037, 0, 3, 1, 3),
     ("PgUp", 0xE049, 1, 2, 1, 2),
     ("Home", 0xE047, 2, 0, 1, 2),
