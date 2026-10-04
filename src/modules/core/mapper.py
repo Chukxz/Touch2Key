@@ -86,7 +86,6 @@ class Mapper:
         )
 
         self.window_lost = self.window_id is None
-        self.wasd_block = 0
         self.toggle_key_scancode: int | None = None
 
         self._update_config()
@@ -285,10 +284,9 @@ class Mapper:
                 "HEALTHY" if pps >= self.pps else ("IDLE" if pps == 0 else "LOW RATE")
             )
             logger.info(
-                "Rate: %5.1f Hz | Status: %s | WASD Block: %d",
+                "Rate: %5.1f Hz | Status: %s",
                 pps,
                 status,
-                self.wasd_block,
             )
 
     def _virtual_keyboard_listener(self) -> None:

@@ -40,9 +40,6 @@ class WASDMapper:
         self.mapper_event_dispatcher.register_callback(
             "ON_WORKER_RESPAWN", self._on_worker_respawn
         )
-        self.mapper_event_dispatcher.register_callback(
-            "ON_WASD_BLOCK", self._on_wasd_block
-        )
 
     def _build_pipeline(self) -> None:
         settings = store.settings.get()
@@ -166,10 +163,6 @@ class WASDMapper:
         with self.lock:
             if self.pipeline:
                 self.pipeline.reset(self.output_sink)
-
-    def _on_wasd_block(self) -> None:
-        if self.mapper.wasd_block > 0:
-            self.touch_up()
 
     def _on_worker_respawn(self, worker_type: str) -> None:
         if worker_type == "keyboard":

@@ -17,6 +17,8 @@ from modules.utils import (
     TouchEvent,
     TouchPhase,
     IpcMapperEventDispatcher,
+    DEFAULT_ADB_RATE_CAP,
+    DEFAULT_PPS,
     IPC_CMD_START,
     unpack_ipc_start_cmd,
 )
@@ -123,7 +125,7 @@ class Engine:
                 )
 
                 logger.info(
-                    "[CLI Interactive Launch] Active Global Hotkeys (Terminal-Focussed): [Esc] Exit Engine | [F5] Toggle Handedness | [F6] Reload Layout | [F7] Reload Config"
+                    "[CLI Interactive Launch] Active Global Hotkeys (Terminal-Focused): [Esc] Exit Engine | [F5] Toggle Handedness | [F6] Reload Layout | [F7] Reload Config"
                 )
             except Exception as exc:
                 logger.debug("Failed to register CLI global hotkeys: %s", exc)
@@ -363,21 +365,40 @@ class Engine:
     def start_headless(
         self,
         window_id: int | None,
-        rate_cap: float = 250.0,
-        pps: float = 60.0,
         toggle_key: str | None = None,
         sprint_key: str | None = None,
-        typematic_enabled: bool = True,
-        typematic_delay_ms: float = 250.0,
-        typematic_rate_hz: float = 30.0,
-        typematic_excluded_keys: str | None = None,
-        k_device_handle: int | None = None,
-        m_device_handle: int | None = None,
+        rate_cap: float | None = None,
+        pps: float | None = None,
+        k_device_handle: int = 0,
+        m_device_handle: int = 10,
     ) -> None:
 
         settings = store.settings.get()
+        toggle_key = toggle_key or settings.toggle_key
+        sprint_key = sprint_key or settings.sprint_key
+        rate_cap = rate_cap or settings.adb_rate_cap
+        pps = pps or settings.pps_alert_threshold
+
+        if window_id is None:
+            logger.warning(
+                "No window ID provided. Engine will run without a target window."
+            )
+
+        logger.info(
+            f"Headless: {self.headless}, Window ID: {window_id}, Rate Cap: {rate_cap}, PPS: {pps}, Toggle Key: {toggle_key}, Sprint Key: {sprint_key}"
+        )
+        logger.info(
+            f"Typematic Enabled: {settings.typematic_enabled}, Typematic Delay (ms): {settings.typematic_delay_ms}, Typematic Rate (Hz): {settings.typematic_rate_hz}, Typematic Excluded Keys: {settings.typematic_excluded_keys}"
+        )
+        logger.info(
+            f"Keyboard Device Handle: {k_device_handle}, Mouse Device Handle: {m_device_handle}"
+        )
+
         self.double_tap_enabled = settings.double_tap_enabled
         self.bezel_toggle_enabled = settings.bezel_toggle_enabled
+
+        print(f"Double-Tap enabled: {self.double_tap_enabled}")
+        print(f"Bezel toggling enabled: {self.bezel_toggle_enabled}")
 
         self.layout_loader = LayoutLoader(
             self.mapper_event_dispatcher,
@@ -407,10 +428,10 @@ class Engine:
         self.key_mapper = KeyMapper(
             self.mapper,
             self.output_sink,
-            typematic_enabled=typematic_enabled,
-            typematic_delay_ms=typematic_delay_ms,
-            typematic_rate_hz=typematic_rate_hz,
-            typematic_excluded_keys=typematic_excluded_keys,
+            typematic_enabled=settings.typematic_enabled,
+            typematic_delay_ms=settings.typematic_delay_ms,
+            typematic_rate_hz=settings.typematic_rate_hz,
+            typematic_excluded_keys=settings.typematic_excluded_keys,
         )
         self.wasd_mapper = WASDMapper(self.mapper, self.output_sink)
 
@@ -432,7 +453,14 @@ class Engine:
 
         self.bridge_class.start_worker_processes(k_device_handle, m_device_handle)
 
-    def _start(self) -> None:
+    def _start(self, config_str: str | None = None) -> None:
+        if config_str is not None:
+            config = parse_config_arg(config_str)
+            self.start_headless(**config)
+            if not self.headless:
+                self._stop_event.wait()
+            return
+
         w_result = select_window()
         if w_result is None:
             return
@@ -463,20 +491,14 @@ class Engine:
             if res:
                 k_device_handle, m_device_handle = res
 
-        settings = store.settings.get()
-
         self.start_headless(
             window_id=selected_window_id,
-            rate_cap=rate_cap,
-            pps=pps,
             toggle_key=toggle_key,
             sprint_key=sprint_key,
-            typematic_enabled=settings.typematic_enabled,
-            typematic_delay_ms=settings.typematic_delay_ms,
-            typematic_rate_hz=settings.typematic_rate_hz,
-            typematic_excluded_keys=settings.typematic_excluded_keys,
-            k_device_handle=k_device_handle,
-            m_device_handle=m_device_handle,
+            rate_cap=rate_cap,
+            pps=pps,
+            k_device_handle=k_device_handle if k_device_handle is not None else 0,
+            m_device_handle=m_device_handle if m_device_handle is not None else 10,
         )
 
         if not self.headless:
@@ -554,14 +576,6 @@ def run_engine_process(conn: Connection) -> None:
         engine = Engine(headless=True, dispatcher=dispatcher)
         engine.start_headless(
             window_id=config["window_id"],
-            rate_cap=config["rate_cap"],
-            pps=config["pps"],
-            toggle_key=config["toggle_key"],
-            sprint_key=config["sprint_key"],
-            typematic_enabled=config["typematic_enabled"],
-            typematic_delay_ms=config["typematic_delay_ms"],
-            typematic_rate_hz=config["typematic_rate_hz"],
-            typematic_excluded_keys=config["typematic_excluded_keys"],
         )
         dispatcher.send_started()
 
@@ -596,3 +610,56 @@ def run_engine_process(conn: Connection) -> None:
             conn.close()
         except OSError:
             pass
+
+
+def parse_config_arg(config_str: str) -> dict:
+    settings = store.settings.get()
+
+    """Parses a comma-separated config string into engine parameters.
+    Format: window_id, toggle_key, sprint_key, rate_cap, pps, k_device_handle, m_device_handle
+    """
+    # Split by comma and strip whitespace from each part
+    parts = [p.strip() for p in config_str.split(",")]
+
+    # Pad out missing trailing values up to 7 items
+    while len(parts) < 7:
+        parts.append("")
+
+    def _parse_val(val, target_type, default):
+        if not val:  # Handles empty strings like ,,
+            return default
+        try:
+            return target_type(val)
+        except (ValueError, TypeError):
+            return default
+
+    window_id = _parse_val(parts[0], int, None)
+    toggle_key = _parse_val(parts[1], str, settings.toggle_key or "")
+    sprint_key = _parse_val(parts[2], str, settings.sprint_key or "")
+    rate_cap = _parse_val(
+        parts[3], float, settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP
+    )
+    pps = _parse_val(parts[4], float, settings.pps_alert_threshold or DEFAULT_PPS)
+    k_device_handle = _parse_val(parts[5], int, 0)
+    m_device_handle = _parse_val(parts[6], int, 10)
+
+    logger.info(
+        "Parsed config: window_id=%s, toggle_key=%s, sprint_key=%s, rate_cap=%s, pps=%s, k_device_handle=%s, m_device_handle=%s",
+        window_id,
+        toggle_key,
+        sprint_key,
+        rate_cap,
+        pps,
+        k_device_handle,
+        m_device_handle,
+    )
+
+    return {
+        "window_id": window_id,
+        "toggle_key": toggle_key,
+        "sprint_key": sprint_key,
+        "rate_cap": rate_cap,
+        "pps": pps,
+        "k_device_handle": k_device_handle,
+        "m_device_handle": m_device_handle,
+    }

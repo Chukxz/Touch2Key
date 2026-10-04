@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Literal, Any
 
 from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QMessageBox
 
 APP_NAME = "Touch2Key"
 
@@ -450,7 +449,6 @@ class MapperEventDispatcher:
         {
             "ON_CONFIG_RELOAD",
             "ON_LAYOUT_RELOAD",
-            "ON_WASD_BLOCK",
         }
     )
 
@@ -460,7 +458,6 @@ class MapperEventDispatcher:
         self.callback_registry: dict[EVENT_TYPE, list[Callback]] = {
             "ON_CONFIG_RELOAD": [],
             "ON_LAYOUT_RELOAD": [],
-            "ON_WASD_BLOCK": [],
             "ON_MENU_MODE_TOGGLE": [],
             "ON_AGGREGATION": [],
             "ON_WORKER_RESPAWN": [],
@@ -625,7 +622,7 @@ IPC_EVT_STOPPED = 0x81
 IPC_EVT_ERROR = 0x82
 
 # Using signed 64-bit integers ("q") for window IDs to prevent 32-bit overflow
-PACK_IPC_START_STRUCT = struct.Struct("<Bqff?ff")
+PACK_IPC_START_STRUCT = struct.Struct("<Bq")
 PACK_IPC_DEVICES_CHANGE_STRUCT = struct.Struct("<Bii")
 PACK_IPC_TARGET_WINDOW_CHANGE_STRUCT = struct.Struct("<Bq")
 
@@ -653,54 +650,21 @@ def _unpack_trailing_strings(data: bytes, count: int) -> list[str | None]:
 
 def pack_ipc_start_cmd(
     window_id: int | None,
-    rate_cap: float,
-    pps: float,
-    toggle_key: str | None,
-    sprint_key: str | None,
-    typematic_enabled: bool,
-    typematic_delay_ms: float,
-    typematic_rate_hz: float,
-    typematic_excluded_keys: str | None,
 ) -> bytes:
     header = PACK_IPC_START_STRUCT.pack(
         IPC_CMD_START,
         _pack_opt_int(window_id),
-        rate_cap,
-        pps,
-        typematic_enabled,
-        typematic_delay_ms,
-        typematic_rate_hz,
     )
-    return header + _pack_trailing_strings(
-        toggle_key, sprint_key, typematic_excluded_keys
-    )
+    return header
 
 
 def unpack_ipc_start_cmd(payload: bytes) -> dict[str, Any]:
-    fixed_size = PACK_IPC_START_STRUCT.size
     (
         _,
         window_id,
-        rate_cap,
-        pps,
-        typematic_enabled,
-        typematic_delay_ms,
-        typematic_rate_hz,
-    ) = PACK_IPC_START_STRUCT.unpack_from(payload, 0)
-    toggle_key, sprint_key, typematic_excluded_keys = _unpack_trailing_strings(
-        payload[fixed_size:], 3
-    )
-    return {
-        "window_id": _unpack_opt_int(window_id),
-        "rate_cap": rate_cap,
-        "pps": pps,
-        "typematic_enabled": typematic_enabled,
-        "typematic_delay_ms": typematic_delay_ms,
-        "typematic_rate_hz": typematic_rate_hz,
-        "toggle_key": toggle_key,
-        "sprint_key": sprint_key,
-        "typematic_excluded_keys": typematic_excluded_keys,
-    }
+    ) = PACK_IPC_START_STRUCT.unpack(payload)
+
+    return {"window_id": _unpack_opt_int(window_id)}
 
 
 def pack_ipc_stop_cmd() -> bytes:
@@ -870,26 +834,10 @@ class QtIpcMapperEventDispatcher(QObject):
     def send_start(
         self,
         window_id: int | None,
-        rate_cap: float,
-        pps: float,
-        toggle_key: str | None,
-        sprint_key: str | None,
-        typematic_enabled: bool = True,
-        typematic_delay_ms: float = 250.0,
-        typematic_rate_hz: float = 30.0,
-        typematic_excluded_keys: str | None = None,
     ) -> None:
         self._send(
             pack_ipc_start_cmd(
                 window_id,
-                rate_cap,
-                pps,
-                toggle_key,
-                sprint_key,
-                typematic_enabled,
-                typematic_delay_ms,
-                typematic_rate_hz,
-                typematic_excluded_keys,
             )
         )
 

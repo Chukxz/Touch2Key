@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import os
 import logging
 import multiprocessing
 
@@ -42,6 +43,9 @@ from modules.gui.overlays.visualizer import run as run_visualizer
 from modules.gui.log_handler import install_gui_logging
 
 from modules.scripts.show_adb_path import run as show_adb_path_run
+from modules.scripts.preflight import run as run_preflight
+from modules.scripts.setup import run as run_setup
+from modules.scripts.uninstall import run as run_uninstall
 
 logger = logging.getLogger("modules.gui.main_window")
 
@@ -68,14 +72,6 @@ class EngineProcessController(QObject):
     def start_engine(
         self,
         window_id: int | None,
-        rate_cap: float,
-        pps: float,
-        toggle_key: str | None,
-        sprint_key: str | None,
-        typematic_enabled: bool = True,
-        typematic_delay_ms: float = 250.0,
-        typematic_rate_hz: float = 30.0,
-        typematic_excluded_keys: str | None = None,
     ) -> None:
         if self.is_running():
             return
@@ -104,21 +100,12 @@ class EngineProcessController(QObject):
             target=run_engine_process,
             name="Touch2Key-Engine",
             args=(engine_conn,),
-            daemon=True,
         )
         self.process.start()
         engine_conn.close()
 
         self.dispatcher.send_start(
             window_id,
-            rate_cap,
-            pps,
-            toggle_key,
-            sprint_key,
-            typematic_enabled,
-            typematic_delay_ms,
-            typematic_rate_hz,
-            typematic_excluded_keys,
         )
         self._watchdog.start()
 
@@ -167,6 +154,17 @@ class MainWindow(QMainWindow):
         self._setup_logging()
         self._wire_engine_signals()
 
+        pid = os.getpid()
+        logger.info(f"GUI Process PID: {pid}")
+
+        success = run_preflight()
+        if not success:
+            QMessageBox.warning(
+                self,
+                "Pre-flight Checks Failed",
+                f"System checks did not pass",
+            )
+
     def _setup_ui(self) -> None:
         central = QWidget()
         self.setCentralWidget(central)
@@ -178,8 +176,12 @@ class MainWindow(QMainWindow):
         self.nav_group.setExclusive(True)
         self.nav_buttons: dict[str, QPushButton] = {}
 
+        self.dashboard_page = DashboardPage(self.dispatcher, self)
+        self.dashboard_page.start_requested.connect(self._start_engine_from_dashboard)
+        self.dashboard_page.stop_requested.connect(self._stop_engine_from_dashboard)
+
         self.pages: dict[str, QWidget] = {
-            "Dashboard": DashboardPage(self.dispatcher, self),
+            "Dashboard": self.dashboard_page,
             "Devices": DevicesPage(self.dispatcher, self),
             "Layout Editor": LayoutsEditorPage(self.dispatcher, self),
             "Profiles": ProfilesPage(self.dispatcher, self),
@@ -319,20 +321,22 @@ class MainWindow(QMainWindow):
             self.sidebar_engine_btn.setEnabled(False)
             self.engine_controller.stop_engine()
         else:
-            settings = store.settings.get()
-
             self.sidebar_engine_btn.setEnabled(False)
             self.engine_controller.start_engine(
                 window_id=self.engine_controller.window_id,
-                rate_cap=settings.adb_rate_cap,
-                pps=settings.pps_alert_threshold,
-                toggle_key=settings.toggle_key,
-                sprint_key=settings.sprint_key,
-                typematic_enabled=settings.typematic_enabled,
-                typematic_delay_ms=settings.typematic_delay_ms,
-                typematic_rate_hz=settings.typematic_rate_hz,
-                typematic_excluded_keys=settings.typematic_excluded_keys,
             )
+
+    def _start_engine_from_dashboard(self) -> None:
+        if not self.engine_controller.is_running():
+            self.dashboard_page.start_btn.setEnabled(False)
+            self.engine_controller.start_engine(
+                window_id=self.engine_controller.window_id
+            )
+
+    def _stop_engine_from_dashboard(self) -> None:
+        if self.engine_controller.is_running():
+            self.dashboard_page.stop_btn.setEnabled(False)
+            self.engine_controller.stop_engine()
 
     def _on_engine_started(self) -> None:
         self.sidebar_engine_btn.setText("Toggle Engine OFF")
@@ -340,6 +344,7 @@ class MainWindow(QMainWindow):
             "font-weight: bold; background-color: #c62828; color: white; padding: 8px;"
         )
         self.sidebar_engine_btn.setEnabled(True)
+        self.dashboard_page.set_running(True)
         logger.info("Touch mapping engine started successfully")
 
     def _on_engine_stopped(self) -> None:
@@ -348,6 +353,7 @@ class MainWindow(QMainWindow):
             "font-weight: bold; background-color: #2e7d32; color: white; padding: 8px;"
         )
         self.sidebar_engine_btn.setEnabled(True)
+        self.dashboard_page.set_running(False)
         logger.info("Touch mapping engine stopped")
 
     def _on_engine_error(self, err_msg: str) -> None:
@@ -356,6 +362,7 @@ class MainWindow(QMainWindow):
             "font-weight: bold; background-color: #2e7d32; color: white; padding: 8px;"
         )
         self.sidebar_engine_btn.setEnabled(True)
+        self.dashboard_page.set_running(False)
         QMessageBox.critical(
             self, "Engine Error", f"Mapping engine encountered an error:\n{err_msg}"
         )
@@ -402,18 +409,9 @@ class MainWindow(QMainWindow):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            if sys.platform == "win32":
-                import ctypes
-
-                ctypes.windll.shell32.ShellExecuteW(
-                    None, "runas", sys.executable, "-m modules.scripts.setup", None, 1
-                )
-            else:
-                import subprocess
-
-                subprocess.Popen(
-                    ["pkexec", sys.executable, "-m", "modules.scripts.setup"]
-                )
+            if self.engine_controller.is_running:
+                self.engine_controller.stop_engine()
+            run_setup()
 
     def _on_check_adb(self):
         """Runs the ADB diagnostic check and displays the result."""
@@ -443,22 +441,20 @@ class MainWindow(QMainWindow):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            if sys.platform == "win32":
-                import ctypes
+            preflight_success = run_preflight(verbose=True, parent=self)
 
-                ctypes.windll.shell32.ShellExecuteW(
-                    None,
-                    "runas",
-                    sys.executable,
-                    "-m modules.scripts.preflight",
-                    None,
-                    1,
+            if preflight_success:
+                QMessageBox.information(
+                    self,
+                    "Preflight Checks Passed",
+                    "All preflight checks passed successfully.",
                 )
-            else:
-                import subprocess
 
-                subprocess.Popen(
-                    ["pkexec", sys.executable, "-m", "modules.scripts.preflight"]
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Pre-flight Checks Failed",
+                    f"System checks did not pass",
                 )
 
     def _on_run_uninstall(self):
@@ -471,25 +467,11 @@ class MainWindow(QMainWindow):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            if sys.platform == "win32":
-                import ctypes
-
-                ctypes.windll.shell32.ShellExecuteW(
-                    None,
-                    "runas",
-                    sys.executable,
-                    "-m modules.scripts.uninstall",
-                    None,
-                    1,
-                )
-            else:
-                import subprocess
-
-                subprocess.Popen(
-                    ["pkexec", sys.executable, "-m", "modules.scripts.uninstall"]
-                )
-
-            QCoreApplication.quit()
+            if self.engine_controller.is_running:
+                self.engine_controller.stop_engine()
+            uninstalled = run_uninstall()
+            if uninstalled:
+                QCoreApplication.quit()
 
     def closeEvent(self, event) -> None:
         if self.engine_controller.is_running():

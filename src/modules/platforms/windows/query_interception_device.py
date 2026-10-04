@@ -342,6 +342,12 @@ def _create_gui_dialogs(context: Interception):
 
                 self.done(QDialog.DialogCode.Accepted)
 
+        def done(self, r: int) -> None:
+            if self.listener.isRunning():
+                self.listener.stop()
+                self.listener.wait(400)
+            super().done(r)
+
         def closeEvent(self, event) -> None:
             if self.listener.isRunning():
                 self.listener.stop()

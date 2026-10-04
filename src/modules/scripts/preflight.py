@@ -78,13 +78,6 @@ def run(verbose: bool = True, parent=None) -> bool:
         if verbose:
             logger.error("Pre-flight checks failed:\n%s", err_msg)
 
-        if is_gui and verbose:
-            QMessageBox.warning(
-                parent,
-                "Pre-flight Checks Failed",
-                f"System checks did not pass:\n\n{err_msg}",
-            )
-
         return False
 
     if verbose:

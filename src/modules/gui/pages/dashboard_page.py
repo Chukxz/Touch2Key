@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from modules.database import store
@@ -14,6 +15,9 @@ class DashboardPage(BasePage):
     """Primary overview dashboard displaying active layout, target window, and engine state."""
 
     title = "Dashboard"
+
+    start_requested = Signal()
+    stop_requested = Signal()
 
     def __init__(
         self,
@@ -39,6 +43,10 @@ class DashboardPage(BasePage):
         self.start_btn = QPushButton("Start Engine")
         self.stop_btn = QPushButton("Stop Engine")
         self.stop_btn.setEnabled(False)
+
+        # Wire up button clicks to signals
+        self.start_btn.clicked.connect(self.start_requested.emit)
+        self.stop_btn.clicked.connect(self.stop_requested.emit)
 
         btn_row.addWidget(self.start_btn)
         btn_row.addWidget(self.stop_btn)

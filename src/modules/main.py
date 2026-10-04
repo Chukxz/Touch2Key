@@ -70,6 +70,12 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         help="Initialize QApplication context",
     )
 
+    parser.add_argument(
+        "--config",
+        type=str,
+        help="One-line comma-separated config: 'window_id,toggle_key,sprint_key,rate_cap,pps,k_device,m_device', use empty strings for defaults, e.g. ',,,100,50,,'",
+    )
+
     args = parser.parse_args()
 
     if args.profile:
@@ -108,7 +114,10 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     engine = Engine(headless=False)
 
     try:
-        engine._start()
+        if args.config:
+            engine._start(config_str=args.config)
+        else:
+            engine._start()
     except KeyboardInterrupt:
         pass
     finally:

@@ -18,7 +18,6 @@ from PySide6.QtGui import QIcon
 from modules.database import store
 from modules.gui.main_window import MainWindow
 from modules.platforms import check_single_instance
-from modules.scripts.preflight import run as pre_flight_run
 from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER, ICONS_FOLDER
 from modules.log_manager import AppLogManager
 
@@ -98,11 +97,6 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
 
     # Handle Ctrl+C cleanly
     signal.signal(signal.SIGINT, lambda *_: QCoreApplication.quit())
-
-    # Now pre-flight can correctly detect the active QApplication instance for GUI warnings
-    if not pre_flight_run():
-        profiler_cleanup(gui_profiler)
-        sys.exit(1)
 
     try:
         multiprocessing.set_start_method("spawn", force=True)
