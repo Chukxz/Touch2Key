@@ -30,9 +30,10 @@ def _check_single_instance_windows(instance_name: str) -> tuple[bool, int | None
         handle = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
         last_error = ctypes.windll.kernel32.GetLastError()
         if last_error == 183:  # ERROR_ALREADY_EXISTS
+            print(f"[!] Single instance check failed (error: {last_error}).")
             return False, None
         if not handle:
-            print(f"[UTILITY] - Mutex creation failed (error {last_error}).")
+            print(f"[!] - Mutex creation failed (error: {last_error}).")
             return False, None
         return True, handle
 
@@ -49,6 +50,7 @@ def _check_single_instance_linux(instance_name: str) -> tuple[bool, object | Non
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return True, handle
         except (IOError, OSError):
+            print(f"[!] Single instance check failed.")
             return False, None
 
     raise RuntimeError(f"Unsupported platform: {sys.platform}")
@@ -112,9 +114,11 @@ def capture_one_key() -> int | None:
     """
     if sys.platform == "win32":
         from .windows.capture_one_key_windows import capture_one_key_windows
+
         return capture_one_key_windows()
     elif sys.platform == "linux":
         from .linux.capture_one_key_linux import capture_one_key_linux
+
         return capture_one_key_linux()
     else:
         return None
@@ -129,9 +133,11 @@ def get_lock_states() -> dict[str, bool] | None:
     """
     if sys.platform == "win32":
         from .windows.lock_state import get_lock_states_windows
+
         return get_lock_states_windows()
     elif sys.platform == "linux":
         from .linux.lock_state import get_lock_states_linux
+
         return get_lock_states_linux()
     else:
         return None

@@ -561,7 +561,9 @@ class Engine:
 
 
 def run_engine_process(conn: Connection, log_queue: Queue) -> None:
-    AppLogManager.setup_logging(is_gui=True, log_prefix="touch2key_engine")
+    AppLogManager.setup_logging(
+        is_gui=True, log_prefix="touch2key_engine", log_queue=log_queue
+    )
     dispatcher = IpcMapperEventDispatcher(conn)
     engine: Engine | None = None
 

@@ -275,6 +275,13 @@ def configure_typematic_interactive() -> None:
     ).strip()
     excludes = s.typematic_excluded_keys if not ex_in else ex_in
 
+    if excludes:
+        excludes_list = [x.strip().lower() for x in excludes.split(",")]
+        excludes = ""
+        for x in excludes_list:
+            excludes += x + ","
+        excludes = excludes[:-1]
+
     store.settings.update(
         typematic_enabled=enabled,
         typematic_delay_ms=delay,
@@ -815,7 +822,13 @@ def run() -> None:
         if args.typematic_rate is not None:
             typematic_updates["typematic_rate_hz"] = args.typematic_rate
         if args.typematic_excludes is not None:
-            typematic_updates["typematic_excluded_keys"] = args.typematic_excludes
+            excludes = args.typematic_excludes
+            excludes_list = [x.strip().lower() for x in excludes.split(",")]
+            excludes = ""
+            for x in excludes_list:
+                excludes += x + ","
+            excludes = excludes[:-1]
+            typematic_updates["typematic_excluded_keys"] = excludes
 
         if typematic_updates:
             store.settings.update(**typematic_updates)

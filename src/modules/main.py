@@ -80,6 +80,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     if args.profile:
         cli_profiler = cProfile.Profile()
         cli_profiler.enable()
+        print(f"[+] Profiling started.")
 
     # -----------------------------------------------------------------------
     # 2. Boot Sequence

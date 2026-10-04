@@ -73,6 +73,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     if args.profile:
         gui_profiler = cProfile.Profile()
         gui_profiler.enable()
+        print(f"[+] Profiling started.")
 
     # -----------------------------------------------------------------------
     # 2. Boot Sequence (Initialize Qt Application Early)

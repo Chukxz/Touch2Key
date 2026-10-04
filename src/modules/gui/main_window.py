@@ -65,6 +65,7 @@ class EngineProcessController(QObject):
         self._watchdog = QTimer(self)
         self._watchdog.setInterval(500)
         self._watchdog.timeout.connect(self._check_process_alive)
+        self._stop_requested = False
 
     def is_running(self) -> bool:
         return self.process is not None and self.process.is_alive()
@@ -113,9 +114,11 @@ class EngineProcessController(QObject):
     def stop_engine(self) -> None:
         if self.dispatcher is None or not self.is_running():
             return
+        self._stop_requested = True
         self.dispatcher.send_stop()
 
     def shutdown(self, timeout: float = 2.0) -> None:
+        self._stop_requested = True
         self._watchdog.stop()
         if self.dispatcher is not None:
             self.dispatcher.send_stop()
@@ -132,15 +135,19 @@ class EngineProcessController(QObject):
     def _check_process_alive(self) -> None:
         if self.process is not None and not self.process.is_alive():
             self._watchdog.stop()
-            if self.dispatcher is not None:
+            if not self._stop_requested and self.dispatcher is not None:
                 self.dispatcher.engine_error.emit(
                     "Engine process terminated unexpectedly"
                 )
                 self.dispatcher.engine_stopped.emit()
 
+        self._stop_requested = False
+
 
 class MainWindow(QMainWindow):
     """Root Application Window with scannable layout, pages stack, and log console."""
+
+    engine_log = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -154,7 +161,9 @@ class MainWindow(QMainWindow):
         self._setup_tools()
         self._setup_logging()
         self._wire_engine_signals()
-        
+
+        self.engine_log.connect(self.log_console.appendPlainText)
+
         self.log_queue = multiprocessing.Queue()
         self._stop_log_thread = threading.Event()
         self._log_thread = threading.Thread(
@@ -302,6 +311,7 @@ class MainWindow(QMainWindow):
             self.engine_controller.dispatcher.send_target_window_change(
                 target_window_id, target_window_title
             )
+            self.engine_controller.window_id = target_window_id
 
     def _switch_page(self, index: int, title: str) -> None:
         self.stack.setCurrentIndex(index)
@@ -334,7 +344,7 @@ class MainWindow(QMainWindow):
                 window_id=self.engine_controller.window_id,
                 log_queue=self.log_queue,
             )
-            
+
     def _start_engine_from_dashboard(self) -> None:
         if not self.engine_controller.is_running():
             self.dashboard_page.start_btn.setEnabled(False)
@@ -419,7 +429,7 @@ class MainWindow(QMainWindow):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            if self.engine_controller.is_running:
+            if self.engine_controller.is_running():
                 self.engine_controller.stop_engine()
             run_setup()
 
@@ -477,11 +487,11 @@ class MainWindow(QMainWindow):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            if self.engine_controller.is_running:
+            if self.engine_controller.is_running():
                 self.engine_controller.stop_engine()
             uninstalled = run_uninstall()
             if uninstalled:
-                QCoreApplication.quit()
+                self.close()
 
     def _consume_engine_logs(self) -> None:
         """Background thread pulling log records from the queue and writing to the GUI console."""
@@ -490,11 +500,15 @@ class MainWindow(QMainWindow):
                 record = self.log_queue.get(timeout=0.2)
                 if record:
                     # Format the log record nicely
-                    msg = record.getMessage() if hasattr(record, "getMessage") else str(record)
+                    msg = (
+                        record.getMessage()
+                        if hasattr(record, "getMessage")
+                        else str(record)
+                    )
                     level = getattr(record, "levelname", "INFO")
                     formatted = f"[{level}] {msg}"
-                    # Safely push to the GUI text console on the main thread via signal or direct append if thread-safe
-                    self.log_console.appendPlainText(formatted)
+                    # Safely push to the GUI text console on the main thread via signal
+                    self.engine_log.emit(formatted)
             except Exception:
                 continue
 

@@ -123,7 +123,7 @@ class UInputBridge(AbstractBridge):
                 # Use a timeout so the thread can periodically check stop_event
                 msg = self.log_queue.get(timeout=0.1)
                 if msg:
-                    logger.info("[Worker] %s", msg)
+                    logger.info("\n[Worker] %s", msg)
             except Exception:
                 continue
 

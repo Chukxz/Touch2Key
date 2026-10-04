@@ -1296,6 +1296,7 @@ class LayoutsPlotterWidget(QWidget):
         return None
 
     def _render_empty_state(self, message: str) -> None:
+        message += "\n" + DEF_STR
         self.ax.clear()
         self.ax.text(
             0.5,
@@ -1392,9 +1393,7 @@ class LayoutsPlotterWidget(QWidget):
         if self.top_bezel_id < 0:
             self.top_bezel_id = ensure_top_bezel(self.active_layout, store.zones)
         if self.bottom_bezel_id < 0:
-            self.bottom_bezel_id = ensure_bottom_bezel(
-                self.active_layout, store.zones
-            )
+            self.bottom_bezel_id = ensure_bottom_bezel(self.active_layout, store.zones)
 
         for zone in zones:
             zone.set_parsed_config_from_json()
@@ -1449,12 +1448,12 @@ class LayoutsPlotterWidget(QWidget):
             artist.set_visible(self.show_overlays)
         for artist in self.labels_artists.values():
             artist.set_visible(self.show_overlays)
-            
+
         self.top_bezel_label_artist.set_visible(self.show_overlays)
         self.top_bezel_shape_artist.set_visible(self.show_overlays)
         self.bottom_bezel_label_artist.set_visible(self.show_overlays)
         self.bottom_bezel_shape_artist.set_visible(self.show_overlays)
-            
+
         self.update_title(f"OVERLAYS: {state_str} | {DEF_STR}")
 
     def label(self, center_x, center_y, label_text, fc):
@@ -2046,16 +2045,13 @@ class LayoutsPlotterWidget(QWidget):
                     Pipeline_Config.set_semantic_config(idx=0)
 
             # Update Region (Shape Type & Priority) and Semantic (Pointer)
-            # Because keep_previous=True is the default, omitting other arguments 
+            # Because keep_previous=True is the default, omitting other arguments
             # naturally preserves existing joystick origins/transforms/constraints.
             Pipeline_Config.set_region_config(
-                idx=region_idx,
-                priority=data.get("priority", 0)
+                idx=region_idx, priority=data.get("priority", 0)
             )
-            
-            Pipeline_Config.set_semantic_config(
-                pointer=data.get("pointer", False)
-            )
+
+            Pipeline_Config.set_semantic_config(pointer=data.get("pointer", False))
 
             entry["pipeline_json"] = Pipeline_Config.get_pipeline_json_from_config()
             output.append(entry)

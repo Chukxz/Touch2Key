@@ -55,7 +55,7 @@ class SettingsPage(BasePage):
         self.floating_check.setToolTip("Floats dynamically, is overridden by anchored.")
         input_layout.addWidget(self.floating_check)
 
-        self.anchored_check = QCheckBox("Anchored Floating Joystick")
+        self.anchored_check = QCheckBox("Anchored Joystick")
         self.anchored_check.setToolTip(
             "Locks touches near center to the anchor, floats dynamically elsewhere. Overrides floating."
         )
