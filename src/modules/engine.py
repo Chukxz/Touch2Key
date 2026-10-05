@@ -111,7 +111,7 @@ class Engine:
                             callback()
                     except Exception as exc:
                         logger.debug(
-                            "Failed to verify foreground window for hotkey: %s", exc
+                            "Failed to verify foreground window for hotkey: %s", exc, exc_info=True
                         )
 
                 keyboard.add_hotkey("esc", lambda: _guard_hotkey(self._shutdown))
@@ -129,7 +129,7 @@ class Engine:
                     "[CLI Interactive Launch] Active Global Hotkeys (Terminal-Focused): [Esc] Exit Engine | [F5] Toggle Handedness | [F6] Reload Layout | [F7] Reload Config"
                 )
             except Exception as exc:
-                logger.debug("Failed to register CLI global hotkeys: %s", exc)
+                logger.debug("Failed to register CLI global hotkeys: %s", exc, exc_info=True)
         else:
             logger.info(
                 "[Headless / GUI Worker Launch] Engine running in background worker mode (terminal hotkeys bypassed)."
@@ -157,7 +157,7 @@ class Engine:
                 MapperEvent(action="ON_CONFIG_RELOAD")
             )
         except Exception as exc:
-            logger.error("Failed to toggle handedness via hotkey: %s", exc)
+            logger.error("Failed to toggle handedness via hotkey: %s", exc, exc_info=True)
 
     def _reload_layout_cli(self) -> None:
         if not self._check_debounce():
@@ -587,7 +587,7 @@ def run_engine_process(conn: Connection, log_queue: Queue) -> None:
         sys.exit(0)
 
     except Exception as exc:
-        print(f"[ENGINE PROCESS] Startup failure: {exc}")
+        logger.error("[ENGINE PROCESS] Startup failure: %s", exc, exc_info=True)
         dispatcher.send_error(str(exc))
         if engine is not None:
             try:
@@ -605,7 +605,7 @@ def run_engine_process(conn: Connection, log_queue: Queue) -> None:
     try:
         engine._shutdown()
     except Exception as exc:
-        print(f"[ENGINE PROCESS] Shutdown failure: {exc}")
+        logger.error("[ENGINE PROCESS] Shutdown failure: %s", exc, exc_info=True)
         dispatcher.send_error(str(exc))
     finally:
         dispatcher.send_stopped()

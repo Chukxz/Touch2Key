@@ -15,6 +15,7 @@ from modules.database import store
 
 if TYPE_CHECKING:
     from .mapper import Mapper
+    from modules.core.pipeline import Pipeline
     from modules.core.pipeline_output import BridgeOutputSink
 
 logger = logging.getLogger("modules.core.wasd_mapper")
@@ -27,21 +28,21 @@ class WASDMapper:
         self.mapper_event_dispatcher = mapper.mapper_event_dispatcher
 
         self.lock = threading.Lock()
-        self.pipeline = None
+        self.pipeline: Pipeline | None = None
 
-        self._build_pipeline()
+        self._build_pipeline_wasd()
 
         self.mapper_event_dispatcher.register_callback(
-            "ON_CONFIG_RELOAD", self._build_pipeline
+            "ON_CONFIG_RELOAD", self._build_pipeline_wasd
         )
         self.mapper_event_dispatcher.register_callback(
-            "ON_LAYOUT_RELOAD", self._build_pipeline
+            "ON_LAYOUT_RELOAD", self._build_pipeline_wasd
         )
         self.mapper_event_dispatcher.register_callback(
-            "ON_WORKER_RESPAWN", self._on_worker_respawn
+            "ON_WORKER_RESPAWN", self._on_worker_respawn_wasd
         )
 
-    def _build_pipeline(self) -> None:
+    def _build_pipeline_wasd(self) -> None:
         settings = store.settings.get()
         layout = store.get_active_layout()
         if layout is None:
@@ -72,90 +73,90 @@ class WASDMapper:
         else:
             half_screen_region = RectangularRegion(Point(0.0, 0.0), Point(w / 2.0, h))
 
-        if wasd_zone_values is not None:
-            z_id = int(wasd_zone_values.get("id", 0))
-            priority = int(wasd_zone_values.get("priority", 0))
-            ignore_app_settings = bool(
-                wasd_zone_values.get("ignore_app_settings", False)
+        if wasd_zone_values is None:
+            return
+
+        z_id = int(wasd_zone_values.get("id", 0))
+        priority = int(wasd_zone_values.get("priority", 0))
+        ignore_app_settings = bool(wasd_zone_values.get("ignore_app_settings", False))
+
+        deadzone = (
+            float(wasd_zone_values.get("deadzone", 0.1))
+            if ignore_app_settings
+            else settings.deadzone
+        )
+        hysteresis = (
+            float(wasd_zone_values.get("hysteresis", 4.0))
+            if ignore_app_settings
+            else settings.hysteresis
+        )
+        sprint_key = settings.sprint_key or "lshift"
+
+        center = Point(
+            scale_coord(wasd_zone_values["cx"], w),
+            scale_coord(wasd_zone_values["cy"], h),
+        )
+
+        if settings.anchored_joystick:
+            pipeline = AnchoredJoystick(
+                default_anchor=center,
+                region=half_screen_region,
+                dead_zone=deadzone * inner_r,
+                walk_radius=inner_r,
+                sprint_distance=outer_r,
+                radius=outer_r,
+                snap_radius=inner_r,
+                hysteresis_deg=hysteresis,
+                up="w",
+                down="s",
+                left="a",
+                right="d",
+                sprint_key=sprint_key,
+                priority=priority,
+                creation_id=z_id,
+            )
+            logger.info(
+                "Configured Anchored Floating Joystick at (%0.1f, %0.1f)",
+                center.x,
+                center.y,
             )
 
-            deadzone = (
-                float(wasd_zone_values.get("deadzone", 0.1))
-                if ignore_app_settings
-                else settings.deadzone
+        elif settings.floating_joystick:
+            pipeline = FloatingJoystick(
+                region=half_screen_region,
+                dead_zone=deadzone * inner_r,
+                walk_radius=inner_r,
+                sprint_distance=outer_r,
+                radius=outer_r,
+                hysteresis_deg=hysteresis,
+                up="w",
+                down="s",
+                left="a",
+                right="d",
+                sprint_key=sprint_key,
             )
-            hysteresis = (
-                float(wasd_zone_values.get("hysteresis", 4.0))
-                if ignore_app_settings
-                else settings.hysteresis
+            logger.info("Configured Floating Joystick.")
+
+        else:
+            pipeline = FixedJoystick(
+                center=center,
+                radius=inner_r,
+                dead_zone=deadzone * inner_r,
+                walk_radius=inner_r,
+                sprint_distance=outer_r,
+                hysteresis_deg=hysteresis,
+                up="w",
+                down="s",
+                left="a",
+                right="d",
+                sprint_key=sprint_key,
             )
-            sprint_key = settings.sprint_key or "lshift"
-
-            center = Point(
-                scale_coord(wasd_zone_values["cx"], w),
-                scale_coord(wasd_zone_values["cy"], h),
+            logger.info(
+                "Configured Fixed Joystick at (%0.1f, %0.1f)", center.x, center.y
             )
-
-            if settings.anchored_joystick:
-                pipeline = AnchoredJoystick(
-                    default_anchor=center,
-                    region=half_screen_region,
-                    dead_zone=deadzone * inner_r,
-                    walk_radius=inner_r,
-                    sprint_distance=outer_r,
-                    radius=outer_r,
-                    snap_radius=inner_r,
-                    hysteresis_deg=hysteresis,
-                    up="w",
-                    down="s",
-                    left="a",
-                    right="d",
-                    sprint_key=sprint_key,
-                    priority=priority,
-                    creation_id=z_id,
-                )
-                logger.info(
-                    "Configured Anchored Floating Joystick at (%0.1f, %0.1f)",
-                    center.x,
-                    center.y,
-                )
-
-            elif settings.floating_joystick:
-                pipeline = FloatingJoystick(
-                    region=half_screen_region,
-                    dead_zone=deadzone * inner_r,
-                    walk_radius=inner_r,
-                    sprint_distance=outer_r,
-                    radius=outer_r,
-                    hysteresis_deg=hysteresis,
-                    up="w",
-                    down="s",
-                    left="a",
-                    right="d",
-                    sprint_key=sprint_key,
-                )
-                logger.info("Configured Floating Joystick.")
-
-            else:
-                pipeline = FixedJoystick(
-                    center=center,
-                    radius=inner_r,
-                    dead_zone=deadzone * inner_r,
-                    walk_radius=inner_r,
-                    sprint_distance=outer_r,
-                    hysteresis_deg=hysteresis,
-                    up="w",
-                    down="s",
-                    left="a",
-                    right="d",
-                    sprint_key=sprint_key,
-                )
-                logger.info(
-                    "Configured Fixed Joystick at (%0.1f, %0.1f)", center.x, center.y
-                )
 
         with self.lock:
-            if self.pipeline:
+            if self.pipeline is not None:
                 self.pipeline.reset(self.output_sink)
             self.pipeline = pipeline
 
@@ -164,6 +165,6 @@ class WASDMapper:
             if self.pipeline:
                 self.pipeline.reset(self.output_sink)
 
-    def _on_worker_respawn(self, worker_type: str) -> None:
+    def _on_worker_respawn_wasd(self, worker_type: str) -> None:
         if worker_type == "keyboard":
             self.touch_up()

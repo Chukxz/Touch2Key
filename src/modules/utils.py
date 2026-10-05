@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import colorsys
 import sys
+import logging
 import random
 import re
 import struct
@@ -15,6 +16,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Literal, Any
 
 from PySide6.QtCore import QObject, Signal
+
+logger = logging.getLogger("modules.utils")
 
 APP_NAME = "Touch2Key"
 
@@ -492,8 +495,11 @@ class MapperEventDispatcher:
 
         except Exception as exc:
             func_name = getattr(func, "__name__", repr(func))
-            print(
-                f"[!] Error registering callback {func_name} for event {event_type}: {exc}"
+            logger.debug(
+                "[!] Error registering callback %s for event {event_type}: %s",
+                func_name,
+                exc,
+                exc_info=True,
             )
 
     def unregister_callback(

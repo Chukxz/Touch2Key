@@ -53,17 +53,17 @@ class KeyMapper:
         self.pipelines = []
         self.ignored_keys = {MOUSE_WHEEL_SIMULATOR_CODE, SPRINT_DISTANCE_CODE}
 
-        self._build_pipelines()
+        self._build_pipelines_key()
         self._sync_typematic_to_bridge()
 
         self.mapper_event_dispatcher.register_callback(
-            "ON_LAYOUT_RELOAD", self._build_pipelines
+            "ON_LAYOUT_RELOAD", self._build_pipelines_key
         )
         self.mapper_event_dispatcher.register_callback(
-            "ON_WORKER_RESPAWN", self._on_worker_respawn
+            "ON_WORKER_RESPAWN", self._on_worker_respawn_key
         )
         self.mapper_event_dispatcher.register_callback(
-            "ON_CONFIG_RELOAD", self._on_config_reload
+            "ON_CONFIG_RELOAD", self._on_config_reload_key
         )
 
     def _resolve_scancode_set(self, raw_tokens: str | None) -> set[int]:
@@ -89,7 +89,7 @@ class KeyMapper:
             exclude_scancodes=resolved,
         )
 
-    def _on_config_reload(self) -> None:
+    def _on_config_reload_key(self) -> None:
         s = store.settings.get()
         self.typematic_enabled = bool(getattr(s, "typematic_enabled", True))
         self.typematic_delay_ms = float(getattr(s, "typematic_delay_ms", 250.0))
@@ -98,7 +98,7 @@ class KeyMapper:
         self._sync_typematic_to_bridge()
         logger.info("KeyMapper pushed updated typematic parameters to bridge.")
 
-    def _build_pipelines(self) -> None:
+    def _build_pipelines_key(self) -> None:
         settings = store.settings.get()
         layout = store.get_active_layout()
         if layout is None:
@@ -182,7 +182,7 @@ class KeyMapper:
             for pipeline in self.pipelines:
                 pipeline.reset(self.output_sink)
 
-    def _on_worker_respawn(self, worker_type: str) -> None:
+    def _on_worker_respawn_key(self, worker_type: str) -> None:
         if worker_type == "keyboard":
             self.release_all()
             self._sync_typematic_to_bridge()

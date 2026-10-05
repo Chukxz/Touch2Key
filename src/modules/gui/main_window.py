@@ -147,8 +147,6 @@ class EngineProcessController(QObject):
 class MainWindow(QMainWindow):
     """Root Application Window with scannable layout, pages stack, and log console."""
 
-    engine_log = Signal(str)
-
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Touch2Key")
@@ -161,8 +159,6 @@ class MainWindow(QMainWindow):
         self._setup_tools()
         self._setup_logging()
         self._wire_engine_signals()
-
-        self.engine_log.connect(self.log_console.appendPlainText)
 
         self.log_queue = multiprocessing.Queue()
         self._stop_log_thread = threading.Event()
@@ -508,7 +504,7 @@ class MainWindow(QMainWindow):
                         if hasattr(record, "getMessage")
                         else str(record)
                     )
-                    self.engine_log.emit(msg)
+                    print(msg)
             except Exception:
                 continue
 

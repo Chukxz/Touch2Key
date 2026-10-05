@@ -14,7 +14,6 @@ from modules.core.pipeline import (
     Point,
     PointerSemantic,
     RectangularRegion,
-    Vector,
 )
 
 from modules.utils import scale_coord
@@ -34,21 +33,21 @@ class MouseMapper:
         self.mapper_event_dispatcher = mapper.mapper_event_dispatcher
 
         self.lock = threading.Lock()
-        self.pipeline: Pipeline[Vector] | None = None
+        self.pipeline: Pipeline | None = None
 
-        self._build_pipeline()
+        self._build_pipeline_mouse()
 
         self.mapper_event_dispatcher.register_callback(
-            "ON_CONFIG_RELOAD", self._build_pipeline
+            "ON_CONFIG_RELOAD", self._build_pipeline_mouse
         )
         self.mapper_event_dispatcher.register_callback(
-            "ON_LAYOUT_RELOAD", self._build_pipeline
+            "ON_LAYOUT_RELOAD", self._build_pipeline_mouse
         )
         self.mapper_event_dispatcher.register_callback(
-            "ON_WORKER_RESPAWN", self._on_worker_respawn
+            "ON_WORKER_RESPAWN", self._on_worker_respawn_mouse
         )
 
-    def _build_pipeline(self) -> None:
+    def _build_pipeline_mouse(self) -> None:
         settings = store.settings.get()
         layout = store.get_active_layout()
         if layout is None:
@@ -148,8 +147,10 @@ class MouseMapper:
                 )
 
         logger.info(
-            f"\n[MOUSEMAPPER] - Final X Sensitivity: {final_sens_x:.4f} (Ratio: {ratio_x:.2f}, User: {sens_x})\
-              \n[MOUSEMAPPER] - Final Y Sensitivity: {final_sens_y:.4f} (Ratio: {ratio_y:.2f}, User: {sens_y})"
+            f"[MOUSEMAPPER] - Final X Sensitivity: {final_sens_x:.4f} (Ratio: {ratio_x:.2f}, User: {sens_x})"
+        )
+        logger.info(
+            f"[MOUSEMAPPER] - Final Y Sensitivity: {final_sens_y:.4f} (Ratio: {ratio_y:.2f}, User: {sens_y})"
         )
 
         pipeline = Pipeline(
@@ -163,15 +164,15 @@ class MouseMapper:
         )
 
         with self.lock:
-            if self.pipeline:
+            if self.pipeline is not None:
                 self.pipeline.reset(self.output_sink)
             self.pipeline = pipeline
 
     def touch_up(self) -> None:
         with self.lock:
-            if self.pipeline:
+            if self.pipeline is not None:
                 self.pipeline.reset(self.output_sink)
 
-    def _on_worker_respawn(self, worker_type: str) -> None:
+    def _on_worker_respawn_mouse(self, worker_type: str) -> None:
         if worker_type == "mouse":
             self.touch_up()
