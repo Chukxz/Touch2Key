@@ -77,10 +77,6 @@ class DashboardPage(BasePage):
         self.status_label.setText("Engine: Running" if running else "Engine: Stopped")
         self._refresh_target_label()
 
-    def set_target_window(self, window_title: str) -> None:
-        self._target_title = window_title
-        self._refresh_target_label()
-
     def _refresh_target_label(self) -> None:
         title = self._target_title if self._running and self._target_title else "None"
         self.target_window_label.setText(f"Target Window: {title}")

@@ -5,7 +5,7 @@ import threading
 import logging
 import multiprocessing
 
-from PySide6.QtCore import Qt, QObject, QTimer, Signal, QCoreApplication
+from PySide6.QtCore import Qt, QObject, QTimer, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -174,6 +174,9 @@ class MainWindow(QMainWindow):
         pid = os.getpid()
         logger.info(f"GUI Process PID: {pid}")
 
+        QTimer(self).singleShot(500, self.run_initial_preflight)
+
+    def run_initial_preflight(self):
         success = run_preflight()
         if not success:
             QMessageBox.warning(
@@ -394,7 +397,7 @@ class MainWindow(QMainWindow):
         toolbar.setMinimumHeight(40)
 
         # Setup / Repair Action
-        setup_action = QAction("Install / Repair Drivers...", self)
+        setup_action = QAction("Install / Repair Drivers (Setup)...", self)
         setup_action.triggered.connect(self._on_run_setup)
         toolbar.addAction(setup_action)
 
@@ -505,10 +508,7 @@ class MainWindow(QMainWindow):
                         if hasattr(record, "getMessage")
                         else str(record)
                     )
-                    level = getattr(record, "levelname", "INFO")
-                    formatted = f"[{level}] {msg}"
-                    # Safely push to the GUI text console on the main thread via signal
-                    self.engine_log.emit(formatted)
+                    self.engine_log.emit(msg)
             except Exception:
                 continue
 

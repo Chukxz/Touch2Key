@@ -123,7 +123,7 @@ class UInputBridge(AbstractBridge):
                 # Use a timeout so the thread can periodically check stop_event
                 msg = self.log_queue.get(timeout=0.1)
                 if msg:
-                    logger.info("\n[Worker] %s", msg)
+                    logger.info("[Worker] %s", msg)
             except Exception:
                 continue
 
@@ -365,7 +365,9 @@ class UInputBridge(AbstractBridge):
                 try:
                     self._respawn_callback("keyboard")
                 except Exception as e:
-                    logger.info(f"\n[BRIDGE] - Respawn callback (keyboard) failed: {e}.")
+                    logger.info(
+                        f"\n[BRIDGE] - Respawn callback (keyboard) failed: {e}."
+                    )
         finally:
             with self._k_respawn_lock:
                 self._k_respawning = False
