@@ -21,6 +21,14 @@ logger = logging.getLogger("modules.utils")
 
 APP_NAME = "Touch2Key"
 
+# ---------------------------------------------------------------------------
+# OS SUBPROCESS FLAGS (PREVENTS FLICKERING CONSOLE WINDOWS)
+# ---------------------------------------------------------------------------
+if sys.platform == "win32":
+    CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW
+else:
+    CREATE_NO_WINDOW = 0
+
 # Task IDs
 TASK_BUTTON = 0
 TASK_REL = 1
@@ -875,7 +883,9 @@ class QtIpcMapperEventDispatcher(QObject):
 
 
 def get_adb_device():
-    out = subprocess.check_output([ADB, "devices"], timeout=10).decode().splitlines()
+    out = subprocess.check_output(
+        [ADB, "devices"], timeout=10, creationflags=CREATE_NO_WINDOW
+    ).decode().splitlines()
     real = [
         d.split()[0] for d in out[1:] if "device" in d and not d.startswith("emulator-")
     ]
@@ -890,6 +900,7 @@ def get_screen_size(device: str) -> tuple[int, int] | None:
         capture_output=True,
         text=True,
         timeout=10,
+        creationflags=CREATE_NO_WINDOW
     )
     match = _PHYSICAL_SIZE_RE.search(result.stdout)
     if match:
@@ -904,6 +915,7 @@ def get_dpi(device: str):
             capture_output=True,
             text=True,
             timeout=10,
+            creationflags=CREATE_NO_WINDOW
         )
         val = result.stdout.strip()
         return int(val) if val else BASELINE_DPI
@@ -918,6 +930,7 @@ def is_device_online(device: str):
             capture_output=True,
             text=True,
             timeout=10,
+            creationflags=CREATE_NO_WINDOW
         )
         return "device" in res.stdout
     except Exception:
@@ -936,7 +949,7 @@ def wireless_connect(device: str | None = None, continuous: bool = True):
                 return False, ""
         try:
             routes = subprocess.check_output(
-                [ADB, "-s", device, "shell", "ip", "route"], text=True, timeout=10
+                [ADB, "-s", device, "shell", "ip", "route"], text=True, timeout=10, creationflags=CREATE_NO_WINDOW
             ).splitlines()
             ip_addr = None
             for line in routes:
@@ -949,9 +962,9 @@ def wireless_connect(device: str | None = None, continuous: bool = True):
             socket_path = f"{ip_addr}:{PORT}"
 
             if device != socket_path:
-                subprocess.run([ADB, "-s", device, "tcpip", PORT], timeout=10)
+                subprocess.run([ADB, "-s", device, "tcpip", PORT], timeout=10, creationflags=CREATE_NO_WINDOW)
                 subprocess.check_output(
-                    [ADB, "-s", device, "connect", socket_path], timeout=10
+                    [ADB, "-s", device, "connect", socket_path], timeout=10, creationflags=CREATE_NO_WINDOW
                 )
             return True, socket_path
         except Exception:
@@ -984,6 +997,7 @@ def get_rotation(device):
             capture_output=True,
             text=True,
             timeout=10,
+            creationflags=CREATE_NO_WINDOW
         )
         for pat in patterns:
             m = re.search(pat, result.stdout)
