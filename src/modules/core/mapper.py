@@ -188,6 +188,9 @@ class Mapper:
         }
 
     def _update_game_window_info(self) -> None:
+        last_log_time = 0.0
+        log_interval = 5.0  # Throttles repeated logs if window is lost/minimized
+
         while self.running and not self.stop_event.is_set():
             try:
                 current_window_id = None
@@ -215,11 +218,18 @@ class Mapper:
                                 self.game_window_info = discovered
                                 self.window_lost = False
                     except Exception:
+                        now = time.perf_counter()
+                        if now - last_log_time > log_interval:
+                            logger.debug("Target window currently unavailable or minimized. Retrying...")
+                            last_log_time = now
                         with self.lock:
                             self.game_window_info = None
 
             except Exception as e:
-                logger.debug("Window tracking exception: %s", e)
+                now = time.perf_counter()
+                if now - last_log_time > log_interval:
+                    logger.debug("Window tracking exception: %s", e)
+                    last_log_time = now
 
             sleep_duration = (
                 LONG_DELAY if self.window_lost else self.window_update_interval
@@ -300,9 +310,9 @@ class Mapper:
                 is_mouse_middle = scancode == M_MIDDLE
                 is_mouse_right = scancode == M_RIGHT
 
-                if state == 0:
+                if state == 0:  # DOWN / PRESS
                     if is_toggle_mode:
-                        self.engine_ref.toggle_mode()
+                        pass  # Handled cleanly on release (state == 1)
                     elif is_mouse_left:
                         self.bridge.left_click_down()
                     elif is_mouse_middle:
@@ -312,9 +322,9 @@ class Mapper:
                     else:
                         self.bridge.key_down(scancode)
 
-                elif state == 1:
+                elif state == 1:  # UP / RELEASE
                     if is_toggle_mode:
-                        pass
+                        self.engine_ref.toggle_mode()
                     elif is_mouse_left:
                         self.bridge.left_click_up()
                     elif is_mouse_middle:
