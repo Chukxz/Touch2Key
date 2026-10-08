@@ -47,7 +47,6 @@ from modules.utils import (
     MapperEvent,
 )
 from modules.core.pipeline import PipelineConfig
-from .base_page import BasePage
 
 if TYPE_CHECKING:
     from modules.utils import MapperEventDispatcher
@@ -68,7 +67,7 @@ STATIC_SHORTCUTS_HELP = (
     "<span style='color: palette(highlight);'>Arrows</span> Nudge"
 )
 
-class LayoutStudioPage(BasePage):
+class LayoutStudioPage(QWidget):
     """Unified Layout Editor, Profile Manager, and Pipeline Inspector."""
 
     title = "Layout Studio"
