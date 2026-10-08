@@ -190,6 +190,8 @@ class Engine:
             self.key_mapper.release_all()
         if self.wasd_mapper:
             self.wasd_mapper.touch_up()
+        if self.bezel_mapper:
+            self.bezel_mapper.release_all()
         self.two_finger_tap_tracker.reset()
 
         self.mapper_event_dispatcher.dispatch(
@@ -235,6 +237,8 @@ class Engine:
                 self.key_mapper.release_all()
             if self.wasd_mapper:
                 self.wasd_mapper.touch_up()
+            if self.bezel_mapper:
+                self.bezel_mapper.release_all()
             self.two_finger_tap_tracker.reset()
 
     def _on_layout_reload(self) -> None:
@@ -281,6 +285,16 @@ class Engine:
                     tiers.append([p])
 
         return tiers
+
+    def _mouse_flush_loop(self, rate_cap: float) -> None:
+        """Dedicated background thread to flush aggregated mouse deltas at a fixed rate."""
+        sleep_interval = 1.0 / rate_cap
+        while not self._stop_event.is_set():
+            if self.output_sink:
+                self.output_sink.flush_mouse_move()
+                if self.touch_reader and getattr(self.touch_reader, "active_touches", 1) == 0:
+                    self.output_sink.reset_mouse_accumulators()
+            time.sleep(sleep_interval)
 
     def _process_touch_event(self, touch_event: TouchEvent) -> None:
         if not (
@@ -353,15 +367,6 @@ class Engine:
                             break
                 if tier_claimed:
                     break
-
-        # Dynamically push any mouse deltas accumulated by MouseMapper / Track-Fire Buttons to the OS
-        self.output_sink.flush_mouse_move()
-
-        if (
-            touch_event.phase is TouchPhase.UP
-            and getattr(self.touch_reader, "active_touches", 1) == 0
-        ):
-            self.output_sink.reset_mouse_accumulators()
 
     def start_headless(
         self,
@@ -454,6 +459,13 @@ class Engine:
 
         self.bridge_class.start_worker_processes(k_device_handle, m_device_handle)
 
+        # Start dedicated background mouse flush thread
+        threading.Thread(
+            target=self._mouse_flush_loop,
+            args=(rate_cap,),
+            daemon=True,
+        ).start()
+
     def _start(self, config_str: str | None = None) -> None:
         if config_str is not None:
             config = parse_config_arg(config_str)
@@ -523,6 +535,12 @@ class Engine:
 
         try:
             self.close_virtual_keyboard()
+
+            # Safely reset all active pipeline states on shutdown
+            if self.output_sink:
+                for tier in self._tiers:
+                    for p in tier:
+                        p.reset(self.output_sink)
 
             if self.touch_reader is not None:
                 self.touch_reader.stop()
@@ -621,15 +639,13 @@ def parse_config_arg(config_str: str) -> dict:
     """Parses a comma-separated config string into engine parameters.
     Format: window_id, toggle_key, sprint_key, rate_cap, pps, k_device_handle, m_device_handle
     """
-    # Split by comma and strip whitespace from each part
     parts = [p.strip() for p in config_str.split(",")]
 
-    # Pad out missing trailing values up to 7 items
     while len(parts) < 7:
         parts.append("")
 
     def _parse_val(val, target_type, default):
-        if not val:  # Handles empty strings like ,,
+        if not val:
             return default
         try:
             return target_type(val)
