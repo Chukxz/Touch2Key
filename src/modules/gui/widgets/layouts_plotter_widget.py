@@ -56,13 +56,6 @@ DELETING = "DELETING"
 MARKING = "MARKING"
 CONFIRM_DELETE_ALL = "CONFIRM_DELETE_ALL"
 CONFIRM_EXIT = "CONFIRM_EXIT"
-HELP_STR = "F1 (Help)"
-DEF_STR = (
-    "MODE: IDLE | F12 (Save) | Esc (Exit) | F6 (Circle) | F7 (RECTANGLE) | F8 (Cancel)\n"
-    "    Del (Delete) | F2 (Delete All) | F9 (List Shapes) | F4 (Toggle Overlays)\n"
-    "    [ (Sprint Threshold) | ] (Mouse Wheel) | Space (Toggle Pointer)\n"
-    "    Arrows: Nudge | Shift+Arrows: Fast Nudge | P / O: Change Priority"
-)
 
 INDICATED_EDGE_COLOR = (0.85, 0.88, 0.92)
 ACTIVE_EDGE_COLOR = (0.7, 0.7, 0.7, 0.8)
@@ -142,8 +135,8 @@ class _Draggable:
         curr_id = self.plotter.current_draggable_id
         if curr_id is None: return
 
+        self.plotter.zone_selected.emit(self.entry_id)
         priority = self.plotter.shapes[self.entry_id].get("priority", 0)
-        self.plotter.zone_selected.emit(priority)
         pointer_info = "Pointer Enabled" if self.plotter.shapes[self.entry_id]["pointer"] else "Pointer Disabled"
 
         if curr_id.startswith("label_"):
@@ -153,7 +146,7 @@ class _Draggable:
                 if label_bbox:
                     label_bbox.set_edgecolor(INDICATED_EDGE_COLOR)
                     label_bbox.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
-                self.plotter.update_title(f"Current Artist: {curr_id} (ID: {self.entry_id}, Prio: {priority}) | Drag/Nudge | {pointer_info} | {HELP_STR}", True)
+                self.plotter.update_title(f"Current Artist: {curr_id} (ID: {self.entry_id}, Prio: {priority}) | Drag/Nudge | {pointer_info}", True)
             self.plotter.current_draggable = draggable_artist
 
         elif curr_id.startswith("shape_"):
@@ -162,7 +155,7 @@ class _Draggable:
                 if (shape_artist := draggable_artist.shape_artist) is not None:
                     shape_artist.set_edgecolor(INDICATED_EDGE_COLOR)
                     shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
-                self.plotter.update_title(f"Current Artist: {curr_id} (ID: {self.entry_id}, Prio: {priority}) | Drag/Resize/Nudge | {pointer_info} | {HELP_STR}", True)
+                self.plotter.update_title(f"Current Artist: {curr_id} (ID: {self.entry_id}, Prio: {priority}) | Drag/Resize/Nudge | {pointer_info}", True)
             self.plotter.current_draggable = draggable_artist
 
         self.cursor_manager.set_custom_cursor(Qt.CursorShape.SizeAllCursor)
@@ -316,8 +309,7 @@ class _DraggableLabel(_Draggable):
 
     def _partial_release(self):
         if self.plotter.ignore_current_draggable_id_n <= 0:
-            state_str = "VISIBLE" if self.plotter.show_overlays else "HIDDEN"
-            self.plotter.update_title(f"OVERLAYS: {state_str} | {DEF_STR}", True)
+            self.plotter.update_title(f"OVERLAYS: {'VISIBLE' if self.plotter.show_overlays else 'HIDDEN'}", True)
 
         label_bbox = self.label_artist.get_bbox_patch()
         if label_bbox:
@@ -327,7 +319,6 @@ class _DraggableLabel(_Draggable):
     def _disconnect_cids(self):
         for cid in self.cids:
             self.canvas.mpl_disconnect(cid)
-
 
 class _DraggableShape(_Draggable):
     def __init__(self, entry_id: int, plotter_ref):
@@ -447,8 +438,7 @@ class _DraggableShape(_Draggable):
     def _partial_release(self):
         if self.shape_artist is None: return
         if self.plotter.ignore_current_draggable_id_n <= 0:
-            state_str = "VISIBLE" if self.plotter.show_overlays else "HIDDEN"
-            self.plotter.update_title(f"OVERLAYS: {state_str} | {DEF_STR}", True)
+            self.plotter.update_title(f"OVERLAYS: {'VISIBLE' if self.plotter.show_overlays else 'HIDDEN'}", True)
 
         self.shape_artist.set_edgecolor(DEFAULT_EDGE_COLOR)
         self.shape_artist.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
@@ -495,7 +485,9 @@ class _DraggableCircle(_DraggableShape):
             self._update_radius(xdata, ydata)
         elif self.shape_mode == "drag":
             _, _, xdata_press, ydata_press, _, _ = self.press
-            new_cx, new_cy = self._move_circle(xdata - xdata_press, ydata - ydata_press)
+            dx = xdata - xdata_press
+            dy = ydata - ydata_press
+            new_cx, new_cy = self._move_circle(dx, dy)
 
         self._circle_transform_helper(old_cx, old_cy, old_r, new_cx, new_cy)
 
@@ -585,7 +577,8 @@ class _DraggableCircle(_DraggableShape):
     def _move_circle(self, dx, dy):
         if isinstance(self.shape_artist, Circle):
             x0, y0, _, _, _, _ = self.press
-            new_cx, new_cy = int(round(x0 + dx)), int(round(y0 + dy))
+            new_cx = int(round(x0 + dx))
+            new_cy = int(round(y0 + dy))
             self.shape_artist.set_center((new_cx, new_cy))
             self.plotter.shapes[self.entry_id]["cx"] = new_cx
             self.plotter.shapes[self.entry_id]["cy"] = new_cy
@@ -603,7 +596,6 @@ class _DraggableCircle(_DraggableShape):
         self._circle_transform_helper(old_cx, old_cy, old_r, new_cx, new_cy)
         self.canvas.draw()
         self.plotter.drawn = False
-
 
 class _DraggableRectangle(_DraggableShape):
     def __init__(self, entry_id: int, plotter_ref):
@@ -738,10 +730,10 @@ class _DraggableRectangle(_DraggableShape):
         self.canvas.draw()
         self.plotter.drawn = False
 
-
 class LayoutsPlotterWidget(QWidget):
     layout_saved = Signal(str, int)
     zone_selected = Signal(int)
+    status_updated = Signal(str) # NEW: Broadcaster for UI text
 
     def __init__(self, parent: QWidget | None = None, standalone: bool = False):
         super().__init__(parent)
@@ -892,7 +884,7 @@ class LayoutsPlotterWidget(QWidget):
         self.update_image_params(img)
         self.ax.imshow(img)
 
-        self.update_title(f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'} | {DEF_STR}")
+        self.update_title(f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'}")
         self.init_crosshairs()
         self.bg_cache = None
 
@@ -976,10 +968,15 @@ class LayoutsPlotterWidget(QWidget):
         self.img_dpi = int(round(img.info.get("dpi", BASELINE_DPI)[0]))
 
     def update_title(self, text: str, idle_override: bool = False):
+        """Sets the matplotlib title and broadcasts it to the Qt parent UI."""
         self.ax.set_title(text)
+        self.status_updated.emit(text)
         self.cursor_manager.set_state_cursor(self.state)
-        if idle_override: self.fig.canvas.draw_idle()
-        else: self.fig.canvas.draw()
+        
+        if idle_override: 
+            self.fig.canvas.draw_idle()
+        else: 
+            self.fig.canvas.draw()
 
     def clear_visuals(self):
         for artist in self.point_artists: artist.remove()
@@ -990,19 +987,18 @@ class LayoutsPlotterWidget(QWidget):
         self.clear_visuals()
         self.state, self.mode, self.points = IDLE, None, []
         self.input_buffer, self.buffer_default = "", True
-        self.update_title(f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'} | {DEF_STR}")
+        self.update_title(f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'}")
         if self.ax.bbox.width > 0 and self.ax.bbox.height > 0:
             self.bg_cache = self.canvas.copy_from_bbox(self.ax.bbox)
 
     def start_mode(self, mode: str, num_points: int):
         self.reset_state()
         self.mode, self.artists_points, self.state = mode, num_points, COLLECTING
-        self.update_title(f"MODE: {mode}. Click {num_points} points on the image (F8 to Cancel).")
+        self.update_title(f"MODE: {mode}. Click {num_points} points on the image.")
 
     def load_active_layout_zones(self):
         if not self.active_layout: return
 
-        # Self-healing call Native to the Repository
         zones = store.zones.list_for_layout(self.active_layout.id)
         w, h, dpi = self.img_width, self.img_height, self.img_dpi
         self.init_params_helper()
@@ -1036,7 +1032,7 @@ class LayoutsPlotterWidget(QWidget):
                     (int(round((zone.x2 or 0.0) * scale_x)), int(round((zone.y2 or 0.0) * scale_y))),
                 )
 
-            self.finalize_shape(cx=cx, cy=cy, r=r, bb=bb, bridge_key=bridge_key or zone.name, hex_code=zone.scancode, pointer=zone.pointer, priority=zone.priority, pipeline_json=zone.pipeline_json)
+            self.finalize_shape(cx=cx, cy=cy, r=r, bb=bb, bridge_key=bridge_key or zone.name, hex_code=zone.scancode, pointer=zone.pointer, priority=zone.priority, pipeline_json=zone.pipeline_json, ignore_app_settings=zone.ignore_app_settings)
 
         self.mouse_wheel_radius = self.active_layout.mouse_wheel_radius
         self.sprint_distance = self.active_layout.sprint_distance
@@ -1050,7 +1046,7 @@ class LayoutsPlotterWidget(QWidget):
         
         for art in (self.top_bezel_label_artist, self.top_bezel_shape_artist, self.bottom_bezel_label_artist, self.bottom_bezel_shape_artist):
             art.set_visible(self.show_overlays)
-        self.update_title(f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'} | {DEF_STR}")
+        self.update_title(f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'}")
 
     def label(self, center_x, center_y, label_text, fc):
         scaled_font = max(5, int(round(self.fig.get_size_inches()[1] * 72 * 0.02)))
@@ -1096,12 +1092,13 @@ class LayoutsPlotterWidget(QWidget):
                     self.fire_on_motion = False
             else:
                 self.partial_release_all()
-                self.update_title(f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'} | {DEF_STR}", True)
+                self.update_title(f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'}", True)
 
     def partial_release_all(self):
         for mgr in self.label_drag_managers.values(): mgr._partial_release()
         for mgr in self.shape_drag_managers.values(): mgr._partial_release()
         self.current_draggable_id = None
+        self.zone_selected.emit(-1)
         self.fig.canvas.draw_idle()
 
     def on_click(self, event):
@@ -1164,6 +1161,7 @@ class LayoutsPlotterWidget(QWidget):
                 eid = self.current_draggable.entry_id
                 self.shapes[eid]["priority"] += 1 if event.key == "p" else -1
                 self.update_title(f"Priority {'increased' if event.key == 'p' else 'decreased'}: {self.shapes[eid]['priority']} (ID: {eid})", True)
+                self.zone_selected.emit(eid)
             else:
                 step = 5 if event.key.startswith("shift+") else 1
                 clean_key = event.key.replace("shift+", "")
@@ -1171,19 +1169,13 @@ class LayoutsPlotterWidget(QWidget):
                 if clean_key in dirs and self.current_draggable:
                     self.current_draggable._move(*dirs[clean_key])
 
-    def on_resize(self, event):
-        if not self.labels_artists: return
-        scaled_font = max(5, int(round(self.fig.get_size_inches()[1] * 72 * 0.02)))
-        for art in self.labels_artists.values(): art.set_fontsize(scaled_font)
-        self.fig.canvas.draw_idle()
-
     def enter_deleting_mode(self):
-        if not self.shapes: self.update_title(f"List empty. Nothing to delete | {HELP_STR}"); return
+        if not self.shapes: self.update_title(f"List empty. Nothing to delete"); return
         self.state, self.input_buffer = DELETING, ""
         self.update_title("DELETE MODE: Type ID... (Enter to Confirm | Esc to Cancel)")
 
     def delete_all_shapes(self):
-        if not self.shapes: self.update_title(f"List empty. Nothing to delete | {HELP_STR}"); return
+        if not self.shapes: self.update_title(f"List empty. Nothing to delete."); return
         for uid in list(self.shapes.keys()): self.delete_entry(uid)
         self.count = 0
         self.reset_state()
@@ -1223,9 +1215,11 @@ class LayoutsPlotterWidget(QWidget):
         if uid in self.label_drag_managers: self.label_drag_managers.pop(uid)._disconnect_cids()
         if uid in self.shape_drag_managers: self.shape_drag_managers.pop(uid)._disconnect_cids()
         if self.last_artist_id in [f"shape_{uid}", f"label_{uid}"]: self.last_artist_id = None
+        
+        self.zone_selected.emit(-1)
 
     def enter_marking_mode(self):
-        if not self.shapes: self.update_title(f"List empty. Nothing to mark | {HELP_STR}"); return
+        if not self.shapes: self.update_title(f"List empty. Nothing to mark."); return
         self.state, self.input_buffer = MARKING, ""
         self.update_title("MARK MODE: Type ID... (Enter to Confirm | Esc to Cancel)")
 
@@ -1242,6 +1236,7 @@ class LayoutsPlotterWidget(QWidget):
                             self.label_drag_managers[uid].restore_face_color(); self.shape_drag_managers[uid].restore_face_color()
                         self.update_title(f"{'Marked' if self.shapes[uid]['pointer'] else 'Unmarked'} ID {uid}. Returning to IDLE...")
                         self.reset_state()
+                        self.zone_selected.emit(uid)
                     else:
                         self.update_title(f"Error: ID {uid} not found. Try again or Press ESC to Cancel."); self.input_buffer = ""
                 except ValueError:
@@ -1262,12 +1257,12 @@ class LayoutsPlotterWidget(QWidget):
         if self.mode == CIRCLE: cx, cy, r, bb = self.calculate_circle()
         elif self.mode == RECTANGLE: cx, cy, r, bb = self.calculate_rect()
 
-        self.finalize_shape(cx=cx, cy=cy, r=r, bb=bb, bridge_key=bridge_key, hex_code=hex_code, pointer=False, priority=0, pipeline_json="{}")
+        self.finalize_shape(cx=cx, cy=cy, r=r, bb=bb, bridge_key=bridge_key, hex_code=hex_code, pointer=False, priority=0, pipeline_json="{}", ignore_app_settings=False)
         self.reset_state()
 
-    def finalize_shape(self, cx, cy, r, bb, bridge_key, hex_code, pointer=False, priority=0, pipeline_json="{}"):
+    def finalize_shape(self, cx, cy, r, bb, bridge_key, hex_code, pointer=False, priority=0, pipeline_json="{}", ignore_app_settings=False):
         if cx is None: return
-        saved, entry_id = self.save_entry(bridge_key, hex_code, cx, cy, r, bb, pointer, priority, pipeline_json)
+        saved, entry_id = self.save_entry(bridge_key, hex_code, cx, cy, r, bb, pointer, priority, pipeline_json, ignore_app_settings)
         if not saved: return
 
         label = "MOUSE_WHEEL" if bridge_key == MOUSE_WHEEL_SIMULATOR_CODE else "SPRINT_DISTANCE" if bridge_key == SPRINT_DISTANCE_CODE else bridge_key.split("E0_")[-1]
@@ -1298,7 +1293,7 @@ class LayoutsPlotterWidget(QWidget):
             self.label_drag_managers[entry_id].dull_face_color(); self.shape_drag_managers[entry_id].dull_face_color()
 
     def enter_naming_mode(self):
-        if not self.shapes: self.update_title(f"Nothing to save! | {HELP_STR}"); return
+        if not self.shapes: self.update_title(f"Nothing to save!"); return
         self.state, self.buffer_default = NAMING, True
         self.input_buffer = self.active_layout.name
         self.update_title(f"SAVE: [{self.input_buffer}] | Enter: Save/Rename | Shift+Enter: Save as Copy | Esc: Cancel")
@@ -1312,7 +1307,7 @@ class LayoutsPlotterWidget(QWidget):
         if key == "backspace":
             if self.buffer_default: self.input_buffer, self.buffer_default = "", False
             else: self.input_buffer = self.input_buffer[:-1]
-        elif len(key) == 1 and (key.isalnum() or key in "_ -.":
+        elif len(key) == 1 and (key.isalnum() or key in "_ -.()"):
             if self.buffer_default: self.input_buffer, self.buffer_default = "", False
             self.input_buffer += key
         self.update_title(f"SAVE: [{self.input_buffer or self.active_layout.name}] | Enter: Save/Rename | Shift+Enter: Save as Copy | Esc: Cancel")
@@ -1323,6 +1318,7 @@ class LayoutsPlotterWidget(QWidget):
             entry = {
                 "name": data["bridge_key"], "scancode": data["m_code"], "type": data["type"],
                 "cx": data["cx"], "cy": data["cy"], "val1": 0, "val2": 0, "val3": 0, "val4": 0,
+                "ignore_app_settings": data.get("ignore_app_settings", False)
             }
 
             p_cfg = PipelineConfig()
@@ -1372,15 +1368,15 @@ class LayoutsPlotterWidget(QWidget):
                 y1=float(item["val2"]) if item["type"] == RECTANGLE else None,
                 x2=float(item["val3"]) if item["type"] == RECTANGLE else None,
                 y2=float(item["val4"]) if item["type"] == RECTANGLE else None,
-                ignore_app_settings=False, pipeline_json=item["pipeline_json"],
+                ignore_app_settings=item["ignore_app_settings"], pipeline_json=item["pipeline_json"],
             )
 
         store.set_active_layout(layout_id)
         self.active_layout = store.layouts.get(layout_id)
         self.layout_saved.emit(user_name, layout_id)
-        self.update_title(f"SAVED: {user_name} | {HELP_STR}")
+        self.update_title(f"SAVED: {user_name}")
 
-    def save_entry(self, bridge_key, hex_code, cx, cy, r, bb, pointer, priority=0, pipeline_json="{}"):
+    def save_entry(self, bridge_key, hex_code, cx, cy, r, bb, pointer, priority=0, pipeline_json="{}", ignore_app_settings=False):
         uid, inc_count = self.count, True
         if bridge_key == MOUSE_WHEEL_SIMULATOR_CODE:
             if self.mode == RECTANGLE: return False, uid
@@ -1412,12 +1408,13 @@ class LayoutsPlotterWidget(QWidget):
         self.shapes[uid] = {
             "bridge_key": bridge_key, "m_code": hex_code, "type": self.mode, "cx": cx, "cy": cy,
             "r": r, "bb": bb, "pointer": pointer, "priority": priority, "pipeline_json": pipeline_json,
+            "ignore_app_settings": ignore_app_settings
         }
         if inc_count: self.count += 1
         return True, uid
 
     def print_data(self):
-        if not self.shapes: self.update_title(f"List empty. Nothing to print | {HELP_STR}"); return
+        if not self.shapes: self.update_title(f"List empty. Nothing to print."); return
         print("\nCurrent Shapes:")
         for k, v in self.shapes.items(): print(k, v)
         print("\n")
