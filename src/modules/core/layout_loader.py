@@ -11,7 +11,7 @@ from modules.utils import (
     RECTANGLE,
 )
 
-from modules.core.bezel_validator import ensure_system_bezels
+# REMOVED: from modules.core.bezel_validator import ensure_system_bezels
 
 if TYPE_CHECKING:
     from modules.utils import MapperEventDispatcher
@@ -51,13 +51,16 @@ class LayoutLoader:
                 self.bezels_json_data = []
             return
 
-        # Ensure system bezels exist before retrieving zones
-        ensure_system_bezels(layout.id, store.layouts, store.zones)
+        # Native repository auto-heals bezels, so we just fetch the zones
         zones = store.get_active_layout_zones()
 
         # Guard against zero or negative dimensions
         layout_w = max(int(layout.width or 0), 1)
         layout_h = max(int(layout.height or 0), 1)
+
+        # Temporary lists to prevent duplicate appending on reload
+        new_keys_json_data: list[tuple[str, dict[str, Any]]] = []
+        new_bezels_json_data: list[tuple[str, dict[str, Any]]] = []
 
         for z in zones:
             z.set_parsed_config_from_json()
@@ -88,9 +91,14 @@ class LayoutLoader:
                 z_dict["y2"] = (z.y2 or 0.0) / layout_h
 
             if z.zone_type == BEZEL:
-                self.bezels_json_data.append((z.scancode, z_dict))
+                new_bezels_json_data.append((z.scancode, z_dict))
             else:
-                self.keys_json_data.append((z.scancode, z_dict))
+                new_keys_json_data.append((z.scancode, z_dict))
+
+        # Safely swap the active lists under lock
+        with self.layout_lock:
+            self.keys_json_data = new_keys_json_data
+            self.bezels_json_data = new_bezels_json_data
 
         logger.info(
             "Active layout '%s' loaded. (%dx%d, %d zones)",
