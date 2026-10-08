@@ -53,7 +53,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("modules.gui.layout_studio_page")
 
-# Extracted the gigantic help string out of Matplotlib and into Qt
 STATIC_SHORTCUTS_HELP = (
     "<b>Shortcuts:</b> "
     "<span style='color: palette(highlight);'>F12</span> Save | "
@@ -77,11 +76,15 @@ class LayoutStudioPage(QWidget):
         dispatcher: MapperEventDispatcher | None = None,
         parent: QWidget | None = None,
     ):
-        super().__init__(dispatcher, parent)
+        super().__init__(parent)
+        self.dispatcher = dispatcher
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
 
         # Main Splitter: Left (Profiles) | Center (Canvas) | Right (Inspector)
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.content_layout().addWidget(self.splitter)
+        main_layout.addWidget(self.splitter)
 
         self._setup_left_sidebar()
         self._setup_center_canvas()
@@ -93,15 +96,11 @@ class LayoutStudioPage(QWidget):
         self._wire_signals()
         self.load_profiles()
 
-    # -------------------------------------------------------------------------
-    # UI SETUP
-    # -------------------------------------------------------------------------
     def _setup_left_sidebar(self):
         sidebar_widget = QWidget()
         sidebar_layout = QVBoxLayout(sidebar_widget)
         sidebar_layout.setContentsMargins(0, 0, 10, 0)
 
-        # Profiles List Group
         profiles_group = QGroupBox("Profiles")
         profiles_layout = QVBoxLayout(profiles_group)
         
@@ -113,7 +112,6 @@ class LayoutStudioPage(QWidget):
         self.details_label.setWordWrap(True)
         profiles_layout.addWidget(self.details_label)
 
-        # Profile Actions
         btn_row_1 = QHBoxLayout()
         self.activate_btn = QPushButton("Set Active")
         self.activate_btn.setStyleSheet("font-weight: bold;")
@@ -128,7 +126,6 @@ class LayoutStudioPage(QWidget):
         profiles_layout.addLayout(btn_row_1)
         sidebar_layout.addWidget(profiles_group)
 
-        # File I/O Group
         io_group = QGroupBox("Import & Export")
         io_layout = QVBoxLayout(io_group)
         self.import_btn = QPushButton("Import (.json / .toml / Bundle)")
@@ -146,7 +143,6 @@ class LayoutStudioPage(QWidget):
         io_layout.addLayout(export_row)
         sidebar_layout.addWidget(io_group)
 
-        # Maintenance Group
         maint_group = QGroupBox("Maintenance")
         maint_layout = QHBoxLayout(maint_group)
         self.clear_zones_btn = QPushButton("Clear Zones")
@@ -164,9 +160,6 @@ class LayoutStudioPage(QWidget):
         canvas_layout = QVBoxLayout(canvas_widget)
         canvas_layout.setContentsMargins(10, 0, 10, 0)
 
-        # -------------------------------------------------------------
-        # NEW: Permanent UI Status & Instructions Labels above Canvas
-        # -------------------------------------------------------------
         status_box = QWidget()
         status_layout = QVBoxLayout(status_box)
         status_layout.setContentsMargins(0, 0, 0, 10)
@@ -182,7 +175,6 @@ class LayoutStudioPage(QWidget):
         status_layout.addWidget(self.canvas_help_label)
         canvas_layout.addWidget(status_box)
 
-        # Toolbar: Canvas Tools
         tools_row = QHBoxLayout()
         
         self.select_image_btn = QPushButton("Select Image")
@@ -207,7 +199,6 @@ class LayoutStudioPage(QWidget):
 
         canvas_layout.addLayout(tools_row)
 
-        # Interactive Canvas
         self.plotter_widget = LayoutsPlotterWidget(self, standalone=False)
         canvas_layout.addWidget(self.plotter_widget, stretch=1)
 
@@ -220,7 +211,7 @@ class LayoutStudioPage(QWidget):
 
         self.inspector_stack = QStackedWidget()
 
-        # --- Page 0: Global Layout Settings (No Zone Selected) ---
+        # Page 0: Global Layout Settings
         page_layout_settings = QWidget()
         layout_form = QVBoxLayout(page_layout_settings)
         layout_form.setContentsMargins(0, 0, 0, 0)
@@ -253,7 +244,7 @@ class LayoutStudioPage(QWidget):
         
         self.inspector_stack.addWidget(page_layout_settings)
 
-        # --- Page 1: Zone Pipeline Settings (Zone Selected) ---
+        # Page 1: Zone Pipeline Settings
         page_zone_settings = QWidget()
         zone_layout = QVBoxLayout(page_zone_settings)
         zone_layout.setContentsMargins(0, 0, 0, 0)
@@ -264,7 +255,6 @@ class LayoutStudioPage(QWidget):
         self.insp_ignore_app_settings = QCheckBox("Ignore Global App Settings")
         zone_layout.addWidget(self.insp_ignore_app_settings)
 
-        # Stage 1: Region
         region_group = QGroupBox("1. Region")
         region_form = QFormLayout(region_group)
         self.insp_priority = QSpinBox()
@@ -272,7 +262,6 @@ class LayoutStudioPage(QWidget):
         region_form.addRow("Priority Value:", self.insp_priority)
         zone_layout.addWidget(region_group)
 
-        # Stage 4: Transform
         transform_group = QGroupBox("4. Transformation")
         transform_form = QFormLayout(transform_group)
         
@@ -297,7 +286,6 @@ class LayoutStudioPage(QWidget):
         transform_form.addRow("Hysteresis:", self.insp_hysteresis)
         zone_layout.addWidget(transform_group)
 
-        # Stage 5: Semantic
         semantic_group = QGroupBox("5. Semantics & Output")
         semantic_form = QFormLayout(semantic_group)
         self.insp_pointer = QCheckBox("Output is Pointer Button")
@@ -313,16 +301,12 @@ class LayoutStudioPage(QWidget):
         inspector_layout.addWidget(self.inspector_stack)
         self.splitter.addWidget(inspector_widget)
 
-    # -------------------------------------------------------------------------
-    # SIGNALS & LIFECYCLE
-    # -------------------------------------------------------------------------
     def on_page_shown(self) -> None:
         self.load_profiles()
         self.plotter_widget.reload_active_layout()
         self._load_bezel_thicknesses_to_ui()
 
     def _wire_signals(self) -> None:
-        # Sidebar Signals
         self.profile_list.itemSelectionChanged.connect(self._on_selection_changed)
         self.activate_btn.clicked.connect(self._on_set_active)
         self.new_btn.clicked.connect(self._on_new_profile)
@@ -337,7 +321,6 @@ class LayoutStudioPage(QWidget):
         self.clear_zones_btn.clicked.connect(self._on_clear_zones)
         self.delete_btn.clicked.connect(self._on_delete)
 
-        # Canvas Signals
         self.select_image_btn.clicked.connect(self._select_background_image)
         self.capture_btn.clicked.connect(self._trigger_screenshot_capture)
         self.add_circle_btn.clicked.connect(lambda: self._start_draw_mode(CIRCLE, 3))
@@ -348,16 +331,12 @@ class LayoutStudioPage(QWidget):
         
         self.plotter_widget.layout_saved.connect(self._on_layout_saved)
         self.plotter_widget.zone_selected.connect(self._on_canvas_zone_selected)
-        
-        # Link dynamic status text from Plotter logic -> Custom Qt QLabel
         self.plotter_widget.status_updated.connect(self.canvas_status_label.setText)
 
-        # Inspector Layout Signals
         self.top_bezel_spin.valueChanged.connect(lambda v: self._on_bezel_thickness_changed(True, v))
         self.bottom_bezel_spin.valueChanged.connect(lambda v: self._on_bezel_thickness_changed(False, v))
         self.reset_all_zones_btn.clicked.connect(self._on_reset_all_zones)
 
-        # Inspector Zone Signals
         self.insp_ignore_app_settings.toggled.connect(self._on_inspector_value_changed)
         self.insp_priority.valueChanged.connect(self._on_inspector_value_changed)
         self.insp_sens_x.valueChanged.connect(self._on_inspector_value_changed)
@@ -367,9 +346,6 @@ class LayoutStudioPage(QWidget):
         self.insp_pointer.toggled.connect(self._on_pointer_toggled)
         self.insp_reset_zone_btn.clicked.connect(self._on_reset_single_zone)
 
-    # -------------------------------------------------------------------------
-    # RIGHT PANE: INSPECTOR LOGIC
-    # -------------------------------------------------------------------------
     def _load_bezel_thicknesses_to_ui(self):
         active = store.get_active_layout()
         if not active: return
@@ -393,7 +369,6 @@ class LayoutStudioPage(QWidget):
         self.bottom_bezel_spin.blockSignals(False)
 
     def _on_bezel_thickness_changed(self, is_top: bool, val: float):
-        """Immediately commits bezel thickness changes to DB and triggers plotter re-render."""
         active = store.get_active_layout()
         if not active: return
         bid = self.plotter_widget.top_bezel_id if is_top else self.plotter_widget.bottom_bezel_id
@@ -425,7 +400,6 @@ class LayoutStudioPage(QWidget):
             QMessageBox.information(self, "Success", f"Reset {count} zones to default AppSettings.")
 
     def _on_canvas_zone_selected(self, uid: int):
-        """Triggered when user clicks a shape on the plotter canvas."""
         if uid == -1 or uid not in self.plotter_widget.shapes:
             self.inspector_stack.setCurrentIndex(0)
             self._current_inspected_uid = None
@@ -466,7 +440,6 @@ class LayoutStudioPage(QWidget):
             w.blockSignals(False)
 
     def _on_pointer_toggled(self, checked: bool):
-        """Enforces Singleton pointer logic across the active shapes."""
         if not checked or self._current_inspected_uid is None:
             self._on_inspector_value_changed()
             return
@@ -482,7 +455,6 @@ class LayoutStudioPage(QWidget):
         self._on_inspector_value_changed()
 
     def _on_inspector_value_changed(self, *_):
-        """Syncs the right pane inspector values back into the plotter's shape dictionary."""
         if self._current_inspected_uid is None: return
         uid = self._current_inspected_uid
         shape = self.plotter_widget.shapes.get(uid)
@@ -516,7 +488,6 @@ class LayoutStudioPage(QWidget):
 
     def _on_reset_single_zone(self):
         if self._current_inspected_uid is None: return
-        
         settings = store.settings.get()
         self.insp_sens_x.setValue(settings.sensitivity_x)
         self.insp_sens_y.setValue(settings.sensitivity_y)
@@ -524,9 +495,6 @@ class LayoutStudioPage(QWidget):
         self.insp_hysteresis.setValue(settings.hysteresis)
         self._on_inspector_value_changed()
 
-    # -------------------------------------------------------------------------
-    # LEFT PANE: SIDEBAR LOGIC
-    # -------------------------------------------------------------------------
     def load_profiles(self) -> None:
         self.profile_list.clear()
         try:
@@ -722,9 +690,6 @@ class LayoutStudioPage(QWidget):
             logger.exception("Failed to delete profile ID %s", layout_id)
             QMessageBox.critical(self, "Database Error", f"Could not delete profile:\n{exc}")
 
-    # -------------------------------------------------------------------------
-    # LEFT PANE: FILE I/O LOGIC
-    # -------------------------------------------------------------------------
     def _on_import_clicked(self) -> None:
         PROFILES_FOLDER.mkdir(parents=True, exist_ok=True)
         file_path_str, _ = QFileDialog.getOpenFileName(
@@ -809,9 +774,6 @@ class LayoutStudioPage(QWidget):
             logger.exception("Failed to export bundle")
             QMessageBox.critical(self, "Export Failed", str(exc))
 
-    # -------------------------------------------------------------------------
-    # CENTER PANE: CANVAS ACTIONS
-    # -------------------------------------------------------------------------
     def _start_draw_mode(self, shape_type: str, clicks: int) -> None:
         if store.get_active_layout() is None:
             QMessageBox.warning(self, "No Active Profile", "Please create or select an active profile in the sidebar first.")
