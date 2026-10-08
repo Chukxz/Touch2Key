@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from modules.utils import MapperEventDispatcher
 
 
-class DashboardPage(QWidget): # Changed to QWidget
+class DashboardPage(QWidget):
     """Primary overview dashboard displaying active layout, target window, and engine state."""
 
     title = "Dashboard"
