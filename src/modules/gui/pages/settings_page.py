@@ -37,7 +37,6 @@ from modules.utils import (
     TOML_PATH, 
     get_scancode_and_bridge_key_from_key
 )
-from .base_page import BasePage
 
 if TYPE_CHECKING:
     from modules.utils import MapperEventDispatcher
@@ -200,7 +199,7 @@ class KeySequenceRow(QWidget):
 # -------------------------------------------------------------------------
 # Main Page View
 # -------------------------------------------------------------------------
-class SettingsPage(BasePage):
+class SettingsPage(QWidget):
     """Unified Settings page covering Hardware, Keybindings, Input tuning, Typematic, and DB resets."""
 
     title = "Settings"
