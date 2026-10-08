@@ -41,9 +41,10 @@ class BezelMapper:
                 "No active layout found in SQLite database. Bezel pipelines will be empty."
             )
             self.release_all()
-            self.pipelines = []
             return
 
+        # Safely grab a copy of the bezels list from layout loader under its lock if applicable, 
+        # or grab the data directly.
         bezels_raw_zones = self.mapper.layout_loader.bezels_json_data.copy()
         w = float(layout.width)
         h = float(layout.height)
@@ -53,6 +54,7 @@ class BezelMapper:
         for scancode, values in bezels_raw_zones:
             z_type = str(values.get("type", ""))
             priority = int(values.get("priority", 0))
+            zone_id = int(values.get("id", 0))
 
             if z_type == BEZEL:
                 region = RectangularRegion(
@@ -66,10 +68,14 @@ class BezelMapper:
                     ),
                 )
                 pipeline = SystemToggle(
-                    output=(str(scancode)), region=region, priority=priority
+                    output=(str(scancode)), 
+                    region=region, 
+                    priority=priority,
+                    creation_id=zone_id
                 )
                 new_pipelines.append(pipeline)
 
+        # Thread-safe swap: reset old pipelines and replace under lock
         with self.lock:
             for pipeline in self.pipelines:
                 pipeline.reset(self.output_sink)
@@ -79,6 +85,7 @@ class BezelMapper:
         with self.lock:
             for pipeline in self.pipelines:
                 pipeline.reset(self.output_sink)
+            self.pipelines = []
 
     def _on_worker_respawn_bezel(self, worker_type: str) -> None:
         if worker_type == "keyboard":
