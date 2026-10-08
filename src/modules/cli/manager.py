@@ -213,7 +213,8 @@ def delete_profile(layout_id: int) -> bool:
     if active_layout and active_layout.id == layout_id:
         store.settings.update(active_layout_id=None)
 
-    store.zones.delete_all_for_layout(layout_id, False)
+    # Removed the ', False' argument since delete_all_for_layout now handles this natively
+    store.zones.delete_all_for_layout(layout_id)
     store.layouts.delete(layout_id)
     print(f"Layout '{target.name}' (ID: {layout_id}) and all mapped zones deleted.")
     return True
@@ -227,9 +228,11 @@ def clear_zones(layout_id: int) -> bool:
         return False
 
     store.zones.delete_all_for_layout(layout_id)
-    print(
-        f"All touch zones (bezels reseeded) cleared for layout '{target.name}' (ID: {layout_id})."
-    )
+    
+    # Trigger native DB self-healing immediately so bezels respawn before the next command
+    store.zones.list_for_layout(layout_id)
+    
+    print(f"All touch zones cleared (system bezels auto-restored) for layout '{target.name}' (ID: {layout_id}).")
     return True
 
 
