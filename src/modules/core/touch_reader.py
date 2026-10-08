@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from modules.utils import (
     ADB,
+    CREATE_NO_WINDOW,
     DEF_MOVE_INTERVAL,
     DEFAULT_ADB_RATE_CAP,
     LONG_DELAY,
@@ -105,8 +106,6 @@ class TouchReader:
                     connecting = False
                     with self.device_lock:
                         self.device = dev
-                    # Stop the USB getevent process without clearing self.device;
-                    # _get_touches() will release held keys and reconfigure on the next loop.
                     self._stop_process(clear_device=False)
                 else:
                     time.sleep(LONG_DELAY)
@@ -121,6 +120,7 @@ class TouchReader:
                     capture_output=True,
                     text=True,
                     timeout=2,
+                    creationflags=CREATE_NO_WINDOW,
                 )
                 current_device, block, devices = None, [], {}
                 for line in result.stdout.splitlines():
@@ -166,6 +166,7 @@ class TouchReader:
                     capture_output=True,
                     text=True,
                     timeout=2,
+                    creationflags=CREATE_NO_WINDOW,
                 )
                 for line in result.stdout.splitlines():
                     if "max" not in line:
@@ -201,6 +202,7 @@ class TouchReader:
                     capture_output=True,
                     text=True,
                     timeout=2,
+                    creationflags=CREATE_NO_WINDOW,
                 )
                 for pat in patterns:
                     m = re.search(pat, result.stdout)
@@ -214,7 +216,6 @@ class TouchReader:
             time.sleep(self.rotation_poll_interval)
 
     def _update_matrix(self) -> None:
-        """Builds a 2D affine matrix that scales [0, max_x]x[0, max_y] to [0, width]x[0, height] and rotates."""
         w = float(self.width)
         h = float(self.height)
         sx = w / float(self.max_x) if self.max_x > 0 else 1.0
@@ -314,6 +315,7 @@ class TouchReader:
                     ],
                     stdout=subprocess.PIPE,
                     text=True,
+                    creationflags=CREATE_NO_WINDOW,
                 )
                 if self.process.stdout is None:
                     self.process = None
