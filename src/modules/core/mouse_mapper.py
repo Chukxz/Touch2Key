@@ -1,26 +1,23 @@
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 from typing import TYPE_CHECKING
 
 from modules.core.pipeline import (
     AlwaysRegion,
     CircularRegion,
-    DeltaTransform,
-    DynamicOrigin,
-    NoConstraint,
-    Pipeline,
-    Point,
-    PointerSemantic,
     RectangularRegion,
+    Point,
 )
-
+from modules.core.pipeline_factory import MousePointer
 from modules.utils import scale_coord
 from modules.database import store
 
 if TYPE_CHECKING:
     from .mapper import Mapper
+    from modules.core.pipeline import Pipeline
     from modules.core.pipeline_output import BridgeOutputSink
 
 logger = logging.getLogger("modules.core.mouse_mapper")
@@ -72,6 +69,8 @@ class MouseMapper:
         final_sens_y = sens_y * ratio_y
 
         custom_look_zone = None
+        zone_priority = -100
+        zone_creation_id = sys.maxsize
 
         for zone in store.zones.list_for_layout(layout.id):
             try:
@@ -79,6 +78,8 @@ class MouseMapper:
                 sem_idx, _, _ = zone.CONFIG_HELPER.get_semantic_config()
                 if sem_idx == 2:  # POINTER
                     custom_look_zone = zone
+                    zone_priority = zone.priority
+                    zone_creation_id = zone.id
                     break
             except Exception:
                 pass
@@ -104,8 +105,8 @@ class MouseMapper:
                 and zone.r
             ):
                 look_region = CircularRegion(
-                    Point(scale_coord(zone.cx), scale_coord(zone.cy)),
-                    scale_coord(zone.r),
+                    Point(scale_coord(dev_w, zone.cx), scale_coord(dev_h, zone.cy)),
+                    scale_coord(dev_w, zone.r),
                 )
             elif (
                 reg_type == "RECTANGLE"
@@ -115,8 +116,8 @@ class MouseMapper:
                 and zone.y2 is not None
             ):
                 look_region = RectangularRegion(
-                    Point(scale_coord(zone.x1), scale_coord(zone.y1)),
-                    Point(scale_coord(zone.x2), scale_coord(zone.y2)),
+                    Point(scale_coord(dev_w, zone.x1), scale_coord(dev_h, zone.y1)),
+                    Point(scale_coord(dev_w, zone.x2), scale_coord(dev_h, zone.y2)),
                 )
             else:
                 look_region = AlwaysRegion()
@@ -153,14 +154,12 @@ class MouseMapper:
             f"[MOUSEMAPPER] - Final Y Sensitivity: {final_sens_y:.4f} (Ratio: {ratio_y:.2f}, User: {sens_y})"
         )
 
-        pipeline = Pipeline(
+        pipeline = MousePointer(
             region=look_region,
-            origin=DynamicOrigin(),
-            constraint=NoConstraint(),
-            transformation=DeltaTransform(
-                sensitivity_x=final_sens_x, sensitivity_y=final_sens_y
-            ),
-            semantics=[PointerSemantic()],
+            sensitivity_x=final_sens_x,
+            sensitivity_y=final_sens_y,
+            priority=zone_priority,
+            creation_id=zone_creation_id,
         )
 
         with self.lock:
