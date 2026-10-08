@@ -150,7 +150,6 @@ class LayoutZone:
         return cls(**data)
 
 
-
 class AppSettingsRepository:
     ALLOWED_FIELDS = {
         "left_handed", "floating_joystick", "anchored_joystick", "json_dev_width",
@@ -432,5 +431,3 @@ class LayoutZonesRepository:
         conn = connection_manager.get_connection()
         with conn:
             conn.execute("DELETE FROM layout_zones WHERE layout_id = ?;", (layout_id,))
-
-
