@@ -9,6 +9,10 @@ from time import perf_counter_ns as _perf_counter_ns, sleep as _sleep
 from typing import TYPE_CHECKING
 
 from modules.utils import (
+    BUTTON_4_DOWN,
+    BUTTON_4_UP,
+    BUTTON_5_DOWN,
+    BUTTON_5_UP,
     BUTTON_PING,
     CONSTANT_DWELL,
     DOWN_TUPLE,
@@ -16,37 +20,33 @@ from modules.utils import (
     KEY_PING,
     LEFT_BUTTON_DOWN,
     LEFT_BUTTON_UP,
-    MIDDLE_BUTTON_DOWN,
-    MIDDLE_BUTTON_UP,
-    RIGHT_BUTTON_DOWN,
-    RIGHT_BUTTON_UP,
-    BUTTON_4_DOWN,
-    BUTTON_4_UP,
-    BUTTON_5_DOWN,
-    BUTTON_5_UP,
-    MOUSE_WHEEL,
-    MOUSE_HWHEEL,
-    WHEEL_DELTA,
     MAX_BUTTON_DWELL,
     MAX_COALESCE,
     MAX_KEY_DWELL,
     MAX_MOUSE_DWELL,
+    MIDDLE_BUTTON_DOWN,
+    MIDDLE_BUTTON_UP,
     MIN_BUTTON_DWELL,
     MIN_KEY_DWELL,
     MIN_MOUSE_DWELL,
+    MOUSE_HWHEEL,
     MOUSE_MOVE_ABSOLUTE,
     MOUSE_MOVE_RELATIVE,
     MOUSE_VIRTUAL_DESKTOP,
+    MOUSE_WHEEL,
     NT_TIMER_RES,
     PACK_ABS_STRUCT,
     PACK_BUTTON_STRUCT,
     PACK_KEY_STRUCT,
     PACK_REL_STRUCT,
-    PACK_WHEEL_STRUCT,
     PACK_TYPEMATIC_STRUCT,
+    PACK_WHEEL_STRUCT,
+    RIGHT_BUTTON_DOWN,
+    RIGHT_BUTTON_UP,
     TASK_ABS,
     TASK_REL,
     TASK_WHEEL,
+    WHEEL_DELTA,
 )
 
 if TYPE_CHECKING:
@@ -75,27 +75,23 @@ def _release_all_buttons(
     m_ctx,
     m_handle,
     M_Stroke,
-    left_down,
-    right_down,
-    middle_down,
-    btn4_down,
-    btn5_down,
+    left_down: bool,
+    right_down: bool,
+    middle_down: bool,
+    btn4_down: bool,
+    btn5_down: bool,
     reason="",
 ):
     log_queue.put(f"{reason}.")
-    buttons_set_sum = sum([left_down, right_down, middle_down, btn4_down, btn5_down])
-    if buttons_set_sum > 0:
-        log_queue.put(f"Releasing {buttons_set_sum} buttons.")
+    buttons_count = sum([left_down, right_down, middle_down, btn4_down, btn5_down])
+    if buttons_count > 0:
+        log_queue.put(f"Releasing {buttons_count} buttons.")
         if left_down:
             m_ctx.send(m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, LEFT_BUTTON_UP, 0, 0, 0))
         if right_down:
-            m_ctx.send(
-                m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, RIGHT_BUTTON_UP, 0, 0, 0)
-            )
+            m_ctx.send(m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, RIGHT_BUTTON_UP, 0, 0, 0))
         if middle_down:
-            m_ctx.send(
-                m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, MIDDLE_BUTTON_UP, 0, 0, 0)
-            )
+            m_ctx.send(m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, MIDDLE_BUTTON_UP, 0, 0, 0))
         if btn4_down:
             m_ctx.send(m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, BUTTON_4_UP, 0, 0, 0))
         if btn5_down:
@@ -119,7 +115,6 @@ def keyboard_worker(
     pressed_keys = set()
     state = {"running": True}
 
-    # Typematic state: initialized empty and populated dynamically via KEY_CONFIG
     typematic_cfg = {
         "enabled": True,
         "delay_ns": 250_000_000,
@@ -335,8 +330,10 @@ def mouse_worker(
     )
     button_thread.start()
 
-    acc_dx, acc_dy = 0.0, 0.0
-    acc_dw_x, acc_dw_y = 0.0, 0.0
+    acc_dx = 0
+    acc_dy = 0
+    acc_dw_x = 0
+    acc_dw_y = 0
     pending_task = None
 
     while state["running"]:
@@ -375,9 +372,12 @@ def mouse_worker(
                     with send_lock:
                         m_ctx.send(
                             m_device_handle,
-                            MouseStroke(MOUSE_MOVE_RELATIVE, 0, 0, acc_dx, acc_dy),
+                            MouseStroke(
+                                MOUSE_MOVE_RELATIVE, 0, 0, int(acc_dx), int(acc_dy)
+                            ),
                         )
-                    acc_dx, acc_dy = 0.0, 0.0
+                    acc_dx = 0
+                    acc_dy = 0
 
                 _sleep(_uniform(MIN_MOUSE_DWELL, MAX_MOUSE_DWELL))
 
@@ -390,8 +390,8 @@ def mouse_worker(
                             MOUSE_MOVE_ABSOLUTE | MOUSE_VIRTUAL_DESKTOP,
                             MOUSE_MOVE_ABSOLUTE,
                             0,
-                            x,
-                            y,
+                            int(x),
+                            int(y),
                         ),
                     )
                 _sleep(CONSTANT_DWELL)
@@ -416,33 +416,32 @@ def mouse_worker(
                         break
 
                 with send_lock:
-                    # Vertical wheel
                     if acc_dw_y != 0:
                         m_ctx.send(
                             m_device_handle,
                             MouseStroke(
                                 MOUSE_MOVE_RELATIVE,
                                 MOUSE_WHEEL,
-                                acc_dw_y * WHEEL_DELTA,
+                                int(acc_dw_y * WHEEL_DELTA),
                                 0,
                                 0,
                             ),
                         )
 
-                    # Horizontal wheel (tilt wheel)
                     if acc_dw_x != 0:
                         m_ctx.send(
                             m_device_handle,
                             MouseStroke(
                                 MOUSE_MOVE_RELATIVE,
                                 MOUSE_HWHEEL,
-                                acc_dw_x * WHEEL_DELTA,
+                                int(acc_dw_x * WHEEL_DELTA),
                                 0,
                                 0,
                             ),
                         )
 
-                    acc_dw_x, acc_dw_y = 0.0, 0.0
+                    acc_dw_x = 0
+                    acc_dw_y = 0
 
                 _sleep(CONSTANT_DWELL)
 
