@@ -161,14 +161,18 @@ Because Touch2Key installs system-level drivers and kernel rules, **simply runni
 
 ### CLI Global Hotkeys
 
-When running the engine in CLI mode, the following hotkeys are active to control runtime behavior on the fly. **They are guarded to only trigger when your terminal window is the active foreground window**, preventing accidental conflicts while playing your game (protected by a **0.4s** debounce cooldown):
+When running the engine in CLI mode, the following hotkeys are active to control runtime behavior on the fly. **They are guarded to only trigger when your terminal window is the active foreground window**, preventing accidental input conflicts while playing games or navigating other applications (protected by a **0.35s** debounce cooldown):
 
-| Hotkey | Action | Description |
-| :--- | :--- | :--- |
-| **Esc** | Shutdown | Gracefully terminates the CLI engine session. |
-| **F5** | Handedness Toggle | Dynamically switches layout orientation between left and right-handed modes. |
-| **F6** | Layout Reload | Instantly reloads the active layout configuration from the database. |
-| **F7** | Config Reload | Refreshes global engine settings live without requiring a full restart. |
+| Hotkey | Action | Step / Bounds | Description |
+| :--- | :--- | :--- | :--- |
+| `Esc` | Shutdown | — | Gracefully terminates the CLI engine session and cleans up worker processes. |
+| `F5` | Handedness Toggle | `True` / `False` | Dynamically switches layout orientation between left- and right-handed modes. |
+| `F6` | Layout Reload | — | Instantly reloads the active layout and zone pipelines from SQLite. |
+| `F7` | Config Reload | — | Refreshes global engine settings live from SQLite without requiring a restart. |
+| `Left` / `Right` | Rate Cap (Hz) | &plusmn;10.0 Hz `[30.0 - 1000.0]` | Dynamically tunes the mouse flush polling rate. Commits immediately to SQLite. |
+| `Down` / `Up` | PPS Alert Threshold | &plusmn;5.0 PPS `[10.0 - 500.0]` | Dynamically tunes the touch monitoring threshold. Commits immediately to SQLite. |
+
+*Arrow key tuning applies in-memory on the next polling loop cycle and persists immediately to SQLite, ensuring subsequent reloads (`F7`) or restarts retain your adjustments.*
 
 ---
 
