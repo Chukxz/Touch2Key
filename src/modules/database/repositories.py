@@ -6,39 +6,75 @@ Validates field names against an explicit ALLOWED_FIELDS set before executing SQ
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field, fields as dataclass_fields
 from typing import Any, Optional, TYPE_CHECKING
 
 from modules.utils import (
-    EXCLUDED_KEYS,
     BEZEL,
-    CIRCLE,
-    RECTANGLE,
     BEZEL_DP_THICKNESS,
-    TOP_BEZEL_ID,
     BOTTOM_BEZEL_ID,
-    TOP_BEZEL_NAME,
     BOTTOM_BEZEL_NAME,
-    dp_to_px,
-    calculate_rect,
+    CIRCLE,
+    EXCLUDED_KEYS,
     InvalidFieldError,
+    RECTANGLE,
+    TOP_BEZEL_ID,
+    TOP_BEZEL_NAME,
+    calculate_rect,
+    dp_to_px,
 )
-
 from modules.core.pipeline import PipelineConfig
 from .connection import connection_manager
 
 if TYPE_CHECKING:
     from . import AppSettings, Layout, LayoutZone
 
+logger = logging.getLogger("modules.database.repository")
 
 # NATIVE REPOSITORY DEFAULT TEMPLATE
 _DEFAULT_BEZEL_PIPELINE_JSON = json.dumps({
-    "region": {"idx": 2, "mode": "RECTANGULAR", "bezel_dp_thickness": BEZEL_DP_THICKNESS, "priority": 100},
+    "region": {
+        "idx": 2,
+        "mode": "RECTANGULAR",
+        "bezel_dp_thickness": BEZEL_DP_THICKNESS,
+        "priority": 100,
+    },
     "origin": {"idx": 0, "mode": "FIXED"},
     "constraint": {"idx": 0, "mode": "NONE"},
-    "transform": {"idx": 0, "mode": "IDENTITY", "sensitivity_x": 1.0, "sensitivity_y": 1.0, "deadzone": 0.1, "hysteresis": 5.0},
-    "semantic": {"idx": 3, "mode": "TOGGLE", "pointer": False}
+    "transform": {
+        "idx": 0,
+        "mode": "IDENTITY",
+        "sensitivity_x": 1.0,
+        "sensitivity_y": 1.0,
+        "deadzone": 0.1,
+        "hysteresis": 5.0,
+    },
+    "semantic": {"idx": 3, "mode": "TOGGLE", "pointer": False},
 })
+
+
+def _scancode_matches(scancode_val: str | int, target_int: int) -> bool:
+    """Matches scancodes across integer values, hex strings, and decimal representations."""
+    if isinstance(scancode_val, int):
+        return scancode_val == target_int
+    if not isinstance(scancode_val, str):
+        return False
+
+    val_str = scancode_val.strip()
+    try:
+        if int(val_str, 16) == target_int:
+            return True
+    except (ValueError, TypeError):
+        pass
+
+    try:
+        if int(val_str, 10) == target_int:
+            return True
+    except (ValueError, TypeError):
+        pass
+
+    return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,9 +153,11 @@ class LayoutZone:
     created_at: str
     updated_at: str
 
-    CONFIG_HELPER: PipelineConfig = field(default_factory=PipelineConfig, init=False, repr=False)
+    CONFIG_HELPER: PipelineConfig = field(
+        default_factory=PipelineConfig, init=False, repr=False
+    )
 
-    def set_parsed_config_from_json(self):
+    def set_parsed_config_from_json(self) -> None:
         if self.CONFIG_HELPER.should_get_config:
             self.CONFIG_HELPER.set_pipeline_config_from_json(self.pipeline_json)
 
@@ -139,24 +177,45 @@ class LayoutZone:
         """Returns the pixel thickness of the bezel directly from the parsed JSON data."""
         self.set_parsed_config_from_json()
         _, _, dp_thickness, _ = self.CONFIG_HELPER.get_region_config()
-        from modules.utils import dp_to_px
         return float(dp_to_px(dp_thickness, dpi))
 
     @classmethod
     def from_row(cls, row) -> LayoutZone:
-        data = {f.name: row[f.name] for f in dataclass_fields(cls) if f.name in row.keys()}
-        data["ignore_app_settings"] = bool(data["ignore_app_settings"])
-        data["pipeline_json"] = str(row["pipeline_json"]) if "pipeline_json" in row.keys() else "{}"
+        data = {
+            f.name: row[f.name]
+            for f in dataclass_fields(cls)
+            if f.init and f.name in row.keys()
+        }
+        data["ignore_app_settings"] = bool(data.get("ignore_app_settings", False))
+        data["pipeline_json"] = (
+            str(row["pipeline_json"]) if "pipeline_json" in row.keys() else "{}"
+        )
         return cls(**data)
 
 
 class AppSettingsRepository:
     ALLOWED_FIELDS = {
-        "left_handed", "floating_joystick", "anchored_joystick", "json_dev_width",
-        "json_dev_height", "json_dev_dpi", "deadzone", "hysteresis", "sensitivity_x",
-        "sensitivity_y", "toggle_key", "sprint_key", "adb_rate_cap", "pps_alert_threshold",
-        "active_layout_id", "typematic_enabled", "typematic_delay_ms", "typematic_rate_hz",
-        "typematic_excluded_keys", "double_tap_enabled", "bezel_toggle_enabled",
+        "left_handed",
+        "floating_joystick",
+        "anchored_joystick",
+        "json_dev_width",
+        "json_dev_height",
+        "json_dev_dpi",
+        "deadzone",
+        "hysteresis",
+        "sensitivity_x",
+        "sensitivity_y",
+        "toggle_key",
+        "sprint_key",
+        "adb_rate_cap",
+        "pps_alert_threshold",
+        "active_layout_id",
+        "typematic_enabled",
+        "typematic_delay_ms",
+        "typematic_rate_hz",
+        "typematic_excluded_keys",
+        "double_tap_enabled",
+        "bezel_toggle_enabled",
     }
 
     def get(self) -> AppSettings:
@@ -181,13 +240,18 @@ class AppSettingsRepository:
 
         conn = connection_manager.get_connection()
         with conn:
-            conn.execute(f"UPDATE app_settings SET {set_clause}, updated_at = datetime('now') WHERE id = :id;", params)
+            conn.execute(
+                f"UPDATE app_settings SET {set_clause}, updated_at = datetime('now') WHERE id = :id;",
+                params,
+            )
         return self.get()
 
     def reset_to_defaults(self) -> AppSettings:
         conn = connection_manager.get_connection()
         with conn:
-            cursor = conn.execute("SELECT active_layout_id FROM app_settings WHERE id = 1;")
+            cursor = conn.execute(
+                "SELECT active_layout_id FROM app_settings WHERE id = 1;"
+            )
             row = cursor.fetchone()
             active_layout_id = row[0] if row else None
 
@@ -201,7 +265,13 @@ class AppSettingsRepository:
 
 class LayoutsRepository:
     ALLOWED_FIELDS = {
-        "name", "width", "height", "dpi", "mouse_wheel_radius", "sprint_distance", "image_path",
+        "name",
+        "width",
+        "height",
+        "dpi",
+        "mouse_wheel_radius",
+        "sprint_distance",
+        "image_path",
     }
     _REQUIRED_ON_CREATE = {"name", "width", "height", "dpi"}
 
@@ -211,14 +281,19 @@ class LayoutsRepository:
         return [Layout.from_row(row) for row in rows]
 
     def get(self, layout_id: int | None) -> Optional[Layout]:
-        if layout_id is None: return None
+        if layout_id is None:
+            return None
         conn = connection_manager.get_connection()
-        row = conn.execute("SELECT * FROM layouts WHERE id = ?;", (layout_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM layouts WHERE id = ?;", (layout_id,)
+        ).fetchone()
         return Layout.from_row(row) if row is not None else None
 
     def get_by_name(self, name: str) -> Optional[Layout]:
         conn = connection_manager.get_connection()
-        row = conn.execute("SELECT * FROM layouts WHERE name = ?;", (name,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM layouts WHERE name = ?;", (name,)
+        ).fetchone()
         return Layout.from_row(row) if row is not None else None
 
     def create(self, **fields: Any) -> Layout:
@@ -231,17 +306,20 @@ class LayoutsRepository:
 
         fields.setdefault("mouse_wheel_radius", 50.0)
         fields.setdefault("sprint_distance", 10.0)
+        fields.setdefault("image_path", None)
         columns = ", ".join(fields)
         placeholders = ", ".join(f":{key}" for key in fields)
 
         conn = connection_manager.get_connection()
         with conn:
-            cursor = conn.execute(f"INSERT INTO layouts ({columns}) VALUES ({placeholders});", fields)
+            cursor = conn.execute(
+                f"INSERT INTO layouts ({columns}) VALUES ({placeholders});", fields
+            )
             new_id = cursor.lastrowid
 
         layout = self.get(new_id)
         assert layout is not None
-        
+
         # Native auto-seed immediately after layout creation
         zones_repo = LayoutZonesRepository()
         zones_repo._ensure_system_bezels(layout)
@@ -249,10 +327,12 @@ class LayoutsRepository:
 
     def update(self, layout_id: int, **fields: Any) -> Layout:
         unknown = set(fields) - self.ALLOWED_FIELDS
-        if unknown: raise InvalidFieldError(f"Unknown layouts field(s): {sorted(unknown)}")
+        if unknown:
+            raise InvalidFieldError(f"Unknown layouts field(s): {sorted(unknown)}")
         if not fields:
             existing = self.get(layout_id)
-            if existing is None: raise KeyError(f"No layout with id={layout_id}")
+            if existing is None:
+                raise KeyError(f"No layout with id={layout_id}")
             return existing
 
         set_clause = ", ".join(f"{key} = :{key}" for key in fields)
@@ -261,10 +341,14 @@ class LayoutsRepository:
 
         conn = connection_manager.get_connection()
         with conn:
-            conn.execute(f"UPDATE layouts SET {set_clause}, updated_at = datetime('now') WHERE id = :id;", params)
+            conn.execute(
+                f"UPDATE layouts SET {set_clause}, updated_at = datetime('now') WHERE id = :id;",
+                params,
+            )
 
         layout = self.get(layout_id)
-        if layout is None: raise KeyError(f"No layout with id={layout_id}")
+        if layout is None:
+            raise KeyError(f"No layout with id={layout_id}")
         return layout
 
     def delete(self, layout_id: int) -> None:
@@ -279,57 +363,96 @@ class LayoutsRepository:
 
     def duplicate(self, layout_id: int, new_name: str) -> Layout:
         source = self.get(layout_id)
-        if source is None: raise KeyError(f"No layout with id={layout_id}")
+        if source is None:
+            raise KeyError(f"No layout with id={layout_id}")
 
         new_layout = self.create(
-            name=new_name, width=source.width, height=source.height, dpi=source.dpi,
-            mouse_wheel_radius=source.mouse_wheel_radius, sprint_distance=source.sprint_distance,
+            name=new_name,
+            width=source.width,
+            height=source.height,
+            dpi=source.dpi,
+            mouse_wheel_radius=source.mouse_wheel_radius,
+            sprint_distance=source.sprint_distance,
+            image_path=source.image_path,
         )
 
         zones_repo = LayoutZonesRepository()
         for zone in zones_repo.list_for_layout(layout_id, auto_heal=False):
             if zone.zone_type == BEZEL:
-                continue # Bezels are handled natively by new_layout.create()
-                
+                continue  # Bezels are handled natively by new_layout.create()
+
             zones_repo.create(
-                layout_id=new_layout.id, scancode=zone.scancode, name=zone.name,
-                zone_type=zone.zone_type, cx=zone.cx, cy=zone.cy, r=zone.r,
-                x1=zone.x1, y1=zone.y1, x2=zone.x2, y2=zone.y2, pipeline_json=zone.pipeline_json,
+                layout_id=new_layout.id,
+                scancode=zone.scancode,
+                name=zone.name,
+                zone_type=zone.zone_type,
+                cx=zone.cx,
+                cy=zone.cy,
+                r=zone.r,
+                x1=zone.x1,
+                y1=zone.y1,
+                x2=zone.x2,
+                y2=zone.y2,
+                ignore_app_settings=zone.ignore_app_settings,
+                pipeline_json=zone.pipeline_json,
             )
         return new_layout
 
 
 class LayoutZonesRepository:
     ALLOWED_FIELDS = {
-        "layout_id", "scancode", "name", "zone_type", "cx", "cy", "r",
-        "x1", "y1", "x2", "y2", "ignore_app_settings", "pipeline_json",
+        "layout_id",
+        "scancode",
+        "name",
+        "zone_type",
+        "cx",
+        "cy",
+        "r",
+        "x1",
+        "y1",
+        "x2",
+        "y2",
+        "ignore_app_settings",
+        "pipeline_json",
     }
     VALID_ZONE_TYPES = {BEZEL, CIRCLE, RECTANGLE}
     _REQUIRED_ON_CREATE = {"layout_id", "scancode", "zone_type"}
 
-    def list_for_layout(self, layout_id: int, auto_heal: bool = True) -> list[LayoutZone]:
+    def list_for_layout(
+        self, layout_id: int, auto_heal: bool = True
+    ) -> list[LayoutZone]:
         conn = connection_manager.get_connection()
-        rows = conn.execute("SELECT * FROM layout_zones WHERE layout_id = ? ORDER BY id;", (layout_id,)).fetchall()
+        rows = conn.execute(
+            "SELECT * FROM layout_zones WHERE layout_id = ? ORDER BY id;", (layout_id,)
+        ).fetchall()
         zones = [LayoutZone.from_row(row) for row in rows]
-        
+
         if auto_heal:
             layouts_repo = LayoutsRepository()
             layout = layouts_repo.get(layout_id)
             if layout and self._ensure_system_bezels(layout, zones):
-                rows = conn.execute("SELECT * FROM layout_zones WHERE layout_id = ? ORDER BY id;", (layout_id,)).fetchall()
+                rows = conn.execute(
+                    "SELECT * FROM layout_zones WHERE layout_id = ? ORDER BY id;",
+                    (layout_id,),
+                ).fetchall()
                 zones = [LayoutZone.from_row(row) for row in rows]
-                    
+
         return zones
 
-    def _ensure_system_bezels(self, layout: Layout, current_zones: list[LayoutZone] | None = None) -> bool:
+    def _ensure_system_bezels(
+        self, layout: Layout, current_zones: list[LayoutZone] | None = None
+    ) -> bool:
         if current_zones is None:
             conn = connection_manager.get_connection()
-            rows = conn.execute("SELECT * FROM layout_zones WHERE layout_id = ? ORDER BY id;", (layout.id,)).fetchall()
+            rows = conn.execute(
+                "SELECT * FROM layout_zones WHERE layout_id = ? ORDER BY id;",
+                (layout.id,),
+            ).fetchall()
             current_zones = [LayoutZone.from_row(row) for row in rows]
 
         healed = False
-        top_bezels = [z for z in current_zones if str(z.scancode) == str(TOP_BEZEL_ID) and z.zone_type == BEZEL]
-        bottom_bezels = [z for z in current_zones if str(z.scancode) == str(BOTTOM_BEZEL_ID) and z.zone_type == BEZEL]
+        top_bezels = [z for z in current_zones if _scancode_matches(z.scancode, TOP_BEZEL_ID)]
+        bottom_bezels = [z for z in current_zones if _scancode_matches(z.scancode, BOTTOM_BEZEL_ID)]
 
         if top_bezels:
             for dup in top_bezels[1:]:
@@ -349,29 +472,45 @@ class LayoutZonesRepository:
 
         return healed
 
-    def _create_native_bezel(self, layout: Layout, scancode: int, name: str, is_top: bool) -> int:
+    def _create_native_bezel(
+        self, layout: Layout, scancode: int, name: str, is_top: bool
+    ) -> int:
         thickness_px = float(dp_to_px(BEZEL_DP_THICKNESS, layout.dpi))
         y1 = 0.0 if is_top else layout.height - thickness_px
         y2 = thickness_px if is_top else layout.height
         cx, cy, rx1, ry1, rx2, ry2 = calculate_rect(0.0, y1, layout.width, y2)
-        
+
         return self.create(
-            layout_id=layout.id, scancode=str(scancode), name=name, zone_type=BEZEL,
-            cx=cx, cy=cy, r=None, x1=rx1, y1=ry1, x2=rx2, y2=ry2,
+            layout_id=layout.id,
+            scancode=hex(scancode),
+            name=name,
+            zone_type=BEZEL,
+            cx=cx,
+            cy=cy,
+            r=None,
+            x1=rx1,
+            y1=ry1,
+            x2=rx2,
+            y2=ry2,
             pipeline_json=_DEFAULT_BEZEL_PIPELINE_JSON,
         ).id
 
     def get(self, zone_id: int | None) -> Optional[LayoutZone]:
-        if zone_id is None: return None
+        if zone_id is None:
+            return None
         conn = connection_manager.get_connection()
-        row = conn.execute("SELECT * FROM layout_zones WHERE id = ?;", (zone_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM layout_zones WHERE id = ?;", (zone_id,)
+        ).fetchone()
         return LayoutZone.from_row(row) if row is not None else None
 
     def create(self, **fields: Any) -> LayoutZone:
         unknown = set(fields) - self.ALLOWED_FIELDS
-        if unknown: raise InvalidFieldError(f"Unknown layout_zones field(s): {sorted(unknown)}")
+        if unknown:
+            raise InvalidFieldError(f"Unknown layout_zones field(s): {sorted(unknown)}")
         missing = self._REQUIRED_ON_CREATE - set(fields)
-        if missing: raise ValueError(f"Missing required zone field(s): {sorted(missing)}")
+        if missing:
+            raise ValueError(f"Missing required zone field(s): {sorted(missing)}")
         if fields["zone_type"] not in self.VALID_ZONE_TYPES:
             raise ValueError(f"zone_type must be one of {self.VALID_ZONE_TYPES}")
 
@@ -384,7 +523,10 @@ class LayoutZonesRepository:
 
         conn = connection_manager.get_connection()
         with conn:
-            cursor = conn.execute(f"INSERT INTO layout_zones ({columns}) VALUES ({placeholders});", fields)
+            cursor = conn.execute(
+                f"INSERT INTO layout_zones ({columns}) VALUES ({placeholders});",
+                fields,
+            )
             new_id = cursor.lastrowid
 
         zone = self.get(new_id)
@@ -393,12 +535,14 @@ class LayoutZonesRepository:
 
     def update(self, zone_id: int, **fields: Any) -> LayoutZone:
         unknown = set(fields) - self.ALLOWED_FIELDS
-        if unknown: raise InvalidFieldError(f"Unknown layout_zones field(s): {sorted(unknown)}")
+        if unknown:
+            raise InvalidFieldError(f"Unknown layout_zones field(s): {sorted(unknown)}")
         if "zone_type" in fields and fields["zone_type"] not in self.VALID_ZONE_TYPES:
             raise ValueError(f"zone_type must be one of {self.VALID_ZONE_TYPES}")
         if not fields:
             existing = self.get(zone_id)
-            if existing is None: raise KeyError(f"No zone with id={zone_id}")
+            if existing is None:
+                raise KeyError(f"No zone with id={zone_id}")
             return existing
 
         set_clause = ", ".join(f"{key} = :{key}" for key in fields)
@@ -407,17 +551,25 @@ class LayoutZonesRepository:
 
         conn = connection_manager.get_connection()
         with conn:
-            conn.execute(f"UPDATE layout_zones SET {set_clause} WHERE id = :id;", params)
+            conn.execute(
+                f"UPDATE layout_zones SET {set_clause}, updated_at = datetime('now') WHERE id = :id;",
+                params,
+            )
 
         zone = self.get(zone_id)
-        if zone is None: raise KeyError(f"No zone with id={zone_id}")
+        if zone is None:
+            raise KeyError(f"No zone with id={zone_id}")
         return zone
 
-    def delete(self, zone_id: int, delete_bezel=False) -> None:
+    def delete(self, zone_id: int, delete_bezel: bool = False) -> None:
         if not delete_bezel:
             zone = self.get(zone_id)
             if zone is not None and zone.zone_type == BEZEL:
-                print(f"[!] Could not delete zone because deletion of 'zone type: {BEZEL}' is forbidden by the caller.")
+                logger.warning(
+                    "Could not delete zone %s because deletion of 'zone type: %s' is forbidden by the caller.",
+                    zone_id,
+                    BEZEL,
+                )
                 return
 
         self._force_delete(zone_id)
