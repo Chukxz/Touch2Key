@@ -1,27 +1,31 @@
 from __future__ import annotations
 
-import math
 import json
+import logging
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar
 
 from modules.utils import (
-    REGION_MODES,
-    ORIGIN_MODES,
-    CONSTRAINT_MODES,
-    TRANSFORM_MODES,
-    SEMANTIC_MODES,
     BEZEL_DP_THICKNESS,
+    CONSTRAINT_MODES,
+    ORIGIN_MODES,
+    REGION_MODES,
+    SEMANTIC_MODES,
     TOGGLE_MODE,
     TOGGLE_VKB,
+    TRANSFORM_MODES,
     Point,
-    Vector,
     TouchEvent,
     TouchPhase,
+    Vector,
 )
 
+logger = logging.getLogger("modules.pipeline")
+
 # Pipeline: Region ⟶ Origin ⟶ Constraint ⟶ Transformation ⟶ Semantic
+
 
 @dataclass(slots=True)
 class OutputSink(ABC):
@@ -36,11 +40,11 @@ class OutputSink(ABC):
     @abstractmethod
     def mouse_move(self, dx: float, dy: float) -> None:
         raise NotImplementedError
-    
+
     @abstractmethod
     def flush_mouse_move(self) -> None:
         raise NotImplementedError
-    
+
     @abstractmethod
     def reset_mouse_accumulators(self) -> None:
         raise NotImplementedError
@@ -125,6 +129,10 @@ class Constraint(ABC):
     @abstractmethod
     def apply(self, origin: Point, position: Point) -> Point: ...
 
+    def update_origin(self, origin: Point, position: Point) -> Point:
+        """Allows leash-type constraints to drag the origin dynamically."""
+        return origin
+
 
 @dataclass(slots=True)
 class NoConstraint(Constraint):
@@ -151,6 +159,17 @@ class LeashConstraint(Constraint):
 
     def apply(self, origin: Point, position: Point) -> Point:
         return position
+
+    def update_origin(self, origin: Point, position: Point) -> Point:
+        delta = position - origin
+        dist = delta.magnitude
+        if dist > self.leash_radius and dist > 0.0:
+            scale = self.leash_radius / dist
+            return Point(
+                position.x - (delta.x * scale),
+                position.y - (delta.y * scale),
+            )
+        return origin
 
 
 @dataclass(slots=True)
@@ -191,18 +210,12 @@ class DynamicOrigin(Origin):
 
     def get(self) -> Point:
         if self._position is None:
-            raise RuntimeError("DynamicOrigin not initialized.")
+            return Point(0.0, 0.0)
         return self._position
 
     def update(self, position: Point, constraint: Constraint) -> None:
-        if isinstance(constraint, LeashConstraint) and self._position is not None:
-            delta = position - self._position
-            dist = delta.magnitude
-            if dist > constraint.leash_radius and dist > 0:
-                scale = constraint.leash_radius / dist
-                self._position = Point(
-                    position.x - (delta.x * scale), position.y - (delta.y * scale)
-                )
+        if self._position is not None:
+            self._position = constraint.update_origin(self._position, position)
 
     def end(self) -> None:
         self._position = None
@@ -227,15 +240,8 @@ class AnchoredOrigin(Origin):
         return self._position
 
     def update(self, position: Point, constraint: Constraint) -> None:
-        if isinstance(constraint, LeashConstraint) and self._position is not None:
-            delta = position - self._position
-            dist = delta.magnitude
-            if dist > constraint.leash_radius and dist > 0:
-                scale = constraint.leash_radius / dist
-                self._position = Point(
-                    position.x - (delta.x * scale),
-                    position.y - (delta.y * scale),
-                )
+        if self._position is not None:
+            self._position = constraint.update_origin(self._position, position)
 
     def end(self) -> None:
         self._position = None
@@ -468,7 +474,7 @@ class Pipeline(Generic[T]):
     type_precedence: int = 0
     creation_id: int = 0
     allow_multi_claim: bool = False
-    is_system: bool = False  # Allows pipeline to intercept touches even in Menu Mode
+    is_system: bool = False
 
     _owned_contact: int | None = field(init=False, default=None)
     _prev_position: Point | None = field(init=False, default=None)
@@ -540,13 +546,13 @@ class PipelineConfig:
     should_get_config: bool = True
     pipeline_config: dict = field(default_factory=dict)
 
-    def _monitor_last_set_config(self, pipeline_config: dict | None = None):
+    def _monitor_last_set_config(self, pipeline_config: dict | None = None) -> None:
         if pipeline_config is None:
             self.is_last_set_config_self = True
         else:
             self.is_last_set_config_self = False
 
-    def get_region_config(self, pipeline_config: dict | None = None):
+    def get_region_config(self, pipeline_config: dict | None = None) -> tuple[int, str, float, int]:
         pipeline_config = (
             pipeline_config if pipeline_config is not None else self.pipeline_config
         )
@@ -565,8 +571,8 @@ class PipelineConfig:
         bezel_dp_thickness: float | None = None,
         priority: int | None = None,
         pipeline_config: dict | None = None,
-        keep_previous=True,
-    ):
+        keep_previous: bool = True,
+    ) -> None:
         self._monitor_last_set_config(pipeline_config)
         if pipeline_config is None:
             self.should_get_config = True
@@ -621,7 +627,7 @@ class PipelineConfig:
             }
         )
 
-    def get_origin_config(self, pipeline_config: dict | None = None):
+    def get_origin_config(self, pipeline_config: dict | None = None) -> tuple[int, str]:
         pipeline_config = (
             pipeline_config if pipeline_config is not None else self.pipeline_config
         )
@@ -636,8 +642,8 @@ class PipelineConfig:
         self,
         idx: int | None = None,
         pipeline_config: dict | None = None,
-        keep_previous=True,
-    ):
+        keep_previous: bool = True,
+    ) -> None:
         self._monitor_last_set_config(pipeline_config)
         if pipeline_config is None:
             self.should_get_config = True
@@ -672,7 +678,7 @@ class PipelineConfig:
             }
         )
 
-    def get_constraint_config(self, pipeline_config: dict | None = None):
+    def get_constraint_config(self, pipeline_config: dict | None = None) -> tuple[int, str]:
         pipeline_config = (
             pipeline_config if pipeline_config is not None else self.pipeline_config
         )
@@ -687,8 +693,8 @@ class PipelineConfig:
         self,
         idx: int | None = None,
         pipeline_config: dict | None = None,
-        keep_previous=True,
-    ):
+        keep_previous: bool = True,
+    ) -> None:
         self._monitor_last_set_config(pipeline_config)
         if pipeline_config is None:
             self.should_get_config = True
@@ -723,7 +729,9 @@ class PipelineConfig:
             }
         )
 
-    def get_transform_config(self, pipeline_config: dict | None = None):
+    def get_transform_config(
+        self, pipeline_config: dict | None = None
+    ) -> tuple[int, str, float, float, float, float]:
         pipeline_config = (
             pipeline_config if pipeline_config is not None else self.pipeline_config
         )
@@ -753,8 +761,8 @@ class PipelineConfig:
         deadzone: float | None = None,
         hysteresis: float | None = None,
         pipeline_config: dict | None = None,
-        keep_previous=True,
-    ):
+        keep_previous: bool = True,
+    ) -> None:
         self._monitor_last_set_config(pipeline_config)
         if pipeline_config is None:
             self.should_get_config = True
@@ -812,7 +820,7 @@ class PipelineConfig:
         else:
             target_deadzone = 0.1
 
-        # Resolve Target hysteresis
+        # Resolve Target Hysteresis
         if hysteresis is not None:
             target_hysteresis = hysteresis
         elif keep_previous:
@@ -832,7 +840,9 @@ class PipelineConfig:
             }
         )
 
-    def get_semantic_config(self, pipeline_config: dict | None = None):
+    def get_semantic_config(
+        self, pipeline_config: dict | None = None
+    ) -> tuple[int, str, bool]:
         pipeline_config = (
             pipeline_config if pipeline_config is not None else self.pipeline_config
         )
@@ -849,8 +859,8 @@ class PipelineConfig:
         idx: int | None = None,
         pointer: bool | None = None,
         pipeline_config: dict | None = None,
-        keep_previous=True,
-    ):
+        keep_previous: bool = True,
+    ) -> None:
         self._monitor_last_set_config(pipeline_config)
         if pipeline_config is None:
             self.should_get_config = True
@@ -894,23 +904,19 @@ class PipelineConfig:
             }
         )
 
-    def get_pipeline_json_from_config(self, pipeline_config: dict | None = None):
+    def get_pipeline_json_from_config(self, pipeline_config: dict | None = None) -> str:
         pipeline_config = (
             pipeline_config if pipeline_config is not None else self.pipeline_config
         )
         try:
-            pipeline_json = json.dumps(pipeline_config)
-        except:
-            pipeline_json = "{}"
-            print(
-                "[!] Error dumping pipeline configuration to json, pipeline json is set to '{}'."
-            )
-
-        return pipeline_json
+            return json.dumps(pipeline_config)
+        except (TypeError, ValueError) as exc:
+            logger.error("Failed to dump pipeline configuration to JSON: %s", exc)
+            return "{}"
 
     def set_pipeline_config_from_json(
-        self, pipeline_json="{}", pipeline_config: dict | None = None
-    ):
+        self, pipeline_json: str = "{}", pipeline_config: dict | None = None
+    ) -> None:
         self._monitor_last_set_config(pipeline_config)
         if pipeline_config is None:
             self.should_get_config = False
@@ -918,13 +924,18 @@ class PipelineConfig:
         pipeline_config = (
             pipeline_config if pipeline_config is not None else self.pipeline_config
         )
+
         try:
             _pipeline_config = json.loads(pipeline_json)
-        except:
+            if not isinstance(_pipeline_config, dict):
+                logger.error(
+                    "Invalid root type in pipeline JSON; expected dict, got %s",
+                    type(_pipeline_config).__name__,
+                )
+                _pipeline_config = {}
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            logger.error("Failed to load pipeline configuration from JSON: %s", exc)
             _pipeline_config = {}
-            print(
-                "[!] Error loading pipeline configuration from json, pipeline configuration set to {}"
-            )
 
         pipeline_config.clear()
         pipeline_config.update(_pipeline_config)
