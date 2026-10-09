@@ -182,10 +182,7 @@ def run(parent=None) -> bool:
         help="Skip system reboot prompt (Windows only, safely ignored on Linux)",
     )
 
-    if is_gui:
-        args, _ = parser.parse_known_args()
-    else:
-        args = parser.parse_args()
+    args = parser.parse_args()
 
     if sys.platform == "win32" and not _is_admin():
         msg = "Administrator privileges are required to uninstall the Interception driver."
@@ -314,8 +311,7 @@ def run(parent=None) -> bool:
 
 def main() -> None:
     """Dedicated entry point for touch2key-uninstall script execution."""
-    is_gui = QApplication.instance() is not None or "--gui" in sys.argv
-    AppLogManager.setup_logging(is_gui=is_gui, log_prefix="touch2key_uninstall")
+    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_uninstall")
 
     if not run():
         sys.exit(1)
