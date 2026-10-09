@@ -832,3 +832,18 @@ class LayoutStudioPage(QWidget):
         except Exception as exc:
             logger.exception("Screenshot capture failed")
             QMessageBox.critical(self, "Capture Failed", str(exc))
+
+
+    def save_state(self) -> bool:
+        """Persists any active layout, zone edits, and inspector values to the database."""
+        try:
+            active = store.get_active_layout()
+            if active is not None and hasattr(self.plotter_widget, "save_to_database"):
+                # This single call saves canvas positions AND the Inspector panel's pipeline settings
+                self.plotter_widget.save_to_database(active.name)
+            
+            return True
+        except Exception as exc:
+            logger.exception("Failed to save Layout Studio state")
+            QMessageBox.critical(self, "Save Error", f"Could not save Layout Studio changes:\n\n{exc}")
+            return False
