@@ -23,6 +23,14 @@ from modules.utils import (
 
 logger = logging.getLogger("modules.gui.dialogs")
 
+# ==========================================
+# Performance Threshold Constants
+# ==========================================
+RATE_CAP_MIN: float = 30.0
+RATE_CAP_MAX: float = 1000.0
+PPS_MIN: float = 10.0
+PPS_MAX: float = 500.0
+
 
 # ==========================================
 # CLI Headless Capture Handlers
@@ -36,23 +44,21 @@ def _capture_keys_cli() -> tuple[str | None, str | None] | None:
 
     try:
         # --- Capture Toggle Key ---
-        print(f"\n[?] Enter TOGGLE key for Camera/Menu mode (e.g. lctl, space, f)")
+        print("\n[?] Enter TOGGLE key for Camera/Menu mode (e.g. lctl, space, f)")
         toggle_input = (
             input(f"    (Default: '{default_toggle}' | Press Enter to keep default): ")
             .strip()
             .lower()
         )
-
         toggle_key = default_toggle if not toggle_input else toggle_input
 
         # --- Capture Sprint Key ---
-        print(f"\n[?] Enter SPRINT key (e.g. lshift, w, c)")
+        print("\n[?] Enter SPRINT key (e.g. lshift, w, c)")
         sprint_input = (
             input(f"    (Default: '{default_sprint}' | Press Enter to keep default): ")
             .strip()
             .lower()
         )
-
         sprint_key = default_sprint if not sprint_input else sprint_input
 
         store.settings.update(
@@ -74,23 +80,39 @@ def _capture_performance_settings_cli() -> tuple[float | None, float | None] | N
     try:
         # --- Capture Rate Cap ---
         print(f"\n[?] Enter the ADB rate cap (Hz) for touch event polling")
-        rate_input = input(f"    (Min 60 | Default {default_rate:g}): ").strip().lower()
+        rate_prompt = (
+            f"    (Min {RATE_CAP_MIN:g}, Max {RATE_CAP_MAX:g} | Default {default_rate:g}): "
+        )
+        rate_input = input(rate_prompt).strip().lower()
 
-        rate_cap = default_rate if not rate_input else float(rate_input)
-        if rate_cap < 60.0:
-            rate_cap = 60.0
+        if not rate_input:
+            rate_cap = default_rate
+        else:
+            try:
+                rate_cap = float(rate_input)
+            except ValueError:
+                logger.warning("Invalid rate cap input; falling back to default.")
+                rate_cap = default_rate
+
+        rate_cap = max(RATE_CAP_MIN, min(RATE_CAP_MAX, float(rate_cap)))
 
         # --- Capture PPS Threshold ---
         print(f"\n[?] Enter the Alert Threshold (PPS) for touch event rate monitoring")
-        pps_input = (
-            input(f"    (Min 30, Max 120 | Default {default_pps:g}): ").strip().lower()
+        pps_prompt = (
+            f"    (Min {PPS_MIN:g}, Max {PPS_MAX:g} | Default {default_pps:g}): "
         )
+        pps_input = input(pps_prompt).strip().lower()
 
-        pps = default_pps if not pps_input else float(pps_input)
-        if pps < 30.0:
-            pps = 30.0
-        elif pps > 120.0:
-            pps = 120.0
+        if not pps_input:
+            pps = default_pps
+        else:
+            try:
+                pps = float(pps_input)
+            except ValueError:
+                logger.warning("Invalid PPS threshold input; falling back to default.")
+                pps = default_pps
+
+        pps = max(PPS_MIN, min(PPS_MAX, float(pps)))
 
         store.settings.update(
             adb_rate_cap=float(rate_cap),
@@ -128,9 +150,7 @@ class KeyCaptureDialog(QDialog):
         layout.addWidget(self.prompt_label)
 
         if default_key:
-            self.key_label = QLabel(
-                f"Waiting for keypress (Default : {default_key})..."
-            )
+            self.key_label = QLabel(f"Waiting for keypress (Default: {default_key})...")
         else:
             self.key_label = QLabel("Waiting for keypress (Default: '')...")
         self.key_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -342,7 +362,8 @@ def capture_performance_settings() -> tuple[float | None, float | None] | None:
             rate_dialog = NumericCaptureDialog(
                 "Enter the ADB rate cap (Hz)\nfor touch event polling\n(or click Skip to use the default)",
                 default_value=default_rate,
-                min_value=60.0,
+                min_value=RATE_CAP_MIN,
+                max_value=RATE_CAP_MAX,
             )
             if rate_dialog.exec() == QDialog.DialogCode.Rejected:
                 return None
@@ -351,8 +372,8 @@ def capture_performance_settings() -> tuple[float | None, float | None] | None:
             pps_dialog = NumericCaptureDialog(
                 "Enter the Alert Threshold (PPS)\nfor touch event rate monitoring\n(or click Skip to use the default)",
                 default_value=default_pps,
-                min_value=30.0,
-                max_value=120.0,
+                min_value=PPS_MIN,
+                max_value=PPS_MAX,
             )
             if pps_dialog.exec() == QDialog.DialogCode.Rejected:
                 return None
