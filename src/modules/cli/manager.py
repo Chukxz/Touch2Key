@@ -9,7 +9,6 @@ and typematic (keyboard repeat) configuration and reset routines.
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 from typing import Optional
 
@@ -66,7 +65,7 @@ def set_profile_image(layout_id: int, image_path_input: str | Path) -> bool:
 
 def show_left_handed() -> None:
     s = store.settings.get()
-    print(f"\n--- Left-Handed Mode ---")
+    print("\n--- Left-Handed Mode ---")
     print(f"  Left-Handed: {'Yes' if s.left_handed else 'No'}\n")
 
 
@@ -125,9 +124,10 @@ def list_layout_zones(layout_id: int) -> None:
     print(f"\n--- Zones / Pipelines for '{layout.name}' (ID: {layout_id}) ---")
 
     for z in zones:
+        coords = "N/A"
         if z.zone_type == CIRCLE:
             coords = f"Center=({z.cx}, {z.cy}), R={z.r}"
-        elif z.zone_type == RECTANGLE or z.zone_type == BEZEL:
+        elif z.zone_type in (RECTANGLE, BEZEL):
             coords = f"Rect=({z.x1}, {z.y1}) -> ({z.x2}, {z.y2})"
 
         cam_flag = " [MoveCam/TrackFire]" if z.pointer else ""
@@ -213,7 +213,6 @@ def delete_profile(layout_id: int) -> bool:
     if active_layout and active_layout.id == layout_id:
         store.settings.update(active_layout_id=None)
 
-    # Removed the ', False' argument since delete_all_for_layout now handles this natively
     store.zones.delete_all_for_layout(layout_id)
     store.layouts.delete(layout_id)
     print(f"Layout '{target.name}' (ID: {layout_id}) and all mapped zones deleted.")
@@ -228,11 +227,11 @@ def clear_zones(layout_id: int) -> bool:
         return False
 
     store.zones.delete_all_for_layout(layout_id)
-    
-    # Trigger native DB self-healing immediately so bezels respawn before the next command
     store.zones.list_for_layout(layout_id)
-    
-    print(f"All touch zones cleared (system bezels auto-restored) for layout '{target.name}' (ID: {layout_id}).")
+
+    print(
+        f"All touch zones cleared (system bezels auto-restored) for layout '{target.name}' (ID: {layout_id})."
+    )
     return True
 
 
@@ -279,11 +278,7 @@ def configure_typematic_interactive() -> None:
     excludes = s.typematic_excluded_keys if not ex_in else ex_in
 
     if excludes:
-        excludes_list = [x.strip().lower() for x in excludes.split(",")]
-        excludes = ""
-        for x in excludes_list:
-            excludes += x + ","
-        excludes = excludes[:-1]
+        excludes = ",".join(k.strip().lower() for k in excludes.split(",") if k.strip())
 
     store.settings.update(
         typematic_enabled=enabled,
@@ -313,15 +308,15 @@ def reset_typematic_defaults() -> None:
 
 
 def show_system() -> None:
-    """Prints current double tap and bezel toggle fields configuration."""
+    """Prints current double-tap and bezel toggle fields configuration."""
     s = store.settings.get()
     print("\n--- System Settings ---")
-    print(f"  Double Tap Enabled:       {'Yes' if s.double_tap_enabled else 'No'}")
-    print(f"  Bezels Enabled:       {'Yes' if s.bezel_toggle_enabled else 'No'}")
+    print(f"  Double Tap Enabled:  {'Yes' if s.double_tap_enabled else 'No'}")
+    print(f"  Bezels Enabled:      {'Yes' if s.bezel_toggle_enabled else 'No'}")
 
 
 def configure_system_interactive() -> None:
-    """Prompts for double tap and bezel toggle fields interactively."""
+    """Prompts for double-tap and bezel toggle fields interactively."""
     s = store.settings.get()
     show_system()
 
@@ -634,7 +629,7 @@ def run() -> None:
         "--set-image",
         nargs=2,
         metavar=("LAYOUT_ID", "IMAGE_PATH"),
-        help="Set background image path for a specific layout by its ID (e.g., --set-image 1 hud.png)",
+        help="Set background image path for a specific layout by its ID",
     )
     parser.add_argument(
         "--show-left-handed",
@@ -706,7 +701,7 @@ def run() -> None:
         "--typematic-excludes",
         type=str,
         metavar="KEYS",
-        help="Set comma-separated excluded/non-spamming keys (e.g. 'w,a,s,d,shift')",
+        help="Set comma-separated excluded keys (e.g. 'w,a,s,d,shift')",
     )
     parser.add_argument(
         "--reset-typematic",
@@ -814,7 +809,6 @@ def run() -> None:
             show_left_handed()
             return
 
-        # Check typematic mutation flags
         typematic_updates = {}
         if args.set_typematic is not None:
             typematic_updates["typematic_enabled"] = (
@@ -825,13 +819,11 @@ def run() -> None:
         if args.typematic_rate is not None:
             typematic_updates["typematic_rate_hz"] = args.typematic_rate
         if args.typematic_excludes is not None:
-            excludes = args.typematic_excludes
-            excludes_list = [x.strip().lower() for x in excludes.split(",")]
-            excludes = ""
-            for x in excludes_list:
-                excludes += x + ","
-            excludes = excludes[:-1]
-            typematic_updates["typematic_excluded_keys"] = excludes
+            typematic_updates["typematic_excluded_keys"] = ",".join(
+                k.strip().lower()
+                for k in args.typematic_excludes.split(",")
+                if k.strip()
+            )
 
         if typematic_updates:
             store.settings.update(**typematic_updates)
@@ -846,7 +838,6 @@ def run() -> None:
             show_typematic()
             return
 
-        # Check system mutation flags
         system_updates = {}
         if args.set_double_tap is not None:
             system_updates["double_tap_enabled"] = (
@@ -931,8 +922,8 @@ def run() -> None:
 
 
 def main() -> None:
-    """Dedicated entry point for touch2key-manage."""
-    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_manage")
+    """Dedicated CLI management entry point."""
+    AppLogManager.setup_logging(is_gui=False, log_prefix="cli_manage")
     run()
 
 
