@@ -4,6 +4,8 @@ Each thread gets its own connection. WAL mode allows concurrent readers
 against the last-committed snapshot while writers execute updates.
 """
 
+from __future__ import annotations
+
 import logging
 import sqlite3
 import threading
@@ -38,6 +40,7 @@ CREATE TABLE IF NOT EXISTS app_settings (
     typematic_excluded_keys TEXT,
     double_tap_enabled INTEGER NOT NULL DEFAULT 1,
     bezel_toggle_enabled INTEGER NOT NULL DEFAULT 1,
+    profile_sort_order TEXT NOT NULL DEFAULT 'Recently Modified',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -105,13 +108,22 @@ class ConnectionManager:
         conn.executescript(_SCHEMA)
         conn.execute(_SEED_DEFAULT_SETTINGS_ROW)
 
-        # Migration safeguard: ensure pipeline_json column exists
         cursor = conn.cursor()
+
+        # Migration safeguard: ensure pipeline_json column exists in layout_zones
         cursor.execute("PRAGMA table_info(layout_zones);")
-        columns = [row["name"] for row in cursor.fetchall()]
-        if "pipeline_json" not in columns:
+        zone_columns = [row["name"] for row in cursor.fetchall()]
+        if "pipeline_json" not in zone_columns:
             cursor.execute(
                 "ALTER TABLE layout_zones ADD COLUMN pipeline_json TEXT NOT NULL DEFAULT '{}';"
+            )
+
+        # Migration safeguard: ensure profile_sort_order column exists in app_settings
+        cursor.execute("PRAGMA table_info(app_settings);")
+        settings_columns = [row["name"] for row in cursor.fetchall()]
+        if "profile_sort_order" not in settings_columns:
+            cursor.execute(
+                "ALTER TABLE app_settings ADD COLUMN profile_sort_order TEXT NOT NULL DEFAULT 'Recently Modified';"
             )
 
         set_fresh_install_version(conn)
