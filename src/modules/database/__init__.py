@@ -10,16 +10,38 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from .connection import ConnectionManager, connection_manager
-from .repositories import (
-    AppSettings,
-    AppSettingsRepository,
-    InvalidFieldError,
-    Layout,
-    LayoutsRepository,
-    LayoutZone,
-    LayoutZonesRepository,
+from modules.utils import (
+    BEZEL,
+    BEZEL_DP_THICKNESS,
+    BOTTOM_BEZEL_ID,
+    TOP_BEZEL_ID,
+    calculate_rect,
+    dp_to_px,
 )
+from .connection import ConnectionManager, connection_manager
+
+try:
+    from .repositories import (
+        AppSettings,
+        AppSettingsRepository,
+        InvalidFieldError,
+        Layout,
+        LayoutsRepository,
+        LayoutZone,
+        LayoutZonesRepository,
+        _scancode_matches,
+    )
+except ImportError:
+    from .repository import (  # type: ignore[no-redef]
+        AppSettings,
+        AppSettingsRepository,
+        InvalidFieldError,
+        Layout,
+        LayoutsRepository,
+        LayoutZone,
+        LayoutZonesRepository,
+        _scancode_matches,
+    )
 
 __all__ = [
     "Store",
@@ -36,15 +58,6 @@ __all__ = [
 ]
 
 logger = logging.getLogger("modules.database")
-
-from modules.utils import (
-    BEZEL,
-    BEZEL_DP_THICKNESS,
-    TOP_BEZEL_ID,
-    BOTTOM_BEZEL_ID,
-    calculate_rect,
-    dp_to_px,
-)
 
 
 class Store:
@@ -105,13 +118,12 @@ def reset_layout_zones_to_app_settings(layout_id: int) -> int:
 
     for zone in zones:
         if zone.zone_type == BEZEL:
-            if zone.scancode == str(TOP_BEZEL_ID):
+            if _scancode_matches(zone.scancode, TOP_BEZEL_ID):
                 cx, cy, x1, y1, x2, y2 = calculate_rect(0.0, 0.0, l_w, thickness)
                 store.zones.update(
                     zone.id, cx=cx, cy=cy, r=None, x1=x1, y1=y1, x2=x2, y2=y2
                 )
-
-            elif zone.scancode == str(BOTTOM_BEZEL_ID):
+            elif _scancode_matches(zone.scancode, BOTTOM_BEZEL_ID):
                 cx, cy, x1, y1, x2, y2 = calculate_rect(0.0, l_h - thickness, l_w, l_h)
                 store.zones.update(
                     zone.id, cx=cx, cy=cy, r=None, x1=x1, y1=y1, x2=x2, y2=y2
@@ -135,7 +147,6 @@ def reset_layout_zones_to_app_settings(layout_id: int) -> int:
         # 3. Directional Movement Joystick Zone
         elif sem_mode == "DIRECTIONAL":
             origin_idx = 0
-
             if settings.anchored_joystick:
                 origin_idx = 2
             elif settings.floating_joystick:
@@ -143,7 +154,7 @@ def reset_layout_zones_to_app_settings(layout_id: int) -> int:
 
             zone.CONFIG_HELPER.set_origin_config(origin_idx)
 
-        # 4. Camera Look Area (Populated dynamically but added here anyway)
+        # 4. Camera Look Area
         elif sem_mode == "POINTER":
             zone.CONFIG_HELPER.set_transform_config(
                 sensitivity_x=settings.sensitivity_x,
