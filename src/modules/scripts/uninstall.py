@@ -312,9 +312,7 @@ def run(parent=None) -> bool:
 def main() -> None:
     """Dedicated entry point for touch2key-uninstall script execution."""
     AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_uninstall")
-
-    if not run():
-        sys.exit(1)
+    run()
 
 
 if __name__ == "__main__":

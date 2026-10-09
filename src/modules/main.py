@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, cast
 
 from modules.engine import Engine
 from modules.platforms import check_single_instance
-from modules.scripts.preflight import run as pre_flight_run
+from modules.scripts.preflight import run as run_preflight
 from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER, ICONS_FOLDER
 from modules.log_manager import AppLogManager
 
@@ -93,7 +93,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         if app_icon_path.exists():
             app.setWindowIcon(QIcon(str(app_icon_path)))
 
-    if not pre_flight_run():
+    if not run_preflight():
         profiler_cleanup(cli_profiler)
         sys.exit(1)
 
@@ -126,7 +126,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
 
 
 def main() -> None:
-    """Dedicated entry point for pyproject.toml scripts and direct execution."""
+    """Dedicated entry point for touch2key script execution."""
     run()
 
 

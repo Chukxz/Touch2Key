@@ -133,13 +133,15 @@ class LayoutStudioPage(QWidget):
 
         # Main Splitter: Left (Profiles) | Center (Canvas) | Right (Inspector)
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setChildrenCollapsible(False)
         main_layout.addWidget(self.splitter)
 
         self._setup_left_sidebar()
         self._setup_center_canvas()
         self._setup_right_inspector()
 
-        self.splitter.setSizes([260, 600, 300])
+        # Responsive default split sizes fitting 1366x768 screens
+        self.splitter.setSizes([240, 560, 280])
         self._current_inspected_uid: int | None = None
 
         self._wire_signals()
@@ -147,12 +149,14 @@ class LayoutStudioPage(QWidget):
 
     def _setup_left_sidebar(self) -> None:
         sidebar_widget = QWidget()
+        sidebar_widget.setMinimumWidth(200)
         sidebar_layout = QVBoxLayout(sidebar_widget)
-        sidebar_layout.setContentsMargins(0, 0, 10, 0)
+        sidebar_layout.setContentsMargins(0, 0, 8, 0)
 
         profiles_group = QGroupBox("Profiles")
         profiles_layout = QVBoxLayout(profiles_group)
 
+        # Sort Mode Selector
         sort_row = QHBoxLayout()
         sort_row.addWidget(QLabel("Sort:"))
         self.sort_combo = QComboBox()
@@ -162,6 +166,7 @@ class LayoutStudioPage(QWidget):
         sort_row.addWidget(self.sort_combo, stretch=1)
         profiles_layout.addLayout(sort_row)
 
+        # Real-time Search Input
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Filter profiles... (Ctrl+F)")
         self.search_input.setClearButtonEnabled(True)
@@ -177,18 +182,22 @@ class LayoutStudioPage(QWidget):
         self.details_label.setWordWrap(True)
         profiles_layout.addWidget(self.details_label)
 
-        btn_row_1 = QHBoxLayout()
+        # Profile Actions: 2x2 grid prevents pushing sidebar past 240px
+        btn_grid_1 = QHBoxLayout()
         self.activate_btn = QPushButton("Set Active")
         self.activate_btn.setStyleSheet("font-weight: bold;")
         self.new_btn = QPushButton("New")
+        btn_grid_1.addWidget(self.activate_btn)
+        btn_grid_1.addWidget(self.new_btn)
+        profiles_layout.addLayout(btn_grid_1)
+
+        btn_grid_2 = QHBoxLayout()
         self.rename_btn = QPushButton("Rename")
         self.duplicate_btn = QPushButton("Duplicate")
+        btn_grid_2.addWidget(self.rename_btn)
+        btn_grid_2.addWidget(self.duplicate_btn)
+        profiles_layout.addLayout(btn_grid_2)
 
-        btn_row_1.addWidget(self.activate_btn)
-        btn_row_1.addWidget(self.new_btn)
-        btn_row_1.addWidget(self.rename_btn)
-        btn_row_1.addWidget(self.duplicate_btn)
-        profiles_layout.addLayout(btn_row_1)
         sidebar_layout.addWidget(profiles_group)
 
         io_group = QGroupBox("Import & Export")
@@ -196,9 +205,9 @@ class LayoutStudioPage(QWidget):
         self.import_btn = QPushButton("Import (.json / .toml / Bundle)")
 
         export_row = QHBoxLayout()
-        self.export_json_btn = QPushButton("Export JSON")
-        self.export_toml_btn = QPushButton("Export TOML")
-        self.export_bundle_btn = QPushButton("Export Bundle")
+        self.export_json_btn = QPushButton("JSON")
+        self.export_toml_btn = QPushButton("TOML")
+        self.export_bundle_btn = QPushButton("Bundle")
 
         export_row.addWidget(self.export_json_btn)
         export_row.addWidget(self.export_toml_btn)
@@ -211,7 +220,7 @@ class LayoutStudioPage(QWidget):
         maint_group = QGroupBox("Maintenance")
         maint_layout = QHBoxLayout(maint_group)
         self.clear_zones_btn = QPushButton("Clear Zones")
-        self.delete_btn = QPushButton("Delete Profile")
+        self.delete_btn = QPushButton("Delete")
         self.delete_btn.setStyleSheet("color: #d9534f;")
 
         maint_layout.addWidget(self.clear_zones_btn)
@@ -222,17 +231,18 @@ class LayoutStudioPage(QWidget):
 
     def _setup_center_canvas(self) -> None:
         canvas_widget = QWidget()
+        canvas_widget.setMinimumWidth(320)
         canvas_layout = QVBoxLayout(canvas_widget)
-        canvas_layout.setContentsMargins(10, 0, 10, 0)
+        canvas_layout.setContentsMargins(8, 0, 8, 0)
 
         status_box = QWidget()
         status_layout = QVBoxLayout(status_box)
-        status_layout.setContentsMargins(0, 0, 0, 10)
+        status_layout.setContentsMargins(0, 0, 0, 6)
         status_layout.setSpacing(2)
 
         self.canvas_status_label = QLabel("Initializing...")
         self.canvas_status_label.setStyleSheet(
-            "font-size: 14px; font-weight: bold; color: palette(highlight);"
+            "font-size: 13px; font-weight: bold; color: palette(highlight);"
         )
 
         self.canvas_help_label = QLabel(STATIC_SHORTCUTS_HELP)
@@ -242,29 +252,32 @@ class LayoutStudioPage(QWidget):
         status_layout.addWidget(self.canvas_help_label)
         canvas_layout.addWidget(status_box)
 
-        tools_row = QHBoxLayout()
-
+        # Toolbar Row 1: Image management & overlay toggles
+        tools_row_1 = QHBoxLayout()
         self.select_image_btn = QPushButton("Select Image")
         self.capture_btn = QPushButton("Capture Screenshot")
+        self.toggle_overlays_btn = QPushButton("Toggle Overlays (F4)")
 
+        tools_row_1.addWidget(self.select_image_btn)
+        tools_row_1.addWidget(self.capture_btn)
+        tools_row_1.addWidget(self.toggle_overlays_btn)
+        tools_row_1.addStretch()
+        canvas_layout.addLayout(tools_row_1)
+
+        # Toolbar Row 2: Drawing shapes & persistence
+        tools_row_2 = QHBoxLayout()
         self.add_circle_btn = QPushButton("Add Circle (F6)")
         self.add_rect_btn = QPushButton("Add Rectangle (F7)")
-        self.toggle_overlays_btn = QPushButton("Toggle Overlays (F4)")
         self.cancel_action_btn = QPushButton("Cancel (F8)")
         self.save_btn = QPushButton("Save to DB (F12)")
         self.save_btn.setStyleSheet("font-weight: bold; color: palette(highlight);")
 
-        tools_row.addWidget(self.select_image_btn)
-        tools_row.addWidget(self.capture_btn)
-        tools_row.addSpacing(10)
-        tools_row.addWidget(self.add_circle_btn)
-        tools_row.addWidget(self.add_rect_btn)
-        tools_row.addWidget(self.toggle_overlays_btn)
-        tools_row.addWidget(self.cancel_action_btn)
-        tools_row.addWidget(self.save_btn)
-        tools_row.addStretch()
-
-        canvas_layout.addLayout(tools_row)
+        tools_row_2.addWidget(self.add_circle_btn)
+        tools_row_2.addWidget(self.add_rect_btn)
+        tools_row_2.addWidget(self.cancel_action_btn)
+        tools_row_2.addWidget(self.save_btn)
+        tools_row_2.addStretch()
+        canvas_layout.addLayout(tools_row_2)
 
         self.plotter_widget = LayoutsPlotterWidget(self, standalone=False)
         canvas_layout.addWidget(self.plotter_widget, stretch=1)
@@ -273,8 +286,9 @@ class LayoutStudioPage(QWidget):
 
     def _setup_right_inspector(self) -> None:
         inspector_widget = QWidget()
+        inspector_widget.setMinimumWidth(220)
         inspector_layout = QVBoxLayout(inspector_widget)
-        inspector_layout.setContentsMargins(10, 0, 0, 0)
+        inspector_layout.setContentsMargins(8, 0, 0, 0)
 
         self.inspector_stack = QStackedWidget()
 
@@ -288,7 +302,7 @@ class LayoutStudioPage(QWidget):
         )
         lbl_global.setWordWrap(True)
         layout_form.addWidget(lbl_global)
-        layout_form.addSpacing(15)
+        layout_form.addSpacing(10)
 
         bezels_group = QGroupBox("System Bezels")
         bezels_form = QFormLayout(bezels_group)
@@ -300,13 +314,13 @@ class LayoutStudioPage(QWidget):
         self.bottom_bezel_spin.setRange(2, 100)
         self.bottom_bezel_spin.setSuffix(" dp")
 
-        bezels_form.addRow("Top Bezel Thickness:", self.top_bezel_spin)
-        bezels_form.addRow("Bottom Bezel Thickness:", self.bottom_bezel_spin)
+        bezels_form.addRow("Top Bezel:", self.top_bezel_spin)
+        bezels_form.addRow("Bottom Bezel:", self.bottom_bezel_spin)
         layout_form.addWidget(bezels_group)
 
         actions_group = QGroupBox("Layout Actions")
         actions_vbox = QVBoxLayout(actions_group)
-        self.reset_all_zones_btn = QPushButton("Reset All Zones to App Defaults")
+        self.reset_all_zones_btn = QPushButton("Reset All Zones to Defaults")
         actions_vbox.addWidget(self.reset_all_zones_btn)
         layout_form.addWidget(actions_group)
         layout_form.addStretch()
@@ -347,7 +361,7 @@ class LayoutStudioPage(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(self.insp_sens_x)
         row.addWidget(self.insp_sens_y)
-        transform_form.addRow("Sensitivity (X, Y):", wrapper)
+        transform_form.addRow("Sens (X, Y):", wrapper)
 
         self.insp_deadzone = QDoubleSpinBox()
         self.insp_deadzone.setRange(0, 1.0)
@@ -364,10 +378,10 @@ class LayoutStudioPage(QWidget):
         semantic_group = QGroupBox("5. Semantics & Output")
         semantic_form = QFormLayout(semantic_group)
         self.insp_pointer = QCheckBox("Output is Pointer Button")
-        semantic_form.addRow("Pointer enabled:", self.insp_pointer)
+        semantic_form.addRow("Pointer:", self.insp_pointer)
         zone_layout.addWidget(semantic_group)
 
-        self.insp_reset_zone_btn = QPushButton("Reset Zone to App Defaults")
+        self.insp_reset_zone_btn = QPushButton("Reset Zone to Defaults")
         zone_layout.addWidget(self.insp_reset_zone_btn)
 
         zone_layout.addStretch()
@@ -501,13 +515,10 @@ class LayoutStudioPage(QWidget):
                     current_still_visible = True
 
         if current_still_visible:
-            # Retain existing valid user selection
             self._on_selection_changed()
         elif bool(query) and first_visible_item is not None:
-            # When actively searching, jump to top matching candidate
             self.profile_list.setCurrentItem(first_visible_item)
         elif active_layout_item is not None:
-            # Default to the layout matching the active canvas
             self.profile_list.setCurrentItem(active_layout_item)
         elif first_visible_item is not None:
             self.profile_list.setCurrentItem(first_visible_item)
@@ -837,6 +848,9 @@ class LayoutStudioPage(QWidget):
             return
 
         layout = store.layouts.get(layout_id)
+        if layout is None:
+            return
+
         JSONS_FOLDER.mkdir(parents=True, exist_ok=True)
         default_save_path = str(JSONS_FOLDER / f"{layout.name}.json")
 
@@ -865,6 +879,9 @@ class LayoutStudioPage(QWidget):
             return
 
         layout = store.layouts.get(layout_id)
+        if layout is None:
+            return
+
         PROFILES_FOLDER.mkdir(parents=True, exist_ok=True)
         default_save_path = str(PROFILES_FOLDER / f"{layout.name}.toml")
 
@@ -888,7 +905,9 @@ class LayoutStudioPage(QWidget):
                 "Exported settings TOML for profile %s to %s", layout.name, out_file
             )
             QMessageBox.information(
-                self, "Export Successful", f"Exported settings TOML to:\n{out_file.name}"
+                self,
+                "Export Successful",
+                f"Exported settings TOML to:\n{out_file.name}",
             )
         except Exception as exc:
             logger.exception("Failed to export settings TOML")
@@ -900,6 +919,9 @@ class LayoutStudioPage(QWidget):
             return
 
         layout = store.layouts.get(layout_id)
+        if layout is None:
+            return
+
         PROFILES_FOLDER.mkdir(parents=True, exist_ok=True)
         folder = QFileDialog.getExistingDirectory(
             self,
@@ -964,8 +986,15 @@ class LayoutStudioPage(QWidget):
             return
 
         img_path = Path(file_path_str)
+        # Store clean filename if placed in data/images/ for cross-machine portability
+        saved_img_ref = (
+            img_path.name
+            if img_path.parent.resolve() == IMAGES_FOLDER.resolve()
+            else str(img_path.resolve())
+        )
+
         try:
-            store.layouts.update(active.id, image_path=str(img_path.resolve()))
+            store.layouts.update(active.id, image_path=saved_img_ref)
             self.load_profiles()
             self.plotter_widget.reload_active_layout()
             self._notify_engine_reload()

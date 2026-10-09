@@ -3,29 +3,33 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from modules.database import store
 from modules.platforms import get_platform
 from modules.utils import (
+    BOTTOM_BEZEL_ID,
     LONG_DELAY,
-    WINDOW_UPDATE_INTERVAL,
-    SCANCODES,
-    VKB_STRUCT,
-    VKB_SLEEP_TIME,
-    TOP_BEZEL_ID,
+    M_BACK,
+    M_FORWARD,
     M_LEFT,
     M_MIDDLE,
     M_RIGHT,
+    SCANCODES,
+    TOP_BEZEL_ID,
+    VKB_SLEEP_TIME,
+    VKB_STRUCT,
+    WINDOW_UPDATE_INTERVAL,
     MapperEvent,
+    get_scancode_from_key,
     rotate_resolution,
 )
 
 if TYPE_CHECKING:
+    from modules.engine import Engine
+    from modules.platforms.base import AbstractBridge
     from .layout_loader import LayoutLoader
     from .touch_reader import TouchReader
-    from modules.platforms.base import AbstractBridge
-    from modules.engine import Engine
 
 logger = logging.getLogger("modules.core.mapper")
 
@@ -59,7 +63,13 @@ class Mapper:
         self.last_cursor_check_time = 0
         self.window_update_interval = WINDOW_UPDATE_INTERVAL
 
-        # Safe Target Window Resolution (Fallback to active foreground window)
+        # Baseline resolution fallbacks prior to configuration load
+        self.device_width = 1920
+        self.device_height = 1080
+        self.dpi = 160
+        self.toggle_key_scancode: int | None = None
+
+        # Resolve target window (fallback to active foreground window)
         if window_id and self.window_manager.is_window_valid(window_id):
             self.window_id = window_id
         else:
@@ -73,20 +83,19 @@ class Mapper:
             if self.window_id
             else None
         )
-        self.game_window_info: dict | None = (
-            {
-                "window_id": self.window_id,
-                "left": 0,
-                "top": 0,
-                "width": self.screen_w,
-                "height": self.screen_h,
-            }
-            if self.window_id
-            else None
-        )
 
-        self.window_lost = self.window_id is None
-        self.toggle_key_scancode: int | None = None
+        try:
+            if self.window_id and self.window_manager.is_window_valid(self.window_id):
+                self.game_window_info: dict | None = self._get_window_info(
+                    self.window_id
+                )
+                self.window_lost = False
+            else:
+                self.game_window_info = None
+                self.window_lost = True
+        except Exception:
+            self.game_window_info = None
+            self.window_lost = True
 
         self._update_config()
 
@@ -94,17 +103,20 @@ class Mapper:
             "ON_CONFIG_RELOAD", self._update_config
         )
         self.mapper_event_dispatcher.register_callback(
+            "ON_LAYOUT_RELOAD", self._update_config
+        )
+        self.mapper_event_dispatcher.register_callback(
             "ON_TARGET_WINDOW_CHANGE", self.rebind_target_window
         )
 
         self.running = True
         self.window_thread = threading.Thread(
-            target=self._update_game_window_info, daemon=True
+            target=self._update_game_window_info, daemon=True, name="WindowTracker"
         )
         self.window_thread.start()
 
         self.vkb_listener = threading.Thread(
-            target=self._virtual_keyboard_listener, daemon=True
+            target=self._virtual_keyboard_listener, daemon=True, name="VKBListener"
         )
         self.vkb_listener.start()
 
@@ -128,20 +140,37 @@ class Mapper:
 
         if settings.pps_alert_threshold > 0:
             self.pps = float(settings.pps_alert_threshold)
+
         if settings.toggle_key:
             self.emulator["toggle_key"] = settings.toggle_key
-            self.toggle_key_scancode = SCANCODES.get(settings.toggle_key)
+            scancode = get_scancode_from_key(settings.toggle_key)
+            if scancode is None:
+                scancode = SCANCODES.get(settings.toggle_key)
+            self.toggle_key_scancode = scancode
+        else:
+            self.emulator["toggle_key"] = None
+            self.toggle_key_scancode = None
 
     def rebind_target_window(
-        self, new_window_id: int | None, new_window_title: str
+        self,
+        new_window_id: int | None = None,
+        new_window_title: str = "",
+        *,
+        target_window_id: int | None = None,
+        target_window_title: str = "",
+        **kwargs: Any,
     ) -> None:
+        wid = target_window_id if target_window_id is not None else new_window_id
+        if hasattr(wid, "target_window_id"):
+            wid = getattr(wid, "target_window_id")
+
         with self.lock:
-            if new_window_id and self.window_manager.is_window_valid(new_window_id):
-                self.window_id = new_window_id
+            if wid and self.window_manager.is_window_valid(wid):
+                self.window_id = wid
                 self.game_window_class_name = self.window_manager.get_window_class_name(
-                    new_window_id
+                    wid
                 )
-                self.game_window_info = self._get_window_info(new_window_id)
+                self.game_window_info = self._get_window_info(wid)
                 self.window_lost = False
                 logger.info(
                     "Engine live-rebound to Window ID: %s (%s)",
@@ -189,7 +218,7 @@ class Mapper:
 
     def _update_game_window_info(self) -> None:
         last_log_time = 0.0
-        log_interval = 5.0  # Throttles repeated logs if window is lost/minimized
+        log_interval = 5.0
 
         while self.running and not self.stop_event.is_set():
             try:
@@ -198,8 +227,10 @@ class Mapper:
                     if self.game_window_info:
                         current_window_id = self.game_window_info.get("window_id")
 
-                if current_window_id and self.window_manager.is_window_valid(
+                if (
                     current_window_id
+                    and self.window_manager.is_window_valid(current_window_id)
+                    and self.window_manager.is_window_visible(current_window_id)
                 ):
                     new_info = self._get_window_info(current_window_id)
                     with self.lock:
@@ -220,7 +251,9 @@ class Mapper:
                     except Exception:
                         now = time.perf_counter()
                         if now - last_log_time > log_interval:
-                            logger.debug("Target window currently unavailable or minimized. Retrying...")
+                            logger.debug(
+                                "Target window currently unavailable or minimized. Retrying..."
+                            )
                             last_log_time = now
                         with self.lock:
                             self.game_window_info = None
@@ -241,7 +274,7 @@ class Mapper:
             self.game_window_class_name
         )
         target_info = None
-        max_diag = 0
+        max_diag = 0.0
 
         for wid in window_ids:
             if not self.window_manager.is_window_visible(wid):
@@ -267,13 +300,13 @@ class Mapper:
         rot_dev_w = max(1.0, float(rot_dev_w))
         rot_dev_h = max(1.0, float(rot_dev_h))
 
-        norm_x = x / rot_dev_w
-        norm_y = y / rot_dev_h
+        norm_x = max(0.0, min(1.0, x / rot_dev_w))
+        norm_y = max(0.0, min(1.0, y / rot_dev_h))
 
         with self.lock:
             win = self.game_window_info
 
-        if win:
+        if win and win["width"] > 0 and win["height"] > 0:
             target_x = win["left"] + norm_x * win["width"]
             target_y = win["top"] + norm_y * win["height"]
         else:
@@ -293,44 +326,63 @@ class Mapper:
             status = (
                 "HEALTHY" if pps >= self.pps else ("IDLE" if pps == 0 else "LOW RATE")
             )
-            logger.info(
-                "Rate: %5.1f Hz | Status: %s",
-                pps,
-                status,
-            )
+            logger.info("Rate: %5.1f Hz | Status: %s", pps, status)
 
     def _virtual_keyboard_listener(self) -> None:
+        reader = getattr(self.engine_ref, "vkb_reader", None)
+        if reader is None:
+            logger.warning("Virtual Keyboard reader pipe is not configured.")
+            return
+
         while self.running and not self.stop_event.is_set():
             try:
-                payload = self.engine_ref.vkb_reader.recv_bytes()
+                # Non-blocking poll prevents thread hanging indefinitely on engine stop
+                if not reader.poll(VKB_SLEEP_TIME):
+                    continue
+
+                payload = reader.recv_bytes()
                 state, scancode = VKB_STRUCT.unpack(payload)
 
                 is_toggle_mode = scancode == TOP_BEZEL_ID
+                is_toggle_vkb = scancode == BOTTOM_BEZEL_ID
                 is_mouse_left = scancode == M_LEFT
                 is_mouse_middle = scancode == M_MIDDLE
                 is_mouse_right = scancode == M_RIGHT
+                is_mouse_back = scancode == M_BACK
+                is_mouse_forward = scancode == M_FORWARD
 
                 if state == 0:  # DOWN / PRESS
-                    if is_toggle_mode:
-                        pass  # Handled cleanly on release (state == 1)
+                    if is_toggle_mode or is_toggle_vkb:
+                        pass
                     elif is_mouse_left:
                         self.bridge.left_click_down()
                     elif is_mouse_middle:
                         self.bridge.middle_click_down()
                     elif is_mouse_right:
                         self.bridge.right_click_down()
+                    elif is_mouse_back:
+                        self.bridge.button4_down()
+                    elif is_mouse_forward:
+                        self.bridge.button5_down()
                     else:
                         self.bridge.key_down(scancode)
 
                 elif state == 1:  # UP / RELEASE
                     if is_toggle_mode:
                         self.engine_ref.toggle_mode()
+                    elif is_toggle_vkb:
+                        if hasattr(self.engine_ref, "toggle_virtual_keyboard"):
+                            self.engine_ref.toggle_virtual_keyboard()
                     elif is_mouse_left:
                         self.bridge.left_click_up()
                     elif is_mouse_middle:
                         self.bridge.middle_click_up()
                     elif is_mouse_right:
                         self.bridge.right_click_up()
+                    elif is_mouse_back:
+                        self.bridge.button4_up()
+                    elif is_mouse_forward:
+                        self.bridge.button5_up()
                     else:
                         self.bridge.key_up(scancode)
 
@@ -348,3 +400,7 @@ class Mapper:
     def stop(self) -> None:
         self.running = False
         self.stop_event.set()
+        if hasattr(self, "window_thread") and self.window_thread.is_alive():
+            self.window_thread.join(timeout=1.0)
+        if hasattr(self, "vkb_listener") and self.vkb_listener.is_alive():
+            self.vkb_listener.join(timeout=1.0)

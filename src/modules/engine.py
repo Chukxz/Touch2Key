@@ -6,7 +6,7 @@ import os
 import sys
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from modules import (
     BezelMapper,
@@ -83,13 +83,14 @@ class Engine:
         self._tiers: list[list[Pipeline]] = []
 
         self.is_visible = False
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.is_shutting_down = False
         self._stop_event = threading.Event()
         self.mapper_event_dispatcher = dispatcher or MapperEventDispatcher()
         self.two_finger_tap_tracker = TwoFingerTapTracker()
 
-        self.vkb_reader, self.vkb_writer = multiprocessing.Pipe()
+        # Persistent IPC pipe for the virtual keyboard overlay
+        self.vkb_reader, self.vkb_writer = multiprocessing.Pipe(duplex=False)
         self.vkb_process: multiprocessing.Process | None = None
 
         self.double_tap_enabled = True
@@ -102,6 +103,8 @@ class Engine:
         # Debounce tracking for hotkeys
         self._last_hotkey_time = 0.0
         self._hotkey_cooldown = 0.35
+
+        self._mouse_flush_thread: threading.Thread | None = None
 
         # Terminal-specific global hotkey bindings
         if not self.headless:
@@ -136,7 +139,6 @@ class Engine:
                     "f7", lambda: _guard_hotkey(self._reload_config_cli)
                 )
 
-                # Arrow key hotkeys for dynamic performance threshold tuning
                 keyboard.add_hotkey(
                     "left",
                     lambda: _guard_hotkey(lambda: self._adjust_rate_cap_cli(-10.0)),
@@ -164,7 +166,9 @@ class Engine:
                     "[Down/Up] PPS (-/+ 5)"
                 )
             except Exception as exc:
-                logger.debug("Failed to register CLI global hotkeys: %s", exc, exc_info=True)
+                logger.debug(
+                    "Failed to register CLI global hotkeys: %s", exc, exc_info=True
+                )
         else:
             logger.info(
                 "[Headless / GUI Worker Launch] Background engine active (terminal hotkeys bypassed)."
@@ -179,7 +183,7 @@ class Engine:
         return True
 
     def _adjust_rate_cap_cli(self, delta: float) -> None:
-        """Dynamically tunes the ADB polling rate cap, enforcing bounds and committing to SQLite."""
+        """Dynamically tunes the ADB polling rate cap, committing to DB and notifying listeners."""
         if not self._check_debounce():
             return
 
@@ -188,17 +192,17 @@ class Engine:
             return
 
         self.rate_cap = new_rate
-        if self.touch_reader and hasattr(self.touch_reader, "rate_cap"):
-            self.touch_reader.rate_cap = new_rate
-
         try:
             store.settings.update(adb_rate_cap=new_rate)
             logger.info("CLI Hotkey: Rate Cap set to %.1f Hz (DB synced)", new_rate)
+            self.mapper_event_dispatcher.dispatch(
+                MapperEvent(action="ON_CONFIG_RELOAD")
+            )
         except Exception as exc:
             logger.error("Failed to commit rate cap update to DB: %s", exc)
 
     def _adjust_pps_cli(self, delta: float) -> None:
-        """Dynamically tunes the PPS alert threshold, enforcing bounds and committing to SQLite."""
+        """Dynamically tunes the PPS alert threshold, committing to DB and notifying listeners."""
         if not self._check_debounce():
             return
 
@@ -207,15 +211,14 @@ class Engine:
             return
 
         self.pps = new_pps
-        if self.mapper:
-            if hasattr(self.mapper, "pps_threshold"):
-                self.mapper.pps_threshold = new_pps
-            elif hasattr(self.mapper, "pps"):
-                self.mapper.pps = new_pps
-
         try:
             store.settings.update(pps_alert_threshold=new_pps)
-            logger.info("CLI Hotkey: PPS Alert Threshold set to %.1f PPS (DB synced)", new_pps)
+            logger.info(
+                "CLI Hotkey: PPS Alert Threshold set to %.1f PPS (DB synced)", new_pps
+            )
+            self.mapper_event_dispatcher.dispatch(
+                MapperEvent(action="ON_CONFIG_RELOAD")
+            )
         except Exception as exc:
             logger.error("Failed to commit PPS update to DB: %s", exc)
 
@@ -226,10 +229,16 @@ class Engine:
             s = store.settings.get()
             new_val = not s.left_handed
             store.settings.update(left_handed=new_val)
-            logger.info("CLI Hotkey Triggered [F5]: Left-Handed mode set to %s", new_val)
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+            logger.info(
+                "CLI Hotkey Triggered [F5]: Left-Handed mode set to %s", new_val
+            )
+            self.mapper_event_dispatcher.dispatch(
+                MapperEvent(action="ON_CONFIG_RELOAD")
+            )
         except Exception as exc:
-            logger.error("Failed to toggle handedness via hotkey: %s", exc, exc_info=True)
+            logger.error(
+                "Failed to toggle handedness via hotkey: %s", exc, exc_info=True
+            )
 
     def _reload_layout_cli(self) -> None:
         if not self._check_debounce():
@@ -243,10 +252,20 @@ class Engine:
         self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
         logger.info("CLI Hotkey Triggered [F7]: Configuration reload event dispatched.")
 
-    def _on_devices_change(self, k_id: int | None, m_id: int | None) -> None:
+    def _on_devices_change(
+        self,
+        k_id: int | None = None,
+        m_id: int | None = None,
+        *,
+        keyboard_device_id: int | None = None,
+        mouse_device_id: int | None = None,
+        **kwargs: Any,
+    ) -> None:
         if not self.bridge_class or self.bridge_class.k_proc is None:
             return
-        self.bridge_class.reload_devices(k_id, m_id)
+        resolved_k = keyboard_device_id if keyboard_device_id is not None else k_id
+        resolved_m = mouse_device_id if mouse_device_id is not None else m_id
+        self.bridge_class.reload_devices(resolved_k, resolved_m)
 
     def toggle_mode(self) -> None:
         with self.lock:
@@ -268,29 +287,35 @@ class Engine:
             MapperEvent(action="ON_MENU_MODE_TOGGLE", is_visible=new_state)
         )
 
-    def start_virtual_keyboard(self):
-        self.vkb_reader.close()
-        self.vkb_writer.close()
+    def start_virtual_keyboard(self) -> None:
+        with self.lock:
+            if self.vkb_process is not None and self.vkb_process.is_alive():
+                return
 
-        self.vkb_reader, self.vkb_writer = multiprocessing.Pipe(duplex=False)
-        self.vkb_process = multiprocessing.Process(
-            target=virtual_keyboard_worker,
-            name="Virtual Keyboard",
-            args=(self.vkb_writer,),
-            daemon=True,
-        )
-        self.vkb_process.start()
-        self.vkb_writer.close()
+            # Drain any residual events from previous overlay runs
+            while self.vkb_reader.poll():
+                try:
+                    self.vkb_reader.recv_bytes()
+                except Exception:
+                    break
 
-    def close_virtual_keyboard(self):
-        if self.vkb_process is not None and self.vkb_process.is_alive():
-            self.vkb_process.terminate()
-            self.vkb_process.join(timeout=1.0)
-            if self.vkb_process.is_alive():
-                self.vkb_process.kill()
+            self.vkb_process = multiprocessing.Process(
+                target=virtual_keyboard_worker,
+                name="Virtual Keyboard",
+                args=(self.vkb_writer,),
+                daemon=True,
+            )
+            self.vkb_process.start()
 
-            self.vkb_reader.close()
-            self.vkb_writer.close()
+    def close_virtual_keyboard(self) -> None:
+        with self.lock:
+            if self.vkb_process is not None:
+                if self.vkb_process.is_alive():
+                    self.vkb_process.terminate()
+                    self.vkb_process.join(timeout=1.0)
+                    if self.vkb_process.is_alive():
+                        self.vkb_process.kill()
+                self.vkb_process = None
 
     def toggle_virtual_keyboard(self) -> None:
         if self.vkb_process is not None and self.vkb_process.is_alive():
@@ -298,9 +323,18 @@ class Engine:
         else:
             self.start_virtual_keyboard()
 
-    def _set_is_visible(self, is_visible: bool = True) -> None:
+    def _set_is_visible(
+        self, is_visible: bool | MapperEvent = True, **kwargs: Any
+    ) -> None:
+        if isinstance(is_visible, MapperEvent):
+            visible_val = getattr(is_visible, "is_visible", True)
+        elif "is_visible" in kwargs:
+            visible_val = kwargs["is_visible"]
+        else:
+            visible_val = is_visible
+
         with self.lock:
-            self.is_visible = is_visible
+            self.is_visible = bool(visible_val)
             if self.mouse_mapper:
                 self.mouse_mapper.touch_up()
             if self.key_mapper:
@@ -312,12 +346,9 @@ class Engine:
             self.two_finger_tap_tracker.reset()
 
     def _on_layout_reload(self) -> None:
-        logger.info("Executing layout reload across loader and pipelines...")
+        """Rebuilds mapper pipelines and priority tiers when active layout changes."""
+        logger.info("Executing layout reload across pipelines...")
         try:
-            if self.layout_loader and hasattr(self.layout_loader, "reload"):
-                self.layout_loader.reload()
-            if self.mapper and hasattr(self.mapper, "reload_layout"):
-                self.mapper.reload_layout()
             if self.key_mapper and hasattr(self.key_mapper, "rebuild_pipelines"):
                 self.key_mapper.rebuild_pipelines()
             if self.bezel_mapper and hasattr(self.bezel_mapper, "rebuild_pipelines"):
@@ -333,28 +364,19 @@ class Engine:
             logger.error("Error during layout reload execution: %s", exc, exc_info=True)
 
     def _on_config_reload(self) -> None:
+        """Pulls updated settings from SQLite and rebuilds pipeline priority tiers."""
         settings = store.settings.get()
         self.double_tap_enabled = settings.double_tap_enabled
         self.bezel_toggle_enabled = settings.bezel_toggle_enabled
 
-        # Update and clamp rate cap
         self.rate_cap = max(
             RATE_CAP_MIN,
             min(RATE_CAP_MAX, float(settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP)),
         )
-        if self.touch_reader and hasattr(self.touch_reader, "rate_cap"):
-            self.touch_reader.rate_cap = self.rate_cap
-
-        # Update and clamp PPS threshold
         self.pps = max(
             PPS_MIN,
             min(PPS_MAX, float(settings.pps_alert_threshold or DEFAULT_PPS)),
         )
-        if self.mapper:
-            if hasattr(self.mapper, "pps_threshold"):
-                self.mapper.pps_threshold = self.pps
-            elif hasattr(self.mapper, "pps"):
-                self.mapper.pps = self.pps
 
         self._tiers = self._build_pipeline_tiers()
         logger.info(
@@ -404,11 +426,16 @@ class Engine:
         while not self._stop_event.is_set():
             if self.output_sink:
                 self.output_sink.flush_mouse_move()
-                if self.touch_reader and getattr(self.touch_reader, "active_touches", 1) == 0:
+                if (
+                    self.touch_reader
+                    and getattr(self.touch_reader, "active_touches", 1) == 0
+                ):
                     self.output_sink.reset_mouse_accumulators()
 
             active_cap = max(RATE_CAP_MIN, self.rate_cap)
-            time.sleep(1.0 / active_cap)
+            # wait() wakes up immediately on shutdown rather than sleeping
+            if self._stop_event.wait(1.0 / active_cap):
+                break
 
     def _process_touch_event(self, touch_event: TouchEvent) -> None:
         if not (
@@ -491,19 +518,25 @@ class Engine:
         pps: float | None = None,
         k_device_handle: int = 0,
         m_device_handle: int = 10,
+        **kwargs: Any,
     ) -> None:
         settings = store.settings.get()
         toggle_key = toggle_key or settings.toggle_key
         sprint_key = sprint_key or settings.sprint_key
 
-        # Strictly enforce bounds on dynamic runtime properties
         self.rate_cap = max(
             RATE_CAP_MIN,
-            min(RATE_CAP_MAX, float(rate_cap or settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP)),
+            min(
+                RATE_CAP_MAX,
+                float(rate_cap or settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP),
+            ),
         )
         self.pps = max(
             PPS_MIN,
-            min(PPS_MAX, float(pps or settings.pps_alert_threshold or DEFAULT_PPS)),
+            min(
+                PPS_MAX,
+                float(pps or settings.pps_alert_threshold or DEFAULT_PPS),
+            ),
         )
 
         if window_id is None:
@@ -579,17 +612,16 @@ class Engine:
 
         self.bridge_class.start_worker_processes(k_device_handle, m_device_handle)
 
-        # Start dynamic mouse accumulator flush thread
-        threading.Thread(
+        self._mouse_flush_thread = threading.Thread(
             target=self._mouse_flush_loop,
             daemon=True,
             name="MouseFlushThread",
-        ).start()
+        )
+        self._mouse_flush_thread.start()
 
     def _start(self, config_str: str | None = None) -> None:
         if config_str is not None:
             config = parse_config_arg(config_str)
-            # Sync parameters to SQLite to persist across reloads
             store.settings.update(
                 adb_rate_cap=config["rate_cap"],
                 pps_alert_threshold=config["pps"],
@@ -619,7 +651,6 @@ class Engine:
         if rate_cap is None or pps is None:
             return
 
-        # Commit interactive CLI selections to SQLite prior to engine initialization
         store.settings.update(
             adb_rate_cap=rate_cap,
             pps_alert_threshold=pps,
@@ -670,8 +701,12 @@ class Engine:
 
         try:
             self.close_virtual_keyboard()
+            try:
+                self.vkb_reader.close()
+                self.vkb_writer.close()
+            except Exception:
+                pass
 
-            # Reset pipelines to release virtual down-states
             if self.output_sink:
                 for tier in self._tiers:
                     for p in tier:
@@ -692,31 +727,15 @@ class Engine:
 
             if self.bridge_class is not None:
                 self.bridge_class.shutdown()
-                self.bridge_class.release_all()
 
-            procs = [
-                p
-                for p in (self.bridge_class.k_proc, self.bridge_class.m_proc)
-                if p is not None
-            ]
-
-            for p in procs:
-                if p.is_alive():
-                    p.terminate()
-            for p in procs:
-                p.join(timeout=1.0)
-                if p.is_alive():
-                    p.kill()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Exception during engine teardown: %s", exc)
 
         store.close()
 
 
 def run_engine_process(conn: Connection, log_queue: Queue) -> None:
-    AppLogManager.setup_logging(
-        is_gui=True, log_prefix="engine", log_queue=log_queue
-    )
+    AppLogManager.setup_logging(is_gui=True, log_prefix="engine", log_queue=log_queue)
     dispatcher = IpcMapperEventDispatcher(conn)
     engine: Engine | None = None
 
@@ -730,9 +749,7 @@ def run_engine_process(conn: Connection, log_queue: Queue) -> None:
         config = unpack_ipc_start_cmd(start_payload)
 
         engine = Engine(headless=True, dispatcher=dispatcher)
-        engine.start_headless(
-            window_id=config["window_id"],
-        )
+        engine.start_headless(**config)
         dispatcher.send_started()
 
     except KeyboardInterrupt:
@@ -756,7 +773,8 @@ def run_engine_process(conn: Connection, log_queue: Queue) -> None:
     dispatcher.run_command_loop()
 
     try:
-        engine._shutdown()
+        if engine is not None:
+            engine._shutdown()
     except Exception as exc:
         logger.error("[ENGINE PROCESS] Shutdown failure: %s", exc, exc_info=True)
         dispatcher.send_error(str(exc))
@@ -793,9 +811,7 @@ def parse_config_arg(config_str: str) -> dict:
     )
     rate_cap = max(RATE_CAP_MIN, min(RATE_CAP_MAX, raw_rate))
 
-    raw_pps = _parse_val(
-        parts[4], float, settings.pps_alert_threshold or DEFAULT_PPS
-    )
+    raw_pps = _parse_val(parts[4], float, settings.pps_alert_threshold or DEFAULT_PPS)
     pps = max(PPS_MIN, min(PPS_MAX, raw_pps))
 
     k_device_handle = _parse_val(parts[5], int, 0)

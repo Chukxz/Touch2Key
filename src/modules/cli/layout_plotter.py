@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow
 
 from modules.utils import ICONS_FOLDER
 from modules.database import store
-from modules.gui.layout_studio_page import LayoutStudioPage
+from modules.gui.pages.layout_studio_page import LayoutStudioPage
 from modules.log_manager import AppLogManager
 
 

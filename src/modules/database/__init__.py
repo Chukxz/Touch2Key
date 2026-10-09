@@ -20,28 +20,16 @@ from modules.utils import (
 )
 from .connection import ConnectionManager, connection_manager
 
-try:
-    from .repositories import (
-        AppSettings,
-        AppSettingsRepository,
-        InvalidFieldError,
-        Layout,
-        LayoutsRepository,
-        LayoutZone,
-        LayoutZonesRepository,
-        _scancode_matches,
-    )
-except ImportError:
-    from .repository import (  # type: ignore[no-redef]
-        AppSettings,
-        AppSettingsRepository,
-        InvalidFieldError,
-        Layout,
-        LayoutsRepository,
-        LayoutZone,
-        LayoutZonesRepository,
-        _scancode_matches,
-    )
+from .repositories import (
+    AppSettings,
+    AppSettingsRepository,
+    InvalidFieldError,
+    Layout,
+    LayoutsRepository,
+    LayoutZone,
+    LayoutZonesRepository,
+    _scancode_matches,
+)
 
 __all__ = [
     "Store",

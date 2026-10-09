@@ -33,7 +33,7 @@ def run() -> str | None:
 
 
 def main() -> None:
-    """Dedicated entry point for touch2key-check-adb script execution."""
+    """Dedicated entry point for touch2key-adb script execution."""
     AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_show_adb_path")
     run()
 

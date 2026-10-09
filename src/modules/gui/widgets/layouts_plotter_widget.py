@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import datetime
 import math
 import os
 import sys
@@ -8,6 +7,7 @@ from pathlib import Path
 from PIL import Image
 
 from modules.platforms import get_platform, get_specific_mt_key
+
 get_platform().SystemConfig().set_dpi_awareness()
 
 from modules.utils import (
@@ -30,16 +30,16 @@ from modules.utils import (
     get_scancode_and_bridge_key_from_key,
     get_vibrant_random_color,
     make_copy_name,
-    rotate_resolution,
 )
 
 from modules.core.pipeline import PipelineConfig
-from modules.database import store
+from modules.database import store, _scancode_matches
 
 if sys.platform == "win32":
     os.environ["QT_LOGGING_RULES"] = "qt.qpa.window=false"
 
 import matplotlib
+
 matplotlib.use("qtagg")
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle, Rectangle
@@ -113,7 +113,9 @@ class _Draggable:
 
         if is_shape:
             self.artist_id = "shape_" + str(entry_id)
-            self.default_face_color = self.plotter.shapes_artists[entry_id].get_facecolor()
+            self.default_face_color = self.plotter.shapes_artists[
+                entry_id
+            ].get_facecolor()
         else:
             self.artist_id = "label_" + str(entry_id)
             label_bbox = self.plotter.labels_artists[entry_id].get_bbox_patch()
@@ -134,7 +136,9 @@ class _Draggable:
             if self.plotter.iter_count >= 2:
                 idx = self.plotter.draggables_ids.index(self.plotter.last_artist_id)
                 self.plotter.iter_count = 0
-                return self.plotter.draggables_ids[(idx + 1) % len(self.plotter.draggables_ids)]
+                return self.plotter.draggables_ids[
+                    (idx + 1) % len(self.plotter.draggables_ids)
+                ]
             else:
                 return self.plotter.last_artist_id
         else:
@@ -149,7 +153,9 @@ class _Draggable:
         self.plotter.zone_selected.emit(self.entry_id)
         priority = self.plotter.shapes[self.entry_id].get("priority", 0)
         pointer_info = (
-            "Pointer Enabled" if self.plotter.shapes[self.entry_id]["pointer"] else "Pointer Disabled"
+            "Pointer Enabled"
+            if self.plotter.shapes[self.entry_id]["pointer"]
+            else "Pointer Disabled"
         )
 
         if curr_id.startswith("label_"):
@@ -196,18 +202,24 @@ class _Draggable:
         if self.is_shape:
             shape = self.plotter.shapes_artists[self.entry_id]
             shape.set_facecolor(
-                get_dulled_hue_color(*get_hue_modified_alpha_from_hsv(self.default_face_color))
+                get_dulled_hue_color(
+                    *get_hue_modified_alpha_from_hsv(self.default_face_color)
+                )
             )
         else:
             label_bbox = self.plotter.labels_artists[self.entry_id].get_bbox_patch()
             if label_bbox:
                 label_bbox.set_facecolor(
-                    get_dulled_hue_color(*get_hue_modified_alpha_from_hsv(self.default_face_color))
+                    get_dulled_hue_color(
+                        *get_hue_modified_alpha_from_hsv(self.default_face_color)
+                    )
                 )
 
     def restore_face_color(self):
         if self.is_shape:
-            self.plotter.shapes_artists[self.entry_id].set_facecolor(self.default_face_color)
+            self.plotter.shapes_artists[self.entry_id].set_facecolor(
+                self.default_face_color
+            )
         else:
             label_bbox = self.plotter.labels_artists[self.entry_id].get_bbox_patch()
             if label_bbox:
@@ -287,7 +299,10 @@ class _DraggableLabel(_Draggable):
             self.shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
 
             self.canvas.draw()
-            if self.label_artist.axes.bbox.width > 0 and self.label_artist.axes.bbox.height > 0:
+            if (
+                self.label_artist.axes.bbox.width > 0
+                and self.label_artist.axes.bbox.height > 0
+            ):
                 self.drag_bg = self.canvas.copy_from_bbox(self.label_artist.axes.bbox)
             self.label_artist.set_visible(True)
             self.plotter.drawn = True
@@ -340,7 +355,8 @@ class _DraggableLabel(_Draggable):
     def _partial_release(self):
         if self.plotter.ignore_current_draggable_id_n <= 0:
             self.plotter.update_title(
-                f"OVERLAYS: {'VISIBLE' if self.plotter.show_overlays else 'HIDDEN'}", True
+                f"OVERLAYS: {'VISIBLE' if self.plotter.show_overlays else 'HIDDEN'}",
+                True,
             )
 
         label_bbox = self.label_artist.get_bbox_patch()
@@ -357,7 +373,6 @@ class _DraggableShape(_Draggable):
     def __init__(self, entry_id: int, plotter_ref):
         super().__init__(entry_id, True, plotter_ref)
         self.label_artist = self.plotter.labels_artists[entry_id]
-        # Resolve the concrete patch artist from the plotter cache
         self.shape_artist = self.plotter.shapes_artists.get(entry_id)
         self.canvas = self.plotter.canvas
         self.press = None
@@ -412,7 +427,6 @@ class _DraggableShape(_Draggable):
     def _shape_transform(self, event) -> None: ...
 
     def _on_motion(self, event):
-        # Polymorphic guard: supports Circle and Rectangle patches
         if self.shape_artist is None:
             return
         if not self.plotter.fire_on_motion or self.shape_artist.axes is None:
@@ -439,7 +453,10 @@ class _DraggableShape(_Draggable):
                 label_bbox.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
 
             self.canvas.draw()
-            if self.shape_artist.axes.bbox.width > 0 and self.shape_artist.axes.bbox.height > 0:
+            if (
+                self.shape_artist.axes.bbox.width > 0
+                and self.shape_artist.axes.bbox.height > 0
+            ):
                 self.drag_bg = self.canvas.copy_from_bbox(self.shape_artist.axes.bbox)
             self.shape_artist.set_visible(True)
             self.plotter.drawn = True
@@ -481,7 +498,8 @@ class _DraggableShape(_Draggable):
             return
         if self.plotter.ignore_current_draggable_id_n <= 0:
             self.plotter.update_title(
-                f"OVERLAYS: {'VISIBLE' if self.plotter.show_overlays else 'HIDDEN'}", True
+                f"OVERLAYS: {'VISIBLE' if self.plotter.show_overlays else 'HIDDEN'}",
+                True,
             )
 
         self.shape_artist.set_edgecolor(DEFAULT_EDGE_COLOR)
@@ -504,16 +522,18 @@ class _DraggableCircle(_DraggableShape):
 
     def _connect_cids(self):
         if self.canvas.supports_blit:
-            self.cids.extend([
-                self.canvas.mpl_connect("button_press_event", self._on_press),
-                self.canvas.mpl_connect("motion_notify_event", self._on_motion),
-                self.canvas.mpl_connect("button_release_event", self._on_release),
-            ])
+            self.cids.extend(
+                [
+                    self.canvas.mpl_connect("button_press_event", self._on_press),
+                    self.canvas.mpl_connect("motion_notify_event", self._on_motion),
+                    self.canvas.mpl_connect("button_release_event", self._on_release),
+                ]
+            )
 
     def _on_press_shape_helper(self, event):
         if not isinstance(self.shape_artist, Circle):
             return
-        cx, cy = self.shape_artist.get_center()
+        cx, cy = self.shape_artist.get_center()  # type: ignore
         self.shape_mode = self._get_circumference(event, cx, cy)
         return float(cx), float(cy)
 
@@ -521,10 +541,14 @@ class _DraggableCircle(_DraggableShape):
         self._circle_transform(event)
 
     def _circle_transform(self, event):
-        if self.shape_mode is None or not isinstance(self.shape_artist, Circle) or self.press is None:
+        if (
+            self.shape_mode is None
+            or not isinstance(self.shape_artist, Circle)
+            or self.press is None
+        ):
             return
         xdata, ydata = event.xdata, event.ydata
-        old_cx, old_cy = self.shape_artist.get_center()
+        old_cx, old_cy = self.shape_artist.get_center()  # type: ignore
         old_r = self.shape_artist.get_radius()
         new_cx, new_cy = old_cx, old_cy
 
@@ -543,29 +567,43 @@ class _DraggableCircle(_DraggableShape):
             return
         current_shape = self.plotter.shapes[self.entry_id]
 
-        if self.plotter.saved_mouse_wheel and current_shape["bridge_key"] == MOUSE_WHEEL_SIMULATOR_CODE:
+        if (
+            self.plotter.saved_mouse_wheel
+            and current_shape["bridge_key"] == MOUSE_WHEEL_SIMULATOR_CODE
+        ):
             self.plotter.mouse_wheel_cx = new_cx
             self.plotter.mouse_wheel_cy = new_cy
             self.plotter.mouse_wheel_radius = current_shape["r"]
 
-            if self.plotter.saved_sprint_distance and self.plotter.sprint_artist_id is not None:
-                sprint_artist = self.plotter.shape_drag_managers[self.plotter.sprint_artist_id]
+            if (
+                self.plotter.saved_sprint_distance
+                and self.plotter.sprint_artist_id is not None
+            ):
+                sprint_artist = self.plotter.shape_drag_managers[
+                    self.plotter.sprint_artist_id
+                ]
                 if (
-                    (sprint_shape_artist := sprint_artist.shape_artist) is not None
-                    and isinstance(sprint_shape_artist, Circle)
-                ):
-                    cx, cy = sprint_shape_artist.get_center()
-                    actual_dist = self.plotter.euclidean_distance(cx, cy, new_cx, new_cy)
+                    sprint_shape_artist := sprint_artist.shape_artist
+                ) is not None and isinstance(sprint_shape_artist, Circle):
+                    cx, cy = sprint_shape_artist.get_center()  # type: ignore
+                    actual_dist = self.plotter.euclidean_distance(
+                        cx, cy, new_cx, new_cy
+                    )
 
                     if actual_dist <= self.plotter.mouse_wheel_radius:
                         r = self.plotter.mouse_wheel_radius
-                        screen_rect = ((0, 0), (self.plotter.img_width, self.plotter.img_height))
+                        screen_rect = (
+                            (0, 0),
+                            (self.plotter.img_width, self.plotter.img_height),
+                        )
                         sp_x, sp_y = self.plotter.constrain_point_to_rect_radial(
                             new_cx, new_cy - r - 1, new_cx, new_cy, screen_rect
                         )
                         sp_x, sp_y = int(round(sp_x)), int(round(sp_y))
 
-                        sprint_shape = self.plotter.shapes[self.plotter.sprint_artist_id]
+                        sprint_shape = self.plotter.shapes[
+                            self.plotter.sprint_artist_id
+                        ]
                         sprint_shape_artist.set_center((sp_x, sp_y))
                         sprint_shape["cx"] = sp_x
                         sprint_shape["cy"] = sp_y
@@ -575,7 +613,10 @@ class _DraggableCircle(_DraggableShape):
                     else:
                         self.plotter.sprint_distance = actual_dist
 
-        if self.plotter.saved_sprint_distance and current_shape["bridge_key"] == SPRINT_DISTANCE_CODE:
+        if (
+            self.plotter.saved_sprint_distance
+            and current_shape["bridge_key"] == SPRINT_DISTANCE_CODE
+        ):
             actual_dist = self.plotter.euclidean_distance(
                 new_cx, new_cy, self.plotter.mouse_wheel_cx, self.plotter.mouse_wheel_cy
             )
@@ -607,37 +648,53 @@ class _DraggableCircle(_DraggableShape):
     def _update_radius(self, xdata, ydata):
         if not isinstance(self.shape_artist, Circle):
             return
-        cx, cy = self.shape_artist.get_center()
+        cx, cy = self.shape_artist.get_center()  # type: ignore
         new_r = int(round(((xdata - cx) ** 2 + (ydata - cy) ** 2) ** 0.5))
         current_shape = self.plotter.shapes[self.entry_id]
         new_sp_r = None
 
-        if self.plotter.saved_mouse_wheel and current_shape["bridge_key"] == MOUSE_WHEEL_SIMULATOR_CODE:
+        if (
+            self.plotter.saved_mouse_wheel
+            and current_shape["bridge_key"] == MOUSE_WHEEL_SIMULATOR_CODE
+        ):
             new_r = min(
                 new_r,
-                int(round(self.spec_max_ratio * ((self.plotter.img_width + self.plotter.img_height) / 2))),
+                int(
+                    round(
+                        self.spec_max_ratio
+                        * ((self.plotter.img_width + self.plotter.img_height) / 2)
+                    )
+                ),
             )
-            if self.plotter.saved_sprint_distance and self.plotter.sprint_artist_id is not None:
-                sprint_artist = self.plotter.shape_drag_managers[self.plotter.sprint_artist_id]
+            if (
+                self.plotter.saved_sprint_distance
+                and self.plotter.sprint_artist_id is not None
+            ):
+                sprint_artist = self.plotter.shape_drag_managers[
+                    self.plotter.sprint_artist_id
+                ]
                 if (
-                    (sprint_shape_artist := sprint_artist.shape_artist) is not None
-                    and isinstance(sprint_shape_artist, Circle)
-                ):
+                    sprint_shape_artist := sprint_artist.shape_artist
+                ) is not None and isinstance(sprint_shape_artist, Circle):
                     if new_r < sprint_shape_artist.get_radius():
                         new_sp_r = new_r
 
-        if self.plotter.saved_sprint_distance and current_shape["bridge_key"] == SPRINT_DISTANCE_CODE:
+        if (
+            self.plotter.saved_sprint_distance
+            and current_shape["bridge_key"] == SPRINT_DISTANCE_CODE
+        ):
             new_r = min(new_r, self.plotter.mouse_wheel_radius)
 
         if new_r >= self.min_circle_dist:
             self.shape_artist.set_radius(new_r)
             current_shape["r"] = new_r
             if new_sp_r is not None and self.plotter.sprint_artist_id is not None:
-                sprint_artist = self.plotter.shape_drag_managers[self.plotter.sprint_artist_id]
+                sprint_artist = self.plotter.shape_drag_managers[
+                    self.plotter.sprint_artist_id
+                ]
                 if (
-                    (sprint_shape_artist := sprint_artist.shape_artist) is not None
-                    and isinstance(sprint_shape_artist, Circle)
-                ):
+                    sprint_shape_artist := sprint_artist.shape_artist
+                ) is not None and isinstance(sprint_shape_artist, Circle):
                     sprint_shape = self.plotter.shapes[self.plotter.sprint_artist_id]
                     sprint_shape_artist.set_radius(new_sp_r)
                     sprint_shape["r"] = new_sp_r
@@ -657,9 +714,9 @@ class _DraggableCircle(_DraggableShape):
         if not isinstance(self.shape_artist, Circle) or not self.press:
             return
         _, _, xdata_press, ydata_press, xpx_press, ypx_press = self.press
-        cx, cy = self.shape_artist.get_center()
+        cx, cy = self.shape_artist.get_center()  # type: ignore
         self.press = cx, cy, xdata_press, ydata_press, xpx_press, ypx_press
-        old_cx, old_cy = self.shape_artist.get_center()
+        old_cx, old_cy = self.shape_artist.get_center()  # type: ignore
         old_r = self.shape_artist.get_radius()
         new_cx, new_cy = self._move_circle(dx, dy)
         self._circle_transform_helper(old_cx, old_cy, old_r, new_cx, new_cy)
@@ -673,16 +730,20 @@ class _DraggableRectangle(_DraggableShape):
         if not isinstance(self.shape_artist, Rectangle):
             return
         x, y = self.shape_artist.get_xy()
-        self._update_rectangle_safe(x, y, self.shape_artist.get_width(), self.shape_artist.get_height())
+        self._update_rectangle_safe(
+            x, y, self.shape_artist.get_width(), self.shape_artist.get_height()
+        )
         self._connect_cids()
 
     def _connect_cids(self):
         if self.canvas.supports_blit:
-            self.cids.extend([
-                self.canvas.mpl_connect("button_press_event", self._on_press),
-                self.canvas.mpl_connect("motion_notify_event", self._on_motion),
-                self.canvas.mpl_connect("button_release_event", self._on_release),
-            ])
+            self.cids.extend(
+                [
+                    self.canvas.mpl_connect("button_press_event", self._on_press),
+                    self.canvas.mpl_connect("motion_notify_event", self._on_motion),
+                    self.canvas.mpl_connect("button_release_event", self._on_release),
+                ]
+            )
 
     def _on_press(self, event):
         self.plotter.ignore_current_draggable_id_n += 1
@@ -693,7 +754,9 @@ class _DraggableRectangle(_DraggableShape):
         if not isinstance(self.shape_artist, Rectangle):
             return
         x, y = self.shape_artist.get_xy()
-        self.shape_mode = self._get_corner_under_mouse(event) or self._get_edge_under_mouse(event)
+        self.shape_mode = self._get_corner_under_mouse(
+            event
+        ) or self._get_edge_under_mouse(event)
         return x, y
 
     def _shape_transform(self, event) -> None:
@@ -712,7 +775,10 @@ class _DraggableRectangle(_DraggableShape):
             self._move_rect(xdata - xdata_press, ydata - ydata_press)
 
     def _get_corner_under_mouse(self, event):
-        if not isinstance(self.shape_artist, Rectangle) or self.shape_artist.axes is None:
+        if (
+            not isinstance(self.shape_artist, Rectangle)
+            or self.shape_artist.axes is None
+        ):
             return
         x, y = self.shape_artist.get_xy()
         w, h = self.shape_artist.get_width(), self.shape_artist.get_height()
@@ -724,7 +790,9 @@ class _DraggableRectangle(_DraggableShape):
         }
         for name, (cx, cy) in corners.items():
             cx_px, cy_px = self.shape_artist.axes.transData.transform((cx, cy))
-            if ((event.x - cx_px) ** 2 + (event.y - cy_px) ** 2) ** 0.5 <= self.vertex_tolerance:
+            if (
+                (event.x - cx_px) ** 2 + (event.y - cy_px) ** 2
+            ) ** 0.5 <= self.vertex_tolerance:
                 return name
         return
 
@@ -756,11 +824,22 @@ class _DraggableRectangle(_DraggableShape):
         w, h = self.shape_artist.get_width(), self.shape_artist.get_height()
 
         if corner == "top_left":
-            return self._update_rectangle_safe(xdata, ydata, (x + w) - xdata, (y + h) - ydata) or True
+            return (
+                self._update_rectangle_safe(
+                    xdata, ydata, (x + w) - xdata, (y + h) - ydata
+                )
+                or True
+            )
         if corner == "top_right":
-            return self._update_rectangle_safe(x, ydata, xdata - x, (y + h) - ydata) or True
+            return (
+                self._update_rectangle_safe(x, ydata, xdata - x, (y + h) - ydata)
+                or True
+            )
         if corner == "bottom_left":
-            return self._update_rectangle_safe(xdata, y, (x + w) - xdata, ydata - y) or True
+            return (
+                self._update_rectangle_safe(xdata, y, (x + w) - xdata, ydata - y)
+                or True
+            )
         if corner == "bottom_right":
             return self._update_rectangle_safe(x, y, xdata - x, ydata - y) or True
         return False
@@ -849,6 +928,7 @@ class LayoutsPlotterWidget(QWidget):
 
         self.fig = Figure()
         self.canvas = FigureCanvas(self.fig)
+        self.canvas.setMinimumSize(0, 0)
         self.ax = self.fig.add_subplot(111)
 
         for key in list(self.canvas.callbacks.callbacks.keys()):
@@ -858,6 +938,7 @@ class LayoutsPlotterWidget(QWidget):
         self.root_layout.addWidget(self.canvas)
         self.cursor_manager = _CursorManager(self.canvas)
 
+        self.image_path: Path | None = None
         self.points = []
         self.point_artists = []
         self.mode = None
@@ -888,6 +969,11 @@ class LayoutsPlotterWidget(QWidget):
 
         self._setup_shortcuts()
         self.reload_active_layout()
+
+    def on_resize(self, event=None) -> None:
+        """Keeps bezels and overlays dynamically aligned to the canvas viewport on resize."""
+        self._render_bezels_notch()
+        self.canvas.draw_idle()
 
     def init_params_helper(self):
         self.input_buffer = ""
@@ -932,21 +1018,47 @@ class LayoutsPlotterWidget(QWidget):
 
     def init_crosshairs(self):
         self.crosshair_h_bg = self.ax.axhline(
-            0, color="black", linewidth=1.5, alpha=0.8, visible=False, zorder=10, animated=True
+            0,
+            color="black",
+            linewidth=1.5,
+            alpha=0.8,
+            visible=False,
+            zorder=10,
+            animated=True,
         )
         self.crosshair_v_bg = self.ax.axvline(
-            0, color="black", linewidth=1.5, alpha=0.8, visible=False, zorder=10, animated=True
+            0,
+            color="black",
+            linewidth=1.5,
+            alpha=0.8,
+            visible=False,
+            zorder=10,
+            animated=True,
         )
         self.crosshair_h_fg = self.ax.axhline(
-            0, color="white", linewidth=0.6, alpha=1.0, visible=False, zorder=11, animated=True
+            0,
+            color="white",
+            linewidth=0.6,
+            alpha=1.0,
+            visible=False,
+            zorder=11,
+            animated=True,
         )
         self.crosshair_v_fg = self.ax.axvline(
-            0, color="white", linewidth=0.6, alpha=1.0, visible=False, zorder=11, animated=True
+            0,
+            color="white",
+            linewidth=0.6,
+            alpha=1.0,
+            visible=False,
+            zorder=11,
+            animated=True,
         )
 
     def _setup_shortcuts(self) -> None:
         context = (
-            Qt.ShortcutContext.WindowShortcut if self.standalone else Qt.ShortcutContext.WidgetWithChildrenShortcut
+            Qt.ShortcutContext.WindowShortcut
+            if self.standalone
+            else Qt.ShortcutContext.WidgetWithChildrenShortcut
         )
         shortcuts = [
             ("F4", self.toggle_visibility),
@@ -978,11 +1090,17 @@ class LayoutsPlotterWidget(QWidget):
     def reload_active_layout(self) -> bool:
         self.active_layout = store.get_active_layout()
         if not self.active_layout:
-            self._render_empty_state("Fatal: No active layout set. Please select or create a layout first.")
+            self.image_path = None
+            self._render_empty_state(
+                "Fatal: No active layout set. Please select or create a layout first."
+            )
             return False
 
         if not self.active_layout.image_path:
-            self._render_empty_state(f"Layout '{self.active_layout.name}' has no assigned HUD image.")
+            self.image_path = None
+            self._render_empty_state(
+                f"Layout '{self.active_layout.name}' has no assigned HUD image."
+            )
             return False
 
         img_path = Path(self.active_layout.image_path)
@@ -990,15 +1108,18 @@ class LayoutsPlotterWidget(QWidget):
             img_path = Path(IMAGES_FOLDER) / img_path
 
         if not img_path.exists():
-            self._render_empty_state(f"Image '{img_path.as_posix()}' does not exist on disk.")
+            self.image_path = None
+            self._render_empty_state(
+                f"Image '{img_path.as_posix()}' does not exist on disk."
+            )
             return False
 
-        img = self.load_image()
+        self.image_path = img_path
+        img = self.load_image(img_path)
         if img is None:
             self._render_empty_state("Could not load image file.")
             return False
 
-        self.image_path = img_path
         self.is_fatal_state = False
         self.ax.clear()
         self.init_params_helper()
@@ -1025,15 +1146,19 @@ class LayoutsPlotterWidget(QWidget):
             self.top_bezel_label_artist.set(**top_kwargs[0])
             self.top_bezel_shape_artist.set(**top_kwargs[1])
         else:
-            self.top_bezel_label_artist.remove()
-            self.top_bezel_shape_artist.remove()
+            if self.top_bezel_label_artist in self.ax.artists:
+                self.top_bezel_label_artist.remove()
+            if self.top_bezel_shape_artist in self.ax.patches:
+                self.top_bezel_shape_artist.remove()
 
         if bot_kwargs:
             self.bottom_bezel_label_artist.set(**bot_kwargs[0])
             self.bottom_bezel_shape_artist.set(**bot_kwargs[1])
         else:
-            self.bottom_bezel_label_artist.remove()
-            self.bottom_bezel_shape_artist.remove()
+            if self.bottom_bezel_label_artist in self.ax.artists:
+                self.bottom_bezel_label_artist.remove()
+            if self.bottom_bezel_shape_artist in self.ax.patches:
+                self.bottom_bezel_shape_artist.remove()
 
         for art in [
             self.top_bezel_label_artist,
@@ -1049,14 +1174,24 @@ class LayoutsPlotterWidget(QWidget):
                     self.ax.add_patch(art)
 
     def _render_bezel_notch(self, bezel_id: int | None, is_top: bool):
-        bezel_px_thickness = float(dp_to_px(float(BEZEL_DP_THICKNESS), self.active_layout.dpi))
+        dpi = (
+            int(self.active_layout.dpi)
+            if self.active_layout
+            else (int(self.img_dpi) if self.img_dpi > 0 else BASELINE_DPI)
+        )
+        bezel_px_thickness = float(dp_to_px(float(BEZEL_DP_THICKNESS), dpi))
 
         store_bezel_zone = store.zones.get(bezel_id)
         if store_bezel_zone:
-            bezel_px_thickness = store_bezel_zone.get_bezel_thickness_px(self.active_layout.dpi)
+            bezel_px_thickness = store_bezel_zone.get_bezel_thickness_px(dpi)
 
-        y = self.img_height - bezel_px_thickness if is_top else 0.0
-        label_y = (self.img_height - bezel_px_thickness / 2.0) if is_top else (bezel_px_thickness / 2.0)
+        # In imshow coordinates: y=0 is at top, y=img_height is at bottom
+        y = 0.0 if is_top else (self.img_height - bezel_px_thickness)
+        label_y = (
+            (bezel_px_thickness / 2.0)
+            if is_top
+            else (self.img_height - bezel_px_thickness / 2.0)
+        )
 
         return (
             {
@@ -1101,24 +1236,39 @@ class LayoutsPlotterWidget(QWidget):
         self.update_title("ERROR: Missing Active Layout")
         self.canvas.draw_idle()
 
-    def load_image(self):
+    def load_image(self, path: Path | str | None = None) -> Image.Image | None:
+        target = path or getattr(self, "image_path", None)
+        if target is None:
+            return None
         try:
-            return Image.open(self.image_path)
+            img = Image.open(target)
+
+            # If the raw file is in portrait but tagged for landscape rotation, rotate the PIL buffer
+            if self.image_path:
+                parts = self.image_path.stem.split("_")
+                if parts[-1].startswith("r"):
+                    try:
+                        rot = int(parts[-1][1:])
+                        if rot in (1, 3) and img.width < img.height:
+                            img = img.rotate(270 if rot == 1 else 90, expand=True)
+                    except ValueError:
+                        pass
+
+            return img
         except Exception as e:
             print(f"Error loading image: {e}")
             return None
 
-    def update_image_params(self, img):
+    def update_image_params(self, img: Image.Image) -> None:
+        """Sets canvas dimensions directly from the active image buffer."""
         self.img_width, self.img_height = img.size
-        try:
-            parts = self.image_path.stem.split("_")
-            if parts[-1].startswith("r"):
-                _w, _h = rotate_resolution(self.img_width, self.img_height, int(parts[-1][1:]))
-                if _w is not None and _h is not None:
-                    self.img_width, self.img_height = _w, _h
-        except Exception:
-            pass
-        self.img_dpi = int(round(img.info.get("dpi", BASELINE_DPI)[0]))
+
+        # Safely extract DPI from image metadata without scalar indexing errors
+        dpi_meta = img.info.get("dpi", (BASELINE_DPI, BASELINE_DPI))
+        if isinstance(dpi_meta, (tuple, list)):
+            self.img_dpi = int(round(dpi_meta[0]))
+        else:
+            self.img_dpi = int(round(dpi_meta)) if dpi_meta else BASELINE_DPI
 
     def update_title(self, text: str, idle_override: bool = False):
         self.ax.set_title(text)
@@ -1163,15 +1313,10 @@ class LayoutsPlotterWidget(QWidget):
         scale_y = self.img_height / self.active_layout.height
 
         for zone in zones:
-            try:
-                code_int = int(zone.scancode, 16) if isinstance(zone.scancode, str) else int(zone.scancode)
-            except (ValueError, TypeError):
-                code_int = None
-
             if zone.zone_type == BEZEL:
-                if code_int == TOP_BEZEL_ID:
+                if _scancode_matches(zone.scancode, TOP_BEZEL_ID):
                     self.top_bezel_id = zone.id
-                elif code_int == BOTTOM_BEZEL_ID:
+                elif _scancode_matches(zone.scancode, BOTTOM_BEZEL_ID):
                     self.bottom_bezel_id = zone.id
                 continue
 
@@ -1190,8 +1335,14 @@ class LayoutsPlotterWidget(QWidget):
                 r = int(round((zone.r or 0.0) * ((scale_x + scale_y) / 2)))
             elif zone.zone_type == RECTANGLE:
                 bb = (
-                    (int(round((zone.x1 or 0.0) * scale_x)), int(round((zone.y1 or 0.0) * scale_y))),
-                    (int(round((zone.x2 or 0.0) * scale_x)), int(round((zone.y2 or 0.0) * scale_y))),
+                    (
+                        int(round((zone.x1 or 0.0) * scale_x)),
+                        int(round((zone.y1 or 0.0) * scale_y)),
+                    ),
+                    (
+                        int(round((zone.x2 or 0.0) * scale_x)),
+                        int(round((zone.y2 or 0.0) * scale_y)),
+                    ),
                 )
 
             self.finalize_shape(
@@ -1248,7 +1399,11 @@ class LayoutsPlotterWidget(QWidget):
             return
         if self.state == COLLECTING and event.inaxes == self.ax:
             x, y = int(round(event.xdata)), int(round(event.ydata))
-            if self.bg_cache is None and self.ax.bbox.width > 0 and self.ax.bbox.height > 0:
+            if (
+                self.bg_cache is None
+                and self.ax.bbox.width > 0
+                and self.ax.bbox.height > 0
+            ):
                 self.bg_cache = self.canvas.copy_from_bbox(self.ax.bbox)
 
             if self.bg_cache is not None:
@@ -1274,7 +1429,12 @@ class LayoutsPlotterWidget(QWidget):
                 self.cursor_manager.set_state_cursor(self.state)
                 self.fig.canvas.draw_idle()
 
-        if self.state == IDLE and not self.drawn and event.button is None and event.inaxes == self.ax:
+        if (
+            self.state == IDLE
+            and not self.drawn
+            and event.button is None
+            and event.inaxes == self.ax
+        ):
             if self.ignore_current_draggable_id_n > 0:
                 return
 
@@ -1299,7 +1459,9 @@ class LayoutsPlotterWidget(QWidget):
                     self.fire_on_motion = False
             else:
                 self.partial_release_all()
-                self.update_title(f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'}", True)
+                self.update_title(
+                    f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'}", True
+                )
 
     def partial_release_all(self):
         for mgr in self.label_drag_managers.values():
@@ -1316,7 +1478,6 @@ class LayoutsPlotterWidget(QWidget):
         if self.state == IDLE:
             self.ignore_current_draggable_id_n = 0
         if self.state == WAITING_FOR_KEY:
-            # Extended mouse mapping: 1=Left, 2=Middle, 3=Right, 8=Back (M4), 9=Forward (M5)
             btn_map = {
                 1: "MOUSE_LEFT",
                 2: "MOUSE_MIDDLE",
@@ -1337,7 +1498,9 @@ class LayoutsPlotterWidget(QWidget):
         self.bg_cache = None
 
         if (rem := self.artists_points - len(self.points)) > 0:
-            self.update_title(f"MODE: {self.mode}. {rem} points remaining (F8 to Cancel).")
+            self.update_title(
+                f"MODE: {self.mode}. {rem} points remaining (F8 to Cancel)."
+            )
         else:
             self.state = WAITING_FOR_KEY
             self.update_title("Shape Defined! Press KEY or CLICK MOUSE to bind.")
@@ -1372,7 +1535,9 @@ class LayoutsPlotterWidget(QWidget):
                 self.reset_state()
             elif event.key == "f2":
                 self.state = CONFIRM_DELETE_ALL
-                self.update_title("[DELETE ALL?] Press ENTER to Confirm or Any other key to Cancel.")
+                self.update_title(
+                    "[DELETE ALL?] Press ENTER to Confirm or Any other key to Cancel."
+                )
             elif event.key == "f4":
                 self.toggle_visibility()
             elif event.key == "f6":
@@ -1400,7 +1565,12 @@ class LayoutsPlotterWidget(QWidget):
             else:
                 step = 5 if event.key.startswith("shift+") else 1
                 clean_key = event.key.replace("shift+", "")
-                dirs = {"left": (-step, 0), "right": (step, 0), "up": (0, -step), "down": (0, step)}
+                dirs = {
+                    "left": (-step, 0),
+                    "right": (step, 0),
+                    "up": (0, -step),
+                    "down": (0, step),
+                }
                 if clean_key in dirs and self.current_draggable:
                     self.current_draggable._move(*dirs[clean_key])
 
@@ -1432,34 +1602,55 @@ class LayoutsPlotterWidget(QWidget):
                         self.update_title(f"Deleted ID {uid}. Returning to IDLE...")
                         self.reset_state()
                     else:
-                        self.update_title(f"Error: ID {uid} not found. Try again or Press ESC to Cancel.")
+                        self.update_title(
+                            f"Error: ID {uid} not found. Try again or Press ESC to Cancel."
+                        )
                         self.input_buffer = ""
                 except ValueError:
-                    self.update_title("Error: Invalid Number. Try again or Press ESC to Cancel.")
+                    self.update_title(
+                        "Error: Invalid Number. Try again or Press ESC to Cancel."
+                    )
                     self.input_buffer = ""
             return
         if key.isdigit():
             self.input_buffer += key
-            self.update_title(f"DELETE MODE: ID [{self.input_buffer}] (Enter to delete | Esc to Cancel)")
+            self.update_title(
+                f"DELETE MODE: ID [{self.input_buffer}] (Enter to delete | Esc to Cancel)"
+            )
         elif key == "backspace":
             self.input_buffer = self.input_buffer[:-1]
-            self.update_title(f"DELETE MODE: ID [{self.input_buffer}] (Enter to delete | Esc to Cancel)")
+            self.update_title(
+                f"DELETE MODE: ID [{self.input_buffer}] (Enter to delete | Esc to Cancel)"
+            )
 
     def delete_entry(self, uid):
         if uid not in self.shapes:
             return
         bkey = self.shapes[uid]["bridge_key"]
         if bkey == MOUSE_WHEEL_SIMULATOR_CODE:
-            for sid in [k for k, v in self.shapes.items() if v["bridge_key"] == SPRINT_DISTANCE_CODE]:
+            for sid in [
+                k
+                for k, v in self.shapes.items()
+                if v["bridge_key"] == SPRINT_DISTANCE_CODE
+            ]:
                 self.delete_entry(sid)
-            self.saved_mouse_wheel, self.mouse_wheel_radius, self.mouse_wheel_cx, self.mouse_wheel_cy = (
+            (
+                self.saved_mouse_wheel,
+                self.mouse_wheel_radius,
+                self.mouse_wheel_cx,
+                self.mouse_wheel_cy,
+            ) = (
                 False,
                 0.0,
                 0.0,
                 0.0,
             )
         elif bkey == SPRINT_DISTANCE_CODE:
-            self.saved_sprint_distance, self.sprint_artist_id, self.sprint_distance = False, None, 0.0
+            self.saved_sprint_distance, self.sprint_artist_id, self.sprint_distance = (
+                False,
+                None,
+                0.0,
+            )
 
         if self.current_draggable_id in [f"shape_{uid}", f"label_{uid}"]:
             self.current_draggable_id = self.current_draggable = None
@@ -1505,18 +1696,26 @@ class LayoutsPlotterWidget(QWidget):
                         self.reset_state()
                         self.zone_selected.emit(uid)
                     else:
-                        self.update_title(f"Error: ID {uid} not found. Try again or Press ESC to Cancel.")
+                        self.update_title(
+                            f"Error: ID {uid} not found. Try again or Press ESC to Cancel."
+                        )
                         self.input_buffer = ""
                 except ValueError:
-                    self.update_title("Error: Invalid Number. Try again or Press ESC to Cancel.")
+                    self.update_title(
+                        "Error: Invalid Number. Try again or Press ESC to Cancel."
+                    )
                     self.input_buffer = ""
             return
         if key.isdigit():
             self.input_buffer += key
-            self.update_title(f"MARK MODE: ID [{self.input_buffer}] (Enter to mark | Esc to Cancel)")
+            self.update_title(
+                f"MARK MODE: ID [{self.input_buffer}] (Enter to mark | Esc to Cancel)"
+            )
         elif key == "backspace":
             self.input_buffer = self.input_buffer[:-1]
-            self.update_title(f"MARK MODE: ID [{self.input_buffer}] (Enter to mark | Esc to Cancel)")
+            self.update_title(
+                f"MARK MODE: ID [{self.input_buffer}] (Enter to mark | Esc to Cancel)"
+            )
 
     def calculate_shape(self, key_name):
         hex_code, bridge_key = get_scancode_and_bridge_key_from_key(key_name)
@@ -1577,18 +1776,22 @@ class LayoutsPlotterWidget(QWidget):
         label = (
             "MOUSE_WHEEL"
             if bridge_key == MOUSE_WHEEL_SIMULATOR_CODE
-            else "SPRINT_DISTANCE"
-            if bridge_key == SPRINT_DISTANCE_CODE
-            else bridge_key.split("E0_")[-1]
+            else (
+                "SPRINT_DISTANCE"
+                if bridge_key == SPRINT_DISTANCE_CODE
+                else bridge_key.split("E0_")[-1]
+            )
         )
 
         if self.mode == CIRCLE and r:
             fc = (
                 DEFAULT_MOUSE_WHEEL_FACE_COLOR
                 if bridge_key == MOUSE_WHEEL_SIMULATOR_CODE
-                else DEFAULT_SPRINT_DISTANCE_FACE_COLOR
-                if bridge_key == SPRINT_DISTANCE_CODE
-                else get_vibrant_random_color(DEFAULT_FACE_COLOR_ALPHA)
+                else (
+                    DEFAULT_SPRINT_DISTANCE_FACE_COLOR
+                    if bridge_key == SPRINT_DISTANCE_CODE
+                    else get_vibrant_random_color(DEFAULT_FACE_COLOR_ALPHA)
+                )
             )
             art = Circle((cx, cy), r, fill=True, lw=2, fc=fc, ec=DEFAULT_EDGE_COLOR)
             self.shapes_artists[entry_id] = art
@@ -1596,7 +1799,15 @@ class LayoutsPlotterWidget(QWidget):
         elif self.mode == RECTANGLE and bb:
             fc = get_vibrant_random_color(DEFAULT_FACE_COLOR_ALPHA)
             (x1, y1), (x2, y2) = bb
-            art = Rectangle((x1, y1), x2 - x1, y2 - y1, fill=True, lw=2, fc=fc, ec=DEFAULT_EDGE_COLOR)
+            art = Rectangle(
+                (x1, y1),
+                x2 - x1,
+                y2 - y1,
+                fill=True,
+                lw=2,
+                fc=fc,
+                ec=DEFAULT_EDGE_COLOR,
+            )
             self.shapes_artists[entry_id] = art
             self.shape_drag_managers[entry_id] = _DraggableRectangle(entry_id, self)
         else:
@@ -1620,6 +1831,10 @@ class LayoutsPlotterWidget(QWidget):
             self.update_title("Nothing to save!")
             return
         self.state, self.buffer_default = NAMING, True
+
+        if self.active_layout is None:
+            return
+
         self.input_buffer = self.active_layout.name
         self.update_title(
             f"SAVE: [{self.input_buffer}] | Enter: Save/Rename | Shift+Enter: Save as Copy | Esc: Cancel"
@@ -1629,9 +1844,14 @@ class LayoutsPlotterWidget(QWidget):
         if key == "escape":
             self.reset_state()
             return
+
+        if self.active_layout is None:
+            return
+
         if key in ("enter", "shift+enter", "ctrl+s"):
             self.save_to_database(
-                self.input_buffer.strip() or self.active_layout.name, as_copy=key != "enter"
+                self.input_buffer.strip() or self.active_layout.name,
+                as_copy=key != "enter",
             )
             self.reset_state()
             return
@@ -1649,6 +1869,9 @@ class LayoutsPlotterWidget(QWidget):
         )
 
     def save_to_database(self, user_name: str, as_copy=False):
+        if self.active_layout is None:
+            return
+
         output = []
         for _, data in self.shapes.items():
             entry = {
@@ -1673,26 +1896,43 @@ class LayoutsPlotterWidget(QWidget):
             else:
                 region_idx = 2
                 (x_min, y_min), (x_max, y_max) = data["bb"]
-                entry["val1"], entry["val2"], entry["val3"], entry["val4"] = x_min, y_min, x_max, y_max
+                entry["val1"], entry["val2"], entry["val3"], entry["val4"] = (
+                    x_min,
+                    y_min,
+                    x_max,
+                    y_max,
+                )
 
             if data.get("pipeline_json", "{}") == "{}":
                 bkey = data["bridge_key"]
-                p_cfg.set_origin_config(idx=0 if bkey == MOUSE_WHEEL_SIMULATOR_CODE else 1)
-                p_cfg.set_constraint_config(idx=1 if bkey == MOUSE_WHEEL_SIMULATOR_CODE else 0)
-                p_cfg.set_transform_config(idx=2 if bkey == MOUSE_WHEEL_SIMULATOR_CODE else 1)
+                p_cfg.set_origin_config(
+                    idx=0 if bkey == MOUSE_WHEEL_SIMULATOR_CODE else 1
+                )
+                p_cfg.set_constraint_config(
+                    idx=1 if bkey == MOUSE_WHEEL_SIMULATOR_CODE else 0
+                )
+                p_cfg.set_transform_config(
+                    idx=2 if bkey == MOUSE_WHEEL_SIMULATOR_CODE else 1
+                )
                 if bkey != SPRINT_DISTANCE_CODE:
-                    p_cfg.set_semantic_config(idx=1 if bkey == MOUSE_WHEEL_SIMULATOR_CODE else 0)
+                    p_cfg.set_semantic_config(
+                        idx=1 if bkey == MOUSE_WHEEL_SIMULATOR_CODE else 0
+                    )
 
             p_cfg.set_region_config(idx=region_idx, priority=data.get("priority", 0))
             p_cfg.set_semantic_config(pointer=data.get("pointer", False))
             entry["pipeline_json"] = p_cfg.get_pipeline_json_from_config()
             output.append(entry)
 
-        rel_img_path = (
-            self.image_path.name
-            if self.image_path.parent == Path(IMAGES_FOLDER)
-            else str(self.image_path)
-        )
+        if self.image_path:
+            rel_img_path = (
+                self.image_path.name
+                if self.image_path.parent == Path(IMAGES_FOLDER)
+                else str(self.image_path)
+            )
+        else:
+            rel_img_path = self.active_layout.image_path if self.active_layout else None
+
         is_new_name = user_name != self.active_layout.name
 
         if as_copy or is_new_name:
@@ -1737,8 +1977,27 @@ class LayoutsPlotterWidget(QWidget):
                 pipeline_json=item["pipeline_json"],
             )
 
+        # Refresh local active layout model and verify bezel integrity
         store.set_active_layout(layout_id)
         self.active_layout = store.layouts.get(layout_id)
+
+        if self.active_layout:
+            store.zones._ensure_system_bezels(self.active_layout)
+            for z in store.zones.list_for_layout(layout_id, auto_heal=False):
+                if z.zone_type == BEZEL:
+                    try:
+                        c_int = (
+                            int(z.scancode, 16)
+                            if isinstance(z.scancode, str)
+                            else int(z.scancode)
+                        )
+                    except (ValueError, TypeError):
+                        c_int = None
+                    if c_int == TOP_BEZEL_ID:
+                        self.top_bezel_id = z.id
+                    elif c_int == BOTTOM_BEZEL_ID:
+                        self.bottom_bezel_id = z.id
+
         self.layout_saved.emit(user_name, layout_id)
         self.update_title(f"SAVED: {user_name}")
 
@@ -1771,7 +2030,12 @@ class LayoutsPlotterWidget(QWidget):
                             if k in d:
                                 d.pop(k)._disconnect_cids()
                         break
-            self.mouse_wheel_radius, self.mouse_wheel_cx, self.mouse_wheel_cy, self.saved_mouse_wheel = (
+            (
+                self.mouse_wheel_radius,
+                self.mouse_wheel_cx,
+                self.mouse_wheel_cy,
+                self.saved_mouse_wheel,
+            ) = (
                 r,
                 cx,
                 cy,
@@ -1792,7 +2056,9 @@ class LayoutsPlotterWidget(QWidget):
                             if k in d:
                                 d.pop(k)._disconnect_cids()
                         break
-            actual_dist = self.euclidean_distance(cx, cy, self.mouse_wheel_cx, self.mouse_wheel_cy)
+            actual_dist = self.euclidean_distance(
+                cx, cy, self.mouse_wheel_cx, self.mouse_wheel_cy
+            )
             if actual_dist <= self.mouse_wheel_radius:
                 return False, uid
             self.sprint_distance, self.saved_sprint_distance, self.sprint_artist_id = (
@@ -1835,8 +2101,16 @@ class LayoutsPlotterWidget(QWidget):
         if d == 0:
             self.update_title("Error: Points are collinear.")
             return None, None, None, None
-        h = ((x1**2 + y1**2) * (y2 - y3) + (x2**2 + y2**2) * (y3 - y1) + (x3**2 + y3**2) * (y1 - y2)) / d
-        k = ((x1**2 + y1**2) * (x3 - x2) + (x2**2 + y2**2) * (x1 - x3) + (x3**2 + y3**2) * (x2 - x1)) / d
+        h = (
+            (x1**2 + y1**2) * (y2 - y3)
+            + (x2**2 + y2**2) * (y3 - y1)
+            + (x3**2 + y3**2) * (y1 - y2)
+        ) / d
+        k = (
+            (x1**2 + y1**2) * (x3 - x2)
+            + (x2**2 + y2**2) * (x1 - x3)
+            + (x3**2 + y3**2) * (x2 - x1)
+        ) / d
         return (
             int(round(h)),
             int(round(k)),
@@ -1899,9 +2173,15 @@ class LayoutsPlotterWidget(QWidget):
         candidates = []
         for ix, iy in valid:
             ta = math.atan2(iy - py, ix - px)
-            candidates.append({
-                "pt": (ix, iy),
-                "diff": abs(math.atan2(math.sin(ta - current_angle), math.cos(ta - current_angle))),
-                "y": iy,
-            })
+            candidates.append(
+                {
+                    "pt": (ix, iy),
+                    "diff": abs(
+                        math.atan2(
+                            math.sin(ta - current_angle), math.cos(ta - current_angle)
+                        )
+                    ),
+                    "y": iy,
+                }
+            )
         return sorted(candidates, key=lambda c: (round(c["diff"], 5), c["y"]))[0]["pt"]

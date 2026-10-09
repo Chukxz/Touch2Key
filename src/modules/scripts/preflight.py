@@ -87,16 +87,10 @@ def run(verbose: bool = True, parent=None) -> bool:
 
 
 def main() -> None:
-    """Dedicated entry point for CLI and pyproject.toml execution."""
-    # 1. Initialize logging right at the entry boundary
+    """Dedicated entry point for touch2key-preflight script execution."""
     AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_preflight")
-
-    # 2. Run the script logic
-    success = run()
-    if not success:
-        sys.exit(1)
+    run()
 
 
-# Allows running directly
 if __name__ == "__main__":
     main()
