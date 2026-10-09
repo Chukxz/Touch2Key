@@ -1009,9 +1009,16 @@ class LayoutsPlotterWidget(QWidget):
         scale_y = self.img_height / self.active_layout.height
 
         for zone in zones:
+            try:
+                code_int = int(zone.scancode, 16) if isinstance(zone.scancode, str) else int(zone.scancode)
+            except (ValueError, TypeError):
+                code_int = None
+
             if zone.zone_type == BEZEL:
-                if str(zone.scancode) == str(TOP_BEZEL_ID): self.top_bezel_id = zone.id
-                elif str(zone.scancode) == str(BOTTOM_BEZEL_ID): self.bottom_bezel_id = zone.id
+                if code_int == TOP_BEZEL_ID:
+                    self.top_bezel_id = zone.id
+                elif code_int == BOTTOM_BEZEL_ID:
+                    self.bottom_bezel_id = zone.id
                 continue
 
             zone.set_parsed_config_from_json()
