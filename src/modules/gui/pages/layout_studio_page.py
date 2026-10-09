@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QVBoxLayout,
     QWidget,
+    QScrollArea,
 )
 
 from modules.core.pipeline import PipelineConfig
@@ -180,7 +181,12 @@ class LayoutStudioPage(QWidget):
             "color: palette(placeholder-text); padding: 4px;"
         )
         self.details_label.setWordWrap(True)
-        profiles_layout.addWidget(self.details_label)
+        self.details_label.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        details_scroll_area = QScrollArea()
+        details_scroll_area.setWidget(self.details_label)
+        details_scroll_area.setWidgetResizable(True)
+        profiles_layout.addWidget(details_scroll_area)
 
         # Profile Actions: 2x2 grid prevents pushing sidebar past 240px
         btn_grid_1 = QHBoxLayout()
@@ -247,9 +253,15 @@ class LayoutStudioPage(QWidget):
 
         self.canvas_help_label = QLabel(STATIC_SHORTCUTS_HELP)
         self.canvas_help_label.setStyleSheet("font-size: 11px;")
+        self.canvas_help_label.setWordWrap(True)
+        self.canvas_help_label.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        canvas_help_scroll_area = QScrollArea()
+        canvas_help_scroll_area.setWidget(self.canvas_help_label)
+        canvas_help_scroll_area.setWidgetResizable(True)
 
         status_layout.addWidget(self.canvas_status_label)
-        status_layout.addWidget(self.canvas_help_label)
+        status_layout.addWidget(canvas_help_scroll_area)
         canvas_layout.addWidget(status_box)
 
         # Toolbar Row 1: Image management & overlay toggles
@@ -298,7 +310,7 @@ class LayoutStudioPage(QWidget):
         layout_form.setContentsMargins(0, 0, 0, 0)
 
         lbl_global = QLabel(
-            "<b>Layout Settings</b><br><small>Click any shape on the canvas to inspect it.</small>"
+            "<b>Layout Settings</b><br>Click any shape on the canvas to inspect it."
         )
         lbl_global.setWordWrap(True)
         layout_form.addWidget(lbl_global)
@@ -621,7 +633,7 @@ class LayoutStudioPage(QWidget):
                 f"Modified: {updated_str} (Created: {created_str})"
             )
         except Exception as exc:
-            logger.exception("Failed to fetch details for layout ID %s", layout_id)
+            logger.exception("Failed to fetch details for layout ID %s", layout_id, exc_info=True)
 
     def _notify_engine_reload(self) -> None:
         if self.dispatcher is not None:

@@ -7,35 +7,43 @@ from modules.utils import SCANCODES, SCANCODES_INV, SPECIAL_MAP, SPECIAL_MAP_INV
 
 
 class Mapping(AbstractMapping):
-    """Linux keycode mapping implementation for Qt/Matplotlib native scancodes."""
+    """Linux keycode mapping implementation for Qt and Matplotlib native scancodes."""
 
     _MODIFIER_MAP: ClassVar[dict[int, str]] = {
-        0: "",
-        0x38: "lalt",
-        0xE038: "ralt",
-        0x1D: "lctrl",
-        0xE01D: "rctrl",
         0x2A: "lshift",
         0x36: "rshift",
+        0x1D: "lctrl",
+        0xE01D: "rctrl",
+        0x38: "lalt",
+        0xE038: "ralt",
+        0xE05B: "lwin",
+        0xE05C: "rwin",
     }
 
     _MODIFIER_MAP_INV: ClassVar[dict[str, int]] = {
-        v: k for k, v in _MODIFIER_MAP.items() if v
+        v: k for k, v in _MODIFIER_MAP.items()
     }
+    # Common desktop environment aliases for the Super/Meta key
+    _MODIFIER_MAP_INV.update(
+        {
+            "win": 0xE05B,
+            "super": 0xE05B,
+            "meta": 0xE05B,
+        }
+    )
 
-    def get_key_name_from_code(self, key_code: int) -> str:
-        """Translates a Linux native scancode (from Qt or Matplotlib) to a human-readable key token.
+    def get_key_name_from_code(self, key_code: int) -> str | None:
+        """Translates a Linux native scancode (from Qt or Matplotlib) to a canonical key token.
 
-        Handles the standard Linux X11/Qt keycode offset (X11 scancode = evdev_code + 8).
+        Handles the standard Linux X11/XKB offset (X11 scancode = evdev_code + 8).
         """
         if not key_code:
-            return ""
+            return None
 
-        # Helper to lookup evdev scancode -> Windows equivalent -> canonical token string
-        def _resolve_evdev(code: int) -> str:
+        def _resolve_evdev(code: int) -> str | None:
             win_scancode = LINUX_KEY_MAP_INV.get(code)
             if win_scancode is None:
-                return ""
+                return None
 
             if win_scancode in self._MODIFIER_MAP:
                 return self._MODIFIER_MAP[win_scancode]
@@ -43,29 +51,43 @@ class Mapping(AbstractMapping):
             name = SCANCODES_INV.get(win_scancode)
             if name:
                 return SPECIAL_MAP_INV.get(name, name).lower()
-            return ""
+            return None
 
-        # 1. Try as a raw evdev code
-        token = _resolve_evdev(key_code)
-        if token:
-            return token
-
-        # 2. Try with X11 offset compensation (Qt/Matplotlib on X11 typically adds 8 to evdev code)
+        # 1. On X11 and Wayland (xkbcommon), Qt nativeScanCode is ALWAYS evdev + 8.
+        # This MUST be evaluated first to avoid matching shifted evdev codes.
         if key_code > 8:
             token = _resolve_evdev(key_code - 8)
             if token:
                 return token
 
-        return ""
+        # 2. Fallback: try raw evdev code (console / uinput without XKB offset)
+        token = _resolve_evdev(key_code)
+        if token:
+            return token
 
-    def get_key_code_from_name(self, key_name: str) -> int:
-        """Translates a key string token to an evdev Linux keycode."""
+        # 3. Retain raw hex representation so unknown scancodes are never silently lost
+        return f"0x{key_code:x}"
+
+    def get_key_code_from_name(self, key_name: str) -> int | None:
+        """Translates a key string token, alias, or hex string to an evdev Linux keycode."""
+        if not key_name:
+            return None
+
         clean = key_name.strip().lower()
 
-        # Check modifier mapping
+        # Parse raw hex strings like '0x1e' or '0x2a'
+        if clean.startswith("0x"):
+            try:
+                win_scancode = int(clean, 16)
+                code = LINUX_KEY_MAP.get(win_scancode)
+                if code and code > 0:
+                    return code
+            except ValueError:
+                pass
+
+        # Check dedicated modifier map and Super/Meta aliases
         win_scancode = self._MODIFIER_MAP_INV.get(clean)
         if win_scancode is None:
-            # Check standard scancodes or canonical aliases
             win_scancode = SCANCODES.get(clean)
             if win_scancode is None:
                 canonical = SPECIAL_MAP.get(clean)
@@ -73,6 +95,8 @@ class Mapping(AbstractMapping):
                     win_scancode = SCANCODES.get(canonical)
 
         if win_scancode is not None:
-            return LINUX_KEY_MAP.get(win_scancode, 0)
+            code = LINUX_KEY_MAP.get(win_scancode)
+            if code and code > 0:
+                return code
 
-        return 0
+        return None

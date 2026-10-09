@@ -147,8 +147,8 @@ MOUSE_SCANCODES: tuple[int, ...] = (
 TOP_BEZEL_NAME = "Top Bezel"
 BOTTOM_BEZEL_NAME = "Bottom Bezel"
 BEZEL_DP_THICKNESS = 25  # ~3.97mm
-SPRINT_DISTANCE_CODE = "LEFT_BRACKET"
-MOUSE_WHEEL_SIMULATOR_CODE = "RIGHT_BRACKET"
+SPRINT_DISTANCE_CODE = "left_bracket"
+MOUSE_WHEEL_SIMULATOR_CODE = "right_bracket"
 
 # Delays (in seconds)
 RELOAD_DELAY = 0.5
@@ -238,7 +238,7 @@ REPEAT_RATE = 0.0333
 EXCLUDED_KEYS = "esc,tab,lshift,rshift,lctrl,rctrl,lalt,ralt,caps_lock,num_lock,scroll_lock,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12"
 
 SCANCODES = {
-    "ESC": 0x01,
+    "esc": 0x01,
     "1": 0x02,
     "2": 0x03,
     "3": 0x04,
@@ -249,10 +249,10 @@ SCANCODES = {
     "8": 0x09,
     "9": 0x0A,
     "0": 0x0B,
-    "MINUS": 0x0C,
-    "EQUAL": 0x0D,
-    "BACKSPACE": 0x0E,
-    "TAB": 0x0F,
+    "minus": 0x0C,
+    "equal": 0x0D,
+    "backspace": 0x0E,
+    "tab": 0x0F,
     "q": 0x10,
     "w": 0x11,
     "e": 0x12,
@@ -263,10 +263,10 @@ SCANCODES = {
     "i": 0x17,
     "o": 0x18,
     "p": 0x19,
-    "LEFT_BRACKET": 0x1A,
-    "RIGHT_BRACKET": 0x1B,
-    "ENTER": 0x1C,
-    "LCTRL": 0x1D,
+    "left_bracket": 0x1A,
+    "right_bracket": 0x1B,
+    "enter": 0x1C,
+    "lctrl": 0x1D,
     "a": 0x1E,
     "s": 0x1F,
     "d": 0x20,
@@ -276,11 +276,11 @@ SCANCODES = {
     "j": 0x24,
     "k": 0x25,
     "l": 0x26,
-    "SEMICOLON": 0x27,
-    "APOSTROPHE": 0x28,
-    "GRAVE": 0x29,
-    "LSHIFT": 0x2A,
-    "BACKSLASH": 0x2B,
+    "semicolon": 0x27,
+    "apostrophe": 0x28,
+    "grave": 0x29,
+    "lshift": 0x2A,
+    "backslash": 0x2B,
     "z": 0x2C,
     "x": 0x2D,
     "c": 0x2E,
@@ -288,56 +288,56 @@ SCANCODES = {
     "b": 0x30,
     "n": 0x31,
     "m": 0x32,
-    "COMMA": 0x33,
-    "DOT": 0x34,
-    "SLASH": 0x35,
-    "RSHIFT": 0x36,
-    "NUM_MULTIPLY": 0x37,
-    "LALT": 0x38,
-    "SPACE": 0x39,
-    "CAPSLOCK": 0x3A,
-    "F1": 0x3B,
-    "F2": 0x3C,
-    "F3": 0x3D,
-    "F4": 0x3E,
-    "F5": 0x3F,
-    "F6": 0x40,
-    "F7": 0x41,
-    "F8": 0x42,
-    "F9": 0x43,
-    "F10": 0x44,
-    "NUMLOCK": 0x45,
-    "SCROLLLOCK": 0x46,
-    "NUM_7": 0x47,
-    "NUM_8": 0x48,
-    "NUM_9": 0x49,
-    "NUM_MINUS": 0x4A,
-    "NUM_4": 0x4B,
-    "NUM_5": 0x4C,
-    "NUM_6": 0x4D,
-    "NUM_PLUS": 0x4E,
-    "NUM_1": 0x4F,
-    "NUM_2": 0x50,
-    "NUM_3": 0x51,
-    "NUM_0": 0x52,
-    "NUM_DOT": 0x53,
+    "comma": 0x33,
+    "dot": 0x34,
+    "slash": 0x35,
+    "rshift": 0x36,
+    "num_multiply": 0x37,
+    "lalt": 0x38,
+    "space": 0x39,
+    "capslock": 0x3A,
+    "f1": 0x3B,
+    "f2": 0x3C,
+    "f3": 0x3D,
+    "f4": 0x3E,
+    "f5": 0x3F,
+    "f6": 0x40,
+    "f7": 0x41,
+    "f8": 0x42,
+    "f9": 0x43,
+    "f10": 0x44,
+    "numlock": 0x45,
+    "scrolllock": 0x46,
+    "num_7": 0x47,
+    "num_8": 0x48,
+    "num_9": 0x49,
+    "num_minu": 0x4A,
+    "num_4": 0x4B,
+    "num_5": 0x4C,
+    "num_6": 0x4D,
+    "num_plus": 0x4E,
+    "num_1": 0x4F,
+    "num_2": 0x50,
+    "num_3": 0x51,
+    "num_0": 0x52,
+    "num_dot": 0x53,
     "F11": 0x57,
     "F12": 0x58,
     # Extended keys (0xE0XX series)
-    "E0_HOME": 0xE047,
-    "E0_UP": 0xE048,
-    "E0_PAGEUP": 0xE049,
-    "E0_PAGEDOWN": 0xE051,
-    "E0_LEFT": 0xE04B,
-    "E0_RIGHT": 0xE04D,
-    "E0_END": 0xE04F,
-    "E0_DOWN": 0xE050,
-    "E0_INSERT": 0xE052,
-    "E0_DELETE": 0xE053,
-    "RCTRL": 0xE01D,
-    "RALT": 0xE038,
-    "E0_NUM_ENTER": 0xE01C,
-    "E0_SLASH": 0xE035,
+    "e0_home": 0xE047,
+    "e0_up": 0xE048,
+    "e0_pageup": 0xE049,
+    "e0_pagedown": 0xE051,
+    "e0_left": 0xE04B,
+    "e0_right": 0xE04D,
+    "e0_end": 0xE04F,
+    "e0_down": 0xE050,
+    "e0_insert": 0xE052,
+    "e0_delete": 0xE053,
+    "rctrl": 0xE01D,
+    "ralt": 0xE038,
+    "e0_num_enter": 0xE01C,
+    "e0_slash": 0xE035,
     # Internal Mouse Codes
     "MOUSE_LEFT": M_LEFT,
     "MOUSE_RIGHT": M_RIGHT,
@@ -349,44 +349,37 @@ SCANCODES = {
 SCANCODES_INV = {v: k for k, v in SCANCODES.items()}
 
 SPECIAL_MAP = {
-    "esc": "ESC",
     "escape": "ESC",
-    "enter": "ENTER",
-    "backspace": "BACKSPACE",
-    "tab": "TAB",
     "=": "EQUAL",
     "-": "MINUS",
-    "[": "LEFT_BRACKET",
-    "]": "RIGHT_BRACKET",
-    ";": "SEMICOLON",
-    "'": "APOSTROPHE",
-    "`": "GRAVE",
-    "\\": "BACKSLASH",
-    ",": "COMMA",
-    ".": "DOT",
-    "/": "SLASH",
-    "shift": "RSHIFT",
-    "alt": "RALT",
-    "ctrl": "RCTRL",
-    "control": "RCTRL",
-    "lshift": "LSHIFT",
-    "rshift": "RSHIFT",
-    "lalt": "LALT",
-    "ralt": "RALT",
-    "lctrl": "LCTRL",
-    "rctrl": "RCTRL",
-    "space": "SPACE",
-    " ": "SPACE",
-    "*": "NUM_MULTIPLY",
-    "caps_lock": "CAPSLOCK",
-    "num_lock": "NUMLOCK",
-    "scroll_lock": "SCROLLLOCK",
-    "up": "E0_UP",
-    "left": "E0_LEFT",
-    "right": "E0_RIGHT",
-    "down": "E0_DOWN",
-    "insert": "E0_INSERT",
-    "delete": "E0_DELETE",
+    "[": "left_bracket",
+    "]": "right_bracket",
+    ";": "semicolon",
+    "'": "apostrophe",
+    "`": "grave",
+    "\\": "backslash",
+    ",": "comma",
+    ".": "dot",
+    "/": "slash",
+    "shift": "rshift",
+    "alt": "ralt",
+    "ctrl": "rctrl",
+    "control": "rctrl",
+    "space": "space",
+    " ": "space",
+    "*": "num_multiply",
+    "caps_lock": "capslock",
+    "caps lock": "capslock",
+    "num_lock": "numlock",
+    "num lock": "numlock",
+    "scroll_lock": "scrolllock",
+    "scroll lock": "scrolllock",
+    "up": "e0_up",
+    "left": "e0_left",
+    "right": "e0_right",
+    "down": "e0_down",
+    "insert": "e0_insert",
+    "delete": "e0_delete",
     # Extended Mouse button aliases
     "left_click": "MOUSE_LEFT",
     "m1": "MOUSE_LEFT",
@@ -516,7 +509,7 @@ class MapperEventDispatcher:
         try:
             with self._lock:
                 if event_type not in self.callback_registry:
-                    print(
+                    logger.warning(
                         f"[!] Unknown event type '{event_type}' during callback registration."
                     )
                     return
@@ -525,11 +518,11 @@ class MapperEventDispatcher:
 
                 if func not in callbacks:
                     callbacks.append(func)
-                    print(
+                    logger.debug(
                         f"[+] Registered callback {func.__name__} for event {event_type}"
                     )
                 else:
-                    print(
+                    logger.debug(
                         f"[!] Callback {func.__name__} already registered for event {event_type}"
                     )
 
@@ -551,7 +544,7 @@ class MapperEventDispatcher:
         try:
             with self._lock:
                 if event_type not in self.callback_registry:
-                    print(
+                    logger.warning(
                         f"[!] Unknown event type '{event_type}' during callback unregistration."
                     )
                     return
@@ -560,18 +553,19 @@ class MapperEventDispatcher:
 
                 if func in callbacks:
                     callbacks.remove(func)
-                    print(
+                    logger.debug(
                         f"[+] Unregistered callback {func.__name__} for event {event_type}"
                     )
                 else:
-                    print(
+                    logger.debug(
                         f"[!] Callback {func.__name__} not found for event {event_type}"
                     )
 
         except Exception as exc:
             func_name = getattr(func, "__name__", repr(func))
-            print(
-                f"[!] Error unregistering callback {func_name} for event {event_type}: {exc}"
+            logger.error(
+                f"[!] Error unregistering callback {func_name} for event {event_type}: {exc}",
+                exc_info=True,
             )
 
     def unregister_by_owner(self, owner: Any) -> None:
@@ -584,21 +578,24 @@ class MapperEventDispatcher:
                         for cb in callbacks
                         if getattr(cb, "__self__", None) is not owner
                     ]
-                    print(
+                    logger.debug(
                         f"[+] Unregistered callbacks for owner {owner} in event {event_type}"
                     )
-                print(f"[+] Unregistered all callbacks for owner {owner}")
+                logger.debug(f"[+] Unregistered all callbacks for owner {owner}")
 
         except Exception as exc:
-            print(f"[!] Error unregistering callbacks for owner {owner}: {exc}")
+            logger.error(
+                f"[!] Error unregistering callbacks for owner {owner}: {exc}",
+                exc_info=True,
+            )
 
     def unregister_all(self) -> None:
         """Flushes every registered callback across all event categories in a single call."""
         with self._lock:
             for event_type in self.callback_registry:
                 self.callback_registry[event_type].clear()
-                print(f"[+] Cleared all callbacks for event {event_type}")
-            print("[+] Unregistered all callbacks for all events")
+                logger.debug(f"[+] Cleared all callbacks for event {event_type}")
+            logger.debug("[+] Unregistered all callbacks for all events")
 
     def dispatch(self, event: MapperEvent) -> None:
         with self._lock:
@@ -609,13 +606,14 @@ class MapperEventDispatcher:
         for callback in callbacks:
             try:
                 callback(*args)
-                print(
+                logger.debug(
                     f"[+] Dispatched event {event.action} to callback {callback.__name__}"
                 )
             except Exception as exc:
                 func_name = getattr(callback, "__name__", repr(callback))
-                print(
-                    f"[!] Error in callback {func_name} for event {event.action}: {exc}"
+                logger.error(
+                    f"[!] Error in callback {func_name} for event {event.action}: {exc}",
+                    exc_info=True,
                 )
 
     @staticmethod
@@ -820,7 +818,7 @@ class IpcMapperEventDispatcher(MapperEventDispatcher):
                 )
             )
         else:
-            print(f"[!] Unknown IPC command opcode: {opcode}")
+            logger.warning(f"[!] Unknown IPC command opcode: {opcode}")
         return True
 
     def run_command_loop(self) -> None:
@@ -867,16 +865,19 @@ class QtIpcMapperEventDispatcher(QObject):
             elif opcode == IPC_EVT_ERROR:
                 self.engine_error.emit(unpack_ipc_error_evt(payload))
             else:
-                print(f"[!] Unknown IPC event opcode: {opcode}")
+                logger.warning(f"[!] Unknown IPC event opcode: {opcode}")
         except Exception as exc:
-            print(f"[!] Failed to handle IPC event (opcode={opcode}): {exc}")
+            logger.debug(
+                f"[!] Failed to handle IPC event (opcode={opcode}): {exc}",
+                exc_info=True,
+            )
 
     def _send(self, payload: bytes) -> None:
         with self._send_lock:
             try:
                 self.conn.send_bytes(payload)
             except (BrokenPipeError, OSError) as exc:
-                print(f"[!] Failed to send IPC command: {exc}")
+                logger.error(f"[!] Failed to send IPC command: {exc}", exc_info=True)
 
     def send_start(
         self,
@@ -916,9 +917,13 @@ class QtIpcMapperEventDispatcher(QObject):
 
 
 def get_adb_device():
-    out = subprocess.check_output(
-        [ADB, "devices"], timeout=10, creationflags=CREATE_NO_WINDOW
-    ).decode().splitlines()
+    out = (
+        subprocess.check_output(
+            [ADB, "devices"], timeout=10, creationflags=CREATE_NO_WINDOW
+        )
+        .decode()
+        .splitlines()
+    )
     real = [
         d.split()[0] for d in out[1:] if "device" in d and not d.startswith("emulator-")
     ]
@@ -933,7 +938,7 @@ def get_screen_size(device: str) -> tuple[int, int] | None:
         capture_output=True,
         text=True,
         timeout=10,
-        creationflags=CREATE_NO_WINDOW
+        creationflags=CREATE_NO_WINDOW,
     )
     match = _PHYSICAL_SIZE_RE.search(result.stdout)
     if match:
@@ -948,7 +953,7 @@ def get_dpi(device: str):
             capture_output=True,
             text=True,
             timeout=10,
-            creationflags=CREATE_NO_WINDOW
+            creationflags=CREATE_NO_WINDOW,
         )
         val = result.stdout.strip()
         return int(val) if val else BASELINE_DPI
@@ -963,7 +968,7 @@ def is_device_online(device: str):
             capture_output=True,
             text=True,
             timeout=10,
-            creationflags=CREATE_NO_WINDOW
+            creationflags=CREATE_NO_WINDOW,
         )
         return "device" in res.stdout
     except Exception:
@@ -982,7 +987,10 @@ def wireless_connect(device: str | None = None, continuous: bool = True):
                 return False, ""
         try:
             routes = subprocess.check_output(
-                [ADB, "-s", device, "shell", "ip", "route"], text=True, timeout=10, creationflags=CREATE_NO_WINDOW
+                [ADB, "-s", device, "shell", "ip", "route"],
+                text=True,
+                timeout=10,
+                creationflags=CREATE_NO_WINDOW,
             ).splitlines()
             ip_addr = None
             for line in routes:
@@ -995,11 +1003,25 @@ def wireless_connect(device: str | None = None, continuous: bool = True):
             socket_path = f"{ip_addr}:{PORT}"
 
             if device != socket_path:
-                subprocess.run([ADB, "-s", device, "tcpip", PORT], timeout=10, creationflags=CREATE_NO_WINDOW)
-                subprocess.check_output(
-                    [ADB, "-s", device, "connect", socket_path], timeout=10, creationflags=CREATE_NO_WINDOW
+                # 1. Restart adbd daemon on device in TCP mode
+                subprocess.run(
+                    [ADB, "-s", device, "tcpip", PORT],
+                    timeout=5,
+                    creationflags=CREATE_NO_WINDOW,
+                    check=True,
+                )
+                # 2. Allow adbd 1.5 seconds to restart and bind to port 5555
+                time.sleep(1.5)
+
+                # 3. Connect to the IP address WITHOUT '-s <device>'
+                subprocess.run(
+                    [ADB, "connect", socket_path],
+                    timeout=5,
+                    creationflags=CREATE_NO_WINDOW,
+                    check=True,
                 )
             return True, socket_path
+
         except Exception:
             if continuous:
                 time.sleep(SHORT_DELAY)
@@ -1030,7 +1052,7 @@ def get_rotation(device):
             capture_output=True,
             text=True,
             timeout=10,
-            creationflags=CREATE_NO_WINDOW
+            creationflags=CREATE_NO_WINDOW,
         )
         for pat in patterns:
             m = re.search(pat, result.stdout)
@@ -1098,7 +1120,7 @@ def get_scancode_from_key(key: str):
     if not key:
         return None
     key_lower = key.lower()
-    code = SCANCODES.get(key_lower.upper())
+    code = SCANCODES.get(key_lower)
     if code is None:
         canonical = SPECIAL_MAP.get(key_lower)
         if canonical:

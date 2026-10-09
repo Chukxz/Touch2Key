@@ -18,7 +18,6 @@ from modules.utils import (
     CIRCLE,
     IDLE,
     IMAGES_FOLDER,
-    MOUSE_SCANCODES,
     MOUSE_WHEEL_SIMULATOR_CODE,
     RECTANGLE,
     SPRINT_DISTANCE_CODE,
@@ -1985,17 +1984,9 @@ class LayoutsPlotterWidget(QWidget):
             store.zones._ensure_system_bezels(self.active_layout)
             for z in store.zones.list_for_layout(layout_id, auto_heal=False):
                 if z.zone_type == BEZEL:
-                    try:
-                        c_int = (
-                            int(z.scancode, 16)
-                            if isinstance(z.scancode, str)
-                            else int(z.scancode)
-                        )
-                    except (ValueError, TypeError):
-                        c_int = None
-                    if c_int == TOP_BEZEL_ID:
+                    if _scancode_matches(z.scancode, TOP_BEZEL_ID):
                         self.top_bezel_id = z.id
-                    elif c_int == BOTTOM_BEZEL_ID:
+                    elif _scancode_matches(z.scancode, BOTTOM_BEZEL_ID):
                         self.bottom_bezel_id = z.id
 
         self.layout_saved.emit(user_name, layout_id)

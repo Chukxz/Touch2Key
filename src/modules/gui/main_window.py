@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import os
-import threading
 import logging
-import sys
-import subprocess
 import multiprocessing
+import os
+import subprocess
+import sys
+import threading
 
-from PySide6.QtCore import Qt, QObject, QTimer, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -17,25 +17,28 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSizePolicy,
+    QSplitter,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
-    QSizePolicy,
 )
 
 from modules.database import store
 from modules.engine import run_engine_process
-
+from modules.gui.dialogs.wireless_connect import connect_wireless_gui
+from modules.gui.log_handler import install_gui_logging
+from modules.gui.overlays.visualizer import run as run_visualizer
 from modules.gui.pages.dashboard_page import DashboardPage
 from modules.gui.pages.layout_studio_page import LayoutStudioPage
 from modules.gui.pages.settings_page import SettingsPage
-
-from modules.utils import MapperEventDispatcher, QtIpcMapperEventDispatcher
-from modules.gui.overlays.visualizer import run as run_visualizer
-from modules.gui.log_handler import install_gui_logging
-
-from modules.scripts.show_adb_path import run as run_show_adb_path
 from modules.scripts.preflight import run as run_preflight
+from modules.scripts.show_adb_path import run as run_show_adb_path
+from modules.utils import (
+    MapperEventDispatcher,
+    QtIpcMapperEventDispatcher,
+    get_scancode_from_key,
+)
 
 logger = logging.getLogger("modules.gui.main_window")
 
@@ -135,7 +138,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Touch2Key")
-        self.resize(1180, 780)
+        # 1180x680 avoids height overflow on 1366x768 screens
+        self.resize(1180, 680)
 
         self.dispatcher = MapperEventDispatcher()
         self.engine_controller = EngineProcessController(self)
@@ -170,7 +174,16 @@ class MainWindow(QMainWindow):
         main_layout = QHBoxLayout(central)
         main_layout.setContentsMargins(8, 8, 8, 8)
 
-        nav_panel = QVBoxLayout()
+        # Horizontal splitter allowing the user to drag and resize the sidebar
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.main_splitter.setChildrenCollapsible(False)
+
+        # Wrap nav_panel inside a dedicated container widget
+        nav_container = QWidget()
+        nav_container.setMinimumWidth(160)  # Prevents shrinking into unreadable state
+        nav_panel = QVBoxLayout(nav_container)
+        nav_panel.setContentsMargins(0, 0, 4, 0)
+
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
         self.nav_buttons: dict[str, QPushButton] = {}
@@ -199,6 +212,7 @@ class MainWindow(QMainWindow):
 
         nav_panel.addStretch()
 
+        # Engine Toggle Button
         self.sidebar_engine_btn = QPushButton("Toggle Engine ON")
         self.sidebar_engine_btn.setStyleSheet(
             "font-weight: bold; background-color: #2e7d32; color: white; padding: 8px;"
@@ -206,14 +220,15 @@ class MainWindow(QMainWindow):
         self.sidebar_engine_btn.clicked.connect(self._toggle_engine)
         nav_panel.addWidget(self.sidebar_engine_btn)
 
+        # Visualizer Launcher Button
         self.sidebar_visualizer_btn = QPushButton("Run Visualizer")
         self.sidebar_visualizer_btn.setStyleSheet(
-            "font-weight: bold; background-color: #2e7d32; color: white; padding: 8px;"
+            "font-weight: bold; background-color: #1976d2; color: white; padding: 8px;"
         )
         self.sidebar_visualizer_btn.clicked.connect(self._start_visualizer)
         nav_panel.addWidget(self.sidebar_visualizer_btn)
 
-        # NEW: Log Toggle Button
+        # Log Toggle Button
         self.sidebar_logs_btn = QPushButton("Hide Logs")
         self.sidebar_logs_btn.setStyleSheet(
             "font-weight: bold; background-color: #555555; color: white; padding: 8px;"
@@ -221,9 +236,14 @@ class MainWindow(QMainWindow):
         self.sidebar_logs_btn.clicked.connect(self._toggle_logs)
         nav_panel.addWidget(self.sidebar_logs_btn)
 
-        main_layout.addLayout(nav_panel, stretch=1)
-        main_layout.addWidget(self.stack, stretch=5)
+        # Add panes to splitter and assign default widths: sidebar (200px), pages (980px)
+        self.main_splitter.addWidget(nav_container)
+        self.main_splitter.addWidget(self.stack)
+        self.main_splitter.setSizes([200, 980])
 
+        main_layout.addWidget(self.main_splitter)
+
+        # Dock widget setup
         self.log_dock = QDockWidget("Application Logs", self)
         self.log_dock.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
@@ -305,7 +325,8 @@ class MainWindow(QMainWindow):
             self.nav_buttons[title].setChecked(True)
 
         if page_widget is not None:
-            show_page = getattr(page_widget, "on_page_show", None)
+            # Handles both on_page_shown and on_page_show conventions
+            show_page = getattr(page_widget, "on_page_shown", None)
             if show_page is not None:
                 show_page()
 
@@ -314,10 +335,21 @@ class MainWindow(QMainWindow):
         self.log_dock.setVisible(is_visible)
         self.sidebar_logs_btn.setText("Hide Logs" if is_visible else "Show Logs")
 
-    def _start_visualizer(self):
+    def _start_visualizer(self) -> None:
+        toggle_key_scancode = None
+        toggle_key = store.settings.get().toggle_key
+        if toggle_key is not None:
+            toggle_key_scancode = get_scancode_from_key(toggle_key)
+
         multiprocessing.Process(
-            target=run_visualizer, name="Virtualizer", daemon=True
+            target=run_visualizer,
+            args=(toggle_key_scancode,),
+            name="Visualizer",
+            daemon=True,
         ).start()
+
+    def _on_wireless_connect(self) -> None:
+        connect_wireless_gui(parent=self)
 
     def _toggle_engine(self) -> None:
         if self.engine_controller.is_running():
@@ -326,14 +358,16 @@ class MainWindow(QMainWindow):
         else:
             self.sidebar_engine_btn.setEnabled(False)
             self.engine_controller.start_engine(
-                window_id=self.engine_controller.window_id, log_queue=self.log_queue
+                window_id=self.engine_controller.window_id,
+                log_queue=self.log_queue,
             )
 
     def _start_engine_from_dashboard(self) -> None:
         if not self.engine_controller.is_running():
             self.dashboard_page.start_btn.setEnabled(False)
             self.engine_controller.start_engine(
-                window_id=self.engine_controller.window_id, log_queue=self.log_queue
+                window_id=self.engine_controller.window_id,
+                log_queue=self.log_queue,
             )
 
     def _stop_engine_from_dashboard(self) -> None:
@@ -370,11 +404,16 @@ class MainWindow(QMainWindow):
             self, "Engine Error", f"Mapping engine encountered an error:\n{err_msg}"
         )
 
-    def _setup_tools(self):
+    def _setup_tools(self) -> None:
         toolbar = self.addToolBar("Tools")
         toolbar.setMovable(False)
         toolbar.setMinimumHeight(40)
 
+        wireless_action = QAction("Connect Wireless ADB...", self)
+        wireless_action.triggered.connect(self._on_wireless_connect)
+        toolbar.addAction(wireless_action)
+
+        toolbar.addSeparator()
         setup_action = QAction("Install / Repair Drivers (Setup)...", self)
         setup_action.triggered.connect(self._on_run_setup)
         toolbar.addAction(setup_action)
@@ -399,8 +438,9 @@ class MainWindow(QMainWindow):
         logger.info("Initiating global state save across all pages...")
         try:
             for title, page_widget in self.pages.items():
-                if hasattr(page_widget, "save_state"):
-                    if not page_widget.save_state():  # type: ignore
+                save_state = getattr(page_widget, "save_state", None)
+                if save_state is not None:
+                    if not save_state():
                         logger.warning("Save validation failed on page: %s", title)
                         QMessageBox.warning(
                             self,
@@ -414,7 +454,9 @@ class MainWindow(QMainWindow):
 
         except Exception as exc:
             logger.exception(
-                "Global save operation encountered an error: %s", exc, exc_info=True
+                "Global save operation encountered an error: %s",
+                exc,
+                exc_info=True,
             )
             QMessageBox.critical(
                 self,
@@ -424,7 +466,6 @@ class MainWindow(QMainWindow):
             return False
 
     def _on_run_setup(self) -> None:
-        """Persists state, stops engine, and launches setup as an external process."""
         if not self.save_all_pages():
             return
 
@@ -445,7 +486,6 @@ class MainWindow(QMainWindow):
 
         logger.info("Spawning setup utility as an external process...")
         try:
-            # Launch setup module cleanly using sys.executable
             subprocess.Popen([sys.executable, "-m", "modules.scripts.setup"])
         except Exception as exc:
             logger.exception("Failed to spawn setup subprocess")
@@ -453,7 +493,7 @@ class MainWindow(QMainWindow):
                 self, "Setup Error", f"Failed to launch setup utility:\n\n{exc}"
             )
 
-    def _on_check_adb(self):
+    def _on_check_adb(self) -> None:
         resolved_path = run_show_adb_path()
         if resolved_path:
             QMessageBox.information(
@@ -468,11 +508,11 @@ class MainWindow(QMainWindow):
                 "ADB executable could not be found.\n\nPlease run Setup to download the Android Platform Tools, or ensure adb is installed in your system PATH.",
             )
 
-    def _on_run_preflight(self):
+    def _on_run_preflight(self) -> None:
         reply = QMessageBox.question(
             self,
             "Preflight Checks",
-            "This will run a series of diagnostic checks to verify system configuration.\n\nContinue?",
+            "This will run diagnostic checks to verify system configuration.\n\nContinue?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
@@ -485,11 +525,12 @@ class MainWindow(QMainWindow):
                 )
             else:
                 QMessageBox.warning(
-                    self, "Pre-flight Checks Failed", "System checks did not pass"
+                    self,
+                    "Pre-flight Checks Failed",
+                    "System checks did not pass.",
                 )
 
     def _on_run_uninstall(self) -> None:
-        """Persists state, stops engine, and launches uninstaller as an external process."""
         if not self.save_all_pages():
             return
 
@@ -510,14 +551,14 @@ class MainWindow(QMainWindow):
 
         logger.info("Spawning uninstaller as an external process...")
         try:
-            # Launch uninstaller module via sys.executable
             subprocess.Popen([sys.executable, "-m", "modules.scripts.uninstall"])
-            # Close the main GUI window since uninstallation is wiping binaries/data
             self.close()
         except Exception as exc:
             logger.exception("Failed to spawn uninstaller subprocess")
             QMessageBox.critical(
-                self, "Uninstall Error", f"Failed to launch uninstaller:\n\n{exc}"
+                self,
+                "Uninstall Error",
+                f"Failed to launch uninstaller:\n\n{exc}",
             )
 
     def _consume_engine_logs(self) -> None:
@@ -530,7 +571,7 @@ class MainWindow(QMainWindow):
                         if hasattr(record, "getMessage")
                         else str(record)
                     )
-                    print(msg)
+                    self.log_console.appendPlainText(msg)
             except Exception:
                 continue
 

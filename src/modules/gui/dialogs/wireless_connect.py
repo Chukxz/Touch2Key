@@ -8,7 +8,7 @@ from modules.utils import wireless_connect
 
 
 class WirelessConnectWorker(QObject):
-    """Background worker executing wireless_connect polling loop."""
+    """Background worker executing the wireless_connect polling loop."""
 
     connected = Signal(str)
     failed = Signal(str)
@@ -27,8 +27,10 @@ class WirelessConnectWorker(QObject):
                     if success:
                         self.connected.emit(endpoint)
                         return
+                    elif not self._is_running:
+                        break
 
-                # Prevent 100% CPU core spinning while waiting for USB/network
+                # Sleep in short intervals so user cancellation responds promptly
                 for _ in range(10):
                     if not self._is_running:
                         break
@@ -46,47 +48,81 @@ class WirelessConnectWorker(QObject):
         self._is_running = False
 
 
+class WirelessConnectDialog(QProgressDialog):
+    """Thread-safe modal progress dialog managing worker and thread lifecycles."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(
+            "Searching for USB device to switch to Wi-Fi...\n\n"
+            "Ensure device is connected via USB and PC & phone are on the same Wi-Fi.",
+            "Cancel",
+            0,
+            0,
+            parent,
+        )
+        self.setWindowTitle("Wireless ADB Connection")
+        self.setMinimumDuration(0)
+        self.setAutoClose(False)
+        self.setAutoReset(False)
+        
+        self.endpoint: str | None = None
+        self.error_msg: str | None = None
+
+        self.worker_thread = QThread(parent)
+        self.worker = WirelessConnectWorker()
+        self.worker.moveToThread(self.worker_thread)
+
+        self.worker_thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self.worker_thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.worker_thread.finished.connect(self.worker_thread.deleteLater)
+
+        self.canceled.connect(self._on_canceled)
+
+        # Because receiver methods belong to a main-thread QObject,
+        # Qt automatically dispatches them via QueuedConnection across threads.
+        self.worker.connected.connect(self._on_worker_connected)
+        self.worker.failed.connect(self._on_worker_failed)
+
+        self.worker_thread.start()
+
+    def _on_canceled(self) -> None:
+        self.worker.stop()
+        self.reject()
+
+    def _on_worker_connected(self, endpoint: str) -> None:
+        self.endpoint = endpoint
+        self.accept()  # Executes safely on the main GUI thread
+
+    def _on_worker_failed(self, msg: str) -> None:
+        self.error_msg = msg
+        self.reject()  # Executes safely on the main GUI thread
+
+
 def connect_wireless_gui(parent: QWidget | None = None) -> None:
-    """Non-blocking GUI launcher with progress indicator and cancellation."""
-    progress = QProgressDialog(
-        "Searching for USB device to switch to Wi-Fi...\nEnsure device is plugged in via USB with USB Debugging enabled.",
-        "Cancel",
-        0,
-        0,
-        parent,
-    )
-    progress.setWindowTitle("Wireless ADB Connection")
-    progress.setMinimumDuration(0)
-    progress.setAutoClose(False)
-    progress.setAutoReset(False)
+    """Non-blocking GUI launcher with safe thread cleanup and post-modal alerts."""
+    dialog = WirelessConnectDialog(parent)
+    dialog.exec()
 
-    thread = QThread(parent)
-    worker = WirelessConnectWorker()
-    worker.moveToThread(thread)
+    # Ensure background thread is fully stopped before proceeding
+    dialog.worker.stop()
+    dialog.worker_thread.quit()
+    dialog.worker_thread.wait(500)
 
-    thread.started.connect(worker.run)
-    worker.finished.connect(thread.quit)
-    worker.finished.connect(worker.deleteLater)
-    thread.finished.connect(thread.deleteLater)
-
-    # Clean cancellation link
-    progress.canceled.connect(worker.stop)
-
-    def on_connected(endpoint: str) -> None:
-        progress.close()
+    # Show alert dialogs ONLY after the modal progress dialog has closed
+    if dialog.endpoint:
         QMessageBox.information(
             parent,
             "Wireless Connected",
-            f"Successfully connected wirelessly to:\n{endpoint}",
+            f"Successfully connected wirelessly to:\n{dialog.endpoint}\n\n"
+            "You may now disconnect the USB cable.",
         )
-
-    def on_failed(msg: str) -> None:
-        progress.close()
-        if "cancelled" not in msg.lower():
-            QMessageBox.warning(parent, "Connection Failed", msg)
-
-    worker.connected.connect(on_connected)
-    worker.failed.connect(on_failed)
-
-    thread.start()
-    progress.exec()
+    elif dialog.error_msg and "cancelled" not in dialog.error_msg.lower():
+        QMessageBox.warning(
+            parent,
+            "Connection Failed",
+            f"{dialog.error_msg}\n\n"
+            "Verify that:\n"
+            "1. USB Debugging is authorized on the phone screen.\n"
+            "2. Both devices are on the exact same Wi-Fi network.",
+        )

@@ -56,16 +56,23 @@ class KeyCaptureFilter(QObject):
         self.callback = callback
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        # Block focus traversal before Qt converts Tab into a navigation event
+        if event.type() == QEvent.Type.ShortcutOverride and isinstance(
+            event, QKeyEvent
+        ):
+            if event.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
+                event.accept()
+                return True
+
+        # Capture the actual key stroke
         if event.type() == QEvent.Type.KeyPress:
             if isinstance(event, QKeyEvent) and event.key() == Qt.Key.Key_Escape:
                 self.callback(None)
                 return True
 
             precise_key = get_specific_qt_key(event)
-            _, bridge_key = get_scancode_and_bridge_key_from_key(precise_key)
-            if bridge_key is not None:
-                self.callback(bridge_key)
-                return True
+            self.callback(precise_key)
+            return True
         return False
 
 
@@ -82,11 +89,8 @@ class ContinuousSequenceFilter(QObject):
                 return True
 
             precise_key = get_specific_qt_key(event)
-            _, bridge_key = get_scancode_and_bridge_key_from_key(precise_key)
-            if bridge_key is not None:
-                db_token = bridge_key.strip().lower()
-                self.key_callback(db_token)
-                return True
+            self.key_callback(precise_key)
+            return True
 
         return False
 
@@ -456,7 +460,9 @@ class SettingsPage(QWidget):
         self.typematic_enabled_check.toggled.connect(self._on_typematic_enabled_changed)
         self.typematic_delay_spin.valueChanged.connect(self._on_typematic_delay_changed)
         self.typematic_rate_spin.valueChanged.connect(self._on_typematic_rate_changed)
-        self.double_tap_enabled_check.toggled.connect(self._on_double_tap_enabled_changed)
+        self.double_tap_enabled_check.toggled.connect(
+            self._on_double_tap_enabled_changed
+        )
         self.bezel_toggle_enabled_check.toggled.connect(
             self._on_bezel_toggle_enabled_changed
         )
@@ -555,9 +561,7 @@ class SettingsPage(QWidget):
 
     def _begin_single_key_capture(self, target_field: str) -> None:
         btn = (
-            self.toggle_key_btn
-            if target_field == "toggle_key"
-            else self.sprint_key_btn
+            self.toggle_key_btn if target_field == "toggle_key" else self.sprint_key_btn
         )
         lbl = (
             self.toggle_key_label
@@ -611,12 +615,10 @@ class SettingsPage(QWidget):
         try:
             store.settings.update(**{target_field: serialized_val})
             self._notify_reload()
-            logger.info("Updated binding for %s", target_field)
+            logger.debug("Updated binding for %s", target_field)
         except Exception as exc:
             logger.exception("Failed to update binding for %s", target_field)
-            QMessageBox.critical(
-                self, "Error", f"Could not save key binding:\n{exc}"
-            )
+            QMessageBox.critical(self, "Error", f"Could not save key binding:\n{exc}")
 
     def load_settings(self) -> None:
         try:
@@ -826,9 +828,7 @@ class SettingsPage(QWidget):
                     "Configuration imported and synced to database.",
                 )
             else:
-                logger.warning(
-                    "Could not parse or apply settings from '%s'", path_str
-                )
+                logger.warning("Could not parse or apply settings from '%s'", path_str)
                 QMessageBox.warning(
                     self,
                     "Import Failed",

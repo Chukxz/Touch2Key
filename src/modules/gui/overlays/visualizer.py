@@ -48,7 +48,12 @@ def get_locations_dict(width: int, height: int) -> dict[int, tuple[int, int]]:
 
     zones = store.get_active_layout_zones()
     for zone in zones:
-        scancode = int(zone.scancode)
+        try:
+            scancode = int(zone.scancode, 16)
+        except (ValueError, TypeError) as err:
+            print(err)
+            pass
+
         scaled_x = int(scale_coord(width, zone.cx))
         scaled_y = int(scale_coord(height, zone.cy))
 
@@ -198,15 +203,15 @@ class MainWindow(QMainWindow):
         self.view.mouse_pressed.connect(self._on_mouse_pressed)
         self.view.mouse_released.connect(self._on_mouse_released)
         self.setCentralWidget(self.view)
-        
+
         self.instruction = self.view._scene.addText(
             "DIAGNOSTIC MODE: Press ESC to exit (when cursor is visible).",
             QFont("Arial", 20),
         )
         self.instruction.setDefaultTextColor(QColor("#cccccc"))
         _w, _h = self.view.viewport().width(), self.view.viewport().height()
-        self.instruction.setPos(int(_w/2), int(_h * 0.3))
-        
+        self.instruction.setPos(int(_w / 2), int(_h * 0.3))
+
         self.showFullScreen()
 
     # ----------------------------------------------------------------- cursor

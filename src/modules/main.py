@@ -4,6 +4,7 @@ import sys
 import multiprocessing
 import argparse
 import cProfile
+import datetime
 from typing import TYPE_CHECKING, cast
 
 from modules.engine import Engine
@@ -21,15 +22,14 @@ if TYPE_CHECKING:
 cli_profiler: Profile | None = None
 
 
-def profiler_cleanup(
-    prof: Profile | None, filename: str = "touch2key_cli.prof"
-) -> None:
+def profiler_cleanup(prof: Profile | None, filename: str = "touch2key_cli") -> None:
     if prof:
         prof.disable()
         DIAGNOSTICS_FOLDER.mkdir(parents=True, exist_ok=True)
-        dump_path = DIAGNOSTICS_FOLDER / filename
-        prof.dump_stats(dump_path)
-        print(f"[+] Profiling data saved to: {dump_path}")
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        dump_file_path = DIAGNOSTICS_FOLDER / f"{filename}_{timestamp}.prof"
+        prof.dump_stats(dump_file_path)
+        print(f"[+] Profiling data saved to: {dump_file_path}")
 
 
 def run(parser: argparse.ArgumentParser | None = None) -> None:

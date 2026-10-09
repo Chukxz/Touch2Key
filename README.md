@@ -210,6 +210,7 @@ touch2key-manage --reset-system
 touch2key-manage --set-image <layout_id> path/to/hud_screenshot.png  # e.g., --set-image 1 hud.png
 touch2key-manage --set-left-handed on
 ```
+See all commands by running `touch2key-manage [-h|--h|-help|--help]`
 
 ---
 
