@@ -105,18 +105,23 @@ class CircularRegion(Region):
 class RectangularRegion(Region):
     top_left: Point
     bottom_right: Point
+    _x1: float = field(init=False)
+    _y1: float = field(init=False)
+    _x2: float = field(init=False)
+    _y2: float = field(init=False)
+
+    def __post_init__(self) -> None:
+        self._x1 = min(self.top_left.x, self.bottom_right.x)
+        self._y1 = min(self.top_left.y, self.bottom_right.y)
+        self._x2 = max(self.top_left.x, self.bottom_right.x)
+        self._y2 = max(self.top_left.y, self.bottom_right.y)
 
     def activates(self, event: TouchEvent) -> bool:
-        return (
-            self.top_left.x <= event.position.x <= self.bottom_right.x
-            and self.top_left.y <= event.position.y <= self.bottom_right.y
-        )
+        return self._x1 <= event.position.x <= self._x2 and self._y1 <= event.position.y <= self._y2
 
     @property
     def area(self) -> float:
-        w = max(0.0, self.bottom_right.x - self.top_left.x)
-        h = max(0.0, self.bottom_right.y - self.top_left.y)
-        return w * h
+        return (self._x2 - self._x1) * (self._y2 - self._y1)
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +135,6 @@ class Constraint(ABC):
     def apply(self, origin: Point, position: Point) -> Point: ...
 
     def update_origin(self, origin: Point, position: Point) -> Point:
-        """Allows leash-type constraints to drag the origin dynamically."""
         return origin
 
 
@@ -301,9 +305,25 @@ class JoystickTransform(Transformation[frozenset[str]]):
     left: str = "a"
     right: str = "d"
     sprint_key: str = "shift"
+
     _last_sector: int | None = field(init=False, default=None)
     _PI_8: float = field(init=False, default=math.pi / 8.0)
     _INV_PI_4: float = field(init=False, default=1.0 / (math.pi / 4.0))
+    _sector_map: tuple[frozenset[str], ...] = field(init=False)
+    _sprint_set: frozenset[str] = field(init=False)
+
+    def __post_init__(self) -> None:
+        self._sprint_set = frozenset({self.sprint_key})
+        self._sector_map = (
+            frozenset({self.right}),
+            frozenset({self.down, self.right}),
+            frozenset({self.down}),
+            frozenset({self.down, self.left}),
+            frozenset({self.left}),
+            frozenset({self.up, self.left}),
+            frozenset({self.up}),
+            frozenset({self.up, self.right}),
+        )
 
     def reset(self) -> None:
         self._last_sector = None
@@ -313,42 +333,32 @@ class JoystickTransform(Transformation[frozenset[str]]):
         if dist_sq <= self.dead_zone * self.dead_zone:
             self._last_sector = None
             return frozenset()
+
         angle_rad = math.atan2(context.delta.y, context.delta.x)
-        if angle_rad < 0:
-            angle_rad += 2 * math.pi
+        if angle_rad < 0.0:
+            angle_rad += 2.0 * math.pi
+
         new_sector = int((angle_rad + self._PI_8) * self._INV_PI_4) % 8
+
         if self._last_sector is not None:
             current_center = self._last_sector * (math.pi / 4.0)
-            angle_diff = (angle_rad - current_center + math.pi) % (
-                2 * math.pi
-            ) - math.pi
+            angle_diff = (angle_rad - current_center + math.pi) % (2.0 * math.pi) - math.pi
             if abs(angle_diff) < (self._PI_8 + self.hysteresis_rad):
                 new_sector = self._last_sector
+
         self._last_sector = new_sector
-        sector_map = {
-            0: {self.right},
-            1: {self.down, self.right},
-            2: {self.down},
-            3: {self.down, self.left},
-            4: {self.left},
-            5: {self.up, self.left},
-            6: {self.up},
-            7: {self.up, self.right},
-        }
-        active_keys = set(sector_map.get(new_sector, set()))
-        if self.sprint_distance > 0 and dist_sq > (
-            self.sprint_distance * self.sprint_distance
-        ):
-            active_keys.add(self.sprint_key)
-        return frozenset(active_keys)
+        base_keys = self._sector_map[new_sector]
+
+        if self.sprint_distance > 0.0 and dist_sq > (self.sprint_distance * self.sprint_distance):
+            return base_keys | self._sprint_set
+
+        return base_keys
 
 
 @dataclass(slots=True)
 class Semantic(ABC, Generic[T]):
     @abstractmethod
-    def process(
-        self, context: PipelineContext, value: T, output_sink: OutputSink
-    ) -> None: ...
+    def process(self, context: PipelineContext, value: T, output_sink: OutputSink) -> None: ...
     def reset(self, output_sink: OutputSink) -> None:
         pass
 
@@ -372,12 +382,11 @@ class ButtonSemantic(Semantic[T], Generic[T]):
 class DirectionalSemantic(Semantic[frozenset[str]]):
     _active: frozenset[str] = field(init=False, default_factory=frozenset)
 
-    def process(
-        self, context: PipelineContext, value: frozenset[str], output_sink: OutputSink
-    ) -> None:
+    def process(self, context: PipelineContext, value: frozenset[str], output_sink: OutputSink) -> None:
         if context.event.phase is TouchPhase.UP:
             self.reset(output_sink)
             return
+
         for key in self._active - value:
             output_sink.key_up(key)
         for key in value - self._active:
@@ -394,45 +403,28 @@ class DirectionalSemantic(Semantic[frozenset[str]]):
 class PointerSemantic(Semantic[Vector]):
     pointer: bool = True
 
-    def process(
-        self, context: PipelineContext, value: Vector, output_sink: OutputSink
-    ) -> None:
-        if (
-            self.pointer
-            and context.event.phase is TouchPhase.MOVE
-            and (value.x or value.y)
-        ):
+    def process(self, context: PipelineContext, value: Vector, output_sink: OutputSink) -> None:
+        if self.pointer and context.event.phase is TouchPhase.MOVE and (value.x or value.y):
             output_sink.mouse_move(value.x, value.y)
 
 
 @dataclass(slots=True)
 class ToggleSemantic(Semantic[Unit]):
-    """
-    Executes a system toggle command on touch UP, strictly enforcing tap constraints
-    to prevent accidental triggers from Android system edge swipes or long presses.
-    """
-
     output: str
-
-    # Tap constraint parameters
     max_duration_s: float = 0.3
     max_drift_px: float = 30.0
 
     _start_time: float | None = field(init=False, default=None)
     _start_pos: Point | None = field(init=False, default=None)
 
-    def process(
-        self, context: PipelineContext, value: Unit, output_sink: OutputSink
-    ) -> None:
+    def process(self, context: PipelineContext, value: Unit, output_sink: OutputSink) -> None:
         phase = context.event.phase
 
-        # 1. Record initial contact
         if phase is TouchPhase.DOWN:
             self._start_time = context.event.timestamp
             self._start_pos = context.event.position
             return
 
-        # 2. Evaluate on release
         if phase is TouchPhase.UP:
             if self._start_time is None or self._start_pos is None:
                 return
@@ -440,18 +432,14 @@ class ToggleSemantic(Semantic[Unit]):
             duration = context.event.timestamp - self._start_time
             drift = (context.event.position - self._start_pos).magnitude
 
-            # Reset state for next interaction
             self._start_time = None
             self._start_pos = None
 
-            # 3. Fire only if it passes the strict tap constraint
             if duration <= self.max_duration_s and drift <= self.max_drift_px:
                 if self.output == TOGGLE_MODE:
                     output_sink.toggle_menu_mode()
                 elif self.output == TOGGLE_VKB:
                     output_sink.toggle_virtual_keyboard()
-                else:
-                    pass
 
     def reset(self, output_sink: OutputSink | None = None) -> None:
         self._start_time = None
@@ -547,22 +535,15 @@ class PipelineConfig:
     pipeline_config: dict = field(default_factory=dict)
 
     def _monitor_last_set_config(self, pipeline_config: dict | None = None) -> None:
-        if pipeline_config is None:
-            self.is_last_set_config_self = True
-        else:
-            self.is_last_set_config_self = False
+        self.is_last_set_config_self = pipeline_config is None
 
     def get_region_config(self, pipeline_config: dict | None = None) -> tuple[int, str, float, int]:
-        pipeline_config = (
-            pipeline_config if pipeline_config is not None else self.pipeline_config
-        )
-
-        region = pipeline_config.get("region", {})
+        cfg = pipeline_config if pipeline_config is not None else self.pipeline_config
+        region = cfg.get("region", {})
         idx = int(region.get("idx", -1))
         mode = str(region.get("mode", ""))
         bezel_dp_thickness = float(region.get("bezel_dp_thickness", BEZEL_DP_THICKNESS))
         priority = int(region.get("priority", 0))
-
         return (idx, mode, bezel_dp_thickness, priority)
 
     def set_region_config(
@@ -577,66 +558,34 @@ class PipelineConfig:
         if pipeline_config is None:
             self.should_get_config = True
 
-        pipeline_config = (
-            pipeline_config if pipeline_config is not None else self.pipeline_config
-        )
+        cfg = pipeline_config if pipeline_config is not None else self.pipeline_config
+        prev_idx, prev_mode, prev_bezel_dp_thickness, prev_priority = self.get_region_config(cfg)
 
-        prev_idx, prev_mode, prev_bezel_dp_thickness, prev_priority = (
-            self.get_region_config(pipeline_config)
-        )
-
-        # Resolve Target IDX
-        if idx is not None:
-            target_idx = idx
-        elif keep_previous:
-            target_idx = prev_idx
-        else:
-            target_idx = -1
-
-        # Resolve Target Mode
+        target_idx = idx if idx is not None else (prev_idx if keep_previous else -1)
         if 0 <= target_idx < len(REGION_MODES):
             target_mode = REGION_MODES[target_idx]
-        elif keep_previous:
-            target_mode = prev_mode
         else:
-            target_mode = ""
+            target_mode = prev_mode if keep_previous else ""
 
-        # Resolve Target Bezel DP Thickness
-        if bezel_dp_thickness is not None:
-            target_bezel_dp_thickness = bezel_dp_thickness
-        elif keep_previous:
-            target_bezel_dp_thickness = prev_bezel_dp_thickness
-        else:
-            target_bezel_dp_thickness = float(BEZEL_DP_THICKNESS)
-
-        # Resolve Target Priority
-        if priority is not None:
-            target_priority = priority
-        elif keep_previous:
-            target_priority = prev_priority
-        else:
-            target_priority = 0
-
-        region = pipeline_config.setdefault("region", {})
-        region.update(
-            {
-                "idx": target_idx,
-                "mode": target_mode,
-                "bezel_dp_thickness": target_bezel_dp_thickness,
-                "priority": target_priority,
-            }
+        target_bezel_dp_thickness = (
+            bezel_dp_thickness
+            if bezel_dp_thickness is not None
+            else (prev_bezel_dp_thickness if keep_previous else float(BEZEL_DP_THICKNESS))
         )
+        target_priority = priority if priority is not None else (prev_priority if keep_previous else 0)
+
+        region = cfg.setdefault("region", {})
+        region.update({
+            "idx": target_idx,
+            "mode": target_mode,
+            "bezel_dp_thickness": target_bezel_dp_thickness,
+            "priority": target_priority,
+        })
 
     def get_origin_config(self, pipeline_config: dict | None = None) -> tuple[int, str]:
-        pipeline_config = (
-            pipeline_config if pipeline_config is not None else self.pipeline_config
-        )
-
-        origin = pipeline_config.get("origin", {})
-        idx = int(origin.get("idx", -1))
-        mode = str(origin.get("mode", ""))
-
-        return (idx, mode)
+        cfg = pipeline_config if pipeline_config is not None else self.pipeline_config
+        origin = cfg.get("origin", {})
+        return (int(origin.get("idx", -1)), str(origin.get("mode", "")))
 
     def set_origin_config(
         self,
@@ -648,46 +597,22 @@ class PipelineConfig:
         if pipeline_config is None:
             self.should_get_config = True
 
-        pipeline_config = (
-            pipeline_config if pipeline_config is not None else self.pipeline_config
-        )
+        cfg = pipeline_config if pipeline_config is not None else self.pipeline_config
+        prev_idx, prev_mode = self.get_origin_config(cfg)
 
-        prev_idx, prev_mode = self.get_origin_config(pipeline_config)
-
-        # Resolve Target IDX
-        if idx is not None:
-            target_idx = idx
-        elif keep_previous:
-            target_idx = prev_idx
-        else:
-            target_idx = -1
-
-        # Resolve Target Mode
+        target_idx = idx if idx is not None else (prev_idx if keep_previous else -1)
         if 0 <= target_idx < len(ORIGIN_MODES):
             target_mode = ORIGIN_MODES[target_idx]
-        elif keep_previous:
-            target_mode = prev_mode
         else:
-            target_mode = ""
+            target_mode = prev_mode if keep_previous else ""
 
-        origin = pipeline_config.setdefault("origin", {})
-        origin.update(
-            {
-                "idx": target_idx,
-                "mode": target_mode,
-            }
-        )
+        origin = cfg.setdefault("origin", {})
+        origin.update({"idx": target_idx, "mode": target_mode})
 
     def get_constraint_config(self, pipeline_config: dict | None = None) -> tuple[int, str]:
-        pipeline_config = (
-            pipeline_config if pipeline_config is not None else self.pipeline_config
-        )
-
-        constraint = pipeline_config.get("constraint", {})
-        idx = int(constraint.get("idx", -1))
-        mode = str(constraint.get("mode", ""))
-
-        return (idx, mode)
+        cfg = pipeline_config if pipeline_config is not None else self.pipeline_config
+        constraint = cfg.get("constraint", {})
+        return (int(constraint.get("idx", -1)), str(constraint.get("mode", "")))
 
     def set_constraint_config(
         self,
@@ -699,58 +624,30 @@ class PipelineConfig:
         if pipeline_config is None:
             self.should_get_config = True
 
-        pipeline_config = (
-            pipeline_config if pipeline_config is not None else self.pipeline_config
-        )
+        cfg = pipeline_config if pipeline_config is not None else self.pipeline_config
+        prev_idx, prev_mode = self.get_constraint_config(cfg)
 
-        prev_idx, prev_mode = self.get_constraint_config(pipeline_config)
-
-        # Resolve Target IDX
-        if idx is not None:
-            target_idx = idx
-        elif keep_previous:
-            target_idx = prev_idx
-        else:
-            target_idx = -1
-
-        # Resolve Target Mode
+        target_idx = idx if idx is not None else (prev_idx if keep_previous else -1)
         if 0 <= target_idx < len(CONSTRAINT_MODES):
             target_mode = CONSTRAINT_MODES[target_idx]
-        elif keep_previous:
-            target_mode = prev_mode
         else:
-            target_mode = ""
+            target_mode = prev_mode if keep_previous else ""
 
-        constraint = pipeline_config.setdefault("constraint", {})
-        constraint.update(
-            {
-                "idx": target_idx,
-                "mode": target_mode,
-            }
-        )
+        constraint = cfg.setdefault("constraint", {})
+        constraint.update({"idx": target_idx, "mode": target_mode})
 
     def get_transform_config(
         self, pipeline_config: dict | None = None
     ) -> tuple[int, str, float, float, float, float]:
-        pipeline_config = (
-            pipeline_config if pipeline_config is not None else self.pipeline_config
-        )
-
-        transform = pipeline_config.get("transform", {})
-        idx = int(transform.get("idx", -1))
-        mode = str(transform.get("mode", ""))
-        sensitivity_x = float(transform.get("sensitivity_x", 1.0))
-        sensitivity_y = float(transform.get("sensitivity_y", 1.0))
-        deadzone = float(transform.get("deadzone", 0.1))
-        hysteresis = float(transform.get("hysteresis", 5.0))
-
+        cfg = pipeline_config if pipeline_config is not None else self.pipeline_config
+        transform = cfg.get("transform", {})
         return (
-            idx,
-            mode,
-            sensitivity_x,
-            sensitivity_y,
-            deadzone,
-            hysteresis,
+            int(transform.get("idx", -1)),
+            str(transform.get("mode", "")),
+            float(transform.get("sensitivity_x", 1.0)),
+            float(transform.get("sensitivity_y", 1.0)),
+            float(transform.get("deadzone", 0.1)),
+            float(transform.get("hysteresis", 5.0)),
         )
 
     def set_transform_config(
@@ -767,92 +664,42 @@ class PipelineConfig:
         if pipeline_config is None:
             self.should_get_config = True
 
-        pipeline_config = (
-            pipeline_config if pipeline_config is not None else self.pipeline_config
-        )
-
+        cfg = pipeline_config if pipeline_config is not None else self.pipeline_config
         (
             prev_idx,
             prev_mode,
-            prev_sensitivity_x,
-            prev_sensitivity_y,
+            prev_sens_x,
+            prev_sens_y,
             prev_deadzone,
             prev_hysteresis,
-        ) = self.get_transform_config(pipeline_config)
+        ) = self.get_transform_config(cfg)
 
-        # Resolve Target IDX
-        if idx is not None:
-            target_idx = idx
-        elif keep_previous:
-            target_idx = prev_idx
-        else:
-            target_idx = -1
-
-        # Resolve Target Mode
+        target_idx = idx if idx is not None else (prev_idx if keep_previous else -1)
         if 0 <= target_idx < len(TRANSFORM_MODES):
             target_mode = TRANSFORM_MODES[target_idx]
-        elif keep_previous:
-            target_mode = prev_mode
         else:
-            target_mode = ""
+            target_mode = prev_mode if keep_previous else ""
 
-        # Resolve Target X sensitivity
-        if sensitivity_x is not None:
-            target_sensitivity_x = sensitivity_x
-        elif keep_previous:
-            target_sensitivity_x = prev_sensitivity_x
-        else:
-            target_sensitivity_x = 1.0
-
-        # Resolve Target Y sensitivity
-        if sensitivity_y is not None:
-            target_sensitivity_y = sensitivity_y
-        elif keep_previous:
-            target_sensitivity_y = prev_sensitivity_y
-        else:
-            target_sensitivity_y = 1.0
-
-        # Resolve Target Deadzone
-        if deadzone is not None:
-            target_deadzone = deadzone
-        elif keep_previous:
-            target_deadzone = prev_deadzone
-        else:
-            target_deadzone = 0.1
-
-        # Resolve Target Hysteresis
-        if hysteresis is not None:
-            target_hysteresis = hysteresis
-        elif keep_previous:
-            target_hysteresis = prev_hysteresis
-        else:
-            target_hysteresis = 5.0
-
-        transform = pipeline_config.setdefault("transform", {})
-        transform.update(
-            {
-                "idx": target_idx,
-                "mode": target_mode,
-                "sensitivity_x": target_sensitivity_x,
-                "sensitivity_y": target_sensitivity_y,
-                "deadzone": target_deadzone,
-                "hysteresis": target_hysteresis,
-            }
-        )
+        transform = cfg.setdefault("transform", {})
+        transform.update({
+            "idx": target_idx,
+            "mode": target_mode,
+            "sensitivity_x": sensitivity_x if sensitivity_x is not None else (prev_sens_x if keep_previous else 1.0),
+            "sensitivity_y": sensitivity_y if sensitivity_y is not None else (prev_sens_y if keep_previous else 1.0),
+            "deadzone": deadzone if deadzone is not None else (prev_deadzone if keep_previous else 0.1),
+            "hysteresis": hysteresis if hysteresis is not None else (prev_hysteresis if keep_previous else 5.0),
+        })
 
     def get_semantic_config(
         self, pipeline_config: dict | None = None
     ) -> tuple[int, str, bool]:
-        pipeline_config = (
-            pipeline_config if pipeline_config is not None else self.pipeline_config
+        cfg = pipeline_config if pipeline_config is not None else self.pipeline_config
+        semantic = cfg.get("semantic", {})
+        return (
+            int(semantic.get("idx", -1)),
+            str(semantic.get("mode", "")),
+            bool(semantic.get("pointer", False)),
         )
-
-        semantic = pipeline_config.get("semantic", {})
-        idx = int(semantic.get("idx", -1))
-        mode = str(semantic.get("mode", ""))
-        pointer = bool(semantic.get("pointer", False))
-
-        return (idx, mode, pointer)
 
     def set_semantic_config(
         self,
@@ -865,51 +712,26 @@ class PipelineConfig:
         if pipeline_config is None:
             self.should_get_config = True
 
-        pipeline_config = (
-            pipeline_config if pipeline_config is not None else self.pipeline_config
-        )
+        cfg = pipeline_config if pipeline_config is not None else self.pipeline_config
+        prev_idx, prev_mode, prev_pointer = self.get_semantic_config(cfg)
 
-        prev_idx, prev_mode, prev_pointer = self.get_semantic_config(pipeline_config)
-
-        # Resolve Target IDX
-        if idx is not None:
-            target_idx = idx
-        elif keep_previous:
-            target_idx = prev_idx
-        else:
-            target_idx = -1
-
-        # Resolve Target Mode
+        target_idx = idx if idx is not None else (prev_idx if keep_previous else -1)
         if 0 <= target_idx < len(SEMANTIC_MODES):
             target_mode = SEMANTIC_MODES[target_idx]
-        elif keep_previous:
-            target_mode = prev_mode
         else:
-            target_mode = ""
+            target_mode = prev_mode if keep_previous else ""
 
-        # Resolve Target Pointer
-        if pointer is not None:
-            target_pointer = pointer
-        elif keep_previous:
-            target_pointer = prev_pointer
-        else:
-            target_pointer = False
-
-        semantic = pipeline_config.setdefault("semantic", {})
-        semantic.update(
-            {
-                "idx": target_idx,
-                "mode": target_mode,
-                "pointer": target_pointer,
-            }
-        )
+        semantic = cfg.setdefault("semantic", {})
+        semantic.update({
+            "idx": target_idx,
+            "mode": target_mode,
+            "pointer": pointer if pointer is not None else (prev_pointer if keep_previous else False),
+        })
 
     def get_pipeline_json_from_config(self, pipeline_config: dict | None = None) -> str:
-        pipeline_config = (
-            pipeline_config if pipeline_config is not None else self.pipeline_config
-        )
+        cfg = pipeline_config if pipeline_config is not None else self.pipeline_config
         try:
-            return json.dumps(pipeline_config)
+            return json.dumps(cfg)
         except (TypeError, ValueError) as exc:
             logger.error("Failed to dump pipeline configuration to JSON: %s", exc)
             return "{}"
@@ -921,21 +743,19 @@ class PipelineConfig:
         if pipeline_config is None:
             self.should_get_config = False
 
-        pipeline_config = (
-            pipeline_config if pipeline_config is not None else self.pipeline_config
-        )
+        cfg = pipeline_config if pipeline_config is not None else self.pipeline_config
 
         try:
-            _pipeline_config = json.loads(pipeline_json)
-            if not isinstance(_pipeline_config, dict):
+            parsed = json.loads(pipeline_json)
+            if not isinstance(parsed, dict):
                 logger.error(
                     "Invalid root type in pipeline JSON; expected dict, got %s",
-                    type(_pipeline_config).__name__,
+                    type(parsed).__name__,
                 )
-                _pipeline_config = {}
+                parsed = {}
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
             logger.error("Failed to load pipeline configuration from JSON: %s", exc)
-            _pipeline_config = {}
+            parsed = {}
 
-        pipeline_config.clear()
-        pipeline_config.update(_pipeline_config)
+        cfg.clear()
+        cfg.update(parsed)
