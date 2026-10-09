@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Callable
 
 
 class AbstractWindowManager(ABC):
@@ -28,7 +28,7 @@ class AbstractWindowManager(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def find_window_ids_by_class(self, class_name: str | None) -> list:
+    def find_window_ids_by_class(self, class_name: str | None) -> list[int]:
         raise NotImplementedError
 
     @abstractmethod
@@ -50,7 +50,7 @@ class AbstractWindowManager(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def find_visible_windows(self) -> dict[int, dict]:
+    def find_visible_windows(self) -> dict[int, dict[str, Any]]:
         raise NotImplementedError
 
 
@@ -111,6 +111,26 @@ class AbstractBridge(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def button4_down(self) -> None:
+        """Dispatches Mouse 4 (XBUTTON1 / Back) press."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def button4_up(self) -> None:
+        """Dispatches Mouse 4 (XBUTTON1 / Back) release."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def button5_down(self) -> None:
+        """Dispatches Mouse 5 (XBUTTON2 / Forward) press."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def button5_up(self) -> None:
+        """Dispatches Mouse 5 (XBUTTON2 / Forward) release."""
+        raise NotImplementedError
+
+    @abstractmethod
     def wheel(self, dx: float, dy: float) -> None:
         raise NotImplementedError
 
@@ -137,7 +157,7 @@ class AbstractBridge(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def set_respawn_callback(self, callback) -> None:
+    def set_respawn_callback(self, callback: Callable[[str], None]) -> None:
         raise NotImplementedError
 
 
