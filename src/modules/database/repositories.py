@@ -101,6 +101,7 @@ class AppSettings:
     typematic_excluded_keys: Optional[str]
     double_tap_enabled: bool
     bezel_toggle_enabled: bool
+    profile_sort_order: str = "Recently Modified"
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -113,6 +114,7 @@ class AppSettings:
         d["typematic_enabled"] = bool(d["typematic_enabled"])
         d["double_tap_enabled"] = bool(d["double_tap_enabled"])
         d["bezel_toggle_enabled"] = bool(d["bezel_toggle_enabled"])
+        d["profile_sort_order"] = str(d.get("profile_sort_order", "Recently Modified"))
         return cls(**d)
 
 
@@ -216,6 +218,7 @@ class AppSettingsRepository:
         "typematic_excluded_keys",
         "double_tap_enabled",
         "bezel_toggle_enabled",
+        "profile_sort_order",
     }
 
     def get(self) -> AppSettings:
@@ -257,7 +260,8 @@ class AppSettingsRepository:
 
             conn.execute("DELETE FROM app_settings WHERE id = 1;")
             conn.execute(
-                "INSERT INTO app_settings (id, active_layout_id, typematic_excluded_keys) VALUES (1, ?, ?);",
+                "INSERT INTO app_settings (id, active_layout_id, typematic_excluded_keys, profile_sort_order) "
+                "VALUES (1, ?, ?, 'Recently Modified');",
                 (active_layout_id, EXCLUDED_KEYS),
             )
         return self.get()
@@ -320,7 +324,7 @@ class LayoutsRepository:
         layout = self.get(new_id)
         assert layout is not None
 
-        # Native auto-seed immediately after layout creation
+        # Auto-seed system bezels immediately on creation
         zones_repo = LayoutZonesRepository()
         zones_repo._ensure_system_bezels(layout)
         return layout
@@ -379,7 +383,7 @@ class LayoutsRepository:
         zones_repo = LayoutZonesRepository()
         for zone in zones_repo.list_for_layout(layout_id, auto_heal=False):
             if zone.zone_type == BEZEL:
-                continue  # Bezels are handled natively by new_layout.create()
+                continue  # Bezels are seeded by self.create()
 
             zones_repo.create(
                 layout_id=new_layout.id,
@@ -451,8 +455,12 @@ class LayoutZonesRepository:
             current_zones = [LayoutZone.from_row(row) for row in rows]
 
         healed = False
-        top_bezels = [z for z in current_zones if _scancode_matches(z.scancode, TOP_BEZEL_ID)]
-        bottom_bezels = [z for z in current_zones if _scancode_matches(z.scancode, BOTTOM_BEZEL_ID)]
+        top_bezels = [
+            z for z in current_zones if _scancode_matches(z.scancode, TOP_BEZEL_ID) and z.zone_type == BEZEL
+        ]
+        bottom_bezels = [
+            z for z in current_zones if _scancode_matches(z.scancode, BOTTOM_BEZEL_ID) and z.zone_type == BEZEL
+        ]
 
         if top_bezels:
             for dup in top_bezels[1:]:
@@ -566,7 +574,7 @@ class LayoutZonesRepository:
             zone = self.get(zone_id)
             if zone is not None and zone.zone_type == BEZEL:
                 logger.warning(
-                    "Could not delete zone %s because deletion of 'zone type: %s' is forbidden by the caller.",
+                    "Could not delete zone %s because deletion of 'zone type: %s' is forbidden by caller.",
                     zone_id,
                     BEZEL,
                 )
