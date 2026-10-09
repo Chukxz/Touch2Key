@@ -5,23 +5,19 @@ import threading
 from typing import TYPE_CHECKING, Any
 
 from modules.core.pipeline import CircularRegion, Point, RectangularRegion
-from modules.core.pipeline_output import BridgeOutputSink
 from modules.core.pipeline_factory import Button
-
+from modules.core.pipeline_output import BridgeOutputSink
+from modules.database import store
 from modules.utils import (
     CIRCLE,
-    M_LEFT,
-    M_MIDDLE,
-    M_RIGHT,
+    EXCLUDED_KEYS,
+    MOUSE_SCANCODES,
     MOUSE_WHEEL_SIMULATOR_CODE,
     RECTANGLE,
     SPRINT_DISTANCE_CODE,
-    EXCLUDED_KEYS,
     get_scancode_from_key,
     scale_coord,
 )
-
-from modules.database import store
 
 if TYPE_CHECKING:
     from .mapper import Mapper
@@ -50,14 +46,14 @@ class KeyMapper:
         self.typematic_excluded_keys = typematic_excluded_keys
 
         self.lock = threading.Lock()
-        self.pipelines = []
+        self.pipelines: list[Any] = []
         self.ignored_keys = {MOUSE_WHEEL_SIMULATOR_CODE, SPRINT_DISTANCE_CODE}
 
-        self._build_pipelines_key()
+        self.rebuild_pipelines()
         self._sync_typematic_to_bridge()
 
         self.mapper_event_dispatcher.register_callback(
-            "ON_LAYOUT_RELOAD", self._build_pipelines_key
+            "ON_LAYOUT_RELOAD", self.rebuild_pipelines
         )
         self.mapper_event_dispatcher.register_callback(
             "ON_WORKER_RESPAWN", self._on_worker_respawn_key
@@ -67,12 +63,8 @@ class KeyMapper:
         )
 
     def _resolve_scancode_set(self, raw_tokens: str | None) -> set[int]:
-        fallback = set(EXCLUDED_KEYS)
-        tokens = (
-            {k.strip().lower() for k in raw_tokens.split(",") if k.strip()}
-            if raw_tokens
-            else fallback
-        )
+        source = raw_tokens if raw_tokens else EXCLUDED_KEYS
+        tokens = {k.strip().lower() for k in source.split(",") if k.strip()}
         resolved_codes = set()
         for token in tokens:
             code = get_scancode_from_key(token)
@@ -98,7 +90,7 @@ class KeyMapper:
         self._sync_typematic_to_bridge()
         logger.info("KeyMapper pushed updated typematic parameters to bridge.")
 
-    def _build_pipelines_key(self) -> None:
+    def rebuild_pipelines(self) -> None:
         settings = store.settings.get()
         layout = store.get_active_layout()
         if layout is None:
@@ -106,7 +98,8 @@ class KeyMapper:
                 "No active layout found in SQLite database. Key pipelines will be empty."
             )
             self.release_all()
-            self.pipelines = []
+            with self.lock:
+                self.pipelines = []
             return
 
         key_raw_zones = self.mapper.layout_loader.keys_json_data.copy()
@@ -115,7 +108,7 @@ class KeyMapper:
 
         new_pipelines = []
 
-        for scancode, values in key_raw_zones:
+        for scancode_raw, values in key_raw_zones:
             name = values.get("name", "")
             if name in self.ignored_keys:
                 continue
@@ -125,7 +118,20 @@ class KeyMapper:
             pointer = bool(values.get("pointer", False))
             priority = int(values.get("priority", 0))
             ignore_app_settings = bool(values.get("ignore_app_settings", False))
-            is_mouse_btn = scancode in (M_LEFT, M_RIGHT, M_MIDDLE)
+
+            try:
+                scancode_int = (
+                    int(scancode_raw, 16)
+                    if isinstance(scancode_raw, str)
+                    else int(scancode_raw)
+                )
+            except (ValueError, TypeError):
+                scancode_int = None
+
+            is_mouse_btn = (
+                scancode_int in MOUSE_SCANCODES if scancode_int is not None else False
+            )
+            button_token = name if name else str(scancode_raw)
 
             sens_x = (
                 float(values.get("sensitivity_x", 1.0))
@@ -161,7 +167,7 @@ class KeyMapper:
                 continue
 
             pipeline = Button(
-                button=str(scancode),
+                button=button_token,
                 region=region,
                 pointer=pointer,
                 sensitivity_x=sens_x,
@@ -176,6 +182,8 @@ class KeyMapper:
             for pipeline in self.pipelines:
                 pipeline.reset(self.output_sink)
             self.pipelines = new_pipelines
+
+    _build_pipelines_key = rebuild_pipelines
 
     def release_all(self) -> None:
         with self.lock:
