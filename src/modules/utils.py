@@ -135,6 +135,15 @@ M_BACK = 0x9904
 TOP_BEZEL_ID = 0x9905
 BOTTOM_BEZEL_ID = 0x9906
 
+# Unified tuple for mouse scancode checks across pipeline & key mappers
+MOUSE_SCANCODES: tuple[int, ...] = (
+    M_LEFT,
+    M_RIGHT,
+    M_MIDDLE,
+    M_FORWARD,
+    M_BACK,
+)
+
 TOP_BEZEL_NAME = "Top Bezel"
 BOTTOM_BEZEL_NAME = "Bottom Bezel"
 BEZEL_DP_THICKNESS = 25  # ~3.97mm
@@ -333,6 +342,8 @@ SCANCODES = {
     "MOUSE_LEFT": M_LEFT,
     "MOUSE_RIGHT": M_RIGHT,
     "MOUSE_MIDDLE": M_MIDDLE,
+    "MOUSE_FORWARD": M_FORWARD,
+    "MOUSE_BACK": M_BACK,
 }
 
 SCANCODES_INV = {v: k for k, v in SCANCODES.items()}
@@ -376,6 +387,29 @@ SPECIAL_MAP = {
     "down": "E0_DOWN",
     "insert": "E0_INSERT",
     "delete": "E0_DELETE",
+    # Extended Mouse button aliases
+    "left_click": "MOUSE_LEFT",
+    "m1": "MOUSE_LEFT",
+    "mouse1": "MOUSE_LEFT",
+    "mouse_left": "MOUSE_LEFT",
+    "right_click": "MOUSE_RIGHT",
+    "m2": "MOUSE_RIGHT",
+    "mouse2": "MOUSE_RIGHT",
+    "mouse_right": "MOUSE_RIGHT",
+    "middle_click": "MOUSE_MIDDLE",
+    "m3": "MOUSE_MIDDLE",
+    "mouse3": "MOUSE_MIDDLE",
+    "mouse_middle": "MOUSE_MIDDLE",
+    "back_click": "MOUSE_BACK",
+    "m4": "MOUSE_BACK",
+    "mouse4": "MOUSE_BACK",
+    "m_back": "MOUSE_BACK",
+    "mouse_back": "MOUSE_BACK",
+    "forward_click": "MOUSE_FORWARD",
+    "m5": "MOUSE_FORWARD",
+    "mouse5": "MOUSE_FORWARD",
+    "m_forward": "MOUSE_FORWARD",
+    "mouse_forward": "MOUSE_FORWARD",
 }
 
 SPECIAL_MAP_INV = {v: k for k, v in SPECIAL_MAP.items()}
@@ -390,9 +424,7 @@ _PHYSICAL_SIZE_RE = re.compile(r"Physical size:\s*(\d+)x(\d+)")
 
 
 class InvalidFieldError(ValueError):
-    """Raised when update()/create()/create_pipeline_from_zone()
-
-    receives a field name outside ALLOWED_FIELDS."""
+    """Raised when update()/create()/create_pipeline_from_zone() receives a field name outside ALLOWED_FIELDS."""
 
 
 class TouchPhase(Enum):
@@ -504,8 +536,9 @@ class MapperEventDispatcher:
         except Exception as exc:
             func_name = getattr(func, "__name__", repr(func))
             logger.debug(
-                "[!] Error registering callback %s for event {event_type}: %s",
+                "[!] Error registering callback %s for event %s: %s",
                 func_name,
+                event_type,
                 exc,
                 exc_info=True,
             )
@@ -1118,7 +1151,6 @@ def make_copy_name(name: str) -> str:
     match = matches[-1]
     number = int(match.group(1) or 1) + 1
 
-    # Added a space before the parenthesis
     return name[: match.start()] + f"- Copy ({number})" + name[match.end() :]
 
 
