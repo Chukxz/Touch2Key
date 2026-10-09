@@ -1,21 +1,23 @@
-from evdev import ecodes, AbsInfo
+from __future__ import annotations
+
+from evdev import AbsInfo, ecodes
 
 from modules.utils import (
-    LEFT_BUTTON_DOWN,
-    LEFT_BUTTON_UP,
-    MIDDLE_BUTTON_DOWN,
-    MIDDLE_BUTTON_UP,
-    RIGHT_BUTTON_DOWN,
-    RIGHT_BUTTON_UP,
     BUTTON_4_DOWN,
     BUTTON_4_UP,
     BUTTON_5_DOWN,
     BUTTON_5_UP,
-    M_LEFT,
-    M_RIGHT,
-    M_MIDDLE,
-    M_FORWARD,
+    LEFT_BUTTON_DOWN,
+    LEFT_BUTTON_UP,
     M_BACK,
+    M_FORWARD,
+    M_LEFT,
+    M_MIDDLE,
+    M_RIGHT,
+    MIDDLE_BUTTON_DOWN,
+    MIDDLE_BUTTON_UP,
+    RIGHT_BUTTON_DOWN,
+    RIGHT_BUTTON_UP,
 )
 
 # Maps Windows/DOS Scancodes to Linux evdev ecodes
@@ -130,7 +132,9 @@ LINUX_KEY_MAP = {
 
 LINUX_KEY_MAP_INV = {v: k for k, v in LINUX_KEY_MAP.items()}
 
-KEYBOARD_CAP = cap = {ecodes.EV_KEY: list(range(1, 256))}
+KEYBOARD_CAP = {
+    ecodes.EV_KEY: sorted(set(range(1, 256)) | set(LINUX_KEY_MAP.values()))
+}
 
 MOUSE_CAP = {
     ecodes.EV_KEY: [
