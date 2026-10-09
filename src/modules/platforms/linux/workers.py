@@ -8,6 +8,10 @@ from time import perf_counter_ns as _perf_counter_ns, sleep as _sleep
 from typing import TYPE_CHECKING
 
 from modules.utils import (
+    BUTTON_4_DOWN,
+    BUTTON_4_UP,
+    BUTTON_5_DOWN,
+    BUTTON_5_UP,
     BUTTON_PING,
     CONSTANT_DWELL,
     DOWN_TUPLE,
@@ -15,18 +19,12 @@ from modules.utils import (
     KEY_PING,
     LEFT_BUTTON_DOWN,
     LEFT_BUTTON_UP,
-    MIDDLE_BUTTON_DOWN,
-    MIDDLE_BUTTON_UP,
-    RIGHT_BUTTON_DOWN,
-    RIGHT_BUTTON_UP,
-    BUTTON_4_DOWN,
-    BUTTON_4_UP,
-    BUTTON_5_DOWN,
-    BUTTON_5_UP,
     MAX_BUTTON_DWELL,
     MAX_COALESCE,
     MAX_KEY_DWELL,
     MAX_MOUSE_DWELL,
+    MIDDLE_BUTTON_DOWN,
+    MIDDLE_BUTTON_UP,
     MIN_BUTTON_DWELL,
     MIN_KEY_DWELL,
     MIN_MOUSE_DWELL,
@@ -34,13 +32,14 @@ from modules.utils import (
     PACK_BUTTON_STRUCT,
     PACK_KEY_STRUCT,
     PACK_REL_STRUCT,
-    PACK_WHEEL_STRUCT,
     PACK_TYPEMATIC_STRUCT,
+    PACK_WHEEL_STRUCT,
+    RIGHT_BUTTON_DOWN,
+    RIGHT_BUTTON_UP,
     TASK_ABS,
     TASK_REL,
     TASK_WHEEL,
 )
-
 from .ecodes_map import BTN_MAP, KEYBOARD_CAP, LINUX_KEY_MAP, MOUSE_CAP
 
 if TYPE_CHECKING:
@@ -48,12 +47,12 @@ if TYPE_CHECKING:
     from multiprocessing.queues import Queue
 
 
-def _release_all_keys(log_queue: Queue, ui_device, ecodes, keys_set, reason=""):
+def _release_all_keys(log_queue: Queue, ui_device, ecodes, keys_set: set[int], reason=""):
     log_queue.put(f"{reason}.")
     if keys_set:
         log_queue.put(f"Releasing {len(keys_set)} keys.")
         for linux_code in list(keys_set):
-            ui_device.write(ecodes.EV_KEY, linux_code, 0)
+            ui_device.write(ecodes.EV_KEY, int(linux_code), 0)
         ui_device.syn()
         keys_set.clear()
 
@@ -62,17 +61,17 @@ def _release_all_buttons(
     log_queue: Queue,
     ui_device,
     ecodes,
-    left_down,
-    right_down,
-    middle_down,
-    btn4_down,
-    btn5_down,
+    left_down: bool,
+    right_down: bool,
+    middle_down: bool,
+    btn4_down: bool,
+    btn5_down: bool,
     reason="",
 ):
     log_queue.put(f"{reason}.")
-    buttons_set_sum = sum([left_down, right_down, middle_down, btn4_down, btn5_down])
-    if buttons_set_sum > 0:
-        log_queue.put(f"Releasing {buttons_set_sum} buttons.")
+    buttons_count = sum([left_down, right_down, middle_down, btn4_down, btn5_down])
+    if buttons_count > 0:
+        log_queue.put(f"Releasing {buttons_count} buttons.")
         if left_down:
             ui_device.write(ecodes.EV_KEY, ecodes.BTN_LEFT, 0)
         if right_down:
@@ -91,10 +90,9 @@ def keyboard_worker(k_pipe_read: Connection, log_queue: Queue):
     from evdev import UInput, ecodes
 
     ui_device = UInput(KEYBOARD_CAP, name="Touch2Key-Keyboard")
-    pressed_keys = set()
+    pressed_keys: set[int] = set()
     state = {"running": True}
 
-    # Typematic state: initialized empty and populated dynamically via KEY_CONFIG
     typematic_cfg = {
         "enabled": True,
         "delay_ns": 250_000_000,
@@ -127,7 +125,7 @@ def keyboard_worker(k_pipe_read: Connection, log_queue: Queue):
                                 repeat_key = linux_code
 
                             repeat_start_time = _perf_counter_ns()
-                            ui_device.write(ecodes.EV_KEY, linux_code, 1)
+                            ui_device.write(ecodes.EV_KEY, int(linux_code), 1)
                             ui_device.syn()
                             _sleep(_uniform(MIN_KEY_DWELL, MAX_KEY_DWELL))
 
@@ -137,7 +135,7 @@ def keyboard_worker(k_pipe_read: Connection, log_queue: Queue):
                             if repeat_key == linux_code:
                                 repeat_key = None
 
-                            ui_device.write(ecodes.EV_KEY, linux_code, 0)
+                            ui_device.write(ecodes.EV_KEY, int(linux_code), 0)
                             ui_device.syn()
                             _sleep(CONSTANT_DWELL)
 
@@ -150,7 +148,7 @@ def keyboard_worker(k_pipe_read: Connection, log_queue: Queue):
                     current_time = _perf_counter_ns()
                     if (current_time - repeat_start_time) >= typematic_cfg["delay_ns"]:
                         try:
-                            ui_device.write(ecodes.EV_KEY, repeat_key, 1)
+                            ui_device.write(ecodes.EV_KEY, int(repeat_key), 1)
                             ui_device.syn()
                         except Exception:
                             pass
@@ -258,10 +256,11 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Q
                     elif data == BUTTON_5_UP:
                         btn5_down = False
 
-                    btn_code, btn_val = BTN_MAP[data]
-                    with send_lock:
-                        ui_device.write(ecodes.EV_KEY, btn_code, btn_val)
-                        ui_device.syn()
+                    if data in BTN_MAP:
+                        btn_code, btn_val = BTN_MAP[data]
+                        with send_lock:
+                            ui_device.write(ecodes.EV_KEY, btn_code, btn_val)
+                            ui_device.syn()
 
                     if data in DOWN_TUPLE:
                         _sleep(_uniform(MIN_BUTTON_DWELL, MAX_BUTTON_DWELL))
@@ -294,8 +293,10 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Q
     )
     button_thread.start()
 
-    acc_dx, acc_dy = 0.0, 0.0
-    acc_dw_x, acc_dw_y = 0.0, 0.0
+    acc_dx = 0
+    acc_dy = 0
+    acc_dw_x = 0
+    acc_dw_y = 0
     pending_task = None
 
     while state["running"]:
@@ -332,18 +333,19 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Q
 
                 if acc_dx != 0 or acc_dy != 0:
                     with send_lock:
-                        ui_device.write(ecodes.EV_REL, ecodes.REL_X, acc_dx)
-                        ui_device.write(ecodes.EV_REL, ecodes.REL_Y, acc_dy)
+                        ui_device.write(ecodes.EV_REL, ecodes.REL_X, int(acc_dx))
+                        ui_device.write(ecodes.EV_REL, ecodes.REL_Y, int(acc_dy))
                         ui_device.syn()
-                    acc_dx, acc_dy = 0.0, 0.0
+                    acc_dx = 0
+                    acc_dy = 0
 
                 _sleep(_uniform(MIN_MOUSE_DWELL, MAX_MOUSE_DWELL))
 
             elif task_id == TASK_ABS:
                 _, x, y = PACK_ABS_STRUCT.unpack(payload)
                 with send_lock:
-                    ui_device.write(ecodes.EV_ABS, ecodes.ABS_X, x)
-                    ui_device.write(ecodes.EV_ABS, ecodes.ABS_Y, y)
+                    ui_device.write(ecodes.EV_ABS, ecodes.ABS_X, int(x))
+                    ui_device.write(ecodes.EV_ABS, ecodes.ABS_Y, int(y))
                     ui_device.syn()
                 _sleep(CONSTANT_DWELL)
 
@@ -368,11 +370,12 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Q
 
                 with send_lock:
                     if acc_dw_y != 0:
-                        ui_device.write(ecodes.EV_REL, ecodes.REL_WHEEL, acc_dw_y)
+                        ui_device.write(ecodes.EV_REL, ecodes.REL_WHEEL, int(acc_dw_y))
                     if acc_dw_x != 0:
-                        ui_device.write(ecodes.EV_REL, ecodes.REL_HWHEEL, acc_dw_x)
+                        ui_device.write(ecodes.EV_REL, ecodes.REL_HWHEEL, int(acc_dw_x))
                     ui_device.syn()
-                acc_dw_x, acc_dw_y = 0.0, 0.0
+                acc_dw_x = 0
+                acc_dw_y = 0
 
                 _sleep(CONSTANT_DWELL)
 
