@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
@@ -139,7 +139,7 @@ class LayoutStudioPage(QWidget):
         self._setup_center_canvas()
         self._setup_right_inspector()
 
-        self.splitter.setSizes([250, 600, 300])
+        self.splitter.setSizes([260, 600, 300])
         self._current_inspected_uid: int | None = None
 
         self._wire_signals()
@@ -153,7 +153,6 @@ class LayoutStudioPage(QWidget):
         profiles_group = QGroupBox("Profiles")
         profiles_layout = QVBoxLayout(profiles_group)
 
-        # Sort Mode Selector
         sort_row = QHBoxLayout()
         sort_row.addWidget(QLabel("Sort:"))
         self.sort_combo = QComboBox()
@@ -163,7 +162,6 @@ class LayoutStudioPage(QWidget):
         sort_row.addWidget(self.sort_combo, stretch=1)
         profiles_layout.addLayout(sort_row)
 
-        # Real-time Search Input
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Filter profiles... (Ctrl+F)")
         self.search_input.setClearButtonEnabled(True)
@@ -475,22 +473,43 @@ class LayoutStudioPage(QWidget):
             return "Recently Modified"
 
     def _filter_profiles(self, text: str | None = None) -> None:
-        """Filters profile list in-place and auto-selects the first matching visible result."""
+        """Filters profile list in-place, preserving active selection or defaulting to active layout."""
         query = (self.search_input.text() if text is None else text).strip().lower()
 
         first_visible_item: QListWidgetItem | None = None
+        active_layout_item: QListWidgetItem | None = None
+        current_item = self.profile_list.currentItem()
+        current_still_visible = False
+
+        active_layout = store.get_active_layout()
+        active_id = active_layout.id if active_layout else None
 
         for index in range(self.profile_list.count()):
             item = self.profile_list.item(index)
             raw_name = item.data(Qt.ItemDataRole.UserRole + 1) or item.text()
+            item_layout_id = item.data(Qt.ItemDataRole.UserRole)
             matches = query in raw_name.lower() or query in item.text().lower()
 
             item.setHidden(not matches)
 
-            if matches and first_visible_item is None:
-                first_visible_item = item
+            if matches:
+                if first_visible_item is None:
+                    first_visible_item = item
+                if item_layout_id == active_id:
+                    active_layout_item = item
+                if current_item is not None and item == current_item:
+                    current_still_visible = True
 
-        if first_visible_item is not None:
+        if current_still_visible:
+            # Retain existing valid user selection
+            self._on_selection_changed()
+        elif bool(query) and first_visible_item is not None:
+            # When actively searching, jump to top matching candidate
+            self.profile_list.setCurrentItem(first_visible_item)
+        elif active_layout_item is not None:
+            # Default to the layout matching the active canvas
+            self.profile_list.setCurrentItem(active_layout_item)
+        elif first_visible_item is not None:
             self.profile_list.setCurrentItem(first_visible_item)
         else:
             self.profile_list.clearSelection()
@@ -1170,6 +1189,7 @@ class LayoutStudioPage(QWidget):
         if self._current_inspected_uid is None:
             return
         settings = store.settings.get()
+        self.insp_ignore_app_settings.setChecked(False)
         self.insp_sens_x.setValue(settings.sensitivity_x)
         self.insp_sens_y.setValue(settings.sensitivity_y)
         self.insp_deadzone.setValue(settings.deadzone)
