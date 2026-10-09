@@ -38,6 +38,8 @@ def export_layout_json(layout_id: int, target_path: Optional[Path] = None) -> Pa
                 "val4": zone.y2 or 0.0,
                 "pointer": bool(zone.pointer),
                 "priority": zone.priority,
+                "ignore_app_settings": bool(zone.ignore_app_settings),
+                "pipeline_json": zone.pipeline_json,
             }
         )
 
@@ -86,9 +88,13 @@ def export_settings_toml(
         system.add("json_path", str(linked_json_path.resolve()))
     else:
         system.add("json_path", "")
-        
+
     system.add("double_tap_enabled", bool(s.double_tap_enabled))
     system.add("bezel_toggle_enabled", bool(s.bezel_toggle_enabled))
+    system.add(
+        "profile_sort_order",
+        str(getattr(s, "profile_sort_order", "Recently Modified")),
+    )
     doc.add("system", system)
 
     # Performance Section
@@ -122,7 +128,9 @@ def export_settings_toml(
     typematic.add("enabled", bool(s.typematic_enabled))
     typematic.add("delay_ms", float(s.typematic_delay_ms))
     typematic.add("rate_hz", float(s.typematic_rate_hz))
-    typematic.add("exclude_keys", s.typematic_excluded_keys or "w,a,s,d,shift,ctrl,alt")
+    typematic.add(
+        "exclude_keys", s.typematic_excluded_keys or "w,a,s,d,shift,ctrl,alt"
+    )
     doc.add("typematic", typematic)
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -156,7 +164,7 @@ def export_bundle(
     return toml_file, json_file
 
 
-def import_any(file_or_dir_path: Path) -> bool:
+def import_any(file_or_dir_path: Path | str) -> bool:
     """Universal importer supporting .json layout, .toml config, or bundled profile directories."""
     path = Path(file_or_dir_path)
     if not path.exists():
@@ -164,12 +172,12 @@ def import_any(file_or_dir_path: Path) -> bool:
         return False
 
     if path.is_dir():
-        toml_files = list(path.glob("*.toml"))
+        toml_files = sorted(path.glob("*.toml"))
         if toml_files:
             migrate_all(toml_files[0])
             logger.info("Imported profile bundle from directory: %s", path)
             return True
-        json_files = list(path.glob("*.json"))
+        json_files = sorted(path.glob("*.json"))
         if json_files:
             return migrate_json_layout(json_files[0], set_active=True) is not None
         return False
