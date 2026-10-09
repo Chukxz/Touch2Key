@@ -80,10 +80,7 @@ def run(parent=None) -> bool:
         help="Skip system reboot prompt (Windows only, safely ignored on Linux)",
     )
 
-    if is_gui:
-        args, _ = parser.parse_known_args()
-    else:
-        args = parser.parse_args()
+    args = parser.parse_args()
 
     # If --yes is passed, force interactive to False so scripts don't block
     interactive_mode = not is_gui and not args.yes
