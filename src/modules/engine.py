@@ -1,46 +1,52 @@
 from __future__ import annotations
 
+import logging
+import multiprocessing
 import os
 import sys
-import multiprocessing
 import threading
-import logging
 import time
 from typing import TYPE_CHECKING
 
+from modules import (
+    BezelMapper,
+    BridgeOutputSink,
+    KeyMapper,
+    LayoutLoader,
+    Mapper,
+    MouseMapper,
+    Pipeline,
+    TouchReader,
+    TwoFingerTapTracker,
+    WASDMapper,
+)
+from modules.cli.key_capture import capture_keys, capture_performance_settings
 from modules.database import store
+from modules.gui.overlays import virtual_keyboard_worker
 from modules.log_manager import AppLogManager
 from modules.platforms import get_platform
+from modules.scripts.list_windows import select_window
 from modules.utils import (
+    DEFAULT_ADB_RATE_CAP,
+    DEFAULT_PPS,
+    IPC_CMD_START,
+    IpcMapperEventDispatcher,
     MapperEvent,
     MapperEventDispatcher,
     TouchEvent,
     TouchPhase,
-    IpcMapperEventDispatcher,
-    DEFAULT_ADB_RATE_CAP,
-    DEFAULT_PPS,
-    IPC_CMD_START,
     unpack_ipc_start_cmd,
 )
 
-from modules import (
-    LayoutLoader,
-    TouchReader,
-    Mapper,
-    BezelMapper,
-    MouseMapper,
-    KeyMapper,
-    WASDMapper,
-    Pipeline,
-    TwoFingerTapTracker,
-    BridgeOutputSink,
-)
-
-from modules.scripts.list_windows import select_window
-from modules.cli.key_capture import capture_keys, capture_performance_settings
-from modules.gui.overlays import virtual_keyboard_worker
-
 logger = logging.getLogger("modules.engine")
+
+# ==========================================
+# Performance Threshold Bounds
+# ==========================================
+RATE_CAP_MIN: float = 30.0
+RATE_CAP_MAX: float = 1000.0
+PPS_MIN: float = 10.0
+PPS_MAX: float = 500.0
 
 
 if TYPE_CHECKING:
@@ -89,29 +95,34 @@ class Engine:
         self.double_tap_enabled = True
         self.bezel_toggle_enabled = True
 
+        # Dynamic performance parameters
+        self.rate_cap: float = RATE_CAP_MIN
+        self.pps: float = PPS_MIN
+
         # Debounce tracking for hotkeys
         self._last_hotkey_time = 0.0
-        self._hotkey_cooldown = 0.4
+        self._hotkey_cooldown = 0.35
 
-        # Dynamic launch context logging & global hotkey binding
+        # Terminal-specific global hotkey bindings
         if not self.headless:
             try:
                 import keyboard
 
-                # Capture the current terminal/console window handle upon startup
                 self._terminal_window_handle = (
                     self.window_manager.get_foreground_window()
                 )
 
                 def _guard_hotkey(callback):
-                    """Wraps hotkey callbacks to ensure they only fire if the terminal window is focused."""
+                    """Restricts hotkey triggers exclusively to active terminal focus."""
                     try:
                         current_fg = self.window_manager.get_foreground_window()
                         if current_fg == self._terminal_window_handle:
                             callback()
                     except Exception as exc:
                         logger.debug(
-                            "Failed to verify foreground window for hotkey: %s", exc, exc_info=True
+                            "Foreground verification failed for hotkey: %s",
+                            exc,
+                            exc_info=True,
                         )
 
                 keyboard.add_hotkey("esc", lambda: _guard_hotkey(self._shutdown))
@@ -125,14 +136,38 @@ class Engine:
                     "f7", lambda: _guard_hotkey(self._reload_config_cli)
                 )
 
+                # Arrow key hotkeys for dynamic performance threshold tuning
+                keyboard.add_hotkey(
+                    "left",
+                    lambda: _guard_hotkey(lambda: self._adjust_rate_cap_cli(-10.0)),
+                    suppress=False,
+                )
+                keyboard.add_hotkey(
+                    "right",
+                    lambda: _guard_hotkey(lambda: self._adjust_rate_cap_cli(10.0)),
+                    suppress=False,
+                )
+                keyboard.add_hotkey(
+                    "down",
+                    lambda: _guard_hotkey(lambda: self._adjust_pps_cli(-5.0)),
+                    suppress=False,
+                )
+                keyboard.add_hotkey(
+                    "up",
+                    lambda: _guard_hotkey(lambda: self._adjust_pps_cli(5.0)),
+                    suppress=False,
+                )
+
                 logger.info(
-                    "[CLI Interactive Launch] Active Global Hotkeys (Terminal-Focused): [Esc] Exit Engine | [F5] Toggle Handedness | [F6] Reload Layout | [F7] Reload Config"
+                    "[CLI Interactive Launch] Active Hotkeys: [Esc] Exit | [F5] Handedness | "
+                    "[F6] Reload Layout | [F7] Reload Config | [Left/Right] Rate Cap (-/+ 10) | "
+                    "[Down/Up] PPS (-/+ 5)"
                 )
             except Exception as exc:
                 logger.debug("Failed to register CLI global hotkeys: %s", exc, exc_info=True)
         else:
             logger.info(
-                "[Headless / GUI Worker Launch] Engine running in background worker mode (terminal hotkeys bypassed)."
+                "[Headless / GUI Worker Launch] Background engine active (terminal hotkeys bypassed)."
             )
 
     def _check_debounce(self) -> bool:
@@ -143,6 +178,47 @@ class Engine:
         self._last_hotkey_time = now
         return True
 
+    def _adjust_rate_cap_cli(self, delta: float) -> None:
+        """Dynamically tunes the ADB polling rate cap, enforcing bounds and committing to SQLite."""
+        if not self._check_debounce():
+            return
+
+        new_rate = max(RATE_CAP_MIN, min(RATE_CAP_MAX, self.rate_cap + delta))
+        if new_rate == self.rate_cap:
+            return
+
+        self.rate_cap = new_rate
+        if self.touch_reader and hasattr(self.touch_reader, "rate_cap"):
+            self.touch_reader.rate_cap = new_rate
+
+        try:
+            store.settings.update(adb_rate_cap=new_rate)
+            logger.info("CLI Hotkey: Rate Cap set to %.1f Hz (DB synced)", new_rate)
+        except Exception as exc:
+            logger.error("Failed to commit rate cap update to DB: %s", exc)
+
+    def _adjust_pps_cli(self, delta: float) -> None:
+        """Dynamically tunes the PPS alert threshold, enforcing bounds and committing to SQLite."""
+        if not self._check_debounce():
+            return
+
+        new_pps = max(PPS_MIN, min(PPS_MAX, self.pps + delta))
+        if new_pps == self.pps:
+            return
+
+        self.pps = new_pps
+        if self.mapper:
+            if hasattr(self.mapper, "pps_threshold"):
+                self.mapper.pps_threshold = new_pps
+            elif hasattr(self.mapper, "pps"):
+                self.mapper.pps = new_pps
+
+        try:
+            store.settings.update(pps_alert_threshold=new_pps)
+            logger.info("CLI Hotkey: PPS Alert Threshold set to %.1f PPS (DB synced)", new_pps)
+        except Exception as exc:
+            logger.error("Failed to commit PPS update to DB: %s", exc)
+
     def _toggle_handedness_cli(self) -> None:
         if not self._check_debounce():
             return
@@ -150,26 +226,20 @@ class Engine:
             s = store.settings.get()
             new_val = not s.left_handed
             store.settings.update(left_handed=new_val)
-            logger.info(
-                "CLI Hotkey Triggered [F5]: Left-Handed mode set to %s", new_val
-            )
-            self.mapper_event_dispatcher.dispatch(
-                MapperEvent(action="ON_CONFIG_RELOAD")
-            )
+            logger.info("CLI Hotkey Triggered [F5]: Left-Handed mode set to %s", new_val)
+            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
         except Exception as exc:
             logger.error("Failed to toggle handedness via hotkey: %s", exc, exc_info=True)
 
     def _reload_layout_cli(self) -> None:
         if not self._check_debounce():
             return
-
         self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
         logger.info("CLI Hotkey Triggered [F6]: Layout reload event dispatched.")
 
     def _reload_config_cli(self) -> None:
         if not self._check_debounce():
             return
-
         self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
         logger.info("CLI Hotkey Triggered [F7]: Configuration reload event dispatched.")
 
@@ -242,13 +312,56 @@ class Engine:
             self.two_finger_tap_tracker.reset()
 
     def _on_layout_reload(self) -> None:
-        self._tiers = self._build_pipeline_tiers()
+        logger.info("Executing layout reload across loader and pipelines...")
+        try:
+            if self.layout_loader and hasattr(self.layout_loader, "reload"):
+                self.layout_loader.reload()
+            if self.mapper and hasattr(self.mapper, "reload_layout"):
+                self.mapper.reload_layout()
+            if self.key_mapper and hasattr(self.key_mapper, "rebuild_pipelines"):
+                self.key_mapper.rebuild_pipelines()
+            if self.bezel_mapper and hasattr(self.bezel_mapper, "rebuild_pipelines"):
+                self.bezel_mapper.rebuild_pipelines()
+            if self.wasd_mapper and hasattr(self.wasd_mapper, "rebuild_pipeline"):
+                self.wasd_mapper.rebuild_pipeline()
+            if self.mouse_mapper and hasattr(self.mouse_mapper, "rebuild_pipeline"):
+                self.mouse_mapper.rebuild_pipeline()
+
+            self._tiers = self._build_pipeline_tiers()
+            logger.info("Layout reload completed successfully.")
+        except Exception as exc:
+            logger.error("Error during layout reload execution: %s", exc, exc_info=True)
 
     def _on_config_reload(self) -> None:
         settings = store.settings.get()
         self.double_tap_enabled = settings.double_tap_enabled
         self.bezel_toggle_enabled = settings.bezel_toggle_enabled
+
+        # Update and clamp rate cap
+        self.rate_cap = max(
+            RATE_CAP_MIN,
+            min(RATE_CAP_MAX, float(settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP)),
+        )
+        if self.touch_reader and hasattr(self.touch_reader, "rate_cap"):
+            self.touch_reader.rate_cap = self.rate_cap
+
+        # Update and clamp PPS threshold
+        self.pps = max(
+            PPS_MIN,
+            min(PPS_MAX, float(settings.pps_alert_threshold or DEFAULT_PPS)),
+        )
+        if self.mapper:
+            if hasattr(self.mapper, "pps_threshold"):
+                self.mapper.pps_threshold = self.pps
+            elif hasattr(self.mapper, "pps"):
+                self.mapper.pps = self.pps
+
         self._tiers = self._build_pipeline_tiers()
+        logger.info(
+            "Engine config reloaded: Rate Cap=%.1f Hz, PPS Threshold=%.1f PPS",
+            self.rate_cap,
+            self.pps,
+        )
 
     def _build_pipeline_tiers(self) -> list[list[Pipeline]]:
         all_pipelines: list[Pipeline] = []
@@ -286,15 +399,16 @@ class Engine:
 
         return tiers
 
-    def _mouse_flush_loop(self, rate_cap: float) -> None:
-        """Dedicated background thread to flush aggregated mouse deltas at a fixed rate."""
-        sleep_interval = 1.0 / rate_cap
+    def _mouse_flush_loop(self) -> None:
+        """Dedicated background loop flushing accumulated mouse movements dynamically."""
         while not self._stop_event.is_set():
             if self.output_sink:
                 self.output_sink.flush_mouse_move()
                 if self.touch_reader and getattr(self.touch_reader, "active_touches", 1) == 0:
                     self.output_sink.reset_mouse_accumulators()
-            time.sleep(sleep_interval)
+
+            active_cap = max(RATE_CAP_MIN, self.rate_cap)
+            time.sleep(1.0 / active_cap)
 
     def _process_touch_event(self, touch_event: TouchEvent) -> None:
         if not (
@@ -344,7 +458,7 @@ class Engine:
                     self.mapper.bridge.left_click_up()
                 return
 
-        # --- Game Mode Pipeline Dispatch ---
+        # Game Mode Pipeline Dispatch
         claimed_existing = False
         for tier in tiers:
             for p in tier:
@@ -378,12 +492,19 @@ class Engine:
         k_device_handle: int = 0,
         m_device_handle: int = 10,
     ) -> None:
-
         settings = store.settings.get()
         toggle_key = toggle_key or settings.toggle_key
         sprint_key = sprint_key or settings.sprint_key
-        rate_cap = rate_cap or settings.adb_rate_cap
-        pps = pps or settings.pps_alert_threshold
+
+        # Strictly enforce bounds on dynamic runtime properties
+        self.rate_cap = max(
+            RATE_CAP_MIN,
+            min(RATE_CAP_MAX, float(rate_cap or settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP)),
+        )
+        self.pps = max(
+            PPS_MIN,
+            min(PPS_MAX, float(pps or settings.pps_alert_threshold or DEFAULT_PPS)),
+        )
 
         if window_id is None:
             logger.warning(
@@ -391,33 +512,32 @@ class Engine:
             )
 
         logger.info(
-            f"Headless: {self.headless}, Window ID: {window_id}, Rate Cap: {rate_cap}, PPS: {pps}, Toggle Key: {toggle_key}, Sprint Key: {sprint_key}"
+            f"Headless: {self.headless}, Window ID: {window_id}, Rate Cap: {self.rate_cap}, "
+            f"PPS: {self.pps}, Toggle Key: {toggle_key}, Sprint Key: {sprint_key}"
         )
         logger.info(
-            f"Typematic Enabled: {settings.typematic_enabled}, Typematic Delay (ms): {settings.typematic_delay_ms}, Typematic Rate (Hz): {settings.typematic_rate_hz}, Typematic Excluded Keys: {settings.typematic_excluded_keys}"
+            f"Typematic Enabled: {settings.typematic_enabled}, Delay (ms): {settings.typematic_delay_ms}, "
+            f"Rate (Hz): {settings.typematic_rate_hz}, Excluded: {settings.typematic_excluded_keys}"
         )
         logger.info(
-            f"Keyboard Device Handle: {k_device_handle}, Mouse Device Handle: {m_device_handle}"
+            f"Keyboard Handle: {k_device_handle}, Mouse Handle: {m_device_handle}"
         )
 
         self.double_tap_enabled = settings.double_tap_enabled
         self.bezel_toggle_enabled = settings.bezel_toggle_enabled
-
-        print(f"Double-Tap enabled: {self.double_tap_enabled}")
-        print(f"Bezel toggling enabled: {self.bezel_toggle_enabled}")
 
         self.layout_loader = LayoutLoader(
             self.mapper_event_dispatcher,
             foreground_window=self.foreground_window,
             toggle_mode_callback=self.toggle_mode,
         )
-        self.touch_reader = TouchReader(self.mapper_event_dispatcher, rate_cap)
+        self.touch_reader = TouchReader(self.mapper_event_dispatcher, self.rate_cap)
 
         self.mapper = Mapper(
             self.layout_loader,
             self.touch_reader,
             self.bridge_class,
-            pps,
+            self.pps,
             {"toggle_key": toggle_key, "sprint_key": sprint_key},
             window_id,
             self,
@@ -459,16 +579,23 @@ class Engine:
 
         self.bridge_class.start_worker_processes(k_device_handle, m_device_handle)
 
-        # Start dedicated background mouse flush thread
+        # Start dynamic mouse accumulator flush thread
         threading.Thread(
             target=self._mouse_flush_loop,
-            args=(rate_cap,),
             daemon=True,
+            name="MouseFlushThread",
         ).start()
 
     def _start(self, config_str: str | None = None) -> None:
         if config_str is not None:
             config = parse_config_arg(config_str)
+            # Sync parameters to SQLite to persist across reloads
+            store.settings.update(
+                adb_rate_cap=config["rate_cap"],
+                pps_alert_threshold=config["pps"],
+                toggle_key=config["toggle_key"],
+                sprint_key=config["sprint_key"],
+            )
             self.start_headless(**config)
             if not self.headless:
                 self._stop_event.wait()
@@ -491,6 +618,14 @@ class Engine:
 
         if rate_cap is None or pps is None:
             return
+
+        # Commit interactive CLI selections to SQLite prior to engine initialization
+        store.settings.update(
+            adb_rate_cap=rate_cap,
+            pps_alert_threshold=pps,
+            toggle_key=toggle_key,
+            sprint_key=sprint_key,
+        )
 
         k_device_handle = None
         m_device_handle = None
@@ -536,7 +671,7 @@ class Engine:
         try:
             self.close_virtual_keyboard()
 
-            # Safely reset all active pipeline states on shutdown
+            # Reset pipelines to release virtual down-states
             if self.output_sink:
                 for tier in self._tiers:
                     for p in tier:
@@ -580,7 +715,7 @@ class Engine:
 
 def run_engine_process(conn: Connection, log_queue: Queue) -> None:
     AppLogManager.setup_logging(
-        is_gui=True, log_prefix="touch2key_engine", log_queue=log_queue
+        is_gui=True, log_prefix="engine", log_queue=log_queue
     )
     dispatcher = IpcMapperEventDispatcher(conn)
     engine: Engine | None = None
@@ -634,11 +769,8 @@ def run_engine_process(conn: Connection, log_queue: Queue) -> None:
 
 
 def parse_config_arg(config_str: str) -> dict:
+    """Parses a comma-separated config string, enforcing performance bounds."""
     settings = store.settings.get()
-
-    """Parses a comma-separated config string into engine parameters.
-    Format: window_id, toggle_key, sprint_key, rate_cap, pps, k_device_handle, m_device_handle
-    """
     parts = [p.strip() for p in config_str.split(",")]
 
     while len(parts) < 7:
@@ -655,15 +787,23 @@ def parse_config_arg(config_str: str) -> dict:
     window_id = _parse_val(parts[0], int, None)
     toggle_key = _parse_val(parts[1], str, settings.toggle_key or "")
     sprint_key = _parse_val(parts[2], str, settings.sprint_key or "")
-    rate_cap = _parse_val(
+
+    raw_rate = _parse_val(
         parts[3], float, settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP
     )
-    pps = _parse_val(parts[4], float, settings.pps_alert_threshold or DEFAULT_PPS)
+    rate_cap = max(RATE_CAP_MIN, min(RATE_CAP_MAX, raw_rate))
+
+    raw_pps = _parse_val(
+        parts[4], float, settings.pps_alert_threshold or DEFAULT_PPS
+    )
+    pps = max(PPS_MIN, min(PPS_MAX, raw_pps))
+
     k_device_handle = _parse_val(parts[5], int, 0)
     m_device_handle = _parse_val(parts[6], int, 10)
 
     logger.info(
-        "Parsed config: window_id=%s, toggle_key=%s, sprint_key=%s, rate_cap=%s, pps=%s, k_device_handle=%s, m_device_handle=%s",
+        "Parsed config: window_id=%s, toggle_key=%s, sprint_key=%s, "
+        "rate_cap=%.1f, pps=%.1f, k_device_handle=%s, m_device_handle=%s",
         window_id,
         toggle_key,
         sprint_key,
