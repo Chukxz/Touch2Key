@@ -1,7 +1,9 @@
-"""One-time importer from legacy/current TOML config and JSON layout files
+"""One-time and on-demand importer from TOML configs and JSON layout files
 
-into the SQLite database with full 5-stage pipeline synthesis.
+into SQLite with lossless pipeline preservation and 5-stage synthesis fallback.
 """
+
+from __future__ import annotations
 
 import json
 import logging
@@ -10,26 +12,22 @@ from typing import Any, Optional
 
 import tomlkit
 
+from modules.core.pipeline import PipelineConfig
 from modules.database import store
 from modules.utils import (
-    JSONS_FOLDER,
-    TOML_PATH,
-    CIRCLE,
-    RECTANGLE,
     BEZEL,
+    BEZEL_DP_THICKNESS,
+    CIRCLE,
+    JSONS_FOLDER,
     MOUSE_WHEEL_SIMULATOR_CODE,
-)
-
-from modules.core.pipeline import PipelineConfig
-
-from modules.core.bezel_validator import (
-    ensure_system_bezels,
+    RECTANGLE,
+    TOML_PATH,
 )
 
 logger = logging.getLogger("modules.database.legacy_migration")
 
 
-def _read_keys(doc: dict) -> tuple[Optional[str], Optional[str]]:
+def _read_keys(doc: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
     keys = doc.get("keys", {})
     toggle_key = keys.get("toggle_key")
     sprint_key = keys.get("sprint_key")
@@ -68,8 +66,8 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
 
     double_tap_enabled = system.get("double_tap_enabled", True)
     bezel_toggle_enabled = system.get("bezel_toggle_enabled", True)
+    sort_order = system.get("profile_sort_order", "Recently Modified")
 
-    # Read typematic values from [typematic] or fall back to legacy [keys] definitions
     typ_enabled = typematic_table.get(
         "enabled", keys_table.get("typematic_enabled", True)
     )
@@ -100,11 +98,12 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
         "typematic_enabled": bool(typ_enabled),
         "typematic_delay_ms": float(typ_delay),
         "typematic_rate_hz": float(typ_rate),
-        "typematic_exclude_keys": (
+        "typematic_excluded_keys": (
             str(typ_excludes) if typ_excludes is not None else None
         ),
         "double_tap_enabled": bool(double_tap_enabled),
         "bezel_toggle_enabled": bool(bezel_toggle_enabled),
+        "profile_sort_order": str(sort_order),
     }
 
     store.settings.update(**fields)
@@ -118,7 +117,7 @@ def migrate_json_layout(
     layout_name: str | None = None,
     set_active: bool = True,
 ) -> Optional[int]:
-    """Imports a JSON layout file into SQLite with synthesized 5-stage pipeline configs."""
+    """Imports a JSON layout file into SQLite with pipeline configuration validation."""
     path = Path(json_path)
     if not path.is_absolute() and not path.exists():
         path = JSONS_FOLDER / path
@@ -155,7 +154,6 @@ def migrate_json_layout(
         layout_id = existing.id
     else:
         layout = store.layouts.create(
-            auto_seed_bezels=False,  # We are importing zones, do not seed defaults
             name=target_name,
             width=int(metadata["width"]),
             height=int(metadata["height"]),
@@ -165,6 +163,14 @@ def migrate_json_layout(
             image_path=image_path,
         )
         layout_id = layout.id
+
+        has_explicit_bezels = any(
+            str(item.get("type", "")).upper() == BEZEL for item in content
+        )
+        if has_explicit_bezels:
+            store.zones.delete_all_for_layout(layout_id)
+
+        app_settings = store.settings.get()
         imported = 0
 
         for item in content:
@@ -183,61 +189,67 @@ def migrate_json_layout(
 
             priority = int(item.get("priority", 0))
             pointer = bool(item.get("pointer", False))
-            Pipeline_Config = PipelineConfig()
             zone_name = str(item.get("name", ""))
-            app_settings = store.settings.get()
+            ignore_app_settings = bool(item.get("ignore_app_settings", False))
 
-            Pipeline_Config.set_region_config(2, priority)
-            Pipeline_Config.set_origin_config(1)
-            Pipeline_Config.set_constraint_config(0)
-            Pipeline_Config.set_transform_config(1)
-            Pipeline_Config.set_semantic_config(0, pointer)
-
-            if zone_type == CIRCLE:
-                reg_idx = 1
+            existing_pipeline_json = item.get("pipeline_json")
+            if existing_pipeline_json and isinstance(existing_pipeline_json, str):
+                pipeline_json = existing_pipeline_json
+            else:
+                p_cfg = PipelineConfig()
+                reg_idx = 1 if zone_type == CIRCLE else 2
+                orig_idx = 1
+                const_idx = 0
+                trans_idx = 1
+                sem_idx = 0
 
                 if zone_name == MOUSE_WHEEL_SIMULATOR_CODE:
-                    Pipeline_Config.set_semantic_config(1)
-
-                    reg_idx = 1
-                    orig_idx = 0
-                    const_idx = 1
-
-                    if app_settings.floating_joystick:
-                        reg_idx = 2
-                        orig_idx = 1
-                        const_idx = 2
-
+                    sem_idx = 1
+                    trans_idx = 2
                     if app_settings.anchored_joystick:
-                        reg_idx = 2
                         orig_idx = 2
                         const_idx = 2
+                    elif app_settings.floating_joystick:
+                        orig_idx = 1
+                        const_idx = 2
+                    else:
+                        orig_idx = 0
+                        const_idx = 1
 
-                    Pipeline_Config.set_origin_config(orig_idx)
-                    Pipeline_Config.set_constraint_config(const_idx)
+                elif zone_type == BEZEL:
+                    orig_idx = 0
+                    const_idx = 0
+                    trans_idx = 0
+                    sem_idx = 3
 
-                Pipeline_Config.set_region_config(reg_idx)
-
-            elif zone_type == BEZEL:
-                Pipeline_Config.set_origin_config(0)
-                Pipeline_Config.set_transform_config(0)
-                Pipeline_Config.set_semantic_config(3)
+                p_cfg.set_region_config(reg_idx, BEZEL_DP_THICKNESS, priority)
+                p_cfg.set_origin_config(orig_idx)
+                p_cfg.set_constraint_config(const_idx)
+                p_cfg.set_transform_config(
+                    trans_idx,
+                    app_settings.sensitivity_x,
+                    app_settings.sensitivity_y,
+                    app_settings.deadzone * float(metadata.get("mouse_wheel_radius", 50.0)),
+                    app_settings.hysteresis,
+                )
+                p_cfg.set_semantic_config(sem_idx, pointer)
+                pipeline_json = p_cfg.get_pipeline_json_from_config()
 
             store.zones.create(
                 layout_id=layout_id,
                 scancode=str(scancode),
-                name=item.get("name", ""),
+                name=zone_name,
                 zone_type=zone_type,
-                cx=item.get("cx", None),
-                cy=item.get("cy", None),
-                r=item.get("val1", None) if zone_type == CIRCLE else None,
-                x1=item.get("val1", None),
-                y1=item.get("val2", None),
-                x2=item.get("val3", None),
-                y2=item.get("val4", None),
-                pipeline_json=Pipeline_Config.get_pipeline_json_from_config(),
+                cx=item.get("cx"),
+                cy=item.get("cy"),
+                r=item.get("val1") if zone_type == CIRCLE else None,
+                x1=item.get("val1"),
+                y1=item.get("val2"),
+                x2=item.get("val3"),
+                y2=item.get("val4"),
+                ignore_app_settings=ignore_app_settings,
+                pipeline_json=pipeline_json,
             )
-
             imported += 1
 
         logger.info(
@@ -248,7 +260,9 @@ def migrate_json_layout(
             len(content),
         )
 
-        ensure_system_bezels(layout_id, store.layouts, store.zones)
+        layout_record = store.layouts.get(layout_id)
+        if layout_record:
+            store.zones._ensure_system_bezels(layout_record)
 
     if set_active:
         store.settings.update(active_layout_id=layout_id)
@@ -257,7 +271,7 @@ def migrate_json_layout(
 
 
 def migrate_all(toml_path: Path | str = TOML_PATH) -> None:
-    """Migrates settings and resolves active layout from the TOML."""
+    """Migrates settings and resolves active layout from the TOML document."""
     path = Path(toml_path)
     json_path: Optional[str] = None
     image_path: str = ""
@@ -275,9 +289,27 @@ def migrate_all(toml_path: Path | str = TOML_PATH) -> None:
 
     migrate_toml_config(path)
 
+    resolved_json: Optional[Path] = None
     if json_path:
-        migrate_json_layout(json_path=json_path, image_path=image_path, set_active=True)
+        candidate = Path(json_path)
+        if candidate.is_file():
+            resolved_json = candidate
+        elif (path.parent / candidate.name).is_file():
+            resolved_json = path.parent / candidate.name
+        elif (JSONS_FOLDER / candidate.name).is_file():
+            resolved_json = JSONS_FOLDER / candidate.name
+
+    if not resolved_json and path.is_file():
+        local_jsons = sorted(path.parent.glob("*.json"))
+        if local_jsons:
+            resolved_json = local_jsons[0]
+
+    if resolved_json:
+        migrate_json_layout(
+            json_path=resolved_json, image_path=image_path, set_active=True
+        )
     else:
         logger.info(
-            "No json_path configured in TOML; completed settings migration only."
+            "No valid JSON layout found for TOML at %s; settings migration only.",
+            path,
         )
