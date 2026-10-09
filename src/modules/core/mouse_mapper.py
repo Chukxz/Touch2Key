@@ -8,17 +8,17 @@ from typing import TYPE_CHECKING
 from modules.core.pipeline import (
     AlwaysRegion,
     CircularRegion,
-    RectangularRegion,
     Point,
+    RectangularRegion,
 )
 from modules.core.pipeline_factory import MousePointer
-from modules.utils import scale_coord
 from modules.database import store
+from modules.utils import scale_coord
 
 if TYPE_CHECKING:
-    from .mapper import Mapper
     from modules.core.pipeline import Pipeline
     from modules.core.pipeline_output import BridgeOutputSink
+    from .mapper import Mapper
 
 logger = logging.getLogger("modules.core.mouse_mapper")
 
@@ -32,19 +32,19 @@ class MouseMapper:
         self.lock = threading.Lock()
         self.pipeline: Pipeline | None = None
 
-        self._build_pipeline_mouse()
+        self.rebuild_pipeline()
 
         self.mapper_event_dispatcher.register_callback(
-            "ON_CONFIG_RELOAD", self._build_pipeline_mouse
+            "ON_CONFIG_RELOAD", self.rebuild_pipeline
         )
         self.mapper_event_dispatcher.register_callback(
-            "ON_LAYOUT_RELOAD", self._build_pipeline_mouse
+            "ON_LAYOUT_RELOAD", self.rebuild_pipeline
         )
         self.mapper_event_dispatcher.register_callback(
             "ON_WORKER_RESPAWN", self._on_worker_respawn_mouse
         )
 
-    def _build_pipeline_mouse(self) -> None:
+    def rebuild_pipeline(self) -> None:
         settings = store.settings.get()
         layout = store.get_active_layout()
         if layout is None:
@@ -52,7 +52,8 @@ class MouseMapper:
                 "No active layout found in SQLite database. MouseMapper pipeline will be empty."
             )
             self.touch_up()
-            self.pipeline = None
+            with self.lock:
+                self.pipeline = None
             return
 
         dev_w = float(layout.width)
@@ -64,9 +65,6 @@ class MouseMapper:
         ratio_y = (pc_h / dev_h) if dev_h > 0 else 1.0
         sens_x = settings.sensitivity_x
         sens_y = settings.sensitivity_y
-
-        final_sens_x = sens_x * ratio_x
-        final_sens_y = sens_y * ratio_y
 
         custom_look_zone = None
         zone_priority = -100
@@ -95,8 +93,6 @@ class MouseMapper:
 
             sens_x = trans_sens_x if zone.ignore_app_settings else sens_x
             sens_y = trans_sens_y if zone.ignore_app_settings else sens_y
-            final_sens_x = sens_x * ratio_x
-            final_sens_y = sens_y * ratio_y
 
             if (
                 reg_type == "CIRCLE"
@@ -147,12 +143,8 @@ class MouseMapper:
                     "Left" if settings.left_handed else "Right",
                 )
 
-        logger.info(
-            f"[MOUSEMAPPER] - Final X Sensitivity: {final_sens_x:.4f} (Ratio: {ratio_x:.2f}, User: {sens_x})"
-        )
-        logger.info(
-            f"[MOUSEMAPPER] - Final Y Sensitivity: {final_sens_y:.4f} (Ratio: {ratio_y:.2f}, User: {sens_y})"
-        )
+        final_sens_x = sens_x * ratio_x
+        final_sens_y = sens_y * ratio_y
 
         pipeline = MousePointer(
             region=look_region,
@@ -167,10 +159,14 @@ class MouseMapper:
                 self.pipeline.reset(self.output_sink)
             self.pipeline = pipeline
 
+    _build_pipeline_mouse = rebuild_pipeline
+
     def touch_up(self) -> None:
         with self.lock:
             if self.pipeline is not None:
                 self.pipeline.reset(self.output_sink)
+
+    release_all = touch_up
 
     def _on_worker_respawn_mouse(self, worker_type: str) -> None:
         if worker_type == "mouse":
