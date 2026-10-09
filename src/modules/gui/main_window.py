@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import threading
 import logging
+import sys
+import subprocess
 import multiprocessing
 
 from PySide6.QtCore import Qt, QObject, QTimer, Signal
@@ -334,14 +336,61 @@ class MainWindow(QMainWindow):
         uninstall_action.triggered.connect(self._on_run_uninstall)
         toolbar.addAction(uninstall_action)
 
-    def _on_run_setup(self):
-        reply = QMessageBox.question(
-            self, "Driver Setup", "This will install or repair the necessary system drivers.\n\nYour OS will prompt you for Administrator permissions. Continue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+    def save_all_pages(self) -> bool:
+        """Aggregates and persists state from all GUI pages to the database."""
+        logger.info("Initiating global state save across all pages...")
+        try:
+            for title, page_widget in self.pages.items():
+                if hasattr(page_widget, "save_state"):
+                    if not page_widget.save_state():
+                        logger.warning("Save validation failed on page: %s", title)
+                        QMessageBox.warning(
+                            self, 
+                            "Save Warning", 
+                            f"Could not save changes on {title}. Please review inputs."
+                    )
+                        return False
+
+            logger.info("All GUI page states saved successfully to database.")
+            return True
+
+        except Exception as exc:
+            logger.exception("Global save operation encountered an error: %s", exc, exc_info=True)
+            QMessageBox.critical(
+                self, 
+                "Save Error", 
+                f"An unexpected error occurred while saving changes:\n\n{exc}"
         )
-        if reply == QMessageBox.StandardButton.Yes:
-            if self.engine_controller.is_running(): self.engine_controller.stop_engine()
-            run_setup()
+            return False
+
+
+    def _on_run_setup(self) -> None:
+        """Persists state, stops engine, and launches setup as an external process."""
+        if not self.save_all_pages():
+            return
+ 
+        reply = QMessageBox.question(
+            self, 
+            "Driver Setup", 
+            "This will install or repair necessary system drivers.\n\n"
+            "Your OS will prompt you for Administrator permissions. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+    )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        if self.engine_controller.is_running():
+            logger.info("Stopping engine prior to setup execution...")
+            self.engine_controller.shutdown()
+
+        logger.info("Spawning setup utility as an external process...")
+        try:
+            # Launch setup module cleanly using sys.executable
+            subprocess.Popen([sys.executable, "-m", "modules.scripts.setup"])
+        except Exception as exc:
+            logger.exception("Failed to spawn setup subprocess")
+            QMessageBox.critical(self, "Setup Error", f"Failed to launch setup utility:\n\n{exc}")
 
     def _on_check_adb(self):
         resolved_path = show_adb_path_run()
@@ -361,16 +410,36 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "Preflight Checks Passed", "All preflight checks passed successfully.")
             else:
                 QMessageBox.warning(self, "Pre-flight Checks Failed", "System checks did not pass")
+    
+    def _on_run_uninstall(self) -> None:
+        """Persists state, stops engine, and launches uninstaller as an external process."""
+        if not self.save_all_pages():
+            return
 
-    def _on_run_uninstall(self):
         reply = QMessageBox.warning(
-            self, "Uninstall Touch2Key", "This will remove the system drivers and completely close the application.\n\nYour OS will prompt you for Administrator permissions. Continue?",
+            self, 
+            "Uninstall Touch2Key", 
+            "This will remove system drivers and clean application data.\n\n"
+            "Your OS will prompt you for Administrator permissions. Continue?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            if self.engine_controller.is_running(): self.engine_controller.stop_engine()
-            uninstalled = run_uninstall()
-            if uninstalled: self.close()
+            QMessageBox.StandardButton.No
+    )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        if self.engine_controller.is_running():
+            logger.info("Stopping engine prior to uninstallation...")
+            self.engine_controller.shutdown()
+
+        logger.info("Spawning uninstaller as an external process...")
+        try:
+            # Launch uninstaller module via sys.executable
+            subprocess.Popen([sys.executable, "-m", "modules.scripts.uninstall"])
+            # Close the main GUI window since uninstallation is wiping binaries/data
+            self.close()
+    except Exception as exc:
+            logger.exception("Failed to spawn uninstaller subprocess")
+            QMessageBox.critical(self, "Uninstall Error", f"Failed to launch uninstaller:\n\n{exc}")
 
     def _consume_engine_logs(self) -> None:
         while not self._stop_log_thread.is_set():
