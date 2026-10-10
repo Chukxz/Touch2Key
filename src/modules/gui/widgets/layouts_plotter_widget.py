@@ -7,6 +7,7 @@ from pathlib import Path
 from PIL import Image
 
 from modules.platforms import get_platform, get_specific_mt_key
+from modules.database import store
 
 get_platform().SystemConfig().set_dpi_awareness()
 
@@ -26,13 +27,12 @@ from modules.utils import (
     get_dulled_hue_color,
     get_hue_modified_alpha_from_hsv,
     get_key_from_scancode,
-    get_scancode_and_bridge_key_from_key,
+    get_scancode_from_key,
     get_vibrant_random_color,
     make_copy_name,
 )
 
 from modules.core.pipeline import PipelineConfig
-from modules.database import store, _scancode_matches
 
 if sys.platform == "win32":
     os.environ["QT_LOGGING_RULES"] = "qt.qpa.window=false"
@@ -568,7 +568,7 @@ class _DraggableCircle(_DraggableShape):
 
         if (
             self.plotter.saved_mouse_wheel
-            and current_shape["bridge_key"] == MOUSE_WHEEL_SIMULATOR_CODE
+            and current_shape["key_name"] == MOUSE_WHEEL_SIMULATOR_CODE
         ):
             self.plotter.mouse_wheel_cx = new_cx
             self.plotter.mouse_wheel_cy = new_cy
@@ -614,7 +614,7 @@ class _DraggableCircle(_DraggableShape):
 
         if (
             self.plotter.saved_sprint_distance
-            and current_shape["bridge_key"] == SPRINT_DISTANCE_CODE
+            and current_shape["key_name"] == SPRINT_DISTANCE_CODE
         ):
             actual_dist = self.plotter.euclidean_distance(
                 new_cx, new_cy, self.plotter.mouse_wheel_cx, self.plotter.mouse_wheel_cy
@@ -654,7 +654,7 @@ class _DraggableCircle(_DraggableShape):
 
         if (
             self.plotter.saved_mouse_wheel
-            and current_shape["bridge_key"] == MOUSE_WHEEL_SIMULATOR_CODE
+            and current_shape["key_name"] == MOUSE_WHEEL_SIMULATOR_CODE
         ):
             new_r = min(
                 new_r,
@@ -680,7 +680,7 @@ class _DraggableCircle(_DraggableShape):
 
         if (
             self.plotter.saved_sprint_distance
-            and current_shape["bridge_key"] == SPRINT_DISTANCE_CODE
+            and current_shape["key_name"] == SPRINT_DISTANCE_CODE
         ):
             new_r = min(new_r, self.plotter.mouse_wheel_radius)
 
@@ -1313,9 +1313,9 @@ class LayoutsPlotterWidget(QWidget):
 
         for zone in zones:
             if zone.zone_type == BEZEL:
-                if _scancode_matches(zone.scancode, TOP_BEZEL_ID):
+                if zone.scancode == TOP_BEZEL_ID:
                     self.top_bezel_id = zone.id
-                elif _scancode_matches(zone.scancode, BOTTOM_BEZEL_ID):
+                elif zone.scancode == BOTTOM_BEZEL_ID:
                     self.bottom_bezel_id = zone.id
                 continue
 
@@ -1324,7 +1324,6 @@ class LayoutsPlotterWidget(QWidget):
             if not key_name:
                 continue
 
-            _, bridge_key = get_scancode_and_bridge_key_from_key(key_name)
             self.mode = zone.zone_type
             cx = int(round((zone.cx or 0.0) * scale_x))
             cy = int(round((zone.cy or 0.0) * scale_y))
@@ -1349,7 +1348,7 @@ class LayoutsPlotterWidget(QWidget):
                 cy=cy,
                 r=r,
                 bb=bb,
-                bridge_key=bridge_key or zone.name,
+                key_name=key_name or zone.name,
                 hex_code=zone.scancode,
                 pointer=zone.pointer,
                 priority=zone.priority,
@@ -1625,12 +1624,12 @@ class LayoutsPlotterWidget(QWidget):
     def delete_entry(self, uid):
         if uid not in self.shapes:
             return
-        bkey = self.shapes[uid]["bridge_key"]
+        bkey = self.shapes[uid]["key_name"]
         if bkey == MOUSE_WHEEL_SIMULATOR_CODE:
             for sid in [
                 k
                 for k, v in self.shapes.items()
-                if v["bridge_key"] == SPRINT_DISTANCE_CODE
+                if v["key_name"] == SPRINT_DISTANCE_CODE
             ]:
                 self.delete_entry(sid)
             (
@@ -1717,8 +1716,8 @@ class LayoutsPlotterWidget(QWidget):
             )
 
     def calculate_shape(self, key_name):
-        hex_code, bridge_key = get_scancode_and_bridge_key_from_key(key_name)
-        if not hex_code or not bridge_key:
+        scancode = get_scancode_from_key(key_name)
+        if not scancode:
             print(f'[PLOTTER] - Key "{key_name}" not mapped.')
             return
 
@@ -1733,8 +1732,8 @@ class LayoutsPlotterWidget(QWidget):
             cy=cy,
             r=r,
             bb=bb,
-            bridge_key=bridge_key,
-            hex_code=hex_code,
+            key_name=key_name,
+            hex_code=hex(scancode),
             pointer=False,
             priority=0,
             pipeline_json="{}",
@@ -1748,7 +1747,7 @@ class LayoutsPlotterWidget(QWidget):
         cy,
         r,
         bb,
-        bridge_key,
+        key_name,
         hex_code,
         pointer=False,
         priority=0,
@@ -1758,7 +1757,7 @@ class LayoutsPlotterWidget(QWidget):
         if cx is None:
             return
         saved, entry_id = self.save_entry(
-            bridge_key,
+            key_name,
             hex_code,
             cx,
             cy,
@@ -1774,21 +1773,21 @@ class LayoutsPlotterWidget(QWidget):
 
         label = (
             "MOUSE_WHEEL"
-            if bridge_key == MOUSE_WHEEL_SIMULATOR_CODE
+            if key_name == MOUSE_WHEEL_SIMULATOR_CODE
             else (
                 "SPRINT_DISTANCE"
-                if bridge_key == SPRINT_DISTANCE_CODE
-                else bridge_key.split("E0_")[-1]
+                if key_name == SPRINT_DISTANCE_CODE
+                else key_name.split("E0_")[-1]
             )
         )
 
         if self.mode == CIRCLE and r:
             fc = (
                 DEFAULT_MOUSE_WHEEL_FACE_COLOR
-                if bridge_key == MOUSE_WHEEL_SIMULATOR_CODE
+                if key_name == MOUSE_WHEEL_SIMULATOR_CODE
                 else (
                     DEFAULT_SPRINT_DISTANCE_FACE_COLOR
-                    if bridge_key == SPRINT_DISTANCE_CODE
+                    if key_name == SPRINT_DISTANCE_CODE
                     else get_vibrant_random_color(DEFAULT_FACE_COLOR_ALPHA)
                 )
             )
@@ -1874,7 +1873,7 @@ class LayoutsPlotterWidget(QWidget):
         output = []
         for _, data in self.shapes.items():
             entry = {
-                "name": data["bridge_key"],
+                "name": data["key_name"],
                 "scancode": data["m_code"],
                 "type": data["type"],
                 "cx": data["cx"],
@@ -1903,7 +1902,7 @@ class LayoutsPlotterWidget(QWidget):
                 )
 
             if data.get("pipeline_json", "{}") == "{}":
-                bkey = data["bridge_key"]
+                bkey = data["key_name"]
                 p_cfg.set_origin_config(
                     idx=0 if bkey == MOUSE_WHEEL_SIMULATOR_CODE else 1
                 )
@@ -1994,7 +1993,7 @@ class LayoutsPlotterWidget(QWidget):
 
     def save_entry(
         self,
-        bridge_key,
+        key_name,
         hex_code,
         cx,
         cy,
@@ -2006,12 +2005,12 @@ class LayoutsPlotterWidget(QWidget):
         ignore_app_settings=False,
     ):
         uid, inc_count = self.count, True
-        if bridge_key == MOUSE_WHEEL_SIMULATOR_CODE:
+        if key_name == MOUSE_WHEEL_SIMULATOR_CODE:
             if self.mode == RECTANGLE:
                 return False, uid
             if self.saved_mouse_wheel:
                 for k, v in list(self.shapes.items()):
-                    if v["bridge_key"] == MOUSE_WHEEL_SIMULATOR_CODE:
+                    if v["key_name"] == MOUSE_WHEEL_SIMULATOR_CODE:
                         uid, inc_count = k, False
                         self.shapes.pop(k)
                         for d in (self.shapes_artists, self.labels_artists):
@@ -2032,12 +2031,12 @@ class LayoutsPlotterWidget(QWidget):
                 cy,
                 True,
             )
-        elif bridge_key == SPRINT_DISTANCE_CODE:
+        elif key_name == SPRINT_DISTANCE_CODE:
             if self.mode == RECTANGLE or not self.saved_mouse_wheel:
                 return False, uid
             if self.saved_sprint_distance:
                 for k, v in list(self.shapes.items()):
-                    if v["bridge_key"] == SPRINT_DISTANCE_CODE:
+                    if v["key_name"] == SPRINT_DISTANCE_CODE:
                         uid, inc_count = k, False
                         self.shapes.pop(k)
                         for d in (self.shapes_artists, self.labels_artists):
@@ -2059,7 +2058,7 @@ class LayoutsPlotterWidget(QWidget):
             )
 
         self.shapes[uid] = {
-            "bridge_key": bridge_key,
+            "key_name": key_name,
             "m_code": hex_code,
             "type": self.mode,
             "cx": cx,

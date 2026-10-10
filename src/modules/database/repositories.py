@@ -33,48 +33,27 @@ if TYPE_CHECKING:
 logger = logging.getLogger("modules.database.repository")
 
 # NATIVE REPOSITORY DEFAULT TEMPLATE
-_DEFAULT_BEZEL_PIPELINE_JSON = json.dumps({
-    "region": {
-        "idx": 2,
-        "mode": "RECTANGULAR",
-        "bezel_dp_thickness": BEZEL_DP_THICKNESS,
-        "priority": 100,
-    },
-    "origin": {"idx": 0, "mode": "FIXED"},
-    "constraint": {"idx": 0, "mode": "NONE"},
-    "transform": {
-        "idx": 0,
-        "mode": "IDENTITY",
-        "sensitivity_x": 1.0,
-        "sensitivity_y": 1.0,
-        "deadzone": 0.1,
-        "hysteresis": 5.0,
-    },
-    "semantic": {"idx": 3, "mode": "TOGGLE", "pointer": False},
-})
-
-
-def _scancode_matches(scancode_val: str | int, target_int: int) -> bool:
-    """Matches scancodes across integer values, hex strings, and decimal representations."""
-    if isinstance(scancode_val, int):
-        return scancode_val == target_int
-    if not isinstance(scancode_val, str):
-        return False
-
-    val_str = scancode_val.strip()
-    try:
-        if int(val_str, 16) == target_int:
-            return True
-    except (ValueError, TypeError):
-        pass
-
-    try:
-        if int(val_str, 10) == target_int:
-            return True
-    except (ValueError, TypeError):
-        pass
-
-    return False
+_DEFAULT_BEZEL_PIPELINE_JSON = json.dumps(
+    {
+        "region": {
+            "idx": 2,
+            "mode": "RECTANGULAR",
+            "bezel_dp_thickness": BEZEL_DP_THICKNESS,
+            "priority": 100,
+        },
+        "origin": {"idx": 0, "mode": "FIXED"},
+        "constraint": {"idx": 0, "mode": "NONE"},
+        "transform": {
+            "idx": 0,
+            "mode": "IDENTITY",
+            "sensitivity_x": 1.0,
+            "sensitivity_y": 1.0,
+            "deadzone": 0.1,
+            "hysteresis": 5.0,
+        },
+        "semantic": {"idx": 3, "mode": "TOGGLE", "pointer": False},
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,7 +119,7 @@ class Layout:
 class LayoutZone:
     id: int
     layout_id: int
-    scancode: str
+    scancode: int
     name: str
     zone_type: str
     cx: Optional[float]
@@ -295,9 +274,7 @@ class LayoutsRepository:
 
     def get_by_name(self, name: str) -> Optional[Layout]:
         conn = connection_manager.get_connection()
-        row = conn.execute(
-            "SELECT * FROM layouts WHERE name = ?;", (name,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM layouts WHERE name = ?;", (name,)).fetchone()
         return Layout.from_row(row) if row is not None else None
 
     def create(self, **fields: Any) -> Layout:
@@ -378,7 +355,7 @@ class LayoutsRepository:
             mouse_wheel_radius=source.mouse_wheel_radius,
             sprint_distance=source.sprint_distance,
             image_path=source.image_path,
-        )
+        ) 
 
         zones_repo = LayoutZonesRepository()
         for zone in zones_repo.list_for_layout(layout_id, auto_heal=False):
@@ -456,10 +433,14 @@ class LayoutZonesRepository:
 
         healed = False
         top_bezels = [
-            z for z in current_zones if _scancode_matches(z.scancode, TOP_BEZEL_ID) and z.zone_type == BEZEL
+            z
+            for z in current_zones
+            if z.scancode == TOP_BEZEL_ID and z.zone_type == BEZEL
         ]
         bottom_bezels = [
-            z for z in current_zones if _scancode_matches(z.scancode, BOTTOM_BEZEL_ID) and z.zone_type == BEZEL
+            z
+            for z in current_zones
+            if z.scancode == BOTTOM_BEZEL_ID and z.zone_type == BEZEL
         ]
 
         if top_bezels:
@@ -490,7 +471,7 @@ class LayoutZonesRepository:
 
         return self.create(
             layout_id=layout.id,
-            scancode=hex(scancode),
+            scancode=scancode,
             name=name,
             zone_type=BEZEL,
             cx=cx,

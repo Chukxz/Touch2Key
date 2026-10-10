@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS layouts (
 CREATE TABLE IF NOT EXISTS layout_zones (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     layout_id INTEGER NOT NULL REFERENCES layouts(id) ON DELETE CASCADE,
-    scancode TEXT NOT NULL,
+    scancode INTEGER NOT NULL,
     name TEXT NOT NULL DEFAULT '',
     zone_type TEXT NOT NULL CHECK (zone_type IN ('CIRCLE', 'RECTANGLE', 'BEZEL')),
     cx REAL, cy REAL, r REAL,

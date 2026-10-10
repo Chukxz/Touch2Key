@@ -141,11 +141,9 @@ class Mapper:
         if settings.pps_alert_threshold > 0:
             self.pps = float(settings.pps_alert_threshold)
 
-        if settings.toggle_key:
+        if settings.toggle_key is not None:
             self.emulator["toggle_key"] = settings.toggle_key
             scancode = get_scancode_from_key(settings.toggle_key)
-            if scancode is None:
-                scancode = SCANCODES.get(settings.toggle_key)
             self.toggle_key_scancode = scancode
         else:
             self.emulator["toggle_key"] = None
@@ -153,16 +151,10 @@ class Mapper:
 
     def rebind_target_window(
         self,
-        new_window_id: int | None = None,
-        new_window_title: str = "",
-        *,
         target_window_id: int | None = None,
         target_window_title: str = "",
-        **kwargs: Any,
     ) -> None:
-        wid = target_window_id if target_window_id is not None else new_window_id
-        if hasattr(wid, "target_window_id"):
-            wid = getattr(wid, "target_window_id")
+        wid = target_window_id
 
         with self.lock:
             if wid and self.window_manager.is_window_valid(wid):
@@ -173,9 +165,10 @@ class Mapper:
                 self.game_window_info = self._get_window_info(wid)
                 self.window_lost = False
                 logger.info(
-                    "Engine live-rebound to Window ID: %s (%s)",
+                    "Engine live-rebound to Window ID: %s (%s - %s)",
                     self.window_id,
                     self.game_window_class_name,
+                    target_window_title,
                 )
             else:
                 self.window_id = self.window_manager.get_foreground_window()
@@ -189,8 +182,9 @@ class Mapper:
                 )
                 self.window_lost = self.window_id is None
                 logger.warning(
-                    "Target window invalidated. Rebound to foreground HWND: %s",
+                    "Target window invalidated. Rebound to foreground HWND: %s (%s)",
                     self.window_id,
+                    self.game_window_class_name,
                 )
 
     def _get_window_info(self, window_id: int) -> dict:
@@ -371,8 +365,7 @@ class Mapper:
                     if is_toggle_mode:
                         self.engine_ref.toggle_mode()
                     elif is_toggle_vkb:
-                        if hasattr(self.engine_ref, "toggle_virtual_keyboard"):
-                            self.engine_ref.toggle_virtual_keyboard()
+                        self.engine_ref.toggle_virtual_keyboard()
                     elif is_mouse_left:
                         self.bridge.left_click_up()
                     elif is_mouse_middle:

@@ -18,7 +18,6 @@ from modules.platforms import get_specific_qt_key
 from modules.utils import (
     DEFAULT_ADB_RATE_CAP,
     DEFAULT_PPS,
-    get_scancode_and_bridge_key_from_key,
 )
 
 logger = logging.getLogger("modules.gui.dialogs")
@@ -150,7 +149,7 @@ class KeyCaptureDialog(QDialog):
         layout.addWidget(self.prompt_label)
 
         if default_key:
-            self.key_label = QLabel(f"Waiting for keypress (Default: {default_key})...")
+            self.key_label = QLabel(f"Waiting for keypress (Default: {default_key.upper()})...")
         else:
             self.key_label = QLabel("Waiting for keypress (Default: '')...")
         self.key_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -189,14 +188,13 @@ class KeyCaptureDialog(QDialog):
         if not self._listening:
             return
 
-        precise_key = get_specific_qt_key(event)
-        _, bridge_key = get_scancode_and_bridge_key_from_key(precise_key)
+        captured_key = get_specific_qt_key(event)
 
-        if bridge_key is None:
+        if captured_key is None:
             return
 
-        self.captured_key = bridge_key
-        self.key_label.setText(f"Captured: {bridge_key}")
+        self.captured_key = captured_key
+        self.key_label.setText(f"Captured: {captured_key.upper()}")
         self._listening = False
         self.retry_btn.setEnabled(True)
         self.confirm_btn.setEnabled(True)

@@ -28,7 +28,7 @@ def export_layout_json(layout_id: int, target_path: Optional[Path] = None) -> Pa
         content.append(
             {
                 "name": zone.name,
-                "scancode": zone.scancode,
+                "scancode": hex(zone.scancode),
                 "type": zone.zone_type,
                 "cx": zone.cx or 0.0,
                 "cy": zone.cy or 0.0,

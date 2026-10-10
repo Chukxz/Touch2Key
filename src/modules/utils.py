@@ -120,9 +120,6 @@ CIRCLE = "CIRCLE"
 RECTANGLE = "RECTANGLE"
 BEZEL = "BEZEL"
 
-TOGGLE_VKB = "TOGGLE_VKB"
-TOGGLE_MODE = "TOGGLE_MODE"
-
 # VIRTUAL KEYBOARD CONSTANTS
 MODIFIER_KEYS = "lshift,rshift,lctrl,rctrl,lalt,ralt"
 LOCK_KEYS = "caps_lock,num_lock,scroll_lock"
@@ -339,19 +336,19 @@ SCANCODES = {
     "e0_num_enter": 0xE01C,
     "e0_slash": 0xE035,
     # Internal Mouse Codes
-    "MOUSE_LEFT": M_LEFT,
-    "MOUSE_RIGHT": M_RIGHT,
-    "MOUSE_MIDDLE": M_MIDDLE,
-    "MOUSE_FORWARD": M_FORWARD,
-    "MOUSE_BACK": M_BACK,
+    "mouse_left": M_LEFT,
+    "mouse_right": M_RIGHT,
+    "mouse_middle": M_MIDDLE,
+    "mouse_forward": M_FORWARD,
+    "mouse_back": M_BACK,
 }
 
 SCANCODES_INV = {v: k for k, v in SCANCODES.items()}
 
 SPECIAL_MAP = {
-    "escape": "ESC",
-    "=": "EQUAL",
-    "-": "MINUS",
+    "escape": "esc",
+    "=": "equal",
+    "-": "minus",
     "[": "left_bracket",
     "]": "right_bracket",
     ";": "semicolon",
@@ -381,28 +378,23 @@ SPECIAL_MAP = {
     "insert": "e0_insert",
     "delete": "e0_delete",
     # Extended Mouse button aliases
-    "left_click": "MOUSE_LEFT",
-    "m1": "MOUSE_LEFT",
-    "mouse1": "MOUSE_LEFT",
-    "mouse_left": "MOUSE_LEFT",
-    "right_click": "MOUSE_RIGHT",
-    "m2": "MOUSE_RIGHT",
-    "mouse2": "MOUSE_RIGHT",
-    "mouse_right": "MOUSE_RIGHT",
-    "middle_click": "MOUSE_MIDDLE",
-    "m3": "MOUSE_MIDDLE",
-    "mouse3": "MOUSE_MIDDLE",
-    "mouse_middle": "MOUSE_MIDDLE",
-    "back_click": "MOUSE_BACK",
-    "m4": "MOUSE_BACK",
-    "mouse4": "MOUSE_BACK",
-    "m_back": "MOUSE_BACK",
-    "mouse_back": "MOUSE_BACK",
-    "forward_click": "MOUSE_FORWARD",
-    "m5": "MOUSE_FORWARD",
-    "mouse5": "MOUSE_FORWARD",
-    "m_forward": "MOUSE_FORWARD",
-    "mouse_forward": "MOUSE_FORWARD",
+    "left_click": "mouse_left",
+    "m1": "mouse_left",
+    "mouse1": "mouse_left",
+    "right_click": "mouse_right",
+    "m2": "mouse_right",
+    "mouse2": "mouse_right",
+    "middle_click": "mouse_middle",
+    "m3": "mouse_middle",
+    "mouse3": "mouse_middle",
+    "back_click": "mouse_back",
+    "m4": "mouse_back",
+    "mouse4": "mouse_back",
+    "m_back": "mouse_back",
+    "forward_click": "mouse_forward",
+    "m5": "mouse_forward",
+    "mouse5": "mouse_forward",
+    "m_forward": "mouse_forward",
 }
 
 SPECIAL_MAP_INV = {v: k for k, v in SPECIAL_MAP.items()}
@@ -1101,21 +1093,6 @@ def get_hue_modified_alpha_from_hsv(color):
     return h, 1.0 - a**2
 
 
-def get_scancode_and_bridge_key_from_key(key: str):
-    if not key:
-        return None, None
-    key_lower = key.lower()
-    mapped_key = key_lower
-    val = SCANCODES.get(mapped_key.upper())
-    if val is None:
-        mapped_key = SPECIAL_MAP.get(key_lower)
-        if mapped_key:
-            val = SCANCODES.get(mapped_key)
-    return hex(val) if val is not None else None, (
-        mapped_key if val is not None else None
-    )
-
-
 def get_scancode_from_key(key: str):
     if not key:
         return None
@@ -1128,13 +1105,8 @@ def get_scancode_from_key(key: str):
     return code
 
 
-def get_key_from_scancode(scancode: str | int):
-    try:
-        code_int = int(scancode, 16) if isinstance(scancode, str) else int(scancode)
-    except (TypeError, ValueError):
-        return None
-    key = SCANCODES_INV.get(code_int)
-    return SPECIAL_MAP_INV.get(key, key) if key else None
+def get_key_from_scancode(scancode: int):
+    return SCANCODES_INV.get(scancode)
 
 
 def dp_to_px(dp: float, dpi: int = BASELINE_DPI) -> int:
@@ -1210,3 +1182,53 @@ def prune_directory(
             oldest_file.unlink(missing_ok=True)
         except Exception:
             pass
+
+
+def bresenham(
+    x0: int,
+    y0: int,
+    x1: int,
+    y1: int,
+    width0: int = 1,
+    height0: int = 1,
+    width1: int | None = None,
+    height1: int | None = None,
+):
+    if width1 is None:
+        width1 = width0
+    if height1 is None:
+        height1 = height0
+
+    dx = abs(x1 - x0)
+    dy = abs(y1 - y0)
+
+    sx = 1 if x0 < x1 else -1
+    sy = 1 if y0 < y1 else -1
+
+    error = dx - dy
+    steps = max(dx, dy)
+    k = 0
+
+    while True:
+        if steps:
+            w = width0 + (width1 - width0) * k // steps
+            h = height0 + (height1 - height0) * k // steps
+        else:
+            w, h = width0, height0
+
+        yield x0 - w // 2, y0 - h // 2, w, h
+
+        if x0 == x1 and y0 == y1:
+            break
+
+        e2 = 2 * error
+
+        if e2 > -dy:
+            error -= dy
+            x0 += sx
+
+        if e2 < dx:
+            error += dx
+            y0 += sy
+
+        k += 1

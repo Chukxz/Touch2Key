@@ -108,7 +108,7 @@ class KeyMapper:
 
         new_pipelines = []
 
-        for scancode_raw, values in key_raw_zones:
+        for scancode, values in key_raw_zones:
             name = values.get("name", "")
             if name in self.ignored_keys:
                 continue
@@ -118,20 +118,7 @@ class KeyMapper:
             pointer = bool(values.get("pointer", False))
             priority = int(values.get("priority", 0))
             ignore_app_settings = bool(values.get("ignore_app_settings", False))
-
-            try:
-                scancode_int = (
-                    int(scancode_raw, 16)
-                    if isinstance(scancode_raw, str)
-                    else int(scancode_raw)
-                )
-            except (ValueError, TypeError):
-                scancode_int = None
-
-            is_mouse_btn = (
-                scancode_int in MOUSE_SCANCODES if scancode_int is not None else False
-            )
-            button_token = name if name else str(scancode_raw)
+            is_mouse_btn = scancode in MOUSE_SCANCODES
 
             sens_x = (
                 float(values.get("sensitivity_x", 1.0))
@@ -167,7 +154,7 @@ class KeyMapper:
                 continue
 
             pipeline = Button(
-                button=button_token,
+                button=scancode,
                 region=region,
                 pointer=pointer,
                 sensitivity_x=sens_x,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import logging
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
@@ -32,6 +33,8 @@ from modules.platforms import get_lock_states, check_single_instance
 
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection
+
+logger = logging.getLogger("modules.gui.overlays.virtual_keyboard")
 
 VKB_NAME = "Touch2Key_VKB"
 
@@ -403,7 +406,9 @@ class VirtualKeyboard(QWidget):
                     else:
                         key_code_hex = hex(linux_code)
 
-            print(f"[VirtualKeyboard] {key_name}: {action} | key_code: {key_code_hex}")
+            logger.info(
+                f"[VirtualKeyboard] {key_name}: {action} | key_code: {key_code_hex}"
+            )
             return
 
         try:
@@ -454,8 +459,8 @@ def virtual_keyboard_worker(conn: Connection):
 
 
 def main() -> None:
-    """Dedicated entry point for touch2key-vkb."""
-    AppLogManager.setup_logging(is_gui=True, log_prefix="touch2key_vkb")
+    """Dedicated entry point for touch2key-keyboard."""
+    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_keyboard")
     run()
 
 

@@ -10,8 +10,6 @@ from modules.database import store
 from modules.utils import (
     BEZEL,
     BOTTOM_BEZEL_ID,
-    TOGGLE_MODE,
-    TOGGLE_VKB,
     TOP_BEZEL_ID,
     scale_coord,
 )
@@ -58,30 +56,13 @@ class BezelMapper:
 
         new_pipelines = []
 
-        for scancode_raw, values in bezels_raw_zones:
+        for scancode, values in bezels_raw_zones:
             z_type = str(values.get("type", ""))
             priority = int(values.get("priority", 0))
             zone_id = int(values.get("id", 0))
 
             if z_type != BEZEL:
                 continue
-
-            try:
-                scancode_int = (
-                    int(scancode_raw, 16)
-                    if isinstance(scancode_raw, str)
-                    else int(scancode_raw)
-                )
-            except (ValueError, TypeError):
-                scancode_int = None
-
-            # Resolve canonical toggle command
-            if scancode_int == TOP_BEZEL_ID or values.get("name") == TOGGLE_MODE:
-                toggle_cmd = TOGGLE_MODE
-            elif scancode_int == BOTTOM_BEZEL_ID or values.get("name") == TOGGLE_VKB:
-                toggle_cmd = TOGGLE_VKB
-            else:
-                toggle_cmd = str(values.get("name") or scancode_raw)
 
             region = RectangularRegion(
                 top_left=Point(
@@ -95,7 +76,7 @@ class BezelMapper:
             )
 
             pipeline = SystemToggle(
-                output=toggle_cmd,
+                output=scancode,
                 region=region,
                 priority=priority,
                 creation_id=zone_id,

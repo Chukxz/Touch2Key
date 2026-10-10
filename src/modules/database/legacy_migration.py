@@ -229,7 +229,8 @@ def migrate_json_layout(
                     trans_idx,
                     app_settings.sensitivity_x,
                     app_settings.sensitivity_y,
-                    app_settings.deadzone * float(metadata.get("mouse_wheel_radius", 50.0)),
+                    app_settings.deadzone
+                    * float(metadata.get("mouse_wheel_radius", 50.0)),
                     app_settings.hysteresis,
                 )
                 p_cfg.set_semantic_config(sem_idx, pointer)
@@ -237,7 +238,7 @@ def migrate_json_layout(
 
             store.zones.create(
                 layout_id=layout_id,
-                scancode=str(scancode),
+                scancode=int(scancode, 16),
                 name=zone_name,
                 zone_type=zone_type,
                 cx=item.get("cx"),

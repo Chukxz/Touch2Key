@@ -9,12 +9,12 @@ from typing import Generic, TypeVar
 
 from modules.utils import (
     BEZEL_DP_THICKNESS,
+    TOP_BEZEL_ID,
+    BOTTOM_BEZEL_ID,
     CONSTRAINT_MODES,
     ORIGIN_MODES,
     REGION_MODES,
     SEMANTIC_MODES,
-    TOGGLE_MODE,
-    TOGGLE_VKB,
     TRANSFORM_MODES,
     Point,
     TouchEvent,
@@ -30,11 +30,11 @@ logger = logging.getLogger("modules.pipeline")
 @dataclass(slots=True)
 class OutputSink(ABC):
     @abstractmethod
-    def key_down(self, key: str) -> None:
+    def key_down(self, scancode: int) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def key_up(self, key: str) -> None:
+    def key_up(self, scancode: int) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -50,11 +50,11 @@ class OutputSink(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def mouse_up(self, button: str) -> None:
+    def mouse_up(self, button: int) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def mouse_down(self, button: str) -> None:
+    def mouse_down(self, button: int) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -117,7 +117,10 @@ class RectangularRegion(Region):
         self._y2 = max(self.top_left.y, self.bottom_right.y)
 
     def activates(self, event: TouchEvent) -> bool:
-        return self._x1 <= event.position.x <= self._x2 and self._y1 <= event.position.y <= self._y2
+        return (
+            self._x1 <= event.position.x <= self._x2
+            and self._y1 <= event.position.y <= self._y2
+        )
 
     @property
     def area(self) -> float:
@@ -295,25 +298,25 @@ class DeltaTransform(Transformation[Vector]):
 
 
 @dataclass(slots=True)
-class JoystickTransform(Transformation[frozenset[str]]):
+class JoystickTransform(Transformation[frozenset[int]]):
     dead_zone: float
     walk_radius: float
     sprint_distance: float
     hysteresis_rad: float = math.radians(5.0)
-    up: str = "w"
-    down: str = "s"
-    left: str = "a"
-    right: str = "d"
-    sprint_key: str = "shift"
+    up: int = 0x11  # "w"
+    down: int = 0x1F  # "s"
+    left: int = 0x1E  # "a"
+    right: int = 0x20  # "d"
+    sprint: int = 0x2A  # "lshift"
 
     _last_sector: int | None = field(init=False, default=None)
     _PI_8: float = field(init=False, default=math.pi / 8.0)
     _INV_PI_4: float = field(init=False, default=1.0 / (math.pi / 4.0))
-    _sector_map: tuple[frozenset[str], ...] = field(init=False)
-    _sprint_set: frozenset[str] = field(init=False)
+    _sector_map: tuple[frozenset[int], ...] = field(init=False)
+    _sprint_set: frozenset[int] = field(init=False)
 
     def __post_init__(self) -> None:
-        self._sprint_set = frozenset({self.sprint_key})
+        self._sprint_set = frozenset({self.sprint})
         self._sector_map = (
             frozenset({self.right}),
             frozenset({self.down, self.right}),
@@ -328,7 +331,7 @@ class JoystickTransform(Transformation[frozenset[str]]):
     def reset(self) -> None:
         self._last_sector = None
 
-    def apply(self, context: PipelineContext) -> frozenset[str]:
+    def apply(self, context: PipelineContext) -> frozenset[int]:
         dist_sq = context.delta.magnitude_squared
         if dist_sq <= self.dead_zone * self.dead_zone:
             self._last_sector = None
@@ -342,14 +345,18 @@ class JoystickTransform(Transformation[frozenset[str]]):
 
         if self._last_sector is not None:
             current_center = self._last_sector * (math.pi / 4.0)
-            angle_diff = (angle_rad - current_center + math.pi) % (2.0 * math.pi) - math.pi
+            angle_diff = (angle_rad - current_center + math.pi) % (
+                2.0 * math.pi
+            ) - math.pi
             if abs(angle_diff) < (self._PI_8 + self.hysteresis_rad):
                 new_sector = self._last_sector
 
         self._last_sector = new_sector
         base_keys = self._sector_map[new_sector]
 
-        if self.sprint_distance > 0.0 and dist_sq > (self.sprint_distance * self.sprint_distance):
+        if self.sprint_distance > 0.0 and dist_sq > (
+            self.sprint_distance * self.sprint_distance
+        ):
             return base_keys | self._sprint_set
 
         return base_keys
@@ -358,31 +365,41 @@ class JoystickTransform(Transformation[frozenset[str]]):
 @dataclass(slots=True)
 class Semantic(ABC, Generic[T]):
     @abstractmethod
-    def process(self, context: PipelineContext, value: T, output_sink: OutputSink) -> None: ...
+    def process(
+        self, context: PipelineContext, value: T, output_sink: OutputSink
+    ) -> None: ...
     def reset(self, output_sink: OutputSink) -> None:
         pass
 
 
 @dataclass(slots=True)
 class ButtonSemantic(Semantic[T], Generic[T]):
-    output: str
+    output: int
     mouse_button: bool = False
 
-    def process(self, context: PipelineContext, value: T, output_sink: OutputSink) -> None:
+    def process(
+        self, context: PipelineContext, value: T, output_sink: OutputSink
+    ) -> None:
         if context.event.phase is TouchPhase.DOWN:
-            (output_sink.mouse_down if self.mouse_button else output_sink.key_down)(self.output)
+            (output_sink.mouse_down if self.mouse_button else output_sink.key_down)(
+                self.output
+            )
         elif context.event.phase is TouchPhase.UP:
-            (output_sink.mouse_up if self.mouse_button else output_sink.key_up)(self.output)
+            (output_sink.mouse_up if self.mouse_button else output_sink.key_up)(
+                self.output
+            )
 
     def reset(self, output_sink: OutputSink) -> None:
         (output_sink.mouse_up if self.mouse_button else output_sink.key_up)(self.output)
 
 
 @dataclass(slots=True)
-class DirectionalSemantic(Semantic[frozenset[str]]):
-    _active: frozenset[str] = field(init=False, default_factory=frozenset)
+class DirectionalSemantic(Semantic[frozenset[int]]):
+    _active: frozenset[int] = field(init=False, default_factory=frozenset)
 
-    def process(self, context: PipelineContext, value: frozenset[str], output_sink: OutputSink) -> None:
+    def process(
+        self, context: PipelineContext, value: frozenset[int], output_sink: OutputSink
+    ) -> None:
         if context.event.phase is TouchPhase.UP:
             self.reset(output_sink)
             return
@@ -403,21 +420,29 @@ class DirectionalSemantic(Semantic[frozenset[str]]):
 class PointerSemantic(Semantic[Vector]):
     pointer: bool = True
 
-    def process(self, context: PipelineContext, value: Vector, output_sink: OutputSink) -> None:
-        if self.pointer and context.event.phase is TouchPhase.MOVE and (value.x or value.y):
+    def process(
+        self, context: PipelineContext, value: Vector, output_sink: OutputSink
+    ) -> None:
+        if (
+            self.pointer
+            and context.event.phase is TouchPhase.MOVE
+            and (value.x or value.y)
+        ):
             output_sink.mouse_move(value.x, value.y)
 
 
 @dataclass(slots=True)
 class ToggleSemantic(Semantic[Unit]):
-    output: str
+    output: int
     max_duration_s: float = 0.3
     max_drift_px: float = 30.0
 
     _start_time: float | None = field(init=False, default=None)
     _start_pos: Point | None = field(init=False, default=None)
 
-    def process(self, context: PipelineContext, value: Unit, output_sink: OutputSink) -> None:
+    def process(
+        self, context: PipelineContext, value: Unit, output_sink: OutputSink
+    ) -> None:
         phase = context.event.phase
 
         if phase is TouchPhase.DOWN:
@@ -436,9 +461,9 @@ class ToggleSemantic(Semantic[Unit]):
             self._start_pos = None
 
             if duration <= self.max_duration_s and drift <= self.max_drift_px:
-                if self.output == TOGGLE_MODE:
+                if self.output == TOP_BEZEL_ID:
                     output_sink.toggle_menu_mode()
-                elif self.output == TOGGLE_VKB:
+                elif self.output == BOTTOM_BEZEL_ID:
                     output_sink.toggle_virtual_keyboard()
 
     def reset(self, output_sink: OutputSink | None = None) -> None:
@@ -537,7 +562,9 @@ class PipelineConfig:
     def _monitor_last_set_config(self, pipeline_config: dict | None = None) -> None:
         self.is_last_set_config_self = pipeline_config is None
 
-    def get_region_config(self, pipeline_config: dict | None = None) -> tuple[int, str, float, int]:
+    def get_region_config(
+        self, pipeline_config: dict | None = None
+    ) -> tuple[int, str, float, int]:
         cfg = pipeline_config if pipeline_config is not None else self.pipeline_config
         region = cfg.get("region", {})
         idx = int(region.get("idx", -1))
@@ -559,7 +586,9 @@ class PipelineConfig:
             self.should_get_config = True
 
         cfg = pipeline_config if pipeline_config is not None else self.pipeline_config
-        prev_idx, prev_mode, prev_bezel_dp_thickness, prev_priority = self.get_region_config(cfg)
+        prev_idx, prev_mode, prev_bezel_dp_thickness, prev_priority = (
+            self.get_region_config(cfg)
+        )
 
         target_idx = idx if idx is not None else (prev_idx if keep_previous else -1)
         if 0 <= target_idx < len(REGION_MODES):
@@ -570,17 +599,25 @@ class PipelineConfig:
         target_bezel_dp_thickness = (
             bezel_dp_thickness
             if bezel_dp_thickness is not None
-            else (prev_bezel_dp_thickness if keep_previous else float(BEZEL_DP_THICKNESS))
+            else (
+                prev_bezel_dp_thickness if keep_previous else float(BEZEL_DP_THICKNESS)
+            )
         )
-        target_priority = priority if priority is not None else (prev_priority if keep_previous else 0)
+        target_priority = (
+            priority
+            if priority is not None
+            else (prev_priority if keep_previous else 0)
+        )
 
         region = cfg.setdefault("region", {})
-        region.update({
-            "idx": target_idx,
-            "mode": target_mode,
-            "bezel_dp_thickness": target_bezel_dp_thickness,
-            "priority": target_priority,
-        })
+        region.update(
+            {
+                "idx": target_idx,
+                "mode": target_mode,
+                "bezel_dp_thickness": target_bezel_dp_thickness,
+                "priority": target_priority,
+            }
+        )
 
     def get_origin_config(self, pipeline_config: dict | None = None) -> tuple[int, str]:
         cfg = pipeline_config if pipeline_config is not None else self.pipeline_config
@@ -609,7 +646,9 @@ class PipelineConfig:
         origin = cfg.setdefault("origin", {})
         origin.update({"idx": target_idx, "mode": target_mode})
 
-    def get_constraint_config(self, pipeline_config: dict | None = None) -> tuple[int, str]:
+    def get_constraint_config(
+        self, pipeline_config: dict | None = None
+    ) -> tuple[int, str]:
         cfg = pipeline_config if pipeline_config is not None else self.pipeline_config
         constraint = cfg.get("constraint", {})
         return (int(constraint.get("idx", -1)), str(constraint.get("mode", "")))
@@ -681,14 +720,32 @@ class PipelineConfig:
             target_mode = prev_mode if keep_previous else ""
 
         transform = cfg.setdefault("transform", {})
-        transform.update({
-            "idx": target_idx,
-            "mode": target_mode,
-            "sensitivity_x": sensitivity_x if sensitivity_x is not None else (prev_sens_x if keep_previous else 1.0),
-            "sensitivity_y": sensitivity_y if sensitivity_y is not None else (prev_sens_y if keep_previous else 1.0),
-            "deadzone": deadzone if deadzone is not None else (prev_deadzone if keep_previous else 0.1),
-            "hysteresis": hysteresis if hysteresis is not None else (prev_hysteresis if keep_previous else 5.0),
-        })
+        transform.update(
+            {
+                "idx": target_idx,
+                "mode": target_mode,
+                "sensitivity_x": (
+                    sensitivity_x
+                    if sensitivity_x is not None
+                    else (prev_sens_x if keep_previous else 1.0)
+                ),
+                "sensitivity_y": (
+                    sensitivity_y
+                    if sensitivity_y is not None
+                    else (prev_sens_y if keep_previous else 1.0)
+                ),
+                "deadzone": (
+                    deadzone
+                    if deadzone is not None
+                    else (prev_deadzone if keep_previous else 0.1)
+                ),
+                "hysteresis": (
+                    hysteresis
+                    if hysteresis is not None
+                    else (prev_hysteresis if keep_previous else 5.0)
+                ),
+            }
+        )
 
     def get_semantic_config(
         self, pipeline_config: dict | None = None
@@ -722,11 +779,17 @@ class PipelineConfig:
             target_mode = prev_mode if keep_previous else ""
 
         semantic = cfg.setdefault("semantic", {})
-        semantic.update({
-            "idx": target_idx,
-            "mode": target_mode,
-            "pointer": pointer if pointer is not None else (prev_pointer if keep_previous else False),
-        })
+        semantic.update(
+            {
+                "idx": target_idx,
+                "mode": target_mode,
+                "pointer": (
+                    pointer
+                    if pointer is not None
+                    else (prev_pointer if keep_previous else False)
+                ),
+            }
+        )
 
     def get_pipeline_json_from_config(self, pipeline_config: dict | None = None) -> str:
         cfg = pipeline_config if pipeline_config is not None else self.pipeline_config

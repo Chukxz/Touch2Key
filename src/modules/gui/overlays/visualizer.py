@@ -3,10 +3,11 @@ from __future__ import annotations
 import sys
 import time
 import ctypes
+import logging
 from collections import deque
 from typing import TYPE_CHECKING
 
-from modules.utils import get_scancode_from_key, scale_coord, ICONS_FOLDER
+from modules.utils import bresenham, get_scancode_from_key, scale_coord, ICONS_FOLDER
 from modules.database import store
 from modules.platforms import get_platform, get_specific_qt_key, check_single_instance
 
@@ -17,20 +18,29 @@ from PySide6.QtGui import (
     QGuiApplication,
     QColor,
     QPen,
+    QBrush,
     QFont,
     QPainter,
     QIcon,
 )
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 
+from modules import AppLogManager
+
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QGraphicsItem
+
+logger = logging.getLogger("modules.gui.overlays.visualizer")
 
 _PLATFORM = get_platform()
 
 VISUALIZER_NAME = "Touch2Key_Visualizer"
+
 RIPPLE_LIFETIME_MS = 5000
 MAX_EVENT_LOG = 10_000
+MAX_TRAIL_NUMBER = 1000
+MAX_TRAIL_WIDTH = 100
+MAX_TRAIL_HEIGHT = 100
 
 MOUSE_BUTTON_INFO: dict[Qt.MouseButton, tuple[str, str]] = {
     Qt.MouseButton.LeftButton: ("Left", "cyan"),
@@ -48,25 +58,18 @@ def get_locations_dict(width: int, height: int) -> dict[int, tuple[int, int]]:
 
     zones = store.get_active_layout_zones()
     for zone in zones:
-        try:
-            scancode = int(zone.scancode, 16)
-        except (ValueError, TypeError) as err:
-            print(err)
-            pass
-
         scaled_x = int(scale_coord(width, zone.cx))
         scaled_y = int(scale_coord(height, zone.cy))
-
-        loc_dict[scancode] = (scaled_x, scaled_y)
+        loc_dict[zone.scancode] = (scaled_x, scaled_y)
 
     return loc_dict
 
 
 class DiagnosticView(QGraphicsView):
-    # (button name, x, y)
-    mouse_pressed = Signal(str, int, int)
-    mouse_released = Signal(str)
-    resized = Signal(int, int)
+    mouse_pressed = Signal(str, int, int)  # (button name, x, y)
+    mouse_released = Signal(str)  # (button_name)
+    arrow_pressed = Signal()
+    resized = Signal(int, int)  # (x, y)
 
     def __init__(
         self,
@@ -92,20 +95,25 @@ class DiagnosticView(QGraphicsView):
         self.active_buttons.setZValue(100)
 
         self.trail_rects: list[QGraphicsItem] = []
-        self.max_trail_length = 50
+        self.max_trail_number = MAX_TRAIL_NUMBER
+        self.trail_width = 5
+        self.trail_height = 5
+        self.f_p_x: int | None = None
+        self.f_p_y: int | None = None
 
     def set_active_text(self, text: str) -> None:
         self.active_buttons.setPlainText(text)
 
-    def _add_trail_rect(self, x: int, y: int) -> None:
-        rect = self._scene.addRect(x, y, 1, 1, QPen(QColor("#cccccc")))
+    def _add_trail_rect(self, x: int, y: int, w=5, h=5) -> None:
+        rect = self._scene.addRect(
+            x, y, w, h, QPen(QColor("#cccccc")), QBrush(QColor("#cccccc"))
+        )
         self.trail_rects.append(rect)
-        if len(self.trail_rects) > self.max_trail_length:
+        if len(self.trail_rects) > self.max_trail_number:
             old_rect = self.trail_rects.pop(0)
             self._remove_scene_item(old_rect)
 
     def _set_active_buttons_pos(self, x: int, y: int) -> None:
-        self._add_trail_rect(x, y)
         self.active_buttons.setPos(x + 20, y - 20)
 
     def set_labelled_ripple(
@@ -152,7 +160,25 @@ class DiagnosticView(QGraphicsView):
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         pos = event.position().toPoint()
-        self._add_trail_rect(pos.x(), pos.y())
+        pos_x = pos.x()
+        pos_y = pos.y()
+
+        points_generator = bresenham(
+            self.f_p_x or pos_x,
+            self.f_p_y or pos_y,
+            pos_x,
+            pos_y,
+            width0=self.trail_width,
+            height0=self.trail_height,
+        )
+
+        for generated_point in points_generator:
+            x, y, w, h = generated_point
+            self._add_trail_rect(x, y, w, h)
+
+        self.f_p_x = pos_x
+        self.f_p_y = pos_y
+
         self.active_buttons.setPos(pos.x() + 20, pos.y() - 20)
         super().mouseMoveEvent(event)
 
@@ -178,6 +204,25 @@ class DiagnosticView(QGraphicsView):
         self.resized.emit(w, h)
         super().resizeEvent(event)
 
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Left:
+            self.trail_width = max(1, min(MAX_TRAIL_WIDTH, self.trail_width - 1))
+            self.arrow_pressed.emit()
+
+        if event.key() == Qt.Key.Key_Right:
+            self.trail_width = max(1, min(MAX_TRAIL_WIDTH, self.trail_width + 1))
+            self.arrow_pressed.emit()
+
+        if event.key() == Qt.Key.Key_Down:
+            self.trail_height = max(1, min(MAX_TRAIL_HEIGHT, self.trail_height - 1))
+            self.arrow_pressed.emit()
+
+        if event.key() == Qt.Key.Key_Up:
+            self.trail_height = max(1, min(MAX_TRAIL_HEIGHT, self.trail_height + 1))
+            self.arrow_pressed.emit()
+
+        return super().keyPressEvent(event)
+
 
 class MainWindow(QMainWindow):
     def __init__(
@@ -197,22 +242,26 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(VISUALIZER_NAME)
         self.setWindowOpacity(0.4)
+        self.showFullScreen()
 
         self.view = DiagnosticView(self.loc_dict, self)
-        self.view.resized.connect(self._on_view_resized)
         self.view.mouse_pressed.connect(self._on_mouse_pressed)
         self.view.mouse_released.connect(self._on_mouse_released)
+        self.view.arrow_pressed.connect(self._update_instruction_text)
+        self.view.resized.connect(self._on_view_resized)
         self.setCentralWidget(self.view)
 
         self.instruction = self.view._scene.addText(
-            "DIAGNOSTIC MODE: Press ESC to exit (when cursor is visible).",
-            QFont("Arial", 20),
+            f"Press ESC to exit (when cursor is visible).\n(Left/Right: increase/decrease trail width ({self.view.trail_width}) [1-{MAX_TRAIL_WIDTH}]).\n(Up/Down: increase/decrease trail height ({self.view.trail_height}) [1-{MAX_TRAIL_HEIGHT}]).\nMaximum number of trails: {MAX_TRAIL_NUMBER}.",
+            QFont("Arial", 15),
         )
         self.instruction.setDefaultTextColor(QColor("#cccccc"))
-        _w, _h = self.view.viewport().width(), self.view.viewport().height()
-        self.instruction.setPos(int(_w / 2), int(_h * 0.3))
+        _ins_bd_rect = self.instruction.boundingRect()
 
-        self.showFullScreen()
+        _offset_x = int((self.width() - _ins_bd_rect.width()) * 0.5)
+        _offset_y = int((self.height() - _ins_bd_rect.height()) * 0.2)
+
+        self.instruction.setPos(_offset_x, _offset_y)
 
     # ----------------------------------------------------------------- cursor
 
@@ -243,6 +292,11 @@ class MainWindow(QMainWindow):
         self.pressed_keys.clear()
         self.pressed_mouse_buttons.clear()
         self._update_active_display()
+
+    def _update_instruction_text(self) -> None:
+        self.instruction.setPlainText(
+            f"Press ESC to exit (when cursor is visible).\n(Left/Right: increase/decrease trail width ({self.view.trail_width}) [1-{MAX_TRAIL_WIDTH}]).\n(Up/Down: increase/decrease trail height ({self.view.trail_height}) [1-{MAX_TRAIL_HEIGHT}]).\nMaximum number of trails: {MAX_TRAIL_NUMBER}.",
+        )
 
     def _on_view_resized(self, w: int, h: int) -> None:
         self.loc_dict = get_locations_dict(w, h)
@@ -345,6 +399,7 @@ def run(
 
 def main() -> None:
     """Dedicated entry point for touch2key-visualizer."""
+    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_visualizer")
     run()
 
 

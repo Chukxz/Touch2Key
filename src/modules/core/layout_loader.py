@@ -35,8 +35,8 @@ class LayoutLoader:
         self.toggle_mode_callback = toggle_mode_callback
         self.layout_lock = threading.Lock()
 
-        self.keys_json_data: list[tuple[str, dict[str, Any]]] = []
-        self.bezels_json_data: list[tuple[str, dict[str, Any]]] = []
+        self.keys_json_data: list[tuple[int, dict[str, Any]]] = []
+        self.bezels_json_data: list[tuple[int, dict[str, Any]]] = []
 
         self.load_layout()
         self.mapper_event_dispatcher.register_callback("ON_LAYOUT_RELOAD", self.load_layout)
@@ -59,8 +59,8 @@ class LayoutLoader:
         layout_h = max(int(layout.height or 0), 1)
 
         # Temporary lists to prevent duplicate appending on reload
-        new_keys_json_data: list[tuple[str, dict[str, Any]]] = []
-        new_bezels_json_data: list[tuple[str, dict[str, Any]]] = []
+        new_keys_json_data: list[tuple[int, dict[str, Any]]] = []
+        new_bezels_json_data: list[tuple[int, dict[str, Any]]] = []
 
         for z in zones:
             z.set_parsed_config_from_json()

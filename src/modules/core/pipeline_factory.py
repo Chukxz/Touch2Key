@@ -33,8 +33,6 @@ from modules.utils import (
     InvalidFieldError,
     MOUSE_SCANCODES,
     Point,
-    TOGGLE_MODE,
-    TOGGLE_VKB,
     TOP_BEZEL_ID,
     dp_to_px,
 )
@@ -49,7 +47,7 @@ if TYPE_CHECKING:
 
 
 def Button(
-    button: str,
+    button: int,
     region: Region | None,
     pointer: bool = False,
     sensitivity_x: float = 1.0,
@@ -81,14 +79,14 @@ def FixedJoystick(
     walk_radius: float,
     sprint_distance: float = 0.0,
     hysteresis_deg: float = 5.0,
-    up: str = "w",
-    down: str = "s",
-    left: str = "a",
-    right: str = "d",
-    sprint_key: str = "shift",
+    up: int = 0x11,  # "w"
+    down: int = 0x1F,  # "s"
+    left: int = 0x1E,  # "a"
+    right: int = 0x20,  # "d"
+    sprint: int = 0x2A,  # "lshift"
     priority: int = 0,
     creation_id: int = 0,
-) -> Pipeline[frozenset[str]]:
+) -> Pipeline[frozenset[int]]:
     return Pipeline(
         region=CircularRegion(center=center, radius=radius),
         origin=FixedOrigin(position=center),
@@ -102,7 +100,7 @@ def FixedJoystick(
             down=down,
             left=left,
             right=right,
-            sprint_key=sprint_key,
+            sprint=sprint,
         ),
         semantics=[DirectionalSemantic()],
         priority=priority,
@@ -118,14 +116,14 @@ def FloatingJoystick(
     sprint_distance: float = 0.0,
     radius: float = 0.0,
     hysteresis_deg: float = 5.0,
-    up: str = "w",
-    down: str = "s",
-    left: str = "a",
-    right: str = "d",
-    sprint_key: str = "shift",
+    up: int = 0x11,  # "w"
+    down: int = 0x1F,  # "s"
+    left: int = 0x1E,  # "a"
+    right: int = 0x20,  # "d"
+    sprint: int = 0x2A,  # "lshift"
     priority: int = 0,
     creation_id: int = 0,
-) -> Pipeline[frozenset[str]]:
+) -> Pipeline[frozenset[int]]:
     effective_leash = (
         radius
         if radius > 0.0
@@ -148,7 +146,7 @@ def FloatingJoystick(
             down=down,
             left=left,
             right=right,
-            sprint_key=sprint_key,
+            sprint=sprint,
         ),
         semantics=[DirectionalSemantic()],
         priority=priority,
@@ -166,14 +164,14 @@ def AnchoredJoystick(
     radius: float = 0.0,
     snap_radius: float = 80.0,
     hysteresis_deg: float = 5.0,
-    up: str = "w",
-    down: str = "s",
-    left: str = "a",
-    right: str = "d",
-    sprint_key: str = "shift",
+    up: int = 0x11,  # "w"
+    down: int = 0x1F,  # "s"
+    left: int = 0x1E,  # "a"
+    right: int = 0x20,  # "d"
+    sprint: int = 0x2A,  # "lshift"
     priority: int = 0,
     creation_id: int = 0,
-) -> Pipeline[frozenset[str]]:
+) -> Pipeline[frozenset[int]]:
     effective_leash = (
         radius
         if radius > 0.0
@@ -196,7 +194,7 @@ def AnchoredJoystick(
             down=down,
             left=left,
             right=right,
-            sprint_key=sprint_key,
+            sprint=sprint,
         ),
         semantics=[DirectionalSemantic()],
         priority=priority,
@@ -225,7 +223,7 @@ def MousePointer(
 
 
 def SystemToggle(
-    output: str,
+    output: int,
     region: Region,
     priority: int = 100,
     creation_id: int = 0,
@@ -326,7 +324,9 @@ def create_pipeline_from_zone(
         return None
 
     # --- Stage 4: Transformation Selection ---
-    trans_idx, _, sens_x, sens_y, dz, hys_deg = zone.CONFIG_HELPER.get_transform_config()
+    trans_idx, _, sens_x, sens_y, dz, hys_deg = (
+        zone.CONFIG_HELPER.get_transform_config()
+    )
 
     if trans_idx == 0:  # IDENTITY
         transformation = IdentityTransform()
@@ -349,28 +349,13 @@ def create_pipeline_from_zone(
     allow_multi_claim = False
     type_precedence = 2
     is_system = False
-
-    # Safely parse hex scancode string (e.g. "0x1E", "0x9900") to integer
-    scancode_raw = zone.scancode
-    scancode_int: int | None = None
-    if isinstance(scancode_raw, int):
-        scancode_int = scancode_raw
-    elif isinstance(scancode_raw, str):
-        try:
-            scancode_int = int(scancode_raw.strip(), 16)
-        except (ValueError, TypeError):
-            scancode_int = None
+    scancode = zone.scancode
 
     if sem_idx == 0:  # BUTTON
-        is_mouse_button = (
-            scancode_int in MOUSE_SCANCODES
-            if scancode_int is not None
-            else False
-        )
-        button_token = zone.name if zone.name else str(scancode_raw)
+        is_mouse_button = scancode in MOUSE_SCANCODES
 
         semantics.append(
-            ButtonSemantic(output=button_token, mouse_button=is_mouse_button)
+            ButtonSemantic(output=zone.scancode, mouse_button=is_mouse_button)
         )
         if pointer:
             semantics.append(PointerSemantic(pointer=True))
@@ -385,11 +370,11 @@ def create_pipeline_from_zone(
         type_precedence = 0
 
     elif sem_idx == 3:  # SYSTEM TOGGLE
-        if scancode_int is not None and scancode_int == TOP_BEZEL_ID:
-            semantics.append(ToggleSemantic(output=TOGGLE_MODE))
+        if scancode == TOP_BEZEL_ID:
+            semantics.append(ToggleSemantic(output=scancode))
             is_system = True
-        elif scancode_int is not None and scancode_int == BOTTOM_BEZEL_ID:
-            semantics.append(ToggleSemantic(output=TOGGLE_VKB))
+        elif scancode == BOTTOM_BEZEL_ID:
+            semantics.append(ToggleSemantic(output=scancode))
             is_system = True
         else:
             return None
