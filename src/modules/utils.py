@@ -318,8 +318,8 @@ SCANCODES = {
     "num_3": 0x51,
     "num_0": 0x52,
     "num_dot": 0x53,
-    "F11": 0x57,
-    "F12": 0x58,
+    "f11": 0x57,
+    "f12": 0x58,
     # Extended keys (0xE0XX series)
     "e0_home": 0xE047,
     "e0_up": 0xE048,

@@ -993,11 +993,16 @@ class LayoutsPlotterWidget(QWidget):
         self.img_dpi: float = 0
 
         for uid in list(self.shapes_artists.keys()):
-            self.shapes_artists[uid].remove()
+            artist = self.shapes_artists[uid]
+            if artist in self.ax.patches:
+                artist.remove()
         self.shapes_artists = {}
         for uid in list(self.labels_artists.keys()):
-            self.labels_artists[uid].remove()
+            label = self.labels_artists[uid]
+            if artist in self.ax.artists:
+                label.remove()
         self.labels_artists = {}
+
         for uid in list(self.label_drag_managers.keys()):
             self.label_drag_managers[uid]._disconnect_cids()
         self.label_drag_managers = {}
@@ -1052,18 +1057,6 @@ class LayoutsPlotterWidget(QWidget):
             zorder=11,
             animated=True,
         )
-
-    def _on_escape_pressed(self) -> None:
-        if self.is_fatal_state:
-            return
-
-        if self.standalone:
-            parent_window = self.window()
-            if parent_window:
-                parent_window.close()
-
-            else:
-                self.reset_state()
 
     def reload_active_layout(
         self,
@@ -1300,7 +1293,7 @@ class LayoutsPlotterWidget(QWidget):
         self.img_dpi = dpi
 
     def update_title(self, text: str, idle_override: bool = False):
-        self.ax.set_title(text)
+        # self.ax.set_title(text)
         self.status_updated.emit(text)
         self.cursor_manager.set_state_cursor(self.state)
 
@@ -1429,6 +1422,7 @@ class LayoutsPlotterWidget(QWidget):
     def on_mouse_move(self, event):
         if self.is_fatal_state:
             return
+
         if self.state == COLLECTING and event.inaxes == self.ax:
             x, y = int(round(event.xdata)), int(round(event.ydata))
             if (
@@ -1450,7 +1444,7 @@ class LayoutsPlotterWidget(QWidget):
                     self.ax.draw_artist(line)
                 self.fig.canvas.blit(self.ax.bbox)
         else:
-            if hasattr(self, "crosshair_h_bg") and self.crosshair_h_bg.get_visible():
+            if self.crosshair_h_bg.get_visible():
                 for line in [
                     self.crosshair_h_bg,
                     self.crosshair_h_fg,
@@ -1582,10 +1576,13 @@ class LayoutsPlotterWidget(QWidget):
             elif event.key == "delete":
                 self.enter_deleting_mode()
             elif event.key == "escape":
-                self._on_escape_pressed()
+                self.reset_state()
             elif event.key in ("p", "o") and self.current_draggable:
                 eid = self.current_draggable.entry_id
                 self.shapes[eid]["priority"] += 1 if event.key == "p" else -1
+                self.shapes[eid]["priority"] = max(
+                    -100, min(100, self.shapes[eid]["priority"])
+                )
                 self.update_title(
                     f"Priority {'increased' if event.key == 'p' else 'decreased'}: {self.shapes[eid]['priority']} (ID: {eid})",
                     True,
@@ -1694,6 +1691,7 @@ class LayoutsPlotterWidget(QWidget):
         self.zone_selected.emit(-1)
 
     def calculate_shape(self, key_name):
+        print(key_name)
         scancode = get_scancode_from_key(key_name)
         if not scancode:
             print(f"[PLOTTER] - Key '{key_name}' not mapped.")
@@ -1820,9 +1818,6 @@ class LayoutsPlotterWidget(QWidget):
         if self.state != IDLE:
             return
 
-        if not self.shapes:
-            self.update_title("Nothing to save!")
-            return
         self.state, self.buffer_default = NAMING, True
 
         if self.active_layout is None:
@@ -1841,7 +1836,7 @@ class LayoutsPlotterWidget(QWidget):
         if self.active_layout is None:
             return
 
-        if key in ("enter", "shift+enter", "ctrl+s"):
+        if key in ("enter", "shift+enter"):
             self.save_to_database(
                 self.input_buffer.strip() or self.active_layout.name,
                 as_copy=key != "enter",
@@ -1938,6 +1933,7 @@ class LayoutsPlotterWidget(QWidget):
                 dpi=self.img_dpi,
                 mouse_wheel_radius=self.mouse_wheel_radius,
                 sprint_distance=self.sprint_distance,
+                image_path=self.active_layout.image_path,
             ).id
 
         else:
