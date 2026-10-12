@@ -8,7 +8,7 @@ import sys
 import threading
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDockWidget,
@@ -41,6 +41,17 @@ from modules.utils import (
 )
 
 logger = logging.getLogger("modules.gui.main_window")
+
+
+class CustomDockWidget(QDockWidget):
+    signal_closed = Signal()
+
+    def __init__(self, title: str, /, parent: QWidget | None = None):
+        super().__init__(title, parent)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self.signal_closed.emit()
+        return super().closeEvent(event)
 
 
 class EngineProcessController(QObject):
@@ -244,8 +255,9 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.main_splitter)
 
         # Dock widget setup
-        self.log_dock = QDockWidget("Application Logs", self)
-        self.log_dock.setSizePolicy(
+        self.custom_log_dock = CustomDockWidget("Application Logs", self)
+        self.custom_log_dock.signal_closed.connect(self._custom_log_dock_closed)
+        self.custom_log_dock.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
 
@@ -258,8 +270,9 @@ class MainWindow(QMainWindow):
             "background-color: #1e1e1e; color: #d4d4d4; font-family: monospace;"
         )
 
-        self.log_dock.setWidget(self.log_console)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.log_dock)
+        self.custom_log_dock.setWidget(self.log_console)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.custom_log_dock)
+        self.custom_log_dock.closeEvent
 
         self._switch_page(0, "Dashboard")
 
@@ -330,9 +343,12 @@ class MainWindow(QMainWindow):
             if show_page is not None:
                 show_page()
 
+    def _custom_log_dock_closed(self):
+        self.sidebar_logs_btn.setText("Show Logs")
+
     def _toggle_logs(self) -> None:
-        is_visible = not self.log_dock.isVisible()
-        self.log_dock.setVisible(is_visible)
+        is_visible = not self.custom_log_dock.isVisible()
+        self.custom_log_dock.setVisible(is_visible)
         self.sidebar_logs_btn.setText("Hide Logs" if is_visible else "Show Logs")
 
     def _start_visualizer(self) -> None:
@@ -409,33 +425,33 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         toolbar.setMinimumHeight(40)
 
-        wireless_action = QAction("Connect Wireless ADB...", self)
+        wireless_action = QAction("Connect Wireless ADB", self)
         wireless_action.triggered.connect(self._on_wireless_connect)
         toolbar.addAction(wireless_action)
 
         toolbar.addSeparator()
-        setup_action = QAction("Install / Repair Drivers (Setup)...", self)
+        setup_action = QAction("Install / Repair Drivers (Setup)", self)
         setup_action.triggered.connect(self._on_run_setup)
         toolbar.addAction(setup_action)
 
         toolbar.addSeparator()
-        preflight_action = QAction("Run Preflight Checks...", self)
+        preflight_action = QAction("Run Preflight Checks", self)
         preflight_action.triggered.connect(self._on_run_preflight)
         toolbar.addAction(preflight_action)
 
         toolbar.addSeparator()
-        check_adb_action = QAction("Check ADB Binary Path...", self)
+        check_adb_action = QAction("Check ADB Binary Path", self)
         check_adb_action.triggered.connect(self._on_check_adb)
         toolbar.addAction(check_adb_action)
 
         toolbar.addSeparator()
-        uninstall_action = QAction("Uninstall Touch2Key...", self)
+        uninstall_action = QAction("Uninstall Touch2Key", self)
         uninstall_action.triggered.connect(self._on_run_uninstall)
         toolbar.addAction(uninstall_action)
 
     def save_all_pages(self) -> bool:
         """Aggregates and persists state from all GUI pages to the database."""
-        logger.info("Initiating global state save across all pages...")
+        logger.info("Initiating global state save across all pages")
         try:
             for title, page_widget in self.pages.items():
                 save_state = getattr(page_widget, "save_state", None)
@@ -481,10 +497,10 @@ class MainWindow(QMainWindow):
             return
 
         if self.engine_controller.is_running():
-            logger.info("Stopping engine prior to setup execution...")
+            logger.info("Stopping engine prior to setup execution")
             self.engine_controller.shutdown()
 
-        logger.info("Spawning setup utility as an external process...")
+        logger.info("Spawning setup utility as an external process")
         try:
             subprocess.Popen([sys.executable, "-m", "modules.scripts.setup"])
         except Exception as exc:
@@ -546,10 +562,10 @@ class MainWindow(QMainWindow):
             return
 
         if self.engine_controller.is_running():
-            logger.info("Stopping engine prior to uninstallation...")
+            logger.info("Stopping engine prior to uninstallation")
             self.engine_controller.shutdown()
 
-        logger.info("Spawning uninstaller as an external process...")
+        logger.info("Spawning uninstaller as an external process")
         try:
             subprocess.Popen([sys.executable, "-m", "modules.scripts.uninstall"])
             self.close()

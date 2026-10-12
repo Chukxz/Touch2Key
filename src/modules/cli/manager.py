@@ -701,7 +701,7 @@ def run() -> None:
         "--typematic-excludes",
         type=str,
         metavar="KEYS",
-        help="Set comma-separated excluded keys (e.g. 'w,a,s,d,shift')",
+        help="Set comma-separated excluded keys (e.g. 'lshift, lctrl, lalt')",
     )
     parser.add_argument(
         "--reset-typematic",

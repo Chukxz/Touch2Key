@@ -5,6 +5,7 @@ import os
 import sys
 from pathlib import Path
 from PIL import Image
+from typing import TYPE_CHECKING, Optional, Any
 
 from modules.platforms import get_platform, get_specific_mt_key
 from modules.database import store
@@ -16,6 +17,7 @@ from modules.utils import (
     BEZEL,
     BEZEL_DP_THICKNESS,
     BOTTOM_BEZEL_ID,
+    BOTTOM_BEZEL_NAME,
     CIRCLE,
     IDLE,
     IMAGES_FOLDER,
@@ -23,7 +25,7 @@ from modules.utils import (
     RECTANGLE,
     SPRINT_DISTANCE_CODE,
     TOP_BEZEL_ID,
-    dp_to_px,
+    TOP_BEZEL_NAME,
     get_dulled_hue_color,
     get_hue_modified_alpha_from_hsv,
     get_key_from_scancode,
@@ -49,11 +51,13 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout
 from PySide6.QtGui import QKeySequence, QShortcut
 
+if TYPE_CHECKING:
+    from modules.database import Layout
+
 COLLECTING = "COLLECTING"
 WAITING_FOR_KEY = "WAITING_FOR_KEY"
 NAMING = "NAMING"
 DELETING = "DELETING"
-MARKING = "MARKING"
 CONFIRM_DELETE_ALL = "CONFIRM_DELETE_ALL"
 CONFIRM_EXIT = "CONFIRM_EXIT"
 
@@ -90,7 +94,6 @@ class _CursorManager:
             WAITING_FOR_KEY: Qt.CursorShape.PointingHandCursor,
             NAMING: Qt.CursorShape.IBeamCursor,
             DELETING: Qt.CursorShape.ForbiddenCursor,
-            MARKING: Qt.CursorShape.PointingHandCursor,
             CONFIRM_DELETE_ALL: Qt.CursorShape.WaitCursor,
             CONFIRM_EXIT: Qt.CursorShape.WaitCursor,
         }
@@ -372,7 +375,7 @@ class _DraggableShape(_Draggable):
     def __init__(self, entry_id: int, plotter_ref):
         super().__init__(entry_id, True, plotter_ref)
         self.label_artist = self.plotter.labels_artists[entry_id]
-        self.shape_artist = self.plotter.shapes_artists.get(entry_id)
+        self.shape_artist = self.plotter.shapes_artists[entry_id]
         self.canvas = self.plotter.canvas
         self.press = None
         self.drag_bg = None
@@ -568,7 +571,7 @@ class _DraggableCircle(_DraggableShape):
 
         if (
             self.plotter.saved_mouse_wheel
-            and current_shape["key_name"] == MOUSE_WHEEL_SIMULATOR_CODE
+            and current_shape["scancode"] == MOUSE_WHEEL_SIMULATOR_CODE
         ):
             self.plotter.mouse_wheel_cx = new_cx
             self.plotter.mouse_wheel_cy = new_cy
@@ -614,7 +617,7 @@ class _DraggableCircle(_DraggableShape):
 
         if (
             self.plotter.saved_sprint_distance
-            and current_shape["key_name"] == SPRINT_DISTANCE_CODE
+            and current_shape["scancode"] == SPRINT_DISTANCE_CODE
         ):
             actual_dist = self.plotter.euclidean_distance(
                 new_cx, new_cy, self.plotter.mouse_wheel_cx, self.plotter.mouse_wheel_cy
@@ -654,7 +657,7 @@ class _DraggableCircle(_DraggableShape):
 
         if (
             self.plotter.saved_mouse_wheel
-            and current_shape["key_name"] == MOUSE_WHEEL_SIMULATOR_CODE
+            and current_shape["scancode"] == MOUSE_WHEEL_SIMULATOR_CODE
         ):
             new_r = min(
                 new_r,
@@ -680,7 +683,7 @@ class _DraggableCircle(_DraggableShape):
 
         if (
             self.plotter.saved_sprint_distance
-            and current_shape["key_name"] == SPRINT_DISTANCE_CODE
+            and current_shape["scancode"] == SPRINT_DISTANCE_CODE
         ):
             new_r = min(new_r, self.plotter.mouse_wheel_radius)
 
@@ -937,24 +940,23 @@ class LayoutsPlotterWidget(QWidget):
         self.root_layout.addWidget(self.canvas)
         self.cursor_manager = _CursorManager(self.canvas)
 
-        self.image_path: Path | None = None
         self.points = []
         self.point_artists = []
         self.mode = None
         self.state = IDLE
         self.input_buffer = ""
         self.bg_cache = None
-        self.active_layout = None
+        self.active_layout: Layout | None = None
 
         self.shapes_artists: dict[int, Circle | Rectangle] = {}
         self.labels_artists: dict[int, Text] = {}
         self.label_drag_managers: dict[int, _DraggableLabel] = {}
         self.shape_drag_managers: dict[int, _DraggableShape] = {}
 
-        self.top_bezel_id = None
+        self.top_bezel_id: int | None = None
         self.top_bezel_label_artist = Text()
         self.top_bezel_shape_artist = Rectangle((0, 0), 0, 0)
-        self.bottom_bezel_id = None
+        self.bottom_bezel_id: int | None = None
         self.bottom_bezel_label_artist = Text()
         self.bottom_bezel_shape_artist = Rectangle((0, 0), 0, 0)
 
@@ -966,27 +968,25 @@ class LayoutsPlotterWidget(QWidget):
         self.fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
         self.canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-        self._setup_shortcuts()
         self.reload_active_layout()
 
     def on_resize(self, event=None) -> None:
-        """Keeps bezels and overlays dynamically aligned to the canvas viewport on resize."""
-        self._render_bezels_notch()
+        """Keeps overlays dynamically aligned to the canvas viewport on resize."""
         self.canvas.draw_idle()
 
     def init_params_helper(self):
         self.input_buffer = ""
         self.buffer_default = True
-        self.shapes = {}
+        self.shapes: dict[int, Any] = {}
         self.count = 0
         self.artists_points = 0
         self.saved_mouse_wheel = False
         self.saved_sprint_distance = False
         self.sprint_artist_id: int | None = None
-        self.mouse_wheel_radius = 0.0
-        self.mouse_wheel_cx = 0.0
-        self.mouse_wheel_cy = 0.0
-        self.sprint_distance = 0.0
+        self.mouse_wheel_radius: float = 0.0
+        self.mouse_wheel_cx: int = 0
+        self.mouse_wheel_cy: int = 0
+        self.sprint_distance: float = 0.0
         self.show_overlays = True
         self.img_width: int = 0
         self.img_height: int = 0
@@ -1053,50 +1053,31 @@ class LayoutsPlotterWidget(QWidget):
             animated=True,
         )
 
-    def _setup_shortcuts(self) -> None:
-        context = (
-            Qt.ShortcutContext.WindowShortcut
-            if self.standalone
-            else Qt.ShortcutContext.WidgetWithChildrenShortcut
-        )
-        shortcuts = [
-            ("F4", self.toggle_visibility),
-            ("F6", lambda: self.start_mode(CIRCLE, 3)),
-            ("F7", lambda: self.start_mode(RECTANGLE, 4)),
-            ("F8", self.reset_state),
-            ("F9", self.print_data),
-            ("F12", self.enter_naming_mode),
-            ("Delete", self.enter_deleting_mode),
-            ("Space", self.enter_marking_mode),
-            ("Esc", self._on_escape_pressed),
-        ]
-        self._shortcuts_registry = []
-        for key_seq, callback in shortcuts:
-            sc = QShortcut(QKeySequence(key_seq), self, callback)
-            sc.setContext(context)
-            self._shortcuts_registry.append(sc)
-
     def _on_escape_pressed(self) -> None:
         if self.is_fatal_state:
             return
-        if self.state == IDLE and self.standalone:
+
+        if self.standalone:
             parent_window = self.window()
             if parent_window:
                 parent_window.close()
-        else:
-            self.reset_state()
 
-    def reload_active_layout(self) -> bool:
+            else:
+                self.reset_state()
+
+    def reload_active_layout(
+        self,
+        img: Optional[Image.Image] = None,
+        image_params: Optional[tuple[int, int, int]] = None,
+    ) -> bool:
         self.active_layout = store.get_active_layout()
         if not self.active_layout:
-            self.image_path = None
             self._render_empty_state(
-                "Fatal: No active layout set. Please select or create a layout first."
+                "No active layout set. Please select or create a layout first."
             )
             return False
 
         if not self.active_layout.image_path:
-            self.image_path = None
             self._render_empty_state(
                 f"Layout '{self.active_layout.name}' has no assigned HUD image."
             )
@@ -1107,22 +1088,27 @@ class LayoutsPlotterWidget(QWidget):
             img_path = Path(IMAGES_FOLDER) / img_path
 
         if not img_path.exists():
-            self.image_path = None
             self._render_empty_state(
                 f"Image '{img_path.as_posix()}' does not exist on disk."
             )
             return False
 
-        self.image_path = img_path
-        img = self.load_image(img_path)
+        # Try to get the layout's image with its parameters if it wasn't provided
+        if img is None or image_params is None:
+            img, image_params = self.get_image_params(self.active_layout)
+
         if img is None:
             self._render_empty_state("Could not load image file.")
+            return False
+
+        if image_params is None:
+            self._render_empty_state("Could not get image parameters")
             return False
 
         self.is_fatal_state = False
         self.ax.clear()
         self.init_params_helper()
-        self.update_image_params(img)
+        self.update_image_params(*image_params)
         self.ax.imshow(img)
 
         self.update_title(f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'}")
@@ -1178,14 +1164,20 @@ class LayoutsPlotterWidget(QWidget):
             if self.active_layout
             else (int(self.img_dpi) if self.img_dpi > 0 else BASELINE_DPI)
         )
-        bezel_px_thickness = float(dp_to_px(float(BEZEL_DP_THICKNESS), dpi))
 
         store_bezel_zone = store.zones.get(bezel_id)
         if store_bezel_zone:
             bezel_px_thickness = store_bezel_zone.get_bezel_thickness_px(dpi)
+            _x = store_bezel_zone.x1
+            _y = store_bezel_zone.y1
+            _width = store_bezel_zone.x2
 
-        # In imshow coordinates: y=0 is at top, y=img_height is at bottom
-        y = 0.0 if is_top else (self.img_height - bezel_px_thickness)
+            if _x is None or _y is None or _width is None:
+                return
+
+        else:
+            return
+
         label_y = (
             (bezel_px_thickness / 2.0)
             if is_top
@@ -1194,7 +1186,7 @@ class LayoutsPlotterWidget(QWidget):
 
         return (
             {
-                "x": self.img_width / 2.0,
+                "x": _width / 2.0,
                 "y": label_y,
                 "text": f"Bezel Notch ({bezel_px_thickness:.0f}px)",
                 "color": "white",
@@ -1205,8 +1197,8 @@ class LayoutsPlotterWidget(QWidget):
                 "alpha": 0.8,
             },
             {
-                "xy": (0.0, y),
-                "width": self.img_width,
+                "xy": (_x, _y),
+                "width": _width,
                 "height": bezel_px_thickness,
                 "fill": True,
                 "facecolor": (1.0, 0.2, 0.2, 0.25),
@@ -1235,39 +1227,77 @@ class LayoutsPlotterWidget(QWidget):
         self.update_title("ERROR: Missing Active Layout")
         self.canvas.draw_idle()
 
-    def load_image(self, path: Path | str | None = None) -> Image.Image | None:
-        target = path or getattr(self, "image_path", None)
-        if target is None:
-            return None
+    def load_image(self, path: Optional[Path] = None) -> Optional[Image.Image]:
+        target_path = path
+        if target_path is None:
+            return
+
         try:
-            img = Image.open(target)
+            img = Image.open(target_path)
 
             # If the raw file is in portrait but tagged for landscape rotation, rotate the PIL buffer
-            if self.image_path:
-                parts = self.image_path.stem.split("_")
-                if parts[-1].startswith("r"):
-                    try:
-                        rot = int(parts[-1][1:])
-                        if rot in (1, 3) and img.width < img.height:
-                            img = img.rotate(270 if rot == 1 else 90, expand=True)
-                    except ValueError:
-                        pass
+            parts = target_path.stem.split("_")
+            if parts[-1].startswith("r"):
+                try:
+                    rot = int(parts[-1][1:])
+                    if rot in (1, 3) and img.width < img.height:
+                        img = img.rotate(270 if rot == 1 else 90, expand=True)
+                except ValueError:
+                    pass
 
             return img
-        except Exception as e:
-            print(f"Error loading image: {e}")
-            return None
 
-    def update_image_params(self, img: Image.Image) -> None:
-        """Sets canvas dimensions directly from the active image buffer."""
-        self.img_width, self.img_height = img.size
+        except Exception as exc:
+            print(f"Error loading image: {exc}")
+            return
+
+    def get_image_params(
+        self, active_layout: Layout, img_path: Optional[Path] = None
+    ) -> tuple[Optional[Image.Image], Optional[tuple[int, int, int]]]:
+        """Gets canvas dimensions directly from the image buffer generated by loading the image from the image path."""
+        if img_path is None:
+            active_path = active_layout.image_path
+            if active_path is None:
+                return None, None
+
+            img_path = Path(active_path)
+            if not img_path.is_absolute():
+                img_path = Path(IMAGES_FOLDER) / img_path
+
+        if (img := self.load_image(img_path)) is None:
+            return None, None
+
+        img_width, img_height = img.size
 
         # Safely extract DPI from image metadata without scalar indexing errors
         dpi_meta = img.info.get("dpi", (BASELINE_DPI, BASELINE_DPI))
         if isinstance(dpi_meta, (tuple, list)):
-            self.img_dpi = int(round(dpi_meta[0]))
+            img_dpi = int(round(dpi_meta[0]))
         else:
-            self.img_dpi = int(round(dpi_meta)) if dpi_meta else BASELINE_DPI
+            img_dpi = int(round(dpi_meta)) if dpi_meta else BASELINE_DPI
+
+        # Store clean filename if placed in data/images/ for cross-machine portability
+        saved_img_ref = (
+            img_path.name
+            if img_path.parent.resolve() == IMAGES_FOLDER.resolve()
+            else str(img_path.resolve())
+        )
+
+        store.layouts.update(
+            active_layout.id,
+            width=img_width,
+            height=img_height,
+            dpi=img_dpi,
+            image_path=saved_img_ref,
+        )
+
+        return img, (img_width, img_height, img_dpi)
+
+    def update_image_params(self, width: int, height: int, dpi: int) -> None:
+        """Sets canvas dimensions"""
+        self.img_width = width
+        self.img_height = height
+        self.img_dpi = dpi
 
     def update_title(self, text: str, idle_override: bool = False):
         self.ax.set_title(text)
@@ -1286,6 +1316,9 @@ class LayoutsPlotterWidget(QWidget):
         self.fig.canvas.draw()
 
     def reset_state(self):
+        if self.is_fatal_state:
+            return
+
         self.clear_visuals()
         self.state, self.mode, self.points = IDLE, None, []
         self.input_buffer, self.buffer_default = "", True
@@ -1294,6 +1327,9 @@ class LayoutsPlotterWidget(QWidget):
             self.bg_cache = self.canvas.copy_from_bbox(self.ax.bbox)
 
     def start_mode(self, mode: str, num_points: int):
+        if self.state != IDLE:
+            return
+
         self.reset_state()
         self.mode, self.artists_points, self.state = mode, num_points, COLLECTING
         self.update_title(f"MODE: {mode}. Click {num_points} points on the image.")
@@ -1317,11 +1353,6 @@ class LayoutsPlotterWidget(QWidget):
                     self.top_bezel_id = zone.id
                 elif zone.scancode == BOTTOM_BEZEL_ID:
                     self.bottom_bezel_id = zone.id
-                continue
-
-            zone.set_parsed_config_from_json()
-            key_name = get_key_from_scancode(zone.scancode)
-            if not key_name:
                 continue
 
             self.mode = zone.zone_type
@@ -1348,8 +1379,8 @@ class LayoutsPlotterWidget(QWidget):
                 cy=cy,
                 r=r,
                 bb=bb,
-                key_name=key_name or zone.name,
-                hex_code=zone.scancode,
+                key_name=zone.name,
+                scancode=zone.scancode,
                 pointer=zone.pointer,
                 priority=zone.priority,
                 pipeline_json=zone.pipeline_json,
@@ -1363,6 +1394,9 @@ class LayoutsPlotterWidget(QWidget):
     def toggle_visibility(self):
         if self.is_fatal_state:
             return
+        if self.state != IDLE:
+            return
+
         self.show_overlays = not self.show_overlays
         for d in (self.shapes_artists, self.labels_artists):
             for art in d.values():
@@ -1477,11 +1511,11 @@ class LayoutsPlotterWidget(QWidget):
             self.ignore_current_draggable_id_n = 0
         if self.state == WAITING_FOR_KEY:
             btn_map = {
-                1: "MOUSE_LEFT",
-                2: "MOUSE_MIDDLE",
-                3: "MOUSE_RIGHT",
-                8: "MOUSE_BACK",
-                9: "MOUSE_FORWARD",
+                1: "mouse_left",
+                2: "mouse_middle",
+                3: "mouse_right",
+                8: "mouse_back",
+                9: "mouse_forward",
             }
             if btn := btn_map.get(event.button):
                 self.calculate_shape(btn)
@@ -1497,7 +1531,7 @@ class LayoutsPlotterWidget(QWidget):
 
         if (rem := self.artists_points - len(self.points)) > 0:
             self.update_title(
-                f"MODE: {self.mode}. {rem} points remaining (F8 to Cancel)."
+                f"MODE: {self.mode}. {rem} points remaining (Esc to Cancel)."
             )
         else:
             self.state = WAITING_FOR_KEY
@@ -1510,7 +1544,6 @@ class LayoutsPlotterWidget(QWidget):
         state_handlers = {
             NAMING: self.handle_naming_input,
             DELETING: self.handle_deleting_input,
-            MARKING: self.handle_marking_input,
         }
 
         if self.state in state_handlers:
@@ -1521,7 +1554,7 @@ class LayoutsPlotterWidget(QWidget):
             self.delete_all_shapes() if event.key == "enter" else self.reset_state()
             return
         if self.state in (CONFIRM_EXIT, COLLECTING):
-            if event.key in ("escape", "f8"):
+            if event.key == "escape":
                 self.reset_state()
             return
         if self.state == WAITING_FOR_KEY:
@@ -1548,10 +1581,8 @@ class LayoutsPlotterWidget(QWidget):
                 self.enter_naming_mode()
             elif event.key == "delete":
                 self.enter_deleting_mode()
-            elif event.key == " ":
-                self.enter_marking_mode()
             elif event.key == "escape":
-                self.reset_state()
+                self._on_escape_pressed()
             elif event.key in ("p", "o") and self.current_draggable:
                 eid = self.current_draggable.entry_id
                 self.shapes[eid]["priority"] += 1 if event.key == "p" else -1
@@ -1573,6 +1604,9 @@ class LayoutsPlotterWidget(QWidget):
                     self.current_draggable._move(*dirs[clean_key])
 
     def enter_deleting_mode(self):
+        if self.state != IDLE:
+            return
+
         if not self.shapes:
             self.update_title("List empty. Nothing to delete")
             return
@@ -1624,31 +1658,24 @@ class LayoutsPlotterWidget(QWidget):
     def delete_entry(self, uid):
         if uid not in self.shapes:
             return
-        bkey = self.shapes[uid]["key_name"]
-        if bkey == MOUSE_WHEEL_SIMULATOR_CODE:
+        entry_scancode = int(self.shapes[uid]["scancode"])
+
+        if entry_scancode == MOUSE_WHEEL_SIMULATOR_CODE:
             for sid in [
                 k
                 for k, v in self.shapes.items()
-                if v["key_name"] == SPRINT_DISTANCE_CODE
+                if v["scancode"] == SPRINT_DISTANCE_CODE
             ]:
                 self.delete_entry(sid)
-            (
-                self.saved_mouse_wheel,
-                self.mouse_wheel_radius,
-                self.mouse_wheel_cx,
-                self.mouse_wheel_cy,
-            ) = (
-                False,
-                0.0,
-                0.0,
-                0.0,
-            )
-        elif bkey == SPRINT_DISTANCE_CODE:
-            self.saved_sprint_distance, self.sprint_artist_id, self.sprint_distance = (
-                False,
-                None,
-                0.0,
-            )
+                self.saved_mouse_wheel = False
+                self.mouse_wheel_radius = 0.0
+                self.mouse_wheel_cx = 0
+                self.mouse_wheel_cy = 0
+
+        elif entry_scancode == SPRINT_DISTANCE_CODE:
+            self.saved_sprint_distance = False
+            self.sprint_artist_id = None
+            self.sprint_distance = 0.0
 
         if self.current_draggable_id in [f"shape_{uid}", f"label_{uid}"]:
             self.current_draggable_id = self.current_draggable = None
@@ -1666,59 +1693,15 @@ class LayoutsPlotterWidget(QWidget):
 
         self.zone_selected.emit(-1)
 
-    def enter_marking_mode(self):
-        if not self.shapes:
-            self.update_title("List empty. Nothing to mark.")
-            return
-        self.state, self.input_buffer = MARKING, ""
-        self.update_title("MARK MODE: Type ID... (Enter to Confirm | Esc to Cancel)")
-
-    def handle_marking_input(self, key):
-        if key == "escape":
-            self.reset_state()
-            return
-        if key == "enter":
-            if self.input_buffer:
-                try:
-                    if (uid := int(self.input_buffer)) in self.shapes:
-                        self.shapes[uid]["pointer"] = not self.shapes[uid]["pointer"]
-                        if self.shapes[uid]["pointer"]:
-                            self.label_drag_managers[uid].dull_face_color()
-                            self.shape_drag_managers[uid].dull_face_color()
-                        else:
-                            self.label_drag_managers[uid].restore_face_color()
-                            self.shape_drag_managers[uid].restore_face_color()
-                        self.update_title(
-                            f"{'Marked' if self.shapes[uid]['pointer'] else 'Unmarked'} ID {uid}. Returning to IDLE..."
-                        )
-                        self.reset_state()
-                        self.zone_selected.emit(uid)
-                    else:
-                        self.update_title(
-                            f"Error: ID {uid} not found. Try again or Press ESC to Cancel."
-                        )
-                        self.input_buffer = ""
-                except ValueError:
-                    self.update_title(
-                        "Error: Invalid Number. Try again or Press ESC to Cancel."
-                    )
-                    self.input_buffer = ""
-            return
-        if key.isdigit():
-            self.input_buffer += key
-            self.update_title(
-                f"MARK MODE: ID [{self.input_buffer}] (Enter to mark | Esc to Cancel)"
-            )
-        elif key == "backspace":
-            self.input_buffer = self.input_buffer[:-1]
-            self.update_title(
-                f"MARK MODE: ID [{self.input_buffer}] (Enter to mark | Esc to Cancel)"
-            )
-
     def calculate_shape(self, key_name):
         scancode = get_scancode_from_key(key_name)
         if not scancode:
-            print(f'[PLOTTER] - Key "{key_name}" not mapped.')
+            print(f"[PLOTTER] - Key '{key_name}' not mapped.")
+            return
+
+        scancode_key_name = get_key_from_scancode(scancode)
+        if not scancode_key_name:
+            print(f"[PLOTTER] - Key '{key_name} has no scancode equivalent key name.")
             return
 
         cx, cy, r, bb = None, None, None, None
@@ -1732,8 +1715,8 @@ class LayoutsPlotterWidget(QWidget):
             cy=cy,
             r=r,
             bb=bb,
-            key_name=key_name,
-            hex_code=hex(scancode),
+            key_name=scancode_key_name,
+            scancode=scancode,
             pointer=False,
             priority=0,
             pipeline_json="{}",
@@ -1743,22 +1726,23 @@ class LayoutsPlotterWidget(QWidget):
 
     def finalize_shape(
         self,
-        cx,
-        cy,
-        r,
-        bb,
-        key_name,
-        hex_code,
-        pointer=False,
-        priority=0,
-        pipeline_json="{}",
-        ignore_app_settings=False,
+        cy: Optional[int],
+        cx: Optional[int],
+        r: Optional[int],
+        bb: Optional[tuple[tuple[int, int], tuple[int, int]]],
+        key_name: str,
+        scancode: int,
+        pointer: bool,
+        priority: int,
+        pipeline_json: str,
+        ignore_app_settings: bool,
     ):
-        if cx is None:
+        if cx is None or cy is None:
             return
+
         saved, entry_id = self.save_entry(
             key_name,
-            hex_code,
+            scancode,
             cx,
             cy,
             r,
@@ -1773,30 +1757,38 @@ class LayoutsPlotterWidget(QWidget):
 
         label = (
             "MOUSE_WHEEL"
-            if key_name == MOUSE_WHEEL_SIMULATOR_CODE
+            if scancode == MOUSE_WHEEL_SIMULATOR_CODE
             else (
                 "SPRINT_DISTANCE"
-                if key_name == SPRINT_DISTANCE_CODE
-                else key_name.split("E0_")[-1]
+                if scancode == SPRINT_DISTANCE_CODE
+                else key_name.upper()
             )
         )
 
-        if self.mode == CIRCLE and r:
+        if self.mode == CIRCLE and r is not None:
             fc = (
                 DEFAULT_MOUSE_WHEEL_FACE_COLOR
-                if key_name == MOUSE_WHEEL_SIMULATOR_CODE
+                if scancode == MOUSE_WHEEL_SIMULATOR_CODE
                 else (
                     DEFAULT_SPRINT_DISTANCE_FACE_COLOR
-                    if key_name == SPRINT_DISTANCE_CODE
+                    if scancode == SPRINT_DISTANCE_CODE
                     else get_vibrant_random_color(DEFAULT_FACE_COLOR_ALPHA)
                 )
             )
+
+            lbl = self.label(cx, cy, label, fc)
             art = Circle((cx, cy), r, fill=True, lw=2, fc=fc, ec=DEFAULT_EDGE_COLOR)
+
+            self.labels_artists[entry_id] = lbl
             self.shapes_artists[entry_id] = art
+            self.label_drag_managers[entry_id] = _DraggableLabel(entry_id, self)
             self.shape_drag_managers[entry_id] = _DraggableCircle(entry_id, self)
-        elif self.mode == RECTANGLE and bb:
+
+        elif self.mode == RECTANGLE and bb is not None:
             fc = get_vibrant_random_color(DEFAULT_FACE_COLOR_ALPHA)
             (x1, y1), (x2, y2) = bb
+
+            lbl = self.label(cx, cy, label, fc)
             art = Rectangle(
                 (x1, y1),
                 x2 - x1,
@@ -1806,7 +1798,10 @@ class LayoutsPlotterWidget(QWidget):
                 fc=fc,
                 ec=DEFAULT_EDGE_COLOR,
             )
+
+            self.labels_artists[entry_id] = lbl
             self.shapes_artists[entry_id] = art
+            self.label_drag_managers[entry_id] = _DraggableLabel(entry_id, self)
             self.shape_drag_managers[entry_id] = _DraggableRectangle(entry_id, self)
         else:
             return
@@ -1814,17 +1809,17 @@ class LayoutsPlotterWidget(QWidget):
         art.set_visible(self.show_overlays)
         self.ax.add_patch(art)
 
-        lbl = self.label(cx, cy, label, fc)
         lbl.set_visible(self.show_overlays)
         self.ax.add_artist(lbl)
-        self.labels_artists[entry_id] = lbl
-        self.label_drag_managers[entry_id] = _DraggableLabel(entry_id, self)
 
         if pointer:
             self.label_drag_managers[entry_id].dull_face_color()
             self.shape_drag_managers[entry_id].dull_face_color()
 
     def enter_naming_mode(self):
+        if self.state != IDLE:
+            return
+
         if not self.shapes:
             self.update_title("Nothing to save!")
             return
@@ -1866,6 +1861,14 @@ class LayoutsPlotterWidget(QWidget):
             f"SAVE: [{self.input_buffer or self.active_layout.name}] | Enter: Save/Rename | Shift+Enter: Save as Copy | Esc: Cancel"
         )
 
+    def on_pointer_marked(self, uid):
+        if self.shapes[uid]["pointer"]:
+            self.label_drag_managers[uid].dull_face_color()
+            self.shape_drag_managers[uid].dull_face_color()
+        else:
+            self.label_drag_managers[uid].restore_face_color()
+            self.shape_drag_managers[uid].restore_face_color()
+
     def save_to_database(self, user_name: str, as_copy=False):
         if self.active_layout is None:
             return
@@ -1874,7 +1877,7 @@ class LayoutsPlotterWidget(QWidget):
         for _, data in self.shapes.items():
             entry = {
                 "name": data["key_name"],
-                "scancode": data["m_code"],
+                "scancode": data["scancode"],
                 "type": data["type"],
                 "cx": data["cx"],
                 "cy": data["cy"],
@@ -1885,8 +1888,9 @@ class LayoutsPlotterWidget(QWidget):
                 "ignore_app_settings": data.get("ignore_app_settings", False),
             }
 
+            pipeline_json_src = data.get("pipeline_json", "{}")
             p_cfg = PipelineConfig()
-            p_cfg.set_pipeline_config_from_json(data.get("pipeline_json", "{}"))
+            p_cfg.set_pipeline_config_from_json(pipeline_json=pipeline_json_src)
 
             if data["type"] == CIRCLE:
                 region_idx = 1
@@ -1901,41 +1905,32 @@ class LayoutsPlotterWidget(QWidget):
                     y_max,
                 )
 
-            if data.get("pipeline_json", "{}") == "{}":
-                bkey = data["key_name"]
-                p_cfg.set_origin_config(
-                    idx=0 if bkey == MOUSE_WHEEL_SIMULATOR_CODE else 1
-                )
-                p_cfg.set_constraint_config(
-                    idx=1 if bkey == MOUSE_WHEEL_SIMULATOR_CODE else 0
-                )
-                p_cfg.set_transform_config(
-                    idx=2 if bkey == MOUSE_WHEEL_SIMULATOR_CODE else 1
-                )
-                if bkey != SPRINT_DISTANCE_CODE:
-                    p_cfg.set_semantic_config(
-                        idx=1 if bkey == MOUSE_WHEEL_SIMULATOR_CODE else 0
-                    )
+            entry_scancode = int(data["scancode"])
+
+            p_cfg.set_origin_config(
+                idx=0 if entry_scancode == MOUSE_WHEEL_SIMULATOR_CODE else 1
+            )
+            p_cfg.set_constraint_config(
+                idx=1 if entry_scancode == MOUSE_WHEEL_SIMULATOR_CODE else 0
+            )
+            p_cfg.set_transform_config(
+                idx=2 if entry_scancode == MOUSE_WHEEL_SIMULATOR_CODE else 1
+            )
+            p_cfg.set_semantic_config(
+                idx=1 if entry_scancode == MOUSE_WHEEL_SIMULATOR_CODE else 0
+            )
 
             p_cfg.set_region_config(idx=region_idx, priority=data.get("priority", 0))
             p_cfg.set_semantic_config(pointer=data.get("pointer", False))
             entry["pipeline_json"] = p_cfg.get_pipeline_json_from_config()
             output.append(entry)
 
-        if self.image_path:
-            rel_img_path = (
-                self.image_path.name
-                if self.image_path.parent == Path(IMAGES_FOLDER)
-                else str(self.image_path)
-            )
-        else:
-            rel_img_path = self.active_layout.image_path if self.active_layout else None
-
         is_new_name = user_name != self.active_layout.name
 
         if as_copy or is_new_name:
             if as_copy and not is_new_name:
                 user_name = make_copy_name(user_name)
+
             layout_id = store.layouts.create(
                 name=user_name,
                 width=self.img_width,
@@ -1943,10 +1938,11 @@ class LayoutsPlotterWidget(QWidget):
                 dpi=self.img_dpi,
                 mouse_wheel_radius=self.mouse_wheel_radius,
                 sprint_distance=self.sprint_distance,
-                image_path=rel_img_path,
             ).id
+
         else:
             layout_id = self.active_layout.id
+
             store.layouts.update(
                 layout_id,
                 width=self.img_width,
@@ -1954,10 +1950,47 @@ class LayoutsPlotterWidget(QWidget):
                 dpi=self.img_dpi,
                 mouse_wheel_radius=self.mouse_wheel_radius,
                 sprint_distance=self.sprint_distance,
-                image_path=rel_img_path,
             )
-            store.zones.delete_all_for_layout(layout_id)
 
+        # Cache the bezel zones dp_thicknesses if they exist else fallback to defaults
+        top_bezel_thickness_dp: float = float(BEZEL_DP_THICKNESS)
+        bottom_bezel_thickness_dp: float = float(BEZEL_DP_THICKNESS)
+
+        top_bezel = store.zones.get(self.top_bezel_id)
+        if top_bezel:
+            top_bezel.set_parsed_config_from_json()
+            _, _, top_bezel_thickness_dp, _ = (
+                top_bezel.CONFIG_HELPER.get_region_config()
+            )
+
+        bottom_bezel = store.zones.get(self.bottom_bezel_id)
+        if bottom_bezel:
+            bottom_bezel.set_parsed_config_from_json()
+            _, _, bottom_bezel_thickness_dp, _ = (
+                bottom_bezel.CONFIG_HELPER.get_region_config()
+            )
+
+        # Clear the database layout of all zones
+        store.zones.delete_all_for_layout(layout_id)
+
+        # Ensure the bezels exist (removing duplicates) and update them with the cached dp_thicknesses
+        store.zones.ensure_bezels(self.active_layout)
+        store.zones.create_bezel(
+            self.active_layout,
+            TOP_BEZEL_ID,
+            TOP_BEZEL_NAME,
+            True,
+            int(top_bezel_thickness_dp),
+        )
+        store.zones.create_bezel(
+            self.active_layout,
+            BOTTOM_BEZEL_ID,
+            BOTTOM_BEZEL_NAME,
+            False,
+            int(bottom_bezel_thickness_dp),
+        )
+
+        # Repopulate the other zones
         for item in output:
             store.zones.create(
                 layout_id=layout_id,
@@ -1980,37 +2013,37 @@ class LayoutsPlotterWidget(QWidget):
         self.active_layout = store.layouts.get(layout_id)
 
         if self.active_layout:
-            store.zones._ensure_system_bezels(self.active_layout)
-            for z in store.zones.list_for_layout(layout_id, auto_heal=False):
-                if z.zone_type == BEZEL:
-                    if _scancode_matches(z.scancode, TOP_BEZEL_ID):
-                        self.top_bezel_id = z.id
-                    elif _scancode_matches(z.scancode, BOTTOM_BEZEL_ID):
-                        self.bottom_bezel_id = z.id
+            for zone in store.zones.list_for_layout(layout_id, auto_heal=True):
+                if zone.zone_type == BEZEL:
+                    if zone.scancode == TOP_BEZEL_ID:
+                        self.top_bezel_id = zone.id
+                    elif zone.scancode == BOTTOM_BEZEL_ID:
+                        self.bottom_bezel_id = zone.id
 
         self.layout_saved.emit(user_name, layout_id)
         self.update_title(f"SAVED: {user_name}")
 
     def save_entry(
         self,
-        key_name,
-        hex_code,
-        cx,
-        cy,
-        r,
-        bb,
-        pointer,
-        priority=0,
-        pipeline_json="{}",
-        ignore_app_settings=False,
+        key_name: str,
+        scancode: int,
+        cx: int,
+        cy: int,
+        r: Optional[int],
+        bb: Optional[tuple[tuple[int, int], tuple[int, int]]],
+        pointer: bool,
+        priority: int,
+        pipeline_json: str,
+        ignore_app_settings: bool,
     ):
         uid, inc_count = self.count, True
-        if key_name == MOUSE_WHEEL_SIMULATOR_CODE:
-            if self.mode == RECTANGLE:
+        if scancode == MOUSE_WHEEL_SIMULATOR_CODE:
+            if self.mode == RECTANGLE or r is None:
                 return False, uid
+
             if self.saved_mouse_wheel:
                 for k, v in list(self.shapes.items()):
-                    if v["key_name"] == MOUSE_WHEEL_SIMULATOR_CODE:
+                    if v["scancode"] == MOUSE_WHEEL_SIMULATOR_CODE:
                         uid, inc_count = k, False
                         self.shapes.pop(k)
                         for d in (self.shapes_artists, self.labels_artists):
@@ -2020,23 +2053,19 @@ class LayoutsPlotterWidget(QWidget):
                             if k in d:
                                 d.pop(k)._disconnect_cids()
                         break
-            (
-                self.mouse_wheel_radius,
-                self.mouse_wheel_cx,
-                self.mouse_wheel_cy,
-                self.saved_mouse_wheel,
-            ) = (
-                r,
-                cx,
-                cy,
-                True,
-            )
-        elif key_name == SPRINT_DISTANCE_CODE:
+
+            self.mouse_wheel_radius = r
+            self.mouse_wheel_cx = cx
+            self.mouse_wheel_cy = cy
+            self.saved_mouse_wheel = True
+
+        elif scancode == SPRINT_DISTANCE_CODE:
             if self.mode == RECTANGLE or not self.saved_mouse_wheel:
                 return False, uid
+
             if self.saved_sprint_distance:
                 for k, v in list(self.shapes.items()):
-                    if v["key_name"] == SPRINT_DISTANCE_CODE:
+                    if v["scancode"] == SPRINT_DISTANCE_CODE:
                         uid, inc_count = k, False
                         self.shapes.pop(k)
                         for d in (self.shapes_artists, self.labels_artists):
@@ -2046,20 +2075,21 @@ class LayoutsPlotterWidget(QWidget):
                             if k in d:
                                 d.pop(k)._disconnect_cids()
                         break
+
             actual_dist = self.euclidean_distance(
                 cx, cy, self.mouse_wheel_cx, self.mouse_wheel_cy
             )
+
             if actual_dist <= self.mouse_wheel_radius:
                 return False, uid
-            self.sprint_distance, self.saved_sprint_distance, self.sprint_artist_id = (
-                actual_dist,
-                True,
-                uid,
-            )
+
+            self.sprint_distance = actual_dist
+            self.saved_sprint_distance = True
+            self.sprint_artist_id = uid
 
         self.shapes[uid] = {
             "key_name": key_name,
-            "m_code": hex_code,
+            "scancode": scancode,
             "type": self.mode,
             "cx": cx,
             "cy": cy,
@@ -2075,6 +2105,9 @@ class LayoutsPlotterWidget(QWidget):
         return True, uid
 
     def print_data(self):
+        if self.state != IDLE:
+            return
+
         if not self.shapes:
             self.update_title("List empty. Nothing to print.")
             return
@@ -2119,7 +2152,7 @@ class LayoutsPlotterWidget(QWidget):
             ((min(xs), min(ys)), (max(xs), max(ys))),
         )
 
-    def euclidean_distance(self, x1, y1, x2, y2):
+    def euclidean_distance(self, x1: float, y1: float, x2: float, y2: float):
         return math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
 
     def constrain_point_to_rect_radial(self, cx, cy, px, py, rect_bb):

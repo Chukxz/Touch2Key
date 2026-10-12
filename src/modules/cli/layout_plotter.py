@@ -24,7 +24,7 @@ class LayoutStudioWindow(QMainWindow):
         self.resize(1300, 800)
         
         # Instantiate the widget directly (dispatcher is None in standalone mode)
-        self.studio = LayoutStudioPage(dispatcher=None, parent=self)
+        self.studio = LayoutStudioPage(dispatcher=None, parent=self, standalone=True)
         self.setCentralWidget(self.studio)
         
         # Force the lifecycle hook to load the db profiles into the UI

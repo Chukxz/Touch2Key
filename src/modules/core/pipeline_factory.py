@@ -256,7 +256,6 @@ def create_pipeline_from_zone(
     radius: float | None = None,
     walk_radius: float = 80.0,
     sprint_distance: float = 120.0,
-    toggle_mode_callback: Any | None = None,
     **fields: Any,
 ) -> Pipeline[Any] | None:
     """Builds a typed 5-stage Pipeline instance from database zone metadata."""

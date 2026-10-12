@@ -28,7 +28,7 @@ def export_layout_json(layout_id: int, target_path: Optional[Path] = None) -> Pa
         content.append(
             {
                 "name": zone.name,
-                "scancode": hex(zone.scancode),
+                "scancode": zone.scancode,
                 "type": zone.zone_type,
                 "cx": zone.cx or 0.0,
                 "cy": zone.cy or 0.0,
@@ -128,9 +128,7 @@ def export_settings_toml(
     typematic.add("enabled", bool(s.typematic_enabled))
     typematic.add("delay_ms", float(s.typematic_delay_ms))
     typematic.add("rate_hz", float(s.typematic_rate_hz))
-    typematic.add(
-        "exclude_keys", s.typematic_excluded_keys or "w,a,s,d,shift,ctrl,alt"
-    )
+    typematic.add("exclude_keys", s.typematic_excluded_keys or "")
     doc.add("typematic", typematic)
 
     target_path.parent.mkdir(parents=True, exist_ok=True)

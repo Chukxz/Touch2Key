@@ -144,8 +144,8 @@ MOUSE_SCANCODES: tuple[int, ...] = (
 TOP_BEZEL_NAME = "Top Bezel"
 BOTTOM_BEZEL_NAME = "Bottom Bezel"
 BEZEL_DP_THICKNESS = 25  # ~3.97mm
-SPRINT_DISTANCE_CODE = "left_bracket"
-MOUSE_WHEEL_SIMULATOR_CODE = "right_bracket"
+SPRINT_DISTANCE_CODE = 0x1A  # "left_bracket"
+MOUSE_WHEEL_SIMULATOR_CODE = 0x1B  # "right_bracket"
 
 # Delays (in seconds)
 RELOAD_DELAY = 0.5
@@ -396,8 +396,6 @@ SPECIAL_MAP = {
     "mouse5": "mouse_forward",
     "m_forward": "mouse_forward",
 }
-
-SPECIAL_MAP_INV = {v: k for k, v in SPECIAL_MAP.items()}
 
 COPY_RE = re.compile(r"- Copy(?:\s*\((\d+)\)|(?=\s|$))")
 

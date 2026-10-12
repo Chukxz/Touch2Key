@@ -4,7 +4,7 @@ import ctypes
 from typing import ClassVar
 
 from ..base import AbstractMapping
-from modules.utils import SCANCODES, SCANCODES_INV, SPECIAL_MAP, SPECIAL_MAP_INV
+from modules.utils import SCANCODES, SCANCODES_INV, SPECIAL_MAP
 
 
 class Mapping(AbstractMapping):
@@ -35,7 +35,7 @@ class Mapping(AbstractMapping):
     def get_key_name_from_code(self, key_code: int) -> str | None:
         """Translates any Windows scancode to a canonical key token, falling back to Win32 API."""
         if not key_code:
-            return ""
+            return None
 
         norm_code = self._normalize_scancode(key_code)
 
@@ -46,19 +46,19 @@ class Mapping(AbstractMapping):
         # 2. Exact match in canonical inverted table
         name = SCANCODES_INV.get(norm_code)
         if name:
-            return SPECIAL_MAP_INV.get(name, name).lower()
+            return name.lower()
 
         # 3. Match raw un-normalized code if table stores un-prefixed values
         if key_code != norm_code:
             name = SCANCODES_INV.get(key_code)
             if name:
-                return SPECIAL_MAP_INV.get(name, name).lower()
+                return name.lower()
 
         # 4. Standard 1-byte keys (only if NOT an extended key)
         if (norm_code & 0xFF00) == 0:
             name_stripped = SCANCODES_INV.get(norm_code & 0xFF)
             if name_stripped:
-                return SPECIAL_MAP_INV.get(name_stripped, name_stripped).lower()
+                return name_stripped.lower()
 
         # 5. Fallback: Query Windows OS API directly (GetKeyNameTextW)
         try:
@@ -73,7 +73,8 @@ class Mapping(AbstractMapping):
                 raw_os_name = buf.value.strip().lower()
                 clean = SPECIAL_MAP.get(raw_os_name, raw_os_name)
                 if clean is not None:
-                    return SPECIAL_MAP_INV.get(clean, clean).lower()
+                    return clean.lower()
+                
         except Exception:
             pass
 
@@ -81,7 +82,7 @@ class Mapping(AbstractMapping):
         return f"0x{norm_code:x}"
 
     def get_key_code_from_name(self, key_name: str) -> int | None:
-        """Translates a key string token or hex string to a Windows native scancode."""
+        """Translates a key string token or hex string to a Windows native scancode."""        
         clean = key_name.strip().lower()
 
         if clean in self._MODIFIER_MAP_INV:

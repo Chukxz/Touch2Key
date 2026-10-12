@@ -77,7 +77,7 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
     typ_rate = typematic_table.get("rate_hz", keys_table.get("typematic_rate_hz", 30.0))
     typ_excludes = typematic_table.get(
         "exclude_keys",
-        keys_table.get("typematic_exclude_keys", "w,a,s,d,shift,ctrl,alt"),
+        keys_table.get("typematic_exclude_keys", ""),
     )
 
     fields: dict[str, Any] = {
@@ -238,16 +238,16 @@ def migrate_json_layout(
 
             store.zones.create(
                 layout_id=layout_id,
-                scancode=int(scancode, 16),
-                name=zone_name,
+                scancode=int(scancode),
+                name=str(zone_name),
                 zone_type=zone_type,
-                cx=item.get("cx"),
-                cy=item.get("cy"),
-                r=item.get("val1") if zone_type == CIRCLE else None,
-                x1=item.get("val1"),
-                y1=item.get("val2"),
-                x2=item.get("val3"),
-                y2=item.get("val4"),
+                cx=float(item.get("cx")),
+                cy=float(item.get("cy")),
+                r= float(item.get("val1")) if zone_type == CIRCLE else None,
+                x1=float(item.get("val1")),
+                y1=float(item.get("val2")),
+                x2=float(item.get("val3")),
+                y2=float(item.get("val4")),
                 ignore_app_settings=ignore_app_settings,
                 pipeline_json=pipeline_json,
             )
@@ -263,7 +263,7 @@ def migrate_json_layout(
 
         layout_record = store.layouts.get(layout_id)
         if layout_record:
-            store.zones._ensure_system_bezels(layout_record)
+            store.zones.ensure_bezels(layout_record)
 
     if set_active:
         store.settings.update(active_layout_id=layout_id)

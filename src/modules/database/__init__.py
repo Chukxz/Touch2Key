@@ -13,10 +13,8 @@ from typing import Optional
 from modules.utils import (
     BEZEL,
     BEZEL_DP_THICKNESS,
-    BOTTOM_BEZEL_ID,
     TOP_BEZEL_ID,
-    calculate_rect,
-    dp_to_px,
+    BOTTOM_BEZEL_ID,
 )
 from .connection import ConnectionManager, connection_manager
 
@@ -28,7 +26,6 @@ from .repositories import (
     LayoutsRepository,
     LayoutZone,
     LayoutZonesRepository,
-    _scancode_matches,
 )
 
 __all__ = [
@@ -98,35 +95,24 @@ def reset_layout_zones_to_app_settings(layout_id: int) -> int:
     if not layout:
         return 0
 
-    l_w = layout.width
-    l_h = layout.height
-    thickness = float(dp_to_px(BEZEL_DP_THICKNESS, layout.dpi))
     zones = store.zones.list_for_layout(layout_id)
     updated_count = 0
 
     for zone in zones:
         if zone.zone_type == BEZEL:
-            if _scancode_matches(zone.scancode, TOP_BEZEL_ID):
-                cx, cy, x1, y1, x2, y2 = calculate_rect(0.0, 0.0, l_w, thickness)
-                store.zones.update(
-                    zone.id, cx=cx, cy=cy, r=None, x1=x1, y1=y1, x2=x2, y2=y2
-                )
-            elif _scancode_matches(zone.scancode, BOTTOM_BEZEL_ID):
-                cx, cy, x1, y1, x2, y2 = calculate_rect(0.0, l_h - thickness, l_w, l_h)
-                store.zones.update(
-                    zone.id, cx=cx, cy=cy, r=None, x1=x1, y1=y1, x2=x2, y2=y2
-                )
+            if zone.scancode == TOP_BEZEL_ID:
+                store.zones.update_bezel(layout, zone, True, BEZEL_DP_THICKNESS)
+            elif zone.scancode == BOTTOM_BEZEL_ID:
+                store.zones.update_bezel(layout, zone, False, BEZEL_DP_THICKNESS)
 
         zone.set_parsed_config_from_json()
 
         _, sem_mode, _ = zone.CONFIG_HELPER.get_semantic_config()
 
-        # 1. Bezels
-        if sem_mode == "TOGGLE":
-            zone.CONFIG_HELPER.set_region_config(bezel_dp_thickness=BEZEL_DP_THICKNESS)
+        # 1. Bezels dp_thickness are already set by the update_bezel methods above
 
         # 2. Standard Buttons
-        elif sem_mode == "BUTTON":
+        if sem_mode == "BUTTON":
             zone.CONFIG_HELPER.set_transform_config(
                 sensitivity_x=settings.sensitivity_x,
                 sensitivity_y=settings.sensitivity_y,

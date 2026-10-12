@@ -201,7 +201,7 @@ You can directly configure hardware auto-repeat behavior, double taps, bezel tog
 ```bash
 touch2key-manage --show-typematic
 touch2key-manage --set-typematic on --typematic-delay 200 --typematic-rate 35
-touch2key-manage --typematic-excludes "w,a,s,d,shift,ctrl,alt"
+touch2key-manage --typematic-excludes "lshift, lctrl, lalt"
 touch2key-manage --reset-typematic
 touch2key-manage --show-system
 touch2key-manage --set-double-tap off

@@ -35,7 +35,6 @@ from modules.utils import (
     MapperEvent,
     PROFILES_FOLDER,
     TOML_PATH,
-    get_scancode_and_bridge_key_from_key,
 )
 
 if TYPE_CHECKING:
@@ -172,7 +171,7 @@ class KeySequenceRow(QWidget):
         if checked:
             self.record_btn.setText("Stop Recording")
             self.status_label.setText(
-                "Recording keypresses (Esc included)... Click Stop when done."
+                "Recording keypresses (Esc included)... Click Stop Recording when done."
             )
             self.page.begin_sequence_capture(self)
         else:
@@ -383,7 +382,10 @@ class SettingsPage(QWidget):
         typematic_form.addRow("Typematic Rate:", self.typematic_rate_spin)
 
         self.typematic_excluded_keys = KeySequenceRow("typematic_excluded_keys", self)
-        typematic_form.addRow("Excluded Keys:", self.typematic_excluded_keys)
+        typematic_excluded_keys_scroll_area = QScrollArea()
+        typematic_excluded_keys_scroll_area.setWidget(self.typematic_excluded_keys)
+        typematic_excluded_keys_scroll_area.setWidgetResizable(True)
+        typematic_form.addRow("Excluded Keys:", typematic_excluded_keys_scroll_area)
 
         scroll_layout.addWidget(typematic_group)
 

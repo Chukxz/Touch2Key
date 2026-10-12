@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
@@ -50,6 +50,8 @@ from modules.utils import (
     JSONS_FOLDER,
     PROFILES_FOLDER,
     RECTANGLE,
+    MOUSE_WHEEL_SIMULATOR_CODE,
+    SPRINT_DISTANCE_CODE,
     MapperEvent,
 )
 
@@ -62,18 +64,19 @@ STATIC_SHORTCUTS_HELP = (
     "<b>Shortcuts:</b> "
     "<span style='color: palette(highlight);'>Ctrl+F</span> Find | "
     "<span style='color: palette(highlight);'>F12</span> Save | "
-    "<span style='color: palette(highlight);'>Esc</span> Cancel/Exit | "
+    "<span style='color: palette(highlight);'>Esc</span> Cancel / Exit (Standalone) | "
     "<span style='color: palette(highlight);'>F6</span> Circle | "
     "<span style='color: palette(highlight);'>F7</span> Rect | "
     "<span style='color: palette(highlight);'>Del</span> Delete | "
     "<span style='color: palette(highlight);'>F2</span> Clear All | "
     "<span style='color: palette(highlight);'>F4</span> Overlays | "
-    "<span style='color: palette(highlight);'>Space</span> Toggle Pointer | "
+    "<span style='color: palette(highlight);'>[</span> Bind Sprint | "
+    "<span style='color: palette(highlight);'>]</span> Bind Mousewheel | "
     "<span style='color: palette(highlight);'>Arrows</span> Nudge"
 )
 
 
-def _format_timestamp(raw_ts: str | None) -> str:
+def _format_timestamp(raw_ts: Optional[str]) -> str:
     """Formats an SQLite timestamp string (YYYY-MM-DD HH:MM:SS) to YYYY-MM-DD HH:MM."""
     if not raw_ts or not raw_ts.strip():
         return "Unknown"
@@ -82,7 +85,7 @@ def _format_timestamp(raw_ts: str | None) -> str:
 
 
 def _get_relative_time_and_recency(
-    timestamp_str: str | None, threshold_hours: int = 24
+    timestamp_str: Optional[str], threshold_hours: int = 24
 ) -> tuple[str, bool]:
     """Returns a short human-readable relative string and a boolean flag if within threshold."""
     if not timestamp_str or not timestamp_str.strip():
@@ -123,11 +126,13 @@ class LayoutStudioPage(QWidget):
 
     def __init__(
         self,
-        dispatcher: MapperEventDispatcher | None = None,
-        parent: QWidget | None = None,
+        dispatcher: Optional[MapperEventDispatcher] = None,
+        parent: Optional[QWidget] = None,
+        standalone=False,
     ):
         super().__init__(parent)
         self.dispatcher = dispatcher
+        self.standalone = standalone
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -143,7 +148,7 @@ class LayoutStudioPage(QWidget):
 
         # Responsive default split sizes fitting 1366x768 screens
         self.splitter.setSizes([240, 560, 280])
-        self._current_inspected_uid: int | None = None
+        self._current_inspected_uid: Optional[int] = None
 
         self._wire_signals()
         self.load_profiles()
@@ -182,7 +187,7 @@ class LayoutStudioPage(QWidget):
         )
         self.details_label.setWordWrap(True)
         self.details_label.setAlignment(Qt.AlignmentFlag.AlignTop)
-        
+
         details_scroll_area = QScrollArea()
         details_scroll_area.setWidget(self.details_label)
         details_scroll_area.setWidgetResizable(True)
@@ -280,7 +285,7 @@ class LayoutStudioPage(QWidget):
         tools_row_2 = QHBoxLayout()
         self.add_circle_btn = QPushButton("Add Circle (F6)")
         self.add_rect_btn = QPushButton("Add Rectangle (F7)")
-        self.cancel_action_btn = QPushButton("Cancel (F8)")
+        self.cancel_action_btn = QPushButton("Cancel (Esc)")
         self.save_btn = QPushButton("Save to DB (F12)")
         self.save_btn.setStyleSheet("font-weight: bold; color: palette(highlight);")
 
@@ -291,7 +296,7 @@ class LayoutStudioPage(QWidget):
         tools_row_2.addStretch()
         canvas_layout.addLayout(tools_row_2)
 
-        self.plotter_widget = LayoutsPlotterWidget(self, standalone=False)
+        self.plotter_widget = LayoutsPlotterWidget(self, standalone=self.standalone)
         canvas_layout.addWidget(self.plotter_widget, stretch=1)
 
         self.splitter.addWidget(canvas_widget)
@@ -310,7 +315,7 @@ class LayoutStudioPage(QWidget):
         layout_form.setContentsMargins(0, 0, 0, 0)
 
         lbl_global = QLabel(
-            "<b>Layout Settings</b><br>Click any shape on the canvas to inspect it."
+            "<b>Layout Settings</b><br>Click any shape (except bezel zones) on the canvas to inspect it."
         )
         lbl_global.setWordWrap(True)
         layout_form.addWidget(lbl_global)
@@ -319,11 +324,11 @@ class LayoutStudioPage(QWidget):
         bezels_group = QGroupBox("System Bezels")
         bezels_form = QFormLayout(bezels_group)
         self.top_bezel_spin = QDoubleSpinBox()
-        self.top_bezel_spin.setRange(2, 100)
+        self.top_bezel_spin.setRange(1, 100)
         self.top_bezel_spin.setSuffix(" dp")
 
         self.bottom_bezel_spin = QDoubleSpinBox()
-        self.bottom_bezel_spin.setRange(2, 100)
+        self.bottom_bezel_spin.setRange(1, 100)
         self.bottom_bezel_spin.setSuffix(" dp")
 
         bezels_form.addRow("Top Bezel:", self.top_bezel_spin)
@@ -350,14 +355,14 @@ class LayoutStudioPage(QWidget):
         self.insp_ignore_app_settings = QCheckBox("Ignore Global App Settings")
         zone_layout.addWidget(self.insp_ignore_app_settings)
 
-        region_group = QGroupBox("1. Region")
+        region_group = QGroupBox("Region")
         region_form = QFormLayout(region_group)
         self.insp_priority = QSpinBox()
         self.insp_priority.setRange(-100, 200)
         region_form.addRow("Priority Value:", self.insp_priority)
         zone_layout.addWidget(region_group)
 
-        transform_group = QGroupBox("4. Transformation")
+        transform_group = QGroupBox("Transformation")
         transform_form = QFormLayout(transform_group)
 
         self.insp_sens_x = QDoubleSpinBox()
@@ -387,7 +392,7 @@ class LayoutStudioPage(QWidget):
         transform_form.addRow("Hysteresis:", self.insp_hysteresis)
         zone_layout.addWidget(transform_group)
 
-        semantic_group = QGroupBox("5. Semantics & Output")
+        semantic_group = QGroupBox("Semantics & Output")
         semantic_form = QFormLayout(semantic_group)
         self.insp_pointer = QCheckBox("Output is Pointer Button")
         semantic_form.addRow("Pointer:", self.insp_pointer)
@@ -498,12 +503,12 @@ class LayoutStudioPage(QWidget):
         except Exception:
             return "Recently Modified"
 
-    def _filter_profiles(self, text: str | None = None) -> None:
+    def _filter_profiles(self, text: Optional[str] = None) -> None:
         """Filters profile list in-place, preserving active selection or defaulting to active layout."""
         query = (self.search_input.text() if text is None else text).strip().lower()
 
-        first_visible_item: QListWidgetItem | None = None
-        active_layout_item: QListWidgetItem | None = None
+        first_visible_item: Optional[QListWidgetItem] = None
+        active_layout_item: Optional[QListWidgetItem] = None
         current_item = self.profile_list.currentItem()
         current_still_visible = False
 
@@ -572,10 +577,12 @@ class LayoutStudioPage(QWidget):
 
                 created_str = _format_timestamp(layout.created_at)
                 updated_str = _format_timestamp(layout.updated_at)
+                img_info = Path(layout.image_path).name if layout.image_path else "None"
                 item.setToolTip(
                     f"<b>{layout.name}</b><br>"
                     f"Canvas: {layout.width}x{layout.height} ({layout.dpi} DPI)<br>"
                     f"Mapped Zones: {len(zones)}<br>"
+                    f"Image path: {img_info}<br>"
                     f"<b>Modified:</b> {updated_str} ({rel_time})<br>"
                     f"<b>Created:</b> {created_str}"
                 )
@@ -600,7 +607,7 @@ class LayoutStudioPage(QWidget):
                 self, "Database Error", f"Could not load profiles:\n{exc}"
             )
 
-    def _get_selected_layout_id(self) -> int | None:
+    def _get_selected_layout_id(self) -> Optional[int]:
         selected = self.profile_list.selectedItems()
         if not selected:
             QMessageBox.warning(
@@ -629,11 +636,13 @@ class LayoutStudioPage(QWidget):
 
             self.details_label.setText(
                 f"ID: {layout.id} | Canvas: {layout.width}x{layout.height} ({layout.dpi} DPI)\n"
-                f"Zones: {len(zones)} | Image: {img_info}\n"
+                f"Zones: {len(zones)} | Image path: {img_info}\n"
                 f"Modified: {updated_str} (Created: {created_str})"
             )
         except Exception as exc:
-            logger.exception("Failed to fetch details for layout ID %s", layout_id, exc_info=True)
+            logger.exception(
+                "Failed to fetch details for layout ID %s", layout_id, exc_info=True
+            )
 
     def _notify_engine_reload(self) -> None:
         if self.dispatcher is not None:
@@ -967,10 +976,10 @@ class LayoutStudioPage(QWidget):
 
     def _on_save_button_clicked(self) -> None:
         active = store.get_active_layout()
-        if active is not None and hasattr(self.plotter_widget, "save_to_database"):
+        if active is not None:
             self.plotter_widget.save_to_database(active.name)
         else:
-            self.plotter_widget.enter_naming_mode()
+            self.plotter_widget.update_title("No active layout")
 
     def _on_layout_saved(self, name: str, layout_id: int) -> None:
         logger.info("Layout '%s' (ID: %s) saved to database", name, layout_id)
@@ -998,23 +1007,20 @@ class LayoutStudioPage(QWidget):
             return
 
         img_path = Path(file_path_str)
-        # Store clean filename if placed in data/images/ for cross-machine portability
-        saved_img_ref = (
-            img_path.name
-            if img_path.parent.resolve() == IMAGES_FOLDER.resolve()
-            else str(img_path.resolve())
-        )
 
         try:
-            store.layouts.update(active.id, image_path=saved_img_ref)
+            img, image_params = self.plotter_widget.get_image_params(active, img_path)
+
             self.load_profiles()
-            self.plotter_widget.reload_active_layout()
+            self.plotter_widget.reload_active_layout(img, image_params)
             self._notify_engine_reload()
+
             logger.info(
                 "Updated active layout ID %s background image to '%s'",
                 active.id,
                 img_path.name,
             )
+
         except Exception as exc:
             logger.exception("Failed to update background image")
             QMessageBox.critical(
@@ -1032,14 +1038,22 @@ class LayoutStudioPage(QWidget):
             return
 
         try:
-            capture_android_screen(parent=self)
+            img_path = capture_android_screen(parent=self)
+            img, image_params = self.plotter_widget.get_image_params(active, img_path)
+
             self.load_profiles()
-            self.plotter_widget.reload_active_layout()
+            self.plotter_widget.reload_active_layout(img, image_params)
             self._notify_engine_reload()
-            logger.info("Screenshot captured and linked to active layout")
+
+            logger.info(
+                "Screenshot '%s' captured and linked to active layout ID %s",
+                img_path.name,
+                active.id,
+            )
             QMessageBox.information(
                 self, "Screenshot", "Reference screenshot captured and linked."
             )
+
         except Exception as exc:
             logger.exception("Screenshot capture failed")
             QMessageBox.critical(self, "Capture Failed", str(exc))
@@ -1083,12 +1097,8 @@ class LayoutStudioPage(QWidget):
         if not zone:
             return
 
-        p_cfg = PipelineConfig()
-        p_cfg.set_pipeline_config_from_json(zone.pipeline_json)
-        r_idx, r_mode, _, prio = p_cfg.get_region_config()
-        p_cfg.set_region_config(r_idx, val, prio)
+        store.zones.update_bezel(active, zone, is_top, int(val))
 
-        store.zones.update(bid, pipeline_json=p_cfg.get_pipeline_json_from_config())
         self.plotter_widget._render_bezels_notch()
         self.plotter_widget.canvas.draw_idle()
 
@@ -1110,18 +1120,12 @@ class LayoutStudioPage(QWidget):
                 self, "Success", f"Reset {count} zones to default AppSettings."
             )
 
-    def _on_canvas_zone_selected(self, uid: int) -> None:
-        if uid == -1 or uid not in self.plotter_widget.shapes:
-            self.inspector_stack.setCurrentIndex(0)
-            self._current_inspected_uid = None
-            self._load_bezel_thicknesses_to_ui()
-            return
-
-        self._current_inspected_uid = uid
-        self.inspector_stack.setCurrentIndex(1)
+    def _on_inspect(self, uid: int) -> None:
         shape_data = self.plotter_widget.shapes[uid]
+        shape_scancode = int(shape_data["scancode"])
+        is_pointer = bool(shape_data.get("pointer", False))
 
-        self.insp_name_label.setText(f"<b>Zone:</b> {shape_data['bridge_key']}")
+        self.insp_name_label.setText(f"<b>Zone:</b> {shape_data['key_name']}")
 
         for w in [
             self.insp_ignore_app_settings,
@@ -1141,19 +1145,35 @@ class LayoutStudioPage(QWidget):
 
         p_cfg = PipelineConfig()
         p_cfg.set_pipeline_config_from_json(shape_data.get("pipeline_json", "{}"))
-
         _, _, sx, sy, dz, hys = p_cfg.get_transform_config()
+
         self.insp_sens_x.setValue(sx)
+        self.insp_sens_x.setEnabled(
+            any([is_pointer, shape_scancode == MOUSE_WHEEL_SIMULATOR_CODE])
+        )
         self.insp_sens_y.setValue(sy)
+        self.insp_sens_y.setEnabled(
+            any([is_pointer, shape_scancode == MOUSE_WHEEL_SIMULATOR_CODE])
+        )
+
         self.insp_hysteresis.setValue(hys)
+        self.insp_hysteresis.setEnabled(shape_scancode == MOUSE_WHEEL_SIMULATOR_CODE)
 
         active = store.get_active_layout()
         r = active.mouse_wheel_radius if active else 50.0
         self.insp_deadzone.setValue(dz / r if r > 0 else 0)
+        self.insp_deadzone.setEnabled(shape_scancode == MOUSE_WHEEL_SIMULATOR_CODE)
 
         _, sem_mode, ptr = p_cfg.get_semantic_config()
-        self.insp_pointer.setEnabled(sem_mode == "BUTTON")
-        self.insp_pointer.setChecked(shape_data.get("pointer", False))
+        self.insp_pointer.setEnabled(
+            not any(
+                [
+                    shape_scancode == MOUSE_WHEEL_SIMULATOR_CODE,
+                    shape_scancode == SPRINT_DISTANCE_CODE,
+                ]
+            )
+        )
+        self.insp_pointer.setChecked(is_pointer)
 
         for w in [
             self.insp_ignore_app_settings,
@@ -1166,24 +1186,23 @@ class LayoutStudioPage(QWidget):
         ]:
             w.blockSignals(False)
 
-    def _on_pointer_toggled(self, checked: bool) -> None:
-        if not checked or self._current_inspected_uid is None:
-            self._on_inspector_value_changed()
+    def _on_canvas_zone_selected(self, uid: int) -> None:
+        if uid == -1 or uid not in self.plotter_widget.shapes:
+            self.inspector_stack.setCurrentIndex(0)
+            self._current_inspected_uid = None
+            self._load_bezel_thicknesses_to_ui()
             return
 
-        for k, v in self.plotter_widget.shapes.items():
-            if k != self._current_inspected_uid and v.get("pointer") is True:
-                QMessageBox.warning(
-                    self,
-                    "Rule Violation",
-                    "A look-area pointer already exists.\nYou cannot create a second one.",
-                )
-                self.insp_pointer.blockSignals(True)
-                self.insp_pointer.setChecked(False)
-                self.insp_pointer.blockSignals(False)
-                return
+        self._current_inspected_uid = uid
+        self.inspector_stack.setCurrentIndex(1)
 
+        self._on_inspect(uid)
+
+    def _on_pointer_toggled(self, checked: bool) -> None:
         self._on_inspector_value_changed()
+
+        if self._current_inspected_uid is not None:
+            self.plotter_widget.on_pointer_marked(self._current_inspected_uid)
 
     def _on_inspector_value_changed(self, *_args: Any) -> None:
         if self._current_inspected_uid is None:
@@ -1223,8 +1242,10 @@ class LayoutStudioPage(QWidget):
 
         shape["pipeline_json"] = p_cfg.get_pipeline_json_from_config()
         self.plotter_widget.update_title(
-            f"INSPECTING: {shape['bridge_key']} (Prio: {prio})", True
+            f"INSPECTING: {shape['key_name']} (Prio: {prio})", True
         )
+
+        self._on_inspect(uid)
 
     def _on_reset_single_zone(self) -> None:
         if self._current_inspected_uid is None:
@@ -1241,7 +1262,7 @@ class LayoutStudioPage(QWidget):
         """Persists any active layout, zone edits, and inspector values to the database."""
         try:
             active = store.get_active_layout()
-            if active is not None and hasattr(self.plotter_widget, "save_to_database"):
+            if active is not None:
                 self.plotter_widget.save_to_database(active.name)
             return True
         except Exception as exc:

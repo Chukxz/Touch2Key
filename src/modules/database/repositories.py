@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("modules.database.repository")
 
-# NATIVE REPOSITORY DEFAULT TEMPLATE
+# NATIVE Repository DEFAULT TEMPLATE
 _DEFAULT_BEZEL_PIPELINE_JSON = json.dumps(
     {
         "region": {
@@ -277,7 +277,7 @@ class LayoutsRepository:
         row = conn.execute("SELECT * FROM layouts WHERE name = ?;", (name,)).fetchone()
         return Layout.from_row(row) if row is not None else None
 
-    def create(self, **fields: Any) -> Layout:
+    def create(self, auto_seed: bool = True, **fields: Any) -> Layout:
         unknown = set(fields) - self.ALLOWED_FIELDS
         if unknown:
             raise InvalidFieldError(f"Unknown layouts field(s): {sorted(unknown)}")
@@ -299,11 +299,12 @@ class LayoutsRepository:
             new_id = cursor.lastrowid
 
         layout = self.get(new_id)
-        assert layout is not None
+        if layout is None:
+            raise KeyError("Error creating layout.")
 
-        # Auto-seed system bezels immediately on creation
-        zones_repo = LayoutZonesRepository()
-        zones_repo._ensure_system_bezels(layout)
+        if auto_seed:
+            zones_repo = LayoutZonesRepository()
+            zones_repo.ensure_bezels(layout)
         return layout
 
     def update(self, layout_id: int, **fields: Any) -> Layout:
@@ -329,7 +330,7 @@ class LayoutsRepository:
 
         layout = self.get(layout_id)
         if layout is None:
-            raise KeyError(f"No layout with id={layout_id}")
+            raise KeyError(f"No layout with id={layout_id}.")
         return layout
 
     def delete(self, layout_id: int) -> None:
@@ -348,6 +349,7 @@ class LayoutsRepository:
             raise KeyError(f"No layout with id={layout_id}")
 
         new_layout = self.create(
+            auto_seed=False,
             name=new_name,
             width=source.width,
             height=source.height,
@@ -355,13 +357,10 @@ class LayoutsRepository:
             mouse_wheel_radius=source.mouse_wheel_radius,
             sprint_distance=source.sprint_distance,
             image_path=source.image_path,
-        ) 
+        )
 
         zones_repo = LayoutZonesRepository()
         for zone in zones_repo.list_for_layout(layout_id, auto_heal=False):
-            if zone.zone_type == BEZEL:
-                continue  # Bezels are seeded by self.create()
-
             zones_repo.create(
                 layout_id=new_layout.id,
                 scancode=zone.scancode,
@@ -381,7 +380,7 @@ class LayoutsRepository:
 
 
 class LayoutZonesRepository:
-    ALLOWED_FIELDS = {
+    ALLOWED_CREATE_FIELDS = {
         "layout_id",
         "scancode",
         "name",
@@ -396,93 +395,11 @@ class LayoutZonesRepository:
         "ignore_app_settings",
         "pipeline_json",
     }
+
+    ALLOWED_UPDATE_FIELDS = set(ALLOWED_CREATE_FIELDS) - set({"layout_id", "scancode"})
+
     VALID_ZONE_TYPES = {BEZEL, CIRCLE, RECTANGLE}
     _REQUIRED_ON_CREATE = {"layout_id", "scancode", "zone_type"}
-
-    def list_for_layout(
-        self, layout_id: int, auto_heal: bool = True
-    ) -> list[LayoutZone]:
-        conn = connection_manager.get_connection()
-        rows = conn.execute(
-            "SELECT * FROM layout_zones WHERE layout_id = ? ORDER BY id;", (layout_id,)
-        ).fetchall()
-        zones = [LayoutZone.from_row(row) for row in rows]
-
-        if auto_heal:
-            layouts_repo = LayoutsRepository()
-            layout = layouts_repo.get(layout_id)
-            if layout and self._ensure_system_bezels(layout, zones):
-                rows = conn.execute(
-                    "SELECT * FROM layout_zones WHERE layout_id = ? ORDER BY id;",
-                    (layout_id,),
-                ).fetchall()
-                zones = [LayoutZone.from_row(row) for row in rows]
-
-        return zones
-
-    def _ensure_system_bezels(
-        self, layout: Layout, current_zones: list[LayoutZone] | None = None
-    ) -> bool:
-        if current_zones is None:
-            conn = connection_manager.get_connection()
-            rows = conn.execute(
-                "SELECT * FROM layout_zones WHERE layout_id = ? ORDER BY id;",
-                (layout.id,),
-            ).fetchall()
-            current_zones = [LayoutZone.from_row(row) for row in rows]
-
-        healed = False
-        top_bezels = [
-            z
-            for z in current_zones
-            if z.scancode == TOP_BEZEL_ID and z.zone_type == BEZEL
-        ]
-        bottom_bezels = [
-            z
-            for z in current_zones
-            if z.scancode == BOTTOM_BEZEL_ID and z.zone_type == BEZEL
-        ]
-
-        if top_bezels:
-            for dup in top_bezels[1:]:
-                self._force_delete(dup.id)
-                healed = True
-        else:
-            self._create_native_bezel(layout, TOP_BEZEL_ID, TOP_BEZEL_NAME, True)
-            healed = True
-
-        if bottom_bezels:
-            for dup in bottom_bezels[1:]:
-                self._force_delete(dup.id)
-                healed = True
-        else:
-            self._create_native_bezel(layout, BOTTOM_BEZEL_ID, BOTTOM_BEZEL_NAME, False)
-            healed = True
-
-        return healed
-
-    def _create_native_bezel(
-        self, layout: Layout, scancode: int, name: str, is_top: bool
-    ) -> int:
-        thickness_px = float(dp_to_px(BEZEL_DP_THICKNESS, layout.dpi))
-        y1 = 0.0 if is_top else layout.height - thickness_px
-        y2 = thickness_px if is_top else layout.height
-        cx, cy, rx1, ry1, rx2, ry2 = calculate_rect(0.0, y1, layout.width, y2)
-
-        return self.create(
-            layout_id=layout.id,
-            scancode=scancode,
-            name=name,
-            zone_type=BEZEL,
-            cx=cx,
-            cy=cy,
-            r=None,
-            x1=rx1,
-            y1=ry1,
-            x2=rx2,
-            y2=ry2,
-            pipeline_json=_DEFAULT_BEZEL_PIPELINE_JSON,
-        ).id
 
     def get(self, zone_id: int | None) -> Optional[LayoutZone]:
         if zone_id is None:
@@ -494,7 +411,7 @@ class LayoutZonesRepository:
         return LayoutZone.from_row(row) if row is not None else None
 
     def create(self, **fields: Any) -> LayoutZone:
-        unknown = set(fields) - self.ALLOWED_FIELDS
+        unknown = set(fields) - self.ALLOWED_CREATE_FIELDS
         if unknown:
             raise InvalidFieldError(f"Unknown layout_zones field(s): {sorted(unknown)}")
         missing = self._REQUIRED_ON_CREATE - set(fields)
@@ -519,11 +436,12 @@ class LayoutZonesRepository:
             new_id = cursor.lastrowid
 
         zone = self.get(new_id)
-        assert zone is not None
+        if zone is None:
+            raise KeyError("Error creating zone.")
         return zone
 
     def update(self, zone_id: int, **fields: Any) -> LayoutZone:
-        unknown = set(fields) - self.ALLOWED_FIELDS
+        unknown = set(fields) - self.ALLOWED_UPDATE_FIELDS
         if unknown:
             raise InvalidFieldError(f"Unknown layout_zones field(s): {sorted(unknown)}")
         if "zone_type" in fields and fields["zone_type"] not in self.VALID_ZONE_TYPES:
@@ -547,7 +465,7 @@ class LayoutZonesRepository:
 
         zone = self.get(zone_id)
         if zone is None:
-            raise KeyError(f"No zone with id={zone_id}")
+            raise KeyError(f"No zone with id={zone_id}.")
         return zone
 
     def delete(self, zone_id: int, delete_bezel: bool = False) -> None:
@@ -572,3 +490,154 @@ class LayoutZonesRepository:
         conn = connection_manager.get_connection()
         with conn:
             conn.execute("DELETE FROM layout_zones WHERE layout_id = ?;", (layout_id,))
+
+    def list_for_layout(
+        self, layout_id: int, auto_heal: bool = True
+    ) -> list[LayoutZone]:
+        conn = connection_manager.get_connection()
+        rows = conn.execute(
+            "SELECT * FROM layout_zones WHERE layout_id = ? ORDER BY id;", (layout_id,)
+        ).fetchall()
+        zones = [LayoutZone.from_row(row) for row in rows]
+
+        if auto_heal:
+            layouts_repo = LayoutsRepository()
+            layout = layouts_repo.get(layout_id)
+            if layout and self.ensure_bezels(layout, zones):
+                rows = conn.execute(
+                    "SELECT * FROM layout_zones WHERE layout_id = ? ORDER BY id;",
+                    (layout_id,),
+                ).fetchall()
+                zones = [LayoutZone.from_row(row) for row in rows]
+
+        return zones
+
+    def ensure_bezels(
+        self, layout: Layout, current_zones: list[LayoutZone] | None = None
+    ) -> bool:
+        """Guarantees the existence of top and bottom bezels in the layout while removing all duplicates of each."""
+        if current_zones is None:
+            conn = connection_manager.get_connection()
+            rows = conn.execute(
+                "SELECT * FROM layout_zones WHERE layout_id = ? ORDER BY id;",
+                (layout.id,),
+            ).fetchall()
+            current_zones = [LayoutZone.from_row(row) for row in rows]
+
+        healed = False
+        top_bezels = [
+            z
+            for z in current_zones
+            if z.scancode == TOP_BEZEL_ID and z.zone_type == BEZEL
+        ]
+        bottom_bezels = [
+            z
+            for z in current_zones
+            if z.scancode == BOTTOM_BEZEL_ID and z.zone_type == BEZEL
+        ]
+
+        if top_bezels:
+            top_bezel = top_bezels[0]
+            self.update_bezel(layout, top_bezel, True)
+
+            for dup in top_bezels[1:]:
+                self._force_delete(dup.id)
+                healed = True
+        else:
+            self.create_bezel(layout, TOP_BEZEL_ID, TOP_BEZEL_NAME, True)
+            healed = True
+
+        if bottom_bezels:
+            bottom_bezel = bottom_bezels[0]
+            self.update_bezel(layout, bottom_bezel, False)
+
+            for dup in bottom_bezels[1:]:
+                self._force_delete(dup.id)
+                healed = True
+        else:
+            self.create_bezel(layout, BOTTOM_BEZEL_ID, BOTTOM_BEZEL_NAME, False)
+            healed = True
+
+        return healed
+
+    def _calculate_native_bezel(
+        self, layout: Layout, is_top: bool, thickness_dp: int | None = None
+    ):
+        if thickness_dp is not None:
+            dp_thickness = thickness_dp
+        else:
+            dp_thickness = BEZEL_DP_THICKNESS
+
+        thickness_px = float(dp_to_px(max(1, min(100, dp_thickness)), layout.dpi))
+        y1 = 0.0 if is_top else layout.height - thickness_px
+        y2 = thickness_px if is_top else layout.height
+        cx, cy, _x1, _y1, _x2, _y2 = calculate_rect(0.0, y1, layout.width, y2)
+
+        return cx, cy, _x1, _y1, _x2, _y2, dp_thickness
+
+    def create_bezel(
+        self,
+        layout: Layout,
+        scancode: int,
+        name: str,
+        is_top: bool,
+        thickness_dp: int | None = None,
+    ) -> int:
+        """If thickness dp is None it uses the default BEZEL_DP_THICKNESS."""
+        cx, cy, _x1, _y1, _x2, _y2, dp_thickness = self._calculate_native_bezel(
+            layout, is_top, thickness_dp
+        )
+
+        p_cfg = PipelineConfig()
+        p_cfg.set_pipeline_config_from_json(_DEFAULT_BEZEL_PIPELINE_JSON)
+        p_cfg.set_region_config(bezel_dp_thickness=dp_thickness)
+
+        created_bezel_zone = self.create(
+            layout_id=layout.id,
+            scancode=scancode,
+            name=name,
+            zone_type=BEZEL,
+            cx=cx,
+            cy=cy,
+            r=None,
+            x1=_x1,
+            y1=_y1,
+            x2=_x2,
+            y2=_y2,
+            pipeline_json=p_cfg.get_pipeline_json_from_config(),
+        )
+
+        created_bezel_zone.set_parsed_config_from_json()
+        return created_bezel_zone.id
+
+    def update_bezel(
+        self,
+        layout: Layout,
+        zone: LayoutZone,
+        is_top: bool,
+        thickness_dp: int | None = None,
+    ):
+        """If thickness_dp is None, it uses the parsed dp thickness from its region config."""
+        zone.set_parsed_config_from_json()
+
+        if thickness_dp is None:
+            _, _, _dp_thickness, _ = zone.CONFIG_HELPER.get_region_config()
+            thickness_dp = int(_dp_thickness)
+
+        cx, cy, _x1, _y1, _x2, _y2, dp_thickness = self._calculate_native_bezel(
+            layout, is_top, thickness_dp
+        )
+
+        zone.CONFIG_HELPER.set_region_config(bezel_dp_thickness=dp_thickness)
+
+        return self.update(
+            zone_id=zone.id,
+            cx=cx,
+            cy=cy,
+            r=None,
+            x1=_x1,
+            y1=_y1,
+            x2=_x2,
+            y2=_y2,
+            pipeline_json=zone.CONFIG_HELPER.get_pipeline_json_from_config(),
+        ).id

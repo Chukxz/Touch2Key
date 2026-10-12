@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import ClassVar
 from ..base import AbstractMapping
 from .ecodes_map import LINUX_KEY_MAP, LINUX_KEY_MAP_INV
-from modules.utils import SCANCODES, SCANCODES_INV, SPECIAL_MAP, SPECIAL_MAP_INV
+from modules.utils import SCANCODES, SCANCODES_INV, SPECIAL_MAP
 
 
 class Mapping(AbstractMapping):
@@ -50,7 +50,7 @@ class Mapping(AbstractMapping):
 
             name = SCANCODES_INV.get(win_scancode)
             if name:
-                return SPECIAL_MAP_INV.get(name, name).lower()
+                return name.lower()
             return None
 
         # 1. On X11 and Wayland (xkbcommon), Qt nativeScanCode is ALWAYS evdev + 8.
@@ -70,9 +70,6 @@ class Mapping(AbstractMapping):
 
     def get_key_code_from_name(self, key_name: str) -> int | None:
         """Translates a key string token, alias, or hex string to an evdev Linux keycode."""
-        if not key_name:
-            return None
-
         clean = key_name.strip().lower()
 
         # Parse raw hex strings like '0x1e' or '0x2a'

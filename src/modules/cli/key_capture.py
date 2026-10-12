@@ -43,7 +43,7 @@ def _capture_keys_cli() -> tuple[str | None, str | None] | None:
 
     try:
         # --- Capture Toggle Key ---
-        print("\n[?] Enter TOGGLE key for Camera/Menu mode (e.g. lctl, space, f)")
+        print("\n[?] Enter TOGGLE key for Camera/Menu mode (e.g. lctrl)")
         toggle_input = (
             input(f"    (Default: '{default_toggle}' | Press Enter to keep default): ")
             .strip()
@@ -52,7 +52,7 @@ def _capture_keys_cli() -> tuple[str | None, str | None] | None:
         toggle_key = default_toggle if not toggle_input else toggle_input
 
         # --- Capture Sprint Key ---
-        print("\n[?] Enter SPRINT key (e.g. lshift, w, c)")
+        print("\n[?] Enter SPRINT key (e.g. lshift)")
         sprint_input = (
             input(f"    (Default: '{default_sprint}' | Press Enter to keep default): ")
             .strip()
@@ -79,9 +79,7 @@ def _capture_performance_settings_cli() -> tuple[float | None, float | None] | N
     try:
         # --- Capture Rate Cap ---
         print(f"\n[?] Enter the ADB rate cap (Hz) for touch event polling")
-        rate_prompt = (
-            f"    (Min {RATE_CAP_MIN:g}, Max {RATE_CAP_MAX:g} | Default {default_rate:g}): "
-        )
+        rate_prompt = f"    (Min {RATE_CAP_MIN:g}, Max {RATE_CAP_MAX:g} | Default {default_rate:g}): "
         rate_input = input(rate_prompt).strip().lower()
 
         if not rate_input:
@@ -149,7 +147,9 @@ class KeyCaptureDialog(QDialog):
         layout.addWidget(self.prompt_label)
 
         if default_key:
-            self.key_label = QLabel(f"Waiting for keypress (Default: {default_key.upper()})...")
+            self.key_label = QLabel(
+                f"Waiting for keypress (Default: {default_key.upper()})..."
+            )
         else:
             self.key_label = QLabel("Waiting for keypress (Default: '')...")
         self.key_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
