@@ -45,11 +45,10 @@ matplotlib.use("qtagg")
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle, Rectangle
 from matplotlib.text import Text
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout
-from PySide6.QtGui import QKeySequence, QShortcut
 
 if TYPE_CHECKING:
     from modules.database import Layout
@@ -86,7 +85,7 @@ def calculate_raw_rect(values: tuple[tuple[float, float], tuple[float, float]]):
 
 
 class _CursorManager:
-    def __init__(self, canvas: FigureCanvas):
+    def __init__(self, canvas: FigureCanvasQTAgg):
         self.canvas = canvas
         self.state_map = {
             IDLE: Qt.CursorShape.ArrowCursor,
@@ -925,19 +924,28 @@ class LayoutsPlotterWidget(QWidget):
         self.standalone = standalone
         self.is_fatal_state = False
 
+        self.fig = Figure()
+        self.fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+
+        self.canvas = FigureCanvasQTAgg(self.fig)
+        self.canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+        self.ax = self.fig.add_subplot(111)
+        self.ax.set_axis_off()
+        self.ax.set_position((0, 0, 1, 1))
+
+        self.fig.patch.set_visible(False)
+        self.ax.patch.set_visible(False)
+
         self.root_layout = QVBoxLayout(self)
         self.root_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.fig = Figure()
-        self.canvas = FigureCanvas(self.fig)
-        self.canvas.setMinimumSize(0, 0)
-        self.ax = self.fig.add_subplot(111)
+        self.root_layout.setSpacing(0)
+        self.root_layout.addWidget(self.canvas)
 
         for key in list(self.canvas.callbacks.callbacks.keys()):
             if "key_press_event" in key:
                 self.canvas.callbacks.callbacks[key].clear()
 
-        self.root_layout.addWidget(self.canvas)
         self.cursor_manager = _CursorManager(self.canvas)
 
         self.points = []
@@ -965,8 +973,6 @@ class LayoutsPlotterWidget(QWidget):
         self.canvas.mpl_connect("key_press_event", self.on_key_press)
         self.canvas.mpl_connect("button_press_event", self.on_click)
         self.canvas.mpl_connect("resize_event", self.on_resize)
-        self.fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
-        self.canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self.reload_active_layout()
 
@@ -1102,7 +1108,7 @@ class LayoutsPlotterWidget(QWidget):
         self.ax.clear()
         self.init_params_helper()
         self.update_image_params(*image_params)
-        self.ax.imshow(img)
+        self.ax.imshow(img, aspect="equal")
 
         self.update_title(f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'}")
         self.init_crosshairs()
@@ -1205,18 +1211,6 @@ class LayoutsPlotterWidget(QWidget):
     def _render_empty_state(self, message: str) -> None:
         self.is_fatal_state = True
         self.ax.clear()
-        self.ax.text(
-            0.5,
-            0.5,
-            message,
-            ha="center",
-            va="center",
-            transform=self.ax.transAxes,
-            color="gray",
-            fontsize=12,
-        )
-        self.ax.set_xticks([])
-        self.ax.set_yticks([])
         self.update_title("ERROR: Missing Active Layout")
         self.canvas.draw_idle()
 

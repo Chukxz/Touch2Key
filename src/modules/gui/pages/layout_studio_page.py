@@ -64,7 +64,7 @@ STATIC_SHORTCUTS_HELP = (
     "<b>Shortcuts:</b> "
     "<span style='color: palette(highlight);'>Ctrl+F</span> Find | "
     "<span style='color: palette(highlight);'>F12</span> Save | "
-    "<span style='color: palette(highlight);'>Esc</span> Cancel / Exit (Standalone) | "
+    "<span style='color: palette(highlight);'>Esc</span> Cancel | "
     "<span style='color: palette(highlight);'>F6</span> Circle | "
     "<span style='color: palette(highlight);'>F7</span> Rect | "
     "<span style='color: palette(highlight);'>Del</span> Delete | "

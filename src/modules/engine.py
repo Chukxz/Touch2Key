@@ -432,9 +432,8 @@ class Engine:
                 ):
                     self.output_sink.reset_mouse_accumulators()
 
-            active_cap = max(RATE_CAP_MIN, self.rate_cap)
             # wait() wakes up immediately on shutdown rather than sleeping
-            if self._stop_event.wait(1.0 / active_cap):
+            if self._stop_event.wait(1.0 / self.rate_cap):
                 break
 
     def _process_touch_event(self, touch_event: TouchEvent) -> None:
