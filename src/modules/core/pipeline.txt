@@ -41,12 +41,7 @@ RelativePointer
 Fixed camera control
 
 
-Button
-      +
-RelativePointer
-      ↓
-Track fire
-
+←↑↓→
 
 @dataclass(slots=True)
 class ModeAwareRegion(Region):
