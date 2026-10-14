@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import sys
 from typing import cast
+import signal
 
+from PySide6.QtCore import QCoreApplication, QTimer
 from PySide6.QtGui import QCloseEvent, QIcon
 from PySide6.QtWidgets import QApplication, QMainWindow
 
@@ -21,12 +23,11 @@ class LayoutStudioWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Touch2Key - Layout Studio (Standalone)")
-        self.resize(1300, 800)
-        
+
         # Instantiate the widget directly (dispatcher is None in standalone mode)
         self.studio = LayoutStudioPage(dispatcher=None, parent=self, standalone=True)
         self.setCentralWidget(self.studio)
-        
+
         # Force the lifecycle hook to load the db profiles into the UI
         self.studio.on_page_shown()
 
@@ -44,8 +45,16 @@ def run() -> None:
     if app_icon_path.exists():
         app.setWindowIcon(QIcon(str(app_icon_path)))
 
+    # Allow Python signals to be processed periodically by running a dummy timer
+    timer = QTimer()
+    timer.start(500)
+    timer.timeout.connect(lambda: None)  # Kickstarts the Python interpreter loop
+
+    # Handle Ctrl+C cleanly
+    signal.signal(signal.SIGINT, lambda *_: QCoreApplication.quit())
+
     window = LayoutStudioWindow()
-    window.show()
+    window.showMaximized()
 
     exit_code = 0
     try:

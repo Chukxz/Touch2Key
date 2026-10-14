@@ -393,8 +393,10 @@ class SettingsPage(QWidget):
         system_group = QGroupBox("System")
         system_form = QFormLayout(system_group)
 
-        self.double_tap_enabled_check = QCheckBox()
-        system_form.addRow("Enable Double-Tap Gesture:", self.double_tap_enabled_check)
+        self.two_finger_tap_enabled_check = QCheckBox()
+        system_form.addRow(
+            "Enable Two-Finger-Tap Gesture:", self.two_finger_tap_enabled_check
+        )
 
         self.bezel_toggle_enabled_check = QCheckBox()
         system_form.addRow("Enable Bezel Toggles:", self.bezel_toggle_enabled_check)
@@ -462,8 +464,8 @@ class SettingsPage(QWidget):
         self.typematic_enabled_check.toggled.connect(self._on_typematic_enabled_changed)
         self.typematic_delay_spin.valueChanged.connect(self._on_typematic_delay_changed)
         self.typematic_rate_spin.valueChanged.connect(self._on_typematic_rate_changed)
-        self.double_tap_enabled_check.toggled.connect(
-            self._on_double_tap_enabled_changed
+        self.two_finger_tap_enabled_check.toggled.connect(
+            self._on_two_finger_tap_enabled_changed
         )
         self.bezel_toggle_enabled_check.toggled.connect(
             self._on_bezel_toggle_enabled_changed
@@ -650,7 +652,7 @@ class SettingsPage(QWidget):
             self.typematic_enabled_check.blockSignals(True)
             self.typematic_delay_spin.blockSignals(True)
             self.typematic_rate_spin.blockSignals(True)
-            self.double_tap_enabled_check.blockSignals(True)
+            self.two_finger_tap_enabled_check.blockSignals(True)
             self.bezel_toggle_enabled_check.blockSignals(True)
 
             self.left_handed_check.setChecked(settings.left_handed)
@@ -665,7 +667,9 @@ class SettingsPage(QWidget):
             self.typematic_enabled_check.setChecked(settings.typematic_enabled)
             self.typematic_delay_spin.setValue(settings.typematic_delay_ms)
             self.typematic_rate_spin.setValue(settings.typematic_rate_hz)
-            self.double_tap_enabled_check.setChecked(settings.double_tap_enabled)
+            self.two_finger_tap_enabled_check.setChecked(
+                settings.two_finger_tap_enabled
+            )
             self.bezel_toggle_enabled_check.setChecked(settings.bezel_toggle_enabled)
 
             self.left_handed_check.blockSignals(False)
@@ -680,7 +684,7 @@ class SettingsPage(QWidget):
             self.typematic_enabled_check.blockSignals(False)
             self.typematic_delay_spin.blockSignals(False)
             self.typematic_rate_spin.blockSignals(False)
-            self.double_tap_enabled_check.blockSignals(False)
+            self.two_finger_tap_enabled_check.blockSignals(False)
             self.bezel_toggle_enabled_check.blockSignals(False)
 
         except Exception:
@@ -772,12 +776,12 @@ class SettingsPage(QWidget):
         except Exception:
             logger.exception("Failed to update typematic_rate setting")
 
-    def _on_double_tap_enabled_changed(self, checked: bool) -> None:
+    def _on_two_finger_tap_enabled_changed(self, checked: bool) -> None:
         try:
-            store.settings.update(double_tap_enabled=checked)
+            store.settings.update(two_finger_tap_enabled=checked)
             self._notify_reload()
         except Exception:
-            logger.exception("Failed to update double_tap enabled setting")
+            logger.exception("Failed to update two_finger_tap enabled setting")
 
     def _on_bezel_toggle_enabled_changed(self, checked: bool) -> None:
         try:

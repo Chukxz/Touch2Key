@@ -134,6 +134,7 @@ class KeyCaptureDialog(QDialog):
         super().__init__()
         self.setWindowTitle("Key Capture")
         self.setFixedSize(400, 200)
+
         self.captured_key: str | None = None
         self.skippable = skippable
         self.default_key = default_key
@@ -171,6 +172,7 @@ class KeyCaptureDialog(QDialog):
         if skippable:
             self.skip_btn = QPushButton("Skip")
             self.skip_btn.clicked.connect(self._skip)
+            self.skip_btn.setDefault(True)
             btn_layout.addWidget(self.skip_btn)
 
         self.reset_btn = QPushButton("Reset")
@@ -272,6 +274,7 @@ class NumericCaptureDialog(QDialog):
 
         self.skip_btn = QPushButton("Skip")
         self.skip_btn.clicked.connect(self._skip)
+        self.skip_btn.setDefault(True)
         btn_layout.addWidget(self.skip_btn)
 
         layout.addLayout(btn_layout)

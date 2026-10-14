@@ -308,27 +308,27 @@ def reset_typematic_defaults() -> None:
 
 
 def show_system() -> None:
-    """Prints current double-tap and bezel toggle fields configuration."""
+    """Prints current two finger tap and bezel toggle fields configuration."""
     s = store.settings.get()
     print("\n--- System Settings ---")
-    print(f"  Double Tap Enabled:  {'Yes' if s.double_tap_enabled else 'No'}")
+    print(f"  Two finger tap Enabled:  {'Yes' if s.two_finger_tap_enabled else 'No'}")
     print(f"  Bezels Enabled:      {'Yes' if s.bezel_toggle_enabled else 'No'}")
 
 
 def configure_system_interactive() -> None:
-    """Prompts for double-tap and bezel toggle fields interactively."""
+    """Prompts for two finger tap and bezel toggle fields interactively."""
     s = store.settings.get()
     show_system()
 
-    en_double_tap_in = (
+    en_two_finger_tap_in = (
         input(
-            f"Enable double tap toggle? (y/n, current: {'y' if s.double_tap_enabled else 'n'}): "
+            f"Enable two finger tap toggle? (y/n, current: {'y' if s.two_finger_tap_enabled else 'n'}): "
         )
         .strip()
         .lower()
     )
-    double_tap_enabled = (
-        s.double_tap_enabled if not en_double_tap_in else (en_double_tap_in == "y")
+    two_finger_tap_enabled = (
+        s.two_finger_tap_enabled if not en_two_finger_tap_in else (en_two_finger_tap_in == "y")
     )
 
     en_bezel_in = (
@@ -343,16 +343,16 @@ def configure_system_interactive() -> None:
     )
 
     store.settings.update(
-        double_tap_enabled=double_tap_enabled, bezel_toggle_enabled=bezel_toggle_enabled
+        two_finger_tap_enabled=two_finger_tap_enabled, bezel_toggle_enabled=bezel_toggle_enabled
     )
-    print("Double Tap and Bezel Toggle settings updated successfully.")
+    print("Two finger tap and Bezel Toggle settings updated successfully.")
     show_system()
 
 
 def reset_system_defaults() -> None:
-    """Resets only double tap and bezel toggle settings to factory defaults."""
-    store.settings.update(double_tap_enabled=True, bezel_toggle_enabled=True)
-    print("Double Tap and Bezel Toggle settings reset to factory defaults.")
+    """Resets only two finger tap and bezel toggle settings to factory defaults."""
+    store.settings.update(two_finger_tap_enabled=True, bezel_toggle_enabled=True)
+    print("Two finger tap and Bezel Toggle settings reset to factory defaults.")
     show_system()
 
 
@@ -415,8 +415,8 @@ def interactive_menu() -> None:
         print("  [d]    Delete Profile")
         print("  [ty]   View / Configure Typematic (Auto-Repeat) Settings")
         print("  [rty]  Reset Typematic Settings to Defaults")
-        print("  [ss]   View / Configure Double Tap and Bezel Toggle Settings")
-        print("  [rss]  Reset Double Tap and Bezel Toggle Settings to Defaults")
+        print("  [ss]   View / Configure two finger tap and Bezel Toggle Settings")
+        print("  [rss]  Reset two finger tap and Bezel Toggle Settings to Defaults")
         print("  [i]    Import Layout from JSON")
         print("  [e]    Export Profile to JSON")
         print("  [st]   Export App Settings to settings.toml")
@@ -536,7 +536,7 @@ def interactive_menu() -> None:
 
         elif choice == "rss":
             confirm = (
-                input("Reset double tap and bezel toggle settings to defaults? (y/N): ")
+                input("Reset two finger tap and bezel toggle settings to defaults? (y/N): ")
                 .strip()
                 .lower()
             )
@@ -713,12 +713,12 @@ def run() -> None:
     parser.add_argument(
         "--show-system",
         action="store_true",
-        help="Display system settings (double tap and bezel toggles)",
+        help="Display system settings (two finger tap and bezel toggles)",
     )
     parser.add_argument(
-        "--set-double-tap",
+        "--set-two-finger-tap",
         choices=["on", "off"],
-        help="Enable or disable the double-tap menu gesture",
+        help="Enable or disable the two finger tap menu gesture",
     )
     parser.add_argument(
         "--set-bezel-toggle",
@@ -839,9 +839,9 @@ def run() -> None:
             return
 
         system_updates = {}
-        if args.set_double_tap is not None:
-            system_updates["double_tap_enabled"] = (
-                True if args.set_double_tap == "on" else False
+        if args.set_two_finger_tap is not None:
+            system_updates["two_finger_tap_enabled"] = (
+                True if args.set_two_finger_tap == "on" else False
             )
         if args.set_bezel_toggle is not None:
             system_updates["bezel_toggle_enabled"] = (

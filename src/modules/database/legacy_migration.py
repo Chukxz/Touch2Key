@@ -64,7 +64,7 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
         ],
     )
 
-    double_tap_enabled = system.get("double_tap_enabled", True)
+    two_finger_tap_enabled = system.get("two_finger_tap_enabled", True)
     bezel_toggle_enabled = system.get("bezel_toggle_enabled", True)
     sort_order = system.get("profile_sort_order", "Recently Modified")
 
@@ -101,7 +101,7 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
         "typematic_excluded_keys": (
             str(typ_excludes) if typ_excludes is not None else None
         ),
-        "double_tap_enabled": bool(double_tap_enabled),
+        "two_finger_tap_enabled": bool(two_finger_tap_enabled),
         "bezel_toggle_enabled": bool(bezel_toggle_enabled),
         "profile_sort_order": str(sort_order),
     }

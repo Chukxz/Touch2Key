@@ -95,7 +95,7 @@ class KeyMapper:
         layout = store.get_active_layout()
         if layout is None:
             logger.warning(
-                "No active layout found in SQLite database. Key pipelines will be empty."
+                "No active layout found in SQLite database. KeyMapper pipelines will be empty."
             )
             self.release_all()
             with self.lock:

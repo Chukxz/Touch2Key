@@ -64,6 +64,22 @@ def check_single_instance(instance_name: str) -> tuple[bool, object | None]:
 
     raise RuntimeError(f"Unsupported platform: {sys.platform}")
 
+def notify_existing_instance(instance_name: str) -> None:
+    """Pings the already-running primary GUI instance via a local socket 
+    to request it to pop its window to the foreground.
+    """
+    try:
+        from PySide6.QtNetwork import QLocalSocket
+        socket = QLocalSocket()
+        socket.connectToServer(instance_name)
+        if socket.waitForConnected(500):
+            socket.write(b"SHOW_WINDOW")
+            socket.flush()
+            socket.waitForBytesWritten(1000)
+            socket.disconnectFromServer()
+    except Exception:
+        pass
+
 
 def get_platform() -> PlatformModules:
     if sys.platform == "win32":
@@ -145,6 +161,7 @@ def get_lock_states() -> dict[str, bool] | None:
 
 __all__ = [
     "check_single_instance",
+    "notify_existing_instance",
     "get_platform",
     "get_specific_mt_key",
     "get_specific_qt_key",

@@ -78,7 +78,7 @@ class AppSettings:
     typematic_delay_ms: float
     typematic_rate_hz: float
     typematic_excluded_keys: Optional[str]
-    double_tap_enabled: bool
+    two_finger_tap_enabled: bool
     bezel_toggle_enabled: bool
     profile_sort_order: str = "Recently Modified"
     created_at: str | None = None
@@ -91,7 +91,7 @@ class AppSettings:
         d["floating_joystick"] = bool(d["floating_joystick"])
         d["anchored_joystick"] = bool(d["anchored_joystick"])
         d["typematic_enabled"] = bool(d["typematic_enabled"])
-        d["double_tap_enabled"] = bool(d["double_tap_enabled"])
+        d["two_finger_tap_enabled"] = bool(d["two_finger_tap_enabled"])
         d["bezel_toggle_enabled"] = bool(d["bezel_toggle_enabled"])
         d["profile_sort_order"] = str(d.get("profile_sort_order", "Recently Modified"))
         return cls(**d)
@@ -195,7 +195,7 @@ class AppSettingsRepository:
         "typematic_delay_ms",
         "typematic_rate_hz",
         "typematic_excluded_keys",
-        "double_tap_enabled",
+        "two_finger_tap_enabled",
         "bezel_toggle_enabled",
         "profile_sort_order",
     }

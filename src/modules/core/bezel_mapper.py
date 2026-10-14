@@ -43,7 +43,7 @@ class BezelMapper:
         layout = store.get_active_layout()
         if layout is None:
             logger.warning(
-                "No active layout found in SQLite database. Bezel pipelines will be empty."
+                "No active layout found in SQLite database. BezelMapper pipelines will be empty."
             )
             self.release_all()
             with self.lock:

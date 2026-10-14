@@ -18,7 +18,7 @@ from PySide6.QtGui import QIcon
 
 from modules.database import store
 from modules.gui.main_window import MainWindow
-from modules.platforms import check_single_instance
+from modules.platforms import check_single_instance, notify_existing_instance
 from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER, ICONS_FOLDER
 from modules.log_manager import AppLogManager
 
@@ -105,6 +105,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
 
     success, _ = check_single_instance(APP_NAME)
     if not success:
+        notify_existing_instance(APP_NAME)
         profiler_cleanup(gui_profiler)
         sys.exit(0)
 

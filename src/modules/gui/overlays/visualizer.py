@@ -242,7 +242,6 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(VISUALIZER_NAME)
         self.setWindowOpacity(0.4)
-        self.showFullScreen()
 
         self.view = DiagnosticView(self.loc_dict, self)
         self.view.mouse_pressed.connect(self._on_mouse_pressed)
@@ -393,6 +392,7 @@ def run(
 
     # Hold an owning reference for the lifetime of the event loop.
     window = MainWindow(toggle_key_scancode)
+    window.showFullScreen()
     window.activateWindow()
     sys.exit(app.exec())
 

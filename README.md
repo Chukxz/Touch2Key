@@ -45,7 +45,7 @@ The first version with only CLI support and basic GUI windows can be accessed [h
   * **Hardware-Free Return Gates & Bezel Toggles:** Control the engine state directly from the touchscreen without reaching for your PC keyboard. *Both systems are independently toggleable in your global settings, and the required bezel zones are automatically seeded and guaranteed to exist in every layout:*
     * **Top Bezel:** Instantly toggles cursor visibility (switches between Game Mode and Menu Mode).
     * **Bottom Bezel:** Loads the Virtual Keyboard. This runs in production mode sending direct IPC commands to the engine for zero-latency typing, bypassing standalone CLI testing modes.
-    * **Double-Tap Quick Return:** If the cursor is currently *visible* (Menu Mode), double-tapping anywhere on the screen will instantly hide it and return you to Game Mode. (Double-tap is ignored while already in-game to prevent accidental triggers).
+    * **Two Finger Tap Quick Return:** If the cursor is currently *visible* (Menu Mode), tapping two fingers anywhere on the screen will instantly hide it and return you to Game Mode. (Two finger tap is ignored while already in-game to prevent accidental triggers).
 
 * **Dynamic Camera & Joystick Integration:**
   * **Buttons:** Configurable `pointer` zones emit simultaneous keypresses and camera deltas (e.g., for aiming while shooting).
@@ -127,7 +127,7 @@ python -m venv .venv
 pip install .
 ```
 
-### Setup Mode
+### Setup Commands
 
 | Action | Command | Description |
 | :--- | :--- | :--- |
@@ -197,14 +197,14 @@ When running the engine in CLI mode, the following hotkeys are active to control
 | `touch2key-visualizer` | Live event visualizer that dynamically loads active layout zones to highlight triggered hitboxes, and respects your configured game toggle key for cursor state testing. |
 
 ### Typematic & System Commands (via Layout Manager)
-You can directly configure hardware auto-repeat behavior, double taps, bezel toggles, and left-handed mode via `touch2key-manage`:
+You can directly configure hardware auto-repeat behavior, two finger taps, bezel toggles, and left-handed mode via `touch2key-manage`:
 ```bash
 touch2key-manage --show-typematic
 touch2key-manage --set-typematic on --typematic-delay 200 --typematic-rate 35
 touch2key-manage --typematic-excludes "lshift, lctrl, lalt"
 touch2key-manage --reset-typematic
 touch2key-manage --show-system
-touch2key-manage --set-double-tap off
+touch2key-manage --set-two-finger-tap off
 touch2key-manage --set-bezel-toggle on
 touch2key-manage --reset-system
 touch2key-manage --set-image <layout_id> path/to/hud_screenshot.png  # e.g., --set-image 1 hud.png

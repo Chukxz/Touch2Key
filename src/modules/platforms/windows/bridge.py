@@ -46,6 +46,7 @@ class InterceptionBridge(AbstractBridge):
         self.system_config = system_config
         self.screen_w, self.screen_h = window_manager.get_screen_dimensions()
         self.bridge_lock = threading.RLock()
+        self._is_shutting_down = False
 
         self._mouse_left_down = False
         self._mouse_right_down = False
@@ -185,9 +186,14 @@ class InterceptionBridge(AbstractBridge):
         self, new_k_handle: int | None, new_m_handle: int | None
     ) -> None:
         with self.bridge_lock:
+            if self._is_shutting_down:
+                logger.debug("Shutdown started, skipping devices reloading.")
+                return
+
             logger.info(
                 f"[BRIDGE] - Hot-Reloading Devices -> K:{new_k_handle}, M:{new_m_handle}"
             )
+
             self.release_all()
 
             self.k_device_handle = new_k_handle
@@ -470,7 +476,14 @@ class InterceptionBridge(AbstractBridge):
             logger.info(
                 f"[BRIDGE] - Keyboard Worker Died: {_datetime.now().strftime('%H:%M:%S')}!"
             )
+
             with self.bridge_lock:
+                if self._is_shutting_down:
+                    logger.debug(
+                        "Keyboard worker exited during shutdown, skipping restart."
+                    )
+                    return
+
                 old_proc = self.k_proc
                 try:
                     self.k_pipe_read.close()
@@ -503,9 +516,8 @@ class InterceptionBridge(AbstractBridge):
                 try:
                     self._respawn_callback("keyboard")
                 except Exception as e:
-                    logger.info(
-                        f"[BRIDGE] - Respawn callback (keyboard) failed: {e}."
-                    )
+                    logger.info(f"[BRIDGE] - Respawn callback (keyboard) failed: {e}.")
+
         finally:
             with self._k_respawn_lock:
                 self._k_respawning = False
@@ -524,7 +536,14 @@ class InterceptionBridge(AbstractBridge):
             logger.info(
                 f"[BRIDGE] - Mouse Worker Died: {_datetime.now().strftime('%H:%M:%S')}!"
             )
+
             with self.bridge_lock:
+                if self._is_shutting_down:
+                    logger.debug(
+                        "Mouse worker exited during shutdown, skipping restart."
+                    )
+                    return
+
                 old_proc = self.m_proc
                 try:
                     self.m_pipe_read.close()
@@ -561,13 +580,13 @@ class InterceptionBridge(AbstractBridge):
                     self._respawn_callback("mouse")
                 except Exception as e:
                     logger.info(f"[BRIDGE] - Respawn callback (mouse) failed: {e}.")
+
         finally:
             with self._m_respawn_lock:
                 self._m_respawning = False
 
     def selective_release(self):
         with self.bridge_lock:
-            self.health_check()
             if self._pressed_keys:
                 for code in list(self._pressed_keys):
                     try:
@@ -599,9 +618,7 @@ class InterceptionBridge(AbstractBridge):
             self._mouse_button5_down = False
 
     def release_all(self):
-        logger.info("[BRIDGE] - Emergency Release (Interception)...")
         with self.bridge_lock:
-            self.health_check()
             unique_codes = set(SCANCODES.values()) - set(MOUSE_SCANCODES)
             for code in unique_codes:
                 try:
@@ -630,18 +647,29 @@ class InterceptionBridge(AbstractBridge):
             self._mouse_middle_down = False
             self._mouse_button4_down = False
             self._mouse_button5_down = False
-        logger.info("[BRIDGE] - Release signals dispatched.")
 
     def shutdown(self):
+        with self.bridge_lock:
+            if self._is_shutting_down:
+                return
+
+            self._is_shutting_down = True
+
+        self._stop_heartbeat.set()
         self._stop_log_event.set()
+        
+        if self.heartbeat_thread.is_alive():
+            self.heartbeat_thread.join(timeout=1.0)
         if self._log_consumer_thread and self._log_consumer_thread.is_alive():
             self._log_consumer_thread.join(timeout=1.0)
-        self._stop_heartbeat.set()
+
         self.release_all()
 
         for proc in (self.k_proc, self.m_proc):
             if proc is not None and proc.is_alive():
                 proc.terminate()
                 proc.join(timeout=1.0)
+
                 if proc.is_alive():
                     proc.kill()
+                    proc.join(timeout=1.0)

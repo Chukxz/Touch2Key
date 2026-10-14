@@ -273,12 +273,16 @@ def _create_gui_dialogs(context: Interception):
             layout.addWidget(self.table)
 
             btn_row = QHBoxLayout()
+
             refresh_btn = QPushButton("Refresh List")
             refresh_btn.clicked.connect(self._populate)
+            btn_row.addWidget(refresh_btn)
+
             confirm_btn = QPushButton("Confirm Selection")
             confirm_btn.clicked.connect(self._handle_confirm)
-            btn_row.addWidget(refresh_btn)
+            confirm_btn.setDefault(True)
             btn_row.addWidget(confirm_btn)
+
             layout.addLayout(btn_row)
 
             self.resize(720, 420)

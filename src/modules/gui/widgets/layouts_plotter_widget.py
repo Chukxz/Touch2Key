@@ -930,7 +930,7 @@ class LayoutsPlotterWidget(QWidget):
         self.canvas = FigureCanvasQTAgg(self.fig)
         self.canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-        self.ax = self.fig.add_subplot(111)
+        self.ax = self.fig.add_subplot(1, 1, 1)
         self.ax.set_axis_off()
         self.ax.set_position((0, 0, 1, 1))
 
@@ -1107,8 +1107,11 @@ class LayoutsPlotterWidget(QWidget):
         self.is_fatal_state = False
         self.ax.clear()
         self.init_params_helper()
+
         self.update_image_params(*image_params)
         self.ax.imshow(img, aspect="equal")
+        self.ax.set_xlim(-0.5, img.width - 0.5)
+        self.ax.set_ylim(img.height - 0.5, -0.5)
 
         self.update_title(f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'}")
         self.init_crosshairs()

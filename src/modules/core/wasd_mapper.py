@@ -11,7 +11,12 @@ from modules.core.pipeline_factory import (
     FloatingJoystick,
 )
 from modules.database import store
-from modules.utils import CIRCLE, MOUSE_WHEEL_SIMULATOR_CODE, scale_coord
+from modules.utils import (
+    CIRCLE,
+    MOUSE_WHEEL_SIMULATOR_CODE,
+    get_scancode_from_key,
+    scale_coord,
+)
 
 if TYPE_CHECKING:
     from modules.core.pipeline import Pipeline
@@ -94,7 +99,7 @@ class WASDMapper:
             if ignore_app_settings
             else float(settings.hysteresis)
         )
-        sprint_key = settings.sprint_key or "lshift"
+        sprint = get_scancode_from_key(settings.sprint_key) if settings.sprint_key is not None else None
 
         # Correct parameter order: scale_coord(base, val)
         center = Point(
@@ -112,11 +117,7 @@ class WASDMapper:
                 radius=outer_r,
                 snap_radius=inner_r,
                 hysteresis_deg=hysteresis,
-                up="w",
-                down="s",
-                left="a",
-                right="d",
-                sprint_key=sprint_key,
+                sprint=sprint,
                 priority=priority,
                 creation_id=z_id,
             )
@@ -134,11 +135,7 @@ class WASDMapper:
                 sprint_distance=outer_r,
                 radius=outer_r,
                 hysteresis_deg=hysteresis,
-                up="w",
-                down="s",
-                left="a",
-                right="d",
-                sprint_key=sprint_key,
+                sprint=sprint,
                 priority=priority,
                 creation_id=z_id,
             )
@@ -152,17 +149,11 @@ class WASDMapper:
                 walk_radius=inner_r,
                 sprint_distance=outer_r,
                 hysteresis_deg=hysteresis,
-                up="w",
-                down="s",
-                left="a",
-                right="d",
-                sprint_key=sprint_key,
+                sprint=sprint,
                 priority=priority,
                 creation_id=z_id,
             )
-            logger.info(
-                "Configured Fixed Joystick at (%.1f, %.1f)", center.x, center.y
-            )
+            logger.info("Configured Fixed Joystick at (%.1f, %.1f)", center.x, center.y)
 
         with self.lock:
             if self.pipeline is not None:

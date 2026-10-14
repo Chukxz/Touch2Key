@@ -12,7 +12,7 @@ import threading
 from pathlib import Path
 
 from modules.database.migrations import run_migrations, set_fresh_install_version
-from modules.utils import DB_PATH
+from modules.utils import DB_PATH, EXCLUDED_KEYS
 
 logger = logging.getLogger("modules.database.connection")
 
@@ -37,8 +37,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
     typematic_enabled INTEGER NOT NULL DEFAULT 1,
     typematic_delay_ms REAL NOT NULL DEFAULT 250.0,
     typematic_rate_hz REAL NOT NULL DEFAULT 30.0,
-    typematic_excluded_keys TEXT,
-    double_tap_enabled INTEGER NOT NULL DEFAULT 1,
+    typematic_excluded_keys TEXT DEFAULT,
+    two_finger_tap_enabled INTEGER NOT NULL DEFAULT 1,
     bezel_toggle_enabled INTEGER NOT NULL DEFAULT 1,
     profile_sort_order TEXT NOT NULL DEFAULT 'Recently Modified',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -74,7 +74,9 @@ CREATE TABLE IF NOT EXISTS layout_zones (
 CREATE INDEX IF NOT EXISTS idx_layout_zones_layout_id ON layout_zones(layout_id);
 """
 
-_SEED_DEFAULT_SETTINGS_ROW = "INSERT OR IGNORE INTO app_settings (id) VALUES (1);"
+_SEED_DEFAULT_SETTINGS_ROW = (
+    "INSERT OR IGNORE INTO app_settings (id, typematic_excluded_keys) VALUES (1, ?);"
+)
 
 
 class ConnectionManager:
@@ -106,7 +108,7 @@ class ConnectionManager:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.execute("PRAGMA synchronous = NORMAL;")
         conn.executescript(_SCHEMA)
-        conn.execute(_SEED_DEFAULT_SETTINGS_ROW)
+        conn.execute(_SEED_DEFAULT_SETTINGS_ROW, (EXCLUDED_KEYS,))
 
         cursor = conn.cursor()
 

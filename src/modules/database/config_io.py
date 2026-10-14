@@ -89,7 +89,7 @@ def export_settings_toml(
     else:
         system.add("json_path", "")
 
-    system.add("double_tap_enabled", bool(s.double_tap_enabled))
+    system.add("two_finger_tap_enabled", bool(s.two_finger_tap_enabled))
     system.add("bezel_toggle_enabled", bool(s.bezel_toggle_enabled))
     system.add(
         "profile_sort_order",

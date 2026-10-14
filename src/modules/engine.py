@@ -70,7 +70,7 @@ class Engine:
 
         self.window_manager = platform_mod.WindowManager()
         self.foreground_window = self.window_manager.get_foreground_window()
-        self.bridge_class = platform_mod.Bridge(self.window_manager, self.system_config)
+        self.bridge = platform_mod.Bridge(self.window_manager, self.system_config)
 
         self.touch_reader: TouchReader | None = None
         self.layout_loader: LayoutLoader | None = None
@@ -93,7 +93,7 @@ class Engine:
         self.vkb_reader, self.vkb_writer = multiprocessing.Pipe(duplex=False)
         self.vkb_process: multiprocessing.Process | None = None
 
-        self.double_tap_enabled = True
+        self.two_finger_tap_enabled = True
         self.bezel_toggle_enabled = True
 
         # Dynamic performance parameters
@@ -261,18 +261,18 @@ class Engine:
         mouse_device_id: int | None = None,
         **kwargs: Any,
     ) -> None:
-        if not self.bridge_class or self.bridge_class.k_proc is None:
+        if not self.bridge or self.bridge.k_proc is None:
             return
         resolved_k = keyboard_device_id if keyboard_device_id is not None else k_id
         resolved_m = mouse_device_id if mouse_device_id is not None else m_id
-        self.bridge_class.reload_devices(resolved_k, resolved_m)
+        self.bridge.reload_devices(resolved_k, resolved_m)
 
     def toggle_mode(self) -> None:
         with self.lock:
             self.is_visible = not self.is_visible
             new_state = self.is_visible
 
-        self.bridge_class.health_check()
+        self.bridge.health_check()
         if self.mouse_mapper:
             self.mouse_mapper.touch_up()
         if self.key_mapper:
@@ -366,7 +366,7 @@ class Engine:
     def _on_config_reload(self) -> None:
         """Pulls updated settings from SQLite and rebuilds pipeline priority tiers."""
         settings = store.settings.get()
-        self.double_tap_enabled = settings.double_tap_enabled
+        self.two_finger_tap_enabled = settings.two_finger_tap_enabled
         self.bezel_toggle_enabled = settings.bezel_toggle_enabled
 
         self.rate_cap = max(
@@ -451,7 +451,7 @@ class Engine:
         output_sink = self.output_sink
 
         if self.is_visible:
-            if self.double_tap_enabled and self.two_finger_tap_tracker.process(
+            if self.two_finger_tap_enabled and self.two_finger_tap_tracker.process(
                 touch_event
             ):
                 self.toggle_mode()
@@ -469,7 +469,7 @@ class Engine:
 
             if (
                 touch_event.contact_id == 0
-                and not self.two_finger_tap_tracker._contacts
+                and not self.two_finger_tap_tracker.is_tracking
             ):
                 gx, gy = self.mapper.device_to_game_abs(
                     touch_event.position.x, touch_event.position.y
@@ -555,7 +555,7 @@ class Engine:
             f"Keyboard Handle: {k_device_handle}, Mouse Handle: {m_device_handle}"
         )
 
-        self.double_tap_enabled = settings.double_tap_enabled
+        self.two_finger_tap_enabled = settings.two_finger_tap_enabled
         self.bezel_toggle_enabled = settings.bezel_toggle_enabled
 
         self.layout_loader = LayoutLoader(
@@ -568,7 +568,7 @@ class Engine:
         self.mapper = Mapper(
             self.layout_loader,
             self.touch_reader,
-            self.bridge_class,
+            self.bridge,
             self.pps,
             {"toggle_key": toggle_key, "sprint_key": sprint_key},
             window_id,
@@ -609,7 +609,7 @@ class Engine:
             "ON_DEVICES_CHANGE", self._on_devices_change
         )
 
-        self.bridge_class.start_worker_processes(k_device_handle, m_device_handle)
+        self.bridge.start_worker_processes(k_device_handle, m_device_handle)
 
         self._mouse_flush_thread = threading.Thread(
             target=self._mouse_flush_loop,
@@ -683,54 +683,91 @@ class Engine:
             self._stop_event.wait()
 
     def _shutdown(self) -> None:
-        if self.is_shutting_down:
-            return
-        self.is_shutting_down = True
-        self._stop_event.set()
+        # Atomically claim shutdown.
+        with self.lock:
+            if self.is_shutting_down:
+                return
 
-        self.mapper_event_dispatcher.unregister_all()
+            self.is_shutting_down = True
+            self._stop_event.set()
 
+        logger.info("Engine shutting down...")
+
+        # Stop accepting hotkey-triggered actions.
         if not self.headless:
             try:
                 import keyboard
 
                 keyboard.unhook_all_hotkeys()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.exception(
+                    "Failed to unhook keyboard hotkeys: %s.", exc, exc_info=True
+                )
 
         try:
+            # Stop periodic work before destroying its dependencies.
+            thread = self._mouse_flush_thread
+
+            if (
+                thread is not None
+                and thread.is_alive()
+                and threading.current_thread() is not thread
+            ):
+                thread.join(timeout=2.0)
+
+                if thread.is_alive():
+                    logger.warning("Mouse flush thread did not stop within timeout.")
+
+            # Stop external input sources.
+            if self.touch_reader is not None:
+                self.touch_reader.stop()
+
+            # Release mapped inputs while output infrastructure is alive.
+            # Keep the existing cleanup calls, but verify their dependencies
+            # and ordering before moving them.
+            if self.output_sink:
+                for tier in self._tiers:
+                    for component in tier:
+                        component.reset(self.output_sink)
+
+            if self.key_mapper is not None:
+                self.key_mapper.release_all()
+
+            if self.wasd_mapper is not None:
+                self.wasd_mapper.touch_up()
+
+            if self.mouse_mapper is not None:
+                self.mouse_mapper.touch_up()
+
+            if self.bezel_mapper is not None:
+                self.bezel_mapper.release_all()
+
+            if self.mapper is not None:
+                self.mapper.stop()
+
+            # Stop injection workers after releases have been dispatched.
+            if self.bridge is not None:
+                self.bridge.shutdown()
+
+            # Close the virtual keyboard and its IPC resources.
             self.close_virtual_keyboard()
+
             try:
                 self.vkb_reader.close()
                 self.vkb_writer.close()
             except Exception:
                 pass
 
-            if self.output_sink:
-                for tier in self._tiers:
-                    for p in tier:
-                        p.reset(self.output_sink)
-
-            if self.touch_reader is not None:
-                self.touch_reader.stop()
-            if self.key_mapper is not None:
-                self.key_mapper.release_all()
-            if self.wasd_mapper is not None:
-                self.wasd_mapper.touch_up()
-            if self.mouse_mapper is not None:
-                self.mouse_mapper.touch_up()
-            if self.bezel_mapper is not None:
-                self.bezel_mapper.release_all()
-            if self.mapper is not None:
-                self.mapper.stop()
-
-            if self.bridge_class is not None:
-                self.bridge_class.shutdown()
+            # Remove callbacks after cleanup no longer needs them.
+            self.mapper_event_dispatcher.unregister_all()
 
         except Exception as exc:
-            logger.debug("Exception during engine teardown: %s", exc)
+            logger.exception(
+                "Exception during engine teardown: %s.", exc, exc_info=True
+            )
 
-        store.close()
+        finally:
+            store.close()
 
 
 def run_engine_process(conn: Connection, log_queue: Queue) -> None:

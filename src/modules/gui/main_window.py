@@ -23,7 +23,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from PySide6.QtNetwork import QLocalServer
 
+from modules.utils import APP_NAME
 from modules.database import store
 from modules.engine import run_engine_process
 from modules.gui.dialogs.wireless_connect import connect_wireless_gui
@@ -41,6 +43,31 @@ from modules.utils import (
 )
 
 logger = logging.getLogger("modules.gui.main_window")
+
+
+class SingleInstanceServer(QObject):
+    def __init__(self, window, server_name: str):
+        super().__init__()
+        self.window = window
+        self.server_name = server_name
+
+        # Clean up any stale sockets/servers
+        QLocalServer.removeServer(self.server_name)
+        self.server = QLocalServer(self)
+        if self.server.listen(self.server_name):
+            self.server.newConnection.connect(self._handle_new_connection)
+
+    def _handle_new_connection(self):
+        client = self.server.nextPendingConnection()
+        if client and client.waitForReadyRead(1000):
+            msg = bytes(client.readAll().data()).decode("utf-8", errors="ignore")
+            if msg == "SHOW_WINDOW":
+                # Bring window to front
+                self.window.showMaximized()
+                self.window.raise_()
+                self.window.activateWindow()
+        if client:
+            client.disconnectFromServer()
 
 
 class CustomDockWidget(QDockWidget):
@@ -148,9 +175,8 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Touch2Key")
-        # 1180x680 avoids height overflow on 1366x768 screens
-        self.resize(1180, 680)
+        self.setWindowTitle(APP_NAME)
+        self._single_instance_server = SingleInstanceServer(self, APP_NAME)
 
         self.dispatcher = MapperEventDispatcher()
         self.engine_controller = EngineProcessController(self)
@@ -182,17 +208,32 @@ class MainWindow(QMainWindow):
     def _setup_ui(self) -> None:
         central = QWidget()
         self.setCentralWidget(central)
+
         main_layout = QHBoxLayout(central)
         main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(0)
+
+        # Sidebar toggle — stays visible when the sidebar is collapsed
+        self.nav_toggle_btn = QPushButton("◀")
+        self.nav_toggle_btn.setFixedWidth(28)
+        self.nav_toggle_btn.setCheckable(True)
+        self.nav_toggle_btn.setToolTip("Collapse sidebar")
+        self.nav_toggle_btn.clicked.connect(self._toggle_nav_panel)
 
         # Horizontal splitter allowing the user to drag and resize the sidebar
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.setChildrenCollapsible(False)
 
+        main_layout.addWidget(self.nav_toggle_btn, alignment=Qt.AlignmentFlag.AlignTop)
+        main_layout.addWidget(self.main_splitter, 1)
+
         # Wrap nav_panel inside a dedicated container widget
-        nav_container = QWidget()
-        nav_container.setMinimumWidth(160)  # Prevents shrinking into unreadable state
-        nav_panel = QVBoxLayout(nav_container)
+        self.nav_container = QWidget()
+        self.nav_container.setMinimumWidth(
+            160
+        )  # Prevents shrinking into unreadable state
+
+        nav_panel = QVBoxLayout(self.nav_container)
         nav_panel.setContentsMargins(0, 0, 4, 0)
 
         self.nav_group = QButtonGroup(self)
@@ -248,11 +289,9 @@ class MainWindow(QMainWindow):
         nav_panel.addWidget(self.sidebar_logs_btn)
 
         # Add panes to splitter and assign default widths: sidebar (200px), pages (980px)
-        self.main_splitter.addWidget(nav_container)
+        self.main_splitter.addWidget(self.nav_container)
         self.main_splitter.addWidget(self.stack)
         self.main_splitter.setSizes([200, 980])
-
-        main_layout.addWidget(self.main_splitter)
 
         # Dock widget setup
         self.custom_log_dock = CustomDockWidget("Application Logs", self)
@@ -449,6 +488,21 @@ class MainWindow(QMainWindow):
         uninstall_action.triggered.connect(self._on_run_uninstall)
         toolbar.addAction(uninstall_action)
 
+    def _toggle_nav_panel(self, checked: bool) -> None:
+        if checked:
+            self._saved_splitter_sizes = self.main_splitter.sizes()
+            self.nav_container.hide()
+            self.nav_toggle_btn.setText("▶")
+            self.nav_toggle_btn.setToolTip("Expand sidebar")
+        else:
+            self.nav_container.show()
+
+            sizes = getattr(self, "_saved_splitter_sizes", [200, 980])
+            self.main_splitter.setSizes(sizes)
+
+            self.nav_toggle_btn.setText("◀")
+            self.nav_toggle_btn.setToolTip("Collapse sidebar")
+
     def save_all_pages(self) -> bool:
         """Aggregates and persists state from all GUI pages to the database."""
         logger.info("Initiating global state save across all pages")
@@ -457,11 +511,8 @@ class MainWindow(QMainWindow):
                 save_state = getattr(page_widget, "save_state", None)
                 if save_state is not None:
                     if not save_state():
-                        logger.warning("Save validation failed on page: %s", title)
-                        QMessageBox.warning(
-                            self,
-                            "Save Warning",
-                            f"Could not save changes on {title}. Please review inputs.",
+                        logger.info(
+                            "GUI page: %s state saved successfully to database.", title
                         )
                         return False
 

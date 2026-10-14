@@ -47,10 +47,7 @@ class BridgeOutputSink(OutputSink):
         self.bridge.key_down(scancode)
 
     def key_up(self, scancode: int) -> None:
-        if scancode is not None:
-            self.bridge.key_up(scancode)
-        else:
-            logger.warning("Failed to resolve scancode for key_up: '%s'", key)
+        self.bridge.key_up(scancode)
 
     def mouse_down(self, scancode: int) -> None:
         if scancode == M_LEFT:

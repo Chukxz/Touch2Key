@@ -307,7 +307,7 @@ class JoystickTransform(Transformation[frozenset[int]]):
     down: int = 0x1F  # "s"
     left: int = 0x1E  # "a"
     right: int = 0x20  # "d"
-    sprint: int = 0x2A  # "lshift"
+    sprint: int | None = 0x2A  # "lshift"
 
     _last_sector: int | None = field(init=False, default=None)
     _PI_8: float = field(init=False, default=math.pi / 8.0)
@@ -316,7 +316,11 @@ class JoystickTransform(Transformation[frozenset[int]]):
     _sprint_set: frozenset[int] = field(init=False)
 
     def __post_init__(self) -> None:
-        self._sprint_set = frozenset({self.sprint})
+        if self.sprint is not None:
+            self._sprint_set = frozenset({self.sprint})
+        else:
+            self._sprint_set = frozenset({})
+            
         self._sector_map = (
             frozenset({self.right}),
             frozenset({self.down, self.right}),

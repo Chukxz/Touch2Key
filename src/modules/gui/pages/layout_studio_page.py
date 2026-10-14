@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QScrollArea,
+    QToolButton,
 )
 
 from modules.core.pipeline import PipelineConfig
@@ -134,29 +135,55 @@ class LayoutStudioPage(QWidget):
         self.dispatcher = dispatcher
         self.standalone = standalone
 
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        # Sidebar controls stay visible when the panels are collapsed.
+        self.profiles_toggle_btn = QToolButton()
+        self.profiles_toggle_btn.setText("◀ Profiles")
+        self.profiles_toggle_btn.setCheckable(True)
+        self.profiles_toggle_btn.setChecked(True)
+        self.profiles_toggle_btn.setToolTip("Show or hide the Profiles panel")
 
-        # Main Splitter: Left (Profiles) | Center (Canvas) | Right (Inspector)
+        self.inspector_toggle_btn = QToolButton()
+        self.inspector_toggle_btn.setText("Inspector ▶")
+        self.inspector_toggle_btn.setCheckable(True)
+        self.inspector_toggle_btn.setChecked(True)
+        self.inspector_toggle_btn.setToolTip("Show or hide the Inspector panel")
+
+        self.profiles_toggle_btn.toggled.connect(self._toggle_profiles)
+        self.inspector_toggle_btn.toggled.connect(self._toggle_inspector)
+
+        # Left toggle | Main workspace | Right toggle
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.setChildrenCollapsible(False)
-        main_layout.addWidget(self.splitter)
+        self.splitter.setHandleWidth(5)
+
+        toggle_bar = QHBoxLayout()
+        toggle_bar.addWidget(self.profiles_toggle_btn)
+        toggle_bar.addStretch()
+        toggle_bar.addWidget(self.inspector_toggle_btn)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(4)
+
+        main_layout.addLayout(toggle_bar)
+        main_layout.addWidget(self.splitter, 1)
 
         self._setup_left_sidebar()
         self._setup_center_canvas()
         self._setup_right_inspector()
 
-        # Responsive default split sizes fitting 1366x768 screens
-        self.splitter.setSizes([240, 560, 280])
+        self._saved_splitter_sizes = [240, 560, 280]
+        self.splitter.setSizes(self._saved_splitter_sizes)
         self._current_inspected_uid: Optional[int] = None
 
         self._wire_signals()
         self.load_profiles()
 
     def _setup_left_sidebar(self) -> None:
-        sidebar_widget = QWidget()
-        sidebar_widget.setMinimumWidth(200)
-        sidebar_layout = QVBoxLayout(sidebar_widget)
+        self.sidebar_widget = QWidget()
+        self.sidebar_widget.setMinimumWidth(200)
+
+        sidebar_layout = QVBoxLayout(self.sidebar_widget)
         sidebar_layout.setContentsMargins(0, 0, 8, 0)
 
         profiles_group = QGroupBox("Profiles")
@@ -179,7 +206,8 @@ class LayoutStudioPage(QWidget):
         profiles_layout.addWidget(self.search_input)
 
         self.profile_list = QListWidget()
-        profiles_layout.addWidget(self.profile_list)
+        self.profile_list.setMinimumHeight(120)
+        profiles_layout.addWidget(self.profile_list, stretch=1)
 
         self.details_label = QLabel("Select a profile to view details.")
         self.details_label.setStyleSheet(
@@ -191,6 +219,9 @@ class LayoutStudioPage(QWidget):
         details_scroll_area = QScrollArea()
         details_scroll_area.setWidget(self.details_label)
         details_scroll_area.setWidgetResizable(True)
+        details_scroll_area.setMinimumHeight(55)
+        details_scroll_area.setMaximumHeight(100)
+
         profiles_layout.addWidget(details_scroll_area)
 
         # Profile Actions: 2x2 grid prevents pushing sidebar past 240px
@@ -228,27 +259,29 @@ class LayoutStudioPage(QWidget):
         io_layout.addLayout(export_row)
         sidebar_layout.addWidget(io_group)
 
-        maint_group = QGroupBox("Maintenance")
-        maint_layout = QHBoxLayout(maint_group)
+        maintenance_group = QGroupBox("maintenance")
+        maintenance_layout = QHBoxLayout(maintenance_group)
         self.clear_zones_btn = QPushButton("Clear Zones")
         self.delete_btn = QPushButton("Delete")
         self.delete_btn.setStyleSheet("color: #d9534f;")
 
-        maint_layout.addWidget(self.clear_zones_btn)
-        maint_layout.addWidget(self.delete_btn)
-        sidebar_layout.addWidget(maint_group)
+        maintenance_layout.addWidget(self.clear_zones_btn)
+        maintenance_layout.addWidget(self.delete_btn)
+        sidebar_layout.addWidget(maintenance_group)
 
-        self.splitter.addWidget(sidebar_widget)
+        self.splitter.addWidget(self.sidebar_widget)
 
     def _setup_center_canvas(self) -> None:
-        canvas_widget = QWidget()
-        canvas_widget.setMinimumWidth(320)
-        canvas_layout = QVBoxLayout(canvas_widget)
-        canvas_layout.setContentsMargins(8, 0, 8, 0)
+        self.canvas_widget = QWidget()
+        self.canvas_widget.setMinimumWidth(320)
+
+        canvas_layout = QVBoxLayout(self.canvas_widget)
+        canvas_layout.setContentsMargins(4, 0, 4, 0)
+        canvas_layout.setSpacing(4)
 
         status_box = QWidget()
         status_layout = QVBoxLayout(status_box)
-        status_layout.setContentsMargins(0, 0, 0, 6)
+        status_layout.setContentsMargins(0, 0, 0, 2)
         status_layout.setSpacing(2)
 
         self.canvas_status_label = QLabel("Initializing...")
@@ -261,12 +294,24 @@ class LayoutStudioPage(QWidget):
         self.canvas_help_label.setWordWrap(True)
         self.canvas_help_label.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        canvas_help_scroll_area = QScrollArea()
-        canvas_help_scroll_area.setWidget(self.canvas_help_label)
-        canvas_help_scroll_area.setWidgetResizable(True)
+        self.canvas_help_toggle = QToolButton()
+        self.canvas_help_toggle.setText("Shortcuts ▼")
+        self.canvas_help_toggle.setCheckable(True)
+        self.canvas_help_toggle.setChecked(False)
+        self.canvas_help_toggle.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextOnly
+        )
+        self.canvas_help_toggle.setToolTip("Show or hide keyboard shortcuts")
+
+        self.canvas_help_label.setVisible(False)
+        self.canvas_help_label.setMaximumHeight(0)
+
+        self.canvas_help_toggle.toggled.connect(self._toggle_canvas_help)
 
         status_layout.addWidget(self.canvas_status_label)
-        status_layout.addWidget(canvas_help_scroll_area)
+        status_layout.addWidget(self.canvas_help_toggle)
+        status_layout.addWidget(self.canvas_help_label)
+
         canvas_layout.addWidget(status_box)
 
         # Toolbar Row 1: Image management & overlay toggles
@@ -299,12 +344,13 @@ class LayoutStudioPage(QWidget):
         self.plotter_widget = LayoutsPlotterWidget(self, standalone=self.standalone)
         canvas_layout.addWidget(self.plotter_widget, stretch=1)
 
-        self.splitter.addWidget(canvas_widget)
+        self.splitter.addWidget(self.canvas_widget)
 
     def _setup_right_inspector(self) -> None:
-        inspector_widget = QWidget()
-        inspector_widget.setMinimumWidth(220)
-        inspector_layout = QVBoxLayout(inspector_widget)
+        self.inspector_widget = QWidget()
+        self.inspector_widget.setMinimumWidth(220)
+
+        inspector_layout = QVBoxLayout(self.inspector_widget)
         inspector_layout.setContentsMargins(8, 0, 0, 0)
 
         self.inspector_stack = QStackedWidget()
@@ -403,9 +449,9 @@ class LayoutStudioPage(QWidget):
 
         zone_layout.addStretch()
         self.inspector_stack.addWidget(page_zone_settings)
-
         inspector_layout.addWidget(self.inspector_stack)
-        self.splitter.addWidget(inspector_widget)
+
+        self.splitter.addWidget(self.inspector_widget)
 
     def on_page_shown(self) -> None:
         self.load_profiles()
@@ -433,7 +479,7 @@ class LayoutStudioPage(QWidget):
         self.export_toml_btn.clicked.connect(self._on_export_toml_clicked)
         self.export_bundle_btn.clicked.connect(self._on_export_bundle_clicked)
 
-        # Maintenance
+        # maintenance
         self.clear_zones_btn.clicked.connect(self._on_clear_zones)
         self.delete_btn.clicked.connect(self._on_delete)
 
@@ -468,6 +514,61 @@ class LayoutStudioPage(QWidget):
         self.insp_hysteresis.valueChanged.connect(self._on_inspector_value_changed)
         self.insp_pointer.toggled.connect(self._on_pointer_toggled)
         self.insp_reset_zone_btn.clicked.connect(self._on_reset_single_zone)
+
+    def _toggle_profiles(self, visible: bool) -> None:
+        sizes = self.splitter.sizes()
+
+        if not visible:
+            if sizes[0] > 0:
+                self._saved_splitter_sizes = sizes
+
+            self.sidebar_widget.hide()
+            self.profiles_toggle_btn.setText("▶ Profiles")
+
+            # Give the available space to the canvas.
+            self.splitter.setSizes(
+                [
+                    0,
+                    max(1, sizes[1] + sizes[0]),
+                    sizes[2],
+                ]
+            )
+        else:
+            self.sidebar_widget.show()
+            self.profiles_toggle_btn.setText("◀ Profiles")
+
+            saved = self._saved_splitter_sizes
+            self.splitter.setSizes(saved)
+
+    def _toggle_inspector(self, visible: bool) -> None:
+        sizes = self.splitter.sizes()
+
+        if not visible:
+            if sizes[2] > 0:
+                self._saved_splitter_sizes = sizes
+
+            self.inspector_widget.hide()
+            self.inspector_toggle_btn.setText("Inspector ◀")
+
+            self.splitter.setSizes(
+                [
+                    sizes[0],
+                    max(1, sizes[1] + sizes[2]),
+                    0,
+                ]
+            )
+        else:
+            self.inspector_widget.show()
+            self.inspector_toggle_btn.setText("Inspector ▶")
+
+            saved = self._saved_splitter_sizes
+            self.splitter.setSizes(saved)
+
+    def _toggle_canvas_help(self, expanded: bool) -> None:
+        self.canvas_help_label.setVisible(expanded)
+        self.canvas_help_label.setMaximumHeight(16777215 if expanded else 0)
+
+        self.canvas_help_toggle.setText("Shortcuts ▲" if expanded else "Shortcuts ▼")
 
     def _focus_search(self) -> None:
         """Focuses search bar and selects existing text for immediate overwrite."""
@@ -631,13 +732,9 @@ class LayoutStudioPage(QWidget):
             zones = store.zones.list_for_layout(layout.id)
             img_info = Path(layout.image_path).name if layout.image_path else "None"
 
-            created_str = _format_timestamp(layout.created_at)
-            updated_str = _format_timestamp(layout.updated_at)
-
             self.details_label.setText(
-                f"ID: {layout.id} | Canvas: {layout.width}x{layout.height} ({layout.dpi} DPI)\n"
-                f"Zones: {len(zones)} | Image path: {img_info}\n"
-                f"Modified: {updated_str} (Created: {created_str})"
+                f"Canvas: {layout.width} x {layout.height} @ {layout.dpi} DPI\n"
+                f"Zones: {len(zones)} | Image: {img_info}"
             )
         except Exception as exc:
             logger.exception(

@@ -83,7 +83,7 @@ def FixedJoystick(
     down: int = 0x1F,  # "s"
     left: int = 0x1E,  # "a"
     right: int = 0x20,  # "d"
-    sprint: int = 0x2A,  # "lshift"
+    sprint: int | None = 0x2A,  # "lshift"
     priority: int = 0,
     creation_id: int = 0,
 ) -> Pipeline[frozenset[int]]:
@@ -120,7 +120,7 @@ def FloatingJoystick(
     down: int = 0x1F,  # "s"
     left: int = 0x1E,  # "a"
     right: int = 0x20,  # "d"
-    sprint: int = 0x2A,  # "lshift"
+    sprint: int | None = 0x2A,  # "lshift"
     priority: int = 0,
     creation_id: int = 0,
 ) -> Pipeline[frozenset[int]]:
@@ -168,7 +168,7 @@ def AnchoredJoystick(
     down: int = 0x1F,  # "s"
     left: int = 0x1E,  # "a"
     right: int = 0x20,  # "d"
-    sprint: int = 0x2A,  # "lshift"
+    sprint: int | None = 0x2A,  # "lshift"
     priority: int = 0,
     creation_id: int = 0,
 ) -> Pipeline[frozenset[int]]:
