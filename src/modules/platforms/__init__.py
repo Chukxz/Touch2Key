@@ -114,7 +114,7 @@ def get_specific_mt_key(event) -> str:
 
 
 def get_specific_qt_key(event) -> str:
-    """Safe mapping helper for PySide6 key events."""
+    """Safe mapping helper for Qt key events."""
     if not hasattr(event, "nativeScanCode"):
         return getattr(event, "text", lambda: "")()
 

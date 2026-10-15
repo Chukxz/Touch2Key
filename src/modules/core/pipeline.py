@@ -358,7 +358,7 @@ class JoystickTransform(Transformation[frozenset[int]]):
         self._last_sector = new_sector
         base_keys = self._sector_map[new_sector]
 
-        if self.sprint_distance > 0.0 and dist_sq > (
+        if self.sprint is not None and self.sprint_distance > 0.0 and dist_sq > (
             self.sprint_distance * self.sprint_distance
         ):
             return base_keys | self._sprint_set

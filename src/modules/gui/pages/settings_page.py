@@ -126,6 +126,7 @@ class KeySequenceRow(QWidget):
         self.remove_btn = QPushButton("Remove Last")
         self.clear_btn = QPushButton("Clear")
         self.wasd_preset_btn = QPushButton("+ WASD")
+        self.arrows_preset_btn = QPushButton("+ ←↑↓→")
 
         controls.addWidget(self.sequence_label)
         controls.addSpacing(10)
@@ -133,6 +134,7 @@ class KeySequenceRow(QWidget):
         controls.addWidget(self.remove_btn)
         controls.addWidget(self.clear_btn)
         controls.addWidget(self.wasd_preset_btn)
+        controls.addWidget(self.arrows_preset_btn)
         controls.addStretch()
 
         layout.addLayout(controls)
@@ -145,6 +147,7 @@ class KeySequenceRow(QWidget):
         self.remove_btn.clicked.connect(self._remove_last_key)
         self.clear_btn.clicked.connect(self._clear_sequence)
         self.wasd_preset_btn.clicked.connect(self._apply_wasd_preset)
+        self.arrows_preset_btn.clicked.connect(self._apply_arrows_preset)
 
     def set_sequence(self, sequence: list[str]) -> None:
         self.sequence = [k.strip().lower() for k in sequence if k.strip()]
@@ -162,6 +165,13 @@ class KeySequenceRow(QWidget):
 
     def _apply_wasd_preset(self) -> None:
         for k in ["w", "a", "s", "d"]:
+            if k not in self.sequence:
+                self.sequence.append(k)
+        self._update_display()
+        self.save()
+        
+    def _apply_arrows_preset(self) -> None:
+        for k in ["left", "up", "down", "right"]:
             if k not in self.sequence:
                 self.sequence.append(k)
         self._update_display()

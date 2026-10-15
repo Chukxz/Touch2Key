@@ -61,8 +61,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("modules.gui.layout_studio_page")
 
-STATIC_SHORTCUTS_HELP = (
-    "<b>Shortcuts:</b> "
+STATIC_HELP = (
+    "<b>Help:</b> "
     "<span style='color: palette(highlight);'>Ctrl+F</span> Find | "
     "<span style='color: palette(highlight);'>F12</span> Save | "
     "<span style='color: palette(highlight);'>Esc</span> Cancel | "
@@ -289,19 +289,19 @@ class LayoutStudioPage(QWidget):
             "font-size: 13px; font-weight: bold; color: palette(highlight);"
         )
 
-        self.canvas_help_label = QLabel(STATIC_SHORTCUTS_HELP)
+        self.canvas_help_label = QLabel(STATIC_HELP)
         self.canvas_help_label.setStyleSheet("font-size: 11px;")
         self.canvas_help_label.setWordWrap(True)
         self.canvas_help_label.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.canvas_help_toggle = QToolButton()
-        self.canvas_help_toggle.setText("Shortcuts ▼")
+        self.canvas_help_toggle.setText("Help ▼")
         self.canvas_help_toggle.setCheckable(True)
         self.canvas_help_toggle.setChecked(False)
         self.canvas_help_toggle.setToolButtonStyle(
             Qt.ToolButtonStyle.ToolButtonTextOnly
         )
-        self.canvas_help_toggle.setToolTip("Show or hide keyboard shortcuts")
+        self.canvas_help_toggle.setToolTip("Show or hide keyboard help")
 
         self.canvas_help_label.setVisible(False)
         self.canvas_help_label.setMaximumHeight(0)
@@ -568,7 +568,7 @@ class LayoutStudioPage(QWidget):
         self.canvas_help_label.setVisible(expanded)
         self.canvas_help_label.setMaximumHeight(16777215 if expanded else 0)
 
-        self.canvas_help_toggle.setText("Shortcuts ▲" if expanded else "Shortcuts ▼")
+        self.canvas_help_toggle.setText("Help ▲" if expanded else "Help ▼")
 
     def _focus_search(self) -> None:
         """Focuses search bar and selects existing text for immediate overwrite."""

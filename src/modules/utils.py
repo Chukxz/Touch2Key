@@ -63,7 +63,6 @@ VKB_STRUCT = struct.Struct("<BH")
 if TYPE_CHECKING:
     from multiprocessing import Process
     from multiprocessing.connection import Connection
-    from logging import Logger
 
 # ---------------------------------------------------------------------------
 # Project & Data Paths
@@ -191,7 +190,6 @@ Callback = Callable[..., None]
 EVENT_TYPE = Literal[
     "ON_CONFIG_RELOAD",
     "ON_LAYOUT_RELOAD",
-    "ON_WASD_BLOCK",
     "ON_MENU_MODE_TOGGLE",
     "ON_AGGREGATION",
     "ON_WORKER_RESPAWN",
@@ -1092,8 +1090,6 @@ def get_hue_modified_alpha_from_hsv(color):
 
 
 def get_scancode_from_key(key: str):
-    if not key:
-        return None
     key_lower = key.lower()
     code = SCANCODES.get(key_lower)
     if code is None:

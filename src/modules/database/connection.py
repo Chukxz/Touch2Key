@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS app_settings (
     typematic_enabled INTEGER NOT NULL DEFAULT 1,
     typematic_delay_ms REAL NOT NULL DEFAULT 250.0,
     typematic_rate_hz REAL NOT NULL DEFAULT 30.0,
-    typematic_excluded_keys TEXT DEFAULT,
+    typematic_excluded_keys TEXT,
     two_finger_tap_enabled INTEGER NOT NULL DEFAULT 1,
     bezel_toggle_enabled INTEGER NOT NULL DEFAULT 1,
     profile_sort_order TEXT NOT NULL DEFAULT 'Recently Modified',

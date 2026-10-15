@@ -159,8 +159,6 @@ class MouseMapper:
                 self.pipeline.reset(self.output_sink)
             self.pipeline = pipeline
 
-    _build_pipeline_mouse = rebuild_pipeline
-
     def touch_up(self) -> None:
         with self.lock:
             if self.pipeline is not None:

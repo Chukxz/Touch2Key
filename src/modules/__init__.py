@@ -26,7 +26,7 @@ from .core.mapper import Mapper
 from .core.bezel_mapper import BezelMapper
 from .core.key_mapper import KeyMapper
 from .core.mouse_mapper import MouseMapper
-from .core.wasd_mapper import WASDMapper
+from .core.wheelmapper import WheelMapper
 from .core.pipeline_output import BridgeOutputSink
 from .core.gestures import TwoFingerTapTracker
 
@@ -45,7 +45,7 @@ __all__ = [
     "BezelMapper",
     "MouseMapper",
     "KeyMapper",
-    "WASDMapper",
+    "WheelMapper",
     "Pipeline",
     "Button",
     "MousePointer",

@@ -23,10 +23,10 @@ if TYPE_CHECKING:
     from modules.core.pipeline_output import BridgeOutputSink
     from .mapper import Mapper
 
-logger = logging.getLogger("modules.core.wasd_mapper")
+logger = logging.getLogger("modules.core.wheel_mapper")
 
 
-class WASDMapper:
+class WheelMapper:
     def __init__(self, mapper: Mapper, output_sink: BridgeOutputSink):
         self.mapper = mapper
         self.output_sink = output_sink
@@ -44,7 +44,7 @@ class WASDMapper:
             "ON_LAYOUT_RELOAD", self.rebuild_pipeline
         )
         self.mapper_event_dispatcher.register_callback(
-            "ON_WORKER_RESPAWN", self._on_worker_respawn_wasd
+            "ON_WORKER_RESPAWN", self._on_respawn_wheel
         )
 
     def rebuild_pipeline(self) -> None:
@@ -52,7 +52,7 @@ class WASDMapper:
         layout = store.get_active_layout()
         if layout is None:
             logger.warning(
-                "No active layout found in SQLite database. WASDMapper pipeline will be empty."
+                "No active layout found in SQLite database. WheelMapper pipeline will be empty."
             )
             self.touch_up()
             with self.lock:
@@ -65,13 +65,13 @@ class WASDMapper:
         h = float(layout.height)
 
         key_raw_zones = self.mapper.layout_loader.keys_json_data.copy()
-        wasd_zone_values = None
+        wheel_zone_values = None
         for _, values in key_raw_zones:
             if (
                 values.get("name") == MOUSE_WHEEL_SIMULATOR_CODE
                 and values.get("type") == CIRCLE
             ):
-                wasd_zone_values = values
+                wheel_zone_values = values
                 break
 
         if settings.left_handed:
@@ -79,23 +79,23 @@ class WASDMapper:
         else:
             half_screen_region = RectangularRegion(Point(0.0, 0.0), Point(w / 2.0, h))
 
-        if wasd_zone_values is None:
+        if wheel_zone_values is None:
             self.touch_up()
             with self.lock:
                 self.pipeline = None
             return
 
-        z_id = int(wasd_zone_values.get("id", 0))
-        priority = int(wasd_zone_values.get("priority", 0))
-        ignore_app_settings = bool(wasd_zone_values.get("ignore_app_settings", False))
+        z_id = int(wheel_zone_values.get("id", 0))
+        priority = int(wheel_zone_values.get("priority", 0))
+        ignore_app_settings = bool(wheel_zone_values.get("ignore_app_settings", False))
 
         deadzone = (
-            float(wasd_zone_values.get("deadzone", 0.1))
+            float(wheel_zone_values.get("deadzone", 0.1))
             if ignore_app_settings
             else float(settings.deadzone)
         )
         hysteresis = (
-            float(wasd_zone_values.get("hysteresis", 4.0))
+            float(wheel_zone_values.get("hysteresis", 4.0))
             if ignore_app_settings
             else float(settings.hysteresis)
         )
@@ -103,8 +103,8 @@ class WASDMapper:
 
         # Correct parameter order: scale_coord(base, val)
         center = Point(
-            scale_coord(w, wasd_zone_values.get("cx")),
-            scale_coord(h, wasd_zone_values.get("cy")),
+            scale_coord(w, wheel_zone_values.get("cx")),
+            scale_coord(h, wheel_zone_values.get("cy")),
         )
 
         if settings.anchored_joystick:
@@ -160,8 +160,6 @@ class WASDMapper:
                 self.pipeline.reset(self.output_sink)
             self.pipeline = pipeline
 
-    _build_pipeline_wasd = rebuild_pipeline
-
     def touch_up(self) -> None:
         with self.lock:
             if self.pipeline is not None:
@@ -169,6 +167,6 @@ class WASDMapper:
 
     release_all = touch_up
 
-    def _on_worker_respawn_wasd(self, worker_type: str) -> None:
+    def _on_respawn_wheel(self, worker_type: str) -> None:
         if worker_type == "keyboard":
             self.touch_up()

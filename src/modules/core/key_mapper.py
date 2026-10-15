@@ -170,8 +170,6 @@ class KeyMapper:
                 pipeline.reset(self.output_sink)
             self.pipelines = new_pipelines
 
-    _build_pipelines_key = rebuild_pipelines
-
     def release_all(self) -> None:
         with self.lock:
             for pipeline in self.pipelines:

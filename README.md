@@ -32,7 +32,7 @@ The first version with only CLI support and basic GUI windows can be accessed [h
 
 * **Hardware-Accurate Typematic Engine (Key Auto-Repeat):**
   * **Dedicated Low-Level Repeat Loop:** Hardware-accurate repeat pulses execute directly inside driver worker processes without pipe saturation or IPC latency.
-  * **Focus-Stealing for Diagonal WASD:** Pressing a new key steals typematic repeat focus without sending artificial `KEY_UP` releases to currently held keys, allowing diagonal movement to hold cleanly while spamming action keys.
+  * **Focus-Stealing for Diagonal Keys:** Pressing a new key steals typematic repeat focus without sending artificial `KEY_UP` releases to currently held keys, allowing diagonal movement to hold cleanly while spamming action keys.
   * **Dynamic IPC Hot-Reloading:** Delay, rate, and exclusion sets can be altered live via the GUI or CLI without restarting the worker processes.
 
 * **Defensive Input Ownership & Multi-Claim:**

@@ -18,7 +18,7 @@ from modules import (
     Pipeline,
     TouchReader,
     TwoFingerTapTracker,
-    WASDMapper,
+    WheelMapper,
 )
 from modules.cli.key_capture import capture_keys, capture_performance_settings
 from modules.database import store
@@ -79,7 +79,7 @@ class Engine:
         self.bezel_mapper: BezelMapper | None = None
         self.mouse_mapper: MouseMapper | None = None
         self.key_mapper: KeyMapper | None = None
-        self.wasd_mapper: WASDMapper | None = None
+        self.wheel_mapper: WheelMapper | None = None
         self._tiers: list[list[Pipeline]] = []
 
         self.is_visible = False
@@ -277,8 +277,8 @@ class Engine:
             self.mouse_mapper.touch_up()
         if self.key_mapper:
             self.key_mapper.release_all()
-        if self.wasd_mapper:
-            self.wasd_mapper.touch_up()
+        if self.wheel_mapper:
+            self.wheel_mapper.touch_up()
         if self.bezel_mapper:
             self.bezel_mapper.release_all()
         self.two_finger_tap_tracker.reset()
@@ -339,8 +339,8 @@ class Engine:
                 self.mouse_mapper.touch_up()
             if self.key_mapper:
                 self.key_mapper.release_all()
-            if self.wasd_mapper:
-                self.wasd_mapper.touch_up()
+            if self.wheel_mapper:
+                self.wheel_mapper.touch_up()
             if self.bezel_mapper:
                 self.bezel_mapper.release_all()
             self.two_finger_tap_tracker.reset()
@@ -353,8 +353,8 @@ class Engine:
                 self.key_mapper.rebuild_pipelines()
             if self.bezel_mapper and hasattr(self.bezel_mapper, "rebuild_pipelines"):
                 self.bezel_mapper.rebuild_pipelines()
-            if self.wasd_mapper and hasattr(self.wasd_mapper, "rebuild_pipeline"):
-                self.wasd_mapper.rebuild_pipeline()
+            if self.wheel_mapper and hasattr(self.wheel_mapper, "rebuild_pipeline"):
+                self.wheel_mapper.rebuild_pipeline()
             if self.mouse_mapper and hasattr(self.mouse_mapper, "rebuild_pipeline"):
                 self.mouse_mapper.rebuild_pipeline()
 
@@ -390,8 +390,8 @@ class Engine:
 
         if self.key_mapper:
             all_pipelines.extend(self.key_mapper.pipelines)
-        if self.wasd_mapper and self.wasd_mapper.pipeline:
-            all_pipelines.append(self.wasd_mapper.pipeline)
+        if self.wheel_mapper and self.wheel_mapper.pipeline:
+            all_pipelines.append(self.wheel_mapper.pipeline)
         if self.mouse_mapper and self.mouse_mapper.pipeline:
             all_pipelines.append(self.mouse_mapper.pipeline)
         if self.bezel_mapper:
@@ -440,7 +440,7 @@ class Engine:
         if not (
             self.mouse_mapper
             and self.key_mapper
-            and self.wasd_mapper
+            and self.wheel_mapper
             and self.bezel_mapper
             and self.mapper
             and self.output_sink
@@ -591,7 +591,7 @@ class Engine:
             typematic_rate_hz=settings.typematic_rate_hz,
             typematic_excluded_keys=settings.typematic_excluded_keys,
         )
-        self.wasd_mapper = WASDMapper(self.mapper, self.output_sink)
+        self.wheel_mapper = WheelMapper(self.mapper, self.output_sink)
 
         self._tiers = self._build_pipeline_tiers()
 
@@ -733,8 +733,8 @@ class Engine:
             if self.key_mapper is not None:
                 self.key_mapper.release_all()
 
-            if self.wasd_mapper is not None:
-                self.wasd_mapper.touch_up()
+            if self.wheel_mapper is not None:
+                self.wheel_mapper.touch_up()
 
             if self.mouse_mapper is not None:
                 self.mouse_mapper.touch_up()

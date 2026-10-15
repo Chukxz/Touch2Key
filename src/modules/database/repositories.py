@@ -21,6 +21,7 @@ from modules.utils import (
     RECTANGLE,
     TOP_BEZEL_ID,
     TOP_BEZEL_NAME,
+    MOUSE_WHEEL_SIMULATOR_CODE,
     calculate_rect,
     dp_to_px,
 )
@@ -641,3 +642,34 @@ class LayoutZonesRepository:
             y2=_y2,
             pipeline_json=zone.CONFIG_HELPER.get_pipeline_json_from_config(),
         ).id
+    
+    def get_mouse_wheel_directional_scancodes(self, zones: Optional[list[LayoutZone]]):
+        W = 0x11
+        A = 0x1E
+        S = 0x1F
+        D = 0x20
+        
+        if zones is None:
+            return int(W), int(A), int(S), int(D)
+        
+        mouse_wheel_zone: Optional[LayoutZone] = None
+        
+        for zone in zones:
+            if zone.scancode == MOUSE_WHEEL_SIMULATOR_CODE:
+                mouse_wheel_zone = zone
+                break      
+        
+        if mouse_wheel_zone is None:
+            return int(W), int(A), int(S), int(D)
+        
+        else:
+            mouse_wheel_zone.set_parsed_config_from_json()
+            zone_json = mouse_wheel_zone.CONFIG_HELPER.pipeline_config
+            
+            up = int(zone_json.get("up", W))
+            left = int(zone_json.get("left", A))
+            down = int(zone_json.get("down", S))
+            right = int(zone_json.get("right", D))
+
+            return up, left, down, right
+            
