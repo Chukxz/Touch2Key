@@ -1055,8 +1055,6 @@ class MouseWheelIndicators:
             self.mouse_wheel_labels_drag_managers[uid]._disconnect_cids()
         self.mouse_wheel_labels_drag_managers = {}
 
-        self.mouse_wheel_indicators_map = {}
-
 
 class LayoutsPlotterWidget(QWidget):
     layout_saved = Signal(str, int)
@@ -2084,7 +2082,10 @@ class LayoutsPlotterWidget(QWidget):
             entry_scancode = int(data["scancode"])
 
             if entry_scancode == MOUSE_WHEEL_SIMULATOR_CODE:
-                p_cfg.pipeline_config.setdefault("up")
+                p_cfg.pipeline_config["up"] = self.mouse_wheel_indicators.mouse_wheel_indicators_map[0]
+                p_cfg.pipeline_config["left"] = self.mouse_wheel_indicators.mouse_wheel_indicators_map[1]
+                p_cfg.pipeline_config["down"] = self.mouse_wheel_indicators.mouse_wheel_indicators_map[2]
+                p_cfg.pipeline_config["right"] = self.mouse_wheel_indicators.mouse_wheel_indicators_map[3]
 
             p_cfg.set_origin_config(
                 idx=0 if entry_scancode == MOUSE_WHEEL_SIMULATOR_CODE else 1
