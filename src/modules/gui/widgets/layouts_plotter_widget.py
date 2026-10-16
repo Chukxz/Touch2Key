@@ -121,6 +121,7 @@ class _Draggable:
         self.plotter = plotter_ref
         self.cursor_manager = plotter_ref.cursor_manager
         self.is_shape = is_shape
+        self.cids: list[int] = []
 
         if is_shape:
             self.artist_id = "shape_" + str(entry_id)
@@ -131,6 +132,22 @@ class _Draggable:
             self.artist_id = "label_" + str(entry_id)
             label_bbox = self.plotter.labels_artists[entry_id].get_bbox_patch()
             self.default_face_color = label_bbox.get_facecolor() if label_bbox else None
+
+    def _capture_background(self, entry_id: int | None = None):
+        if entry_id is None:
+            return
+
+        current_shape = self.plotter.shapes[self.entry_id]
+        scancode = int(current_shape["scancode"])
+
+        if (
+            not self.plotter.mouse_wheel_indicators.mouse_wheel_indicators_captured
+            and scancode == MOUSE_WHEEL_SIMULATOR_CODE
+        ):
+            self.plotter.mouse_wheel_indicators._capture_mouse_wheel_background()
+
+    def _on_release(self):
+        self.plotter.mouse_wheel_indicators._on_release_mouse_wheel()
 
     def populate_draggables_list(self):
         self.plotter.draggables_ids.append(self.artist_id)
@@ -162,10 +179,11 @@ class _Draggable:
             return
 
         self.plotter.zone_selected.emit(self.entry_id)
-        priority = self.plotter.shapes[self.entry_id].get("priority", 0)
+        current_shape = self.plotter.shapes[self.entry_id]
+        priority = current_shape.get("priority", 0)
         pointer_info = (
             "Pointer Enabled"
-            if self.plotter.shapes[self.entry_id]["pointer"]
+            if current_shape.get("pointer", False)
             else "Pointer Disabled"
         )
 
@@ -204,7 +222,7 @@ class _Draggable:
         else:
             self.plotter.iter_count = 0
 
-        self.plotter.drawn = False
+        self.plotter.captured = False
         self.plotter.last_artist_id = self.plotter.current_draggable_id
         self.plotter.current_draggable_id = None
         self.plotter.current_move_distance = 0.0
@@ -251,7 +269,6 @@ class _DraggableLabel(_Draggable):
         self.shape_artist = self.plotter.shapes_artists[entry_id]
         self.canvas = self.plotter.canvas
         self.press = None
-        self.drag_bg = None
         self._connect_cids()
 
     def _connect_cids(self):
@@ -275,33 +292,9 @@ class _DraggableLabel(_Draggable):
         self._on_press_helper(event)
         self.plotter.fire_on_motion = True
 
-        if (label_bbox := self.label_artist.get_bbox_patch()) is not None:
-            label_bbox.set_edgecolor(ACTIVE_EDGE_COLOR)
-            label_bbox.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
-
-        self.label_artist.set_visible(False)
-        self.shape_artist.set_edgecolor(ACTIVE_EDGE_COLOR)
-        self.shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
-
-        self.canvas.draw()
-        ax = self.label_artist.axes
-        if ax.bbox.width > 0 and ax.bbox.height > 0:
-            dpi_ratio = (
-                self.canvas.device_pixel_ratio
-                if hasattr(self.canvas, "device_pixel_ratio")
-                else 1.0
-            )
-            pad = 5 * dpi_ratio
-            padded_bbox = ax.bbox.padded(pad)
-            self.drag_bg = self.canvas.copy_from_bbox(padded_bbox)
-
-        self.label_artist.set_visible(True)
-        self.plotter.drawn = True
-
     def _on_press_helper(self, event):
         self.plotter.fire_on_motion = False
         self.press = None
-        self.drag_bg = None
 
         if event.inaxes != self.shape_artist.axes:
             self.plotter.ignore_current_draggable_id_n -= 1
@@ -322,6 +315,21 @@ class _DraggableLabel(_Draggable):
             self.populate_draggables_list()
 
         self.canvas.draw_idle()
+
+    def _capture_background(self):
+        if (label_bbox := self.label_artist.get_bbox_patch()) is not None:
+            label_bbox.set_edgecolor(ACTIVE_EDGE_COLOR)
+            label_bbox.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
+        self.label_artist.set_animated(True)
+
+        self.shape_artist.set_edgecolor(ACTIVE_EDGE_COLOR)
+        self.shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
+
+        self.canvas.draw()
+        self.plotter.bg_cache = self.canvas.copy_from_bbox(self.plotter.ax.bbox)
+        self.plotter.captured = True
+
+        super()._capture_background(self.entry_id)
 
     def _on_motion(self, event):
         if not self.plotter.fire_on_motion or self.label_artist.axes is None:
@@ -345,12 +353,15 @@ class _DraggableLabel(_Draggable):
         dy_press = event.y - ypx_press
         self.plotter.current_move_distance = ((dx_press**2) + (dy_press**2)) ** 0.5
 
-        if self.drag_bg is not None:
-            self.canvas.restore_region(self.drag_bg)
+        if not self.plotter.captured:
+            self._capture_background()
+
+        if self.plotter.bg_cache is not None:
+            self.canvas.restore_region(self.plotter.bg_cache)
 
         self._move_label(dx, dy)
         self.label_artist.axes.draw_artist(self.label_artist)
-        self.canvas.blit(self.label_artist.axes.bbox)
+        self.canvas.blit(self.plotter.ax.bbox)
 
     def _move_label(self, dx, dy):
         if not self.press:
@@ -366,7 +377,7 @@ class _DraggableLabel(_Draggable):
         self.press = x, y, xdata_press, ydata_press, xpx_press, ypx_press
         self._move_label(dx, dy)
         self.canvas.draw()
-        self.plotter.drawn = False
+        self.plotter.captured = False
 
     def _on_release(self, event=None):
         if self.plotter.is_fatal_state or self.plotter.state != IDLE:
@@ -379,13 +390,15 @@ class _DraggableLabel(_Draggable):
             self.indicate_current_draggable_id()
 
         if self.artist_id == self.plotter.current_draggable_id:
-            if self.plotter.drawn:
+            if self.plotter.captured:
                 self.shape_artist.set_edgecolor(DEFAULT_EDGE_COLOR)
                 self.shape_artist.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
+                self.label_artist.set_animated(False)
+
             self.clean_up_current_draggable_id()
-            self.label_artist.remove()
             self.plotter.ax.add_artist(self.label_artist)
 
+        super()._on_release()
         self.canvas.draw_idle()
 
     def _partial_release(self):
@@ -413,7 +426,6 @@ class _DraggableShape(_Draggable):
         self.press = None
         self.drag_bg = None
         self.shape_mode = None
-        self.cids: list[int] = []
 
     def _connect_cids(self) -> None:
         raise NotImplementedError()
@@ -432,30 +444,6 @@ class _DraggableShape(_Draggable):
         self.plotter.ignore_current_draggable_id_n += 1
         self._on_press_helper(event)
         self.plotter.fire_on_motion = True
-
-        self.shape_artist.set_edgecolor(ACTIVE_EDGE_COLOR)
-        self.shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
-        self.shape_artist.set_visible(False)
-
-        if (label_bbox := self.label_artist.get_bbox_patch()) is not None:
-            label_bbox.set_edgecolor(ACTIVE_EDGE_COLOR)
-            label_bbox.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
-
-        self.canvas.draw()
-        ax = self.shape_artist.axes
-        if ax.bbox.width > 0 and ax.bbox.height > 0:
-            # Pad the bbox by 5 pixels in display coordinates to capture thick stroke outlines
-            dpi_ratio = (
-                self.canvas.device_pixel_ratio
-                if hasattr(self.canvas, "device_pixel_ratio")
-                else 1.0
-            )
-            pad = 5 * dpi_ratio
-            padded_bbox = ax.bbox.padded(pad)
-            self.drag_bg = self.canvas.copy_from_bbox(padded_bbox)
-
-        self.shape_artist.set_visible(True)
-        self.plotter.drawn = True
 
     def _on_press_helper(self, event):
         self.plotter.fire_on_motion = False
@@ -483,6 +471,21 @@ class _DraggableShape(_Draggable):
 
         self.canvas.draw_idle()
 
+    def _capture_background(self):
+        self.shape_artist.set_edgecolor(ACTIVE_EDGE_COLOR)
+        self.shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
+        self.shape_artist.set_animated(True)
+
+        if (label_bbox := self.label_artist.get_bbox_patch()) is not None:
+            label_bbox.set_edgecolor(ACTIVE_EDGE_COLOR)
+            label_bbox.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
+
+        self.canvas.draw()
+        self.plotter.bg_cache = self.canvas.copy_from_bbox(self.plotter.ax.bbox)
+        self.plotter.captured = True
+
+        super()._capture_background(self.entry_id)
+
     def _on_press_shape_helper(self, event) -> tuple[float, float] | None:
         raise NotImplementedError()
 
@@ -508,15 +511,18 @@ class _DraggableShape(_Draggable):
         dy_press = event.y - ypx_press
         self.plotter.current_move_distance = ((dx_press**2) + (dy_press**2)) ** 0.5
 
-        if self.drag_bg is not None:
-            self.canvas.restore_region(self.drag_bg)
+        if not self.plotter.captured:
+            self._capture_background()
+
+        if self.plotter.bg_cache is not None:
+            self.canvas.restore_region(self.plotter.bg_cache)
 
         self._shape_transform(event)
         self.shape_artist.axes.draw_artist(self.shape_artist)
-        self.canvas.blit(self.shape_artist.axes.bbox)
+        self.canvas.blit(self.plotter.ax.bbox)
 
     def _on_release(self, event=None):
-        if self.plotter.is_fatal_state or self.plotter.state:
+        if self.plotter.is_fatal_state or self.plotter.state != IDLE:
             return
 
         self._partial_release()
@@ -526,15 +532,16 @@ class _DraggableShape(_Draggable):
             self.indicate_current_draggable_id()
 
         if self.artist_id == self.plotter.current_draggable_id:
-            if self.plotter.drawn:
+            if self.plotter.captured:
                 if (label_bbox := self.label_artist.get_bbox_patch()) is not None:
                     label_bbox.set_edgecolor("black")
                     label_bbox.set_linewidth(DEFAULT_SMALL_LINE_WIDTH)
+                    self.shape_artist.set_animated(False)
 
             self.clean_up_current_draggable_id()
-            self.shape_artist.remove()
             self.plotter.ax.add_patch(self.shape_artist)
 
+        super()._on_release()
         self.canvas.draw_idle()
 
     def _partial_release(self):
@@ -557,6 +564,7 @@ class _DraggableCircle(_DraggableShape):
         super().__init__(entry_id, plotter_ref)
         if not isinstance(self.shape_artist, Circle):
             return
+
         new_r = max(self.shape_artist.get_radius(), DEFAULT_MIN_CIRCLE_R)
         self.shape_artist.set_radius(new_r)
         self.plotter.shapes[self.entry_id]["r"] = new_r
@@ -611,9 +619,11 @@ class _DraggableCircle(_DraggableShape):
             dy = ydata - ydata_press
             new_cx, new_cy = self._move_circle(dx, dy)
 
-        self._circle_transform_helper(old_cx, old_cy, old_r, new_cx, new_cy)
+        self._circle_transform_helper(old_cx, old_cy, old_r, new_cx, new_cy, True)
 
-    def _circle_transform_helper(self, old_cx, old_cy, old_r, new_cx, new_cy):
+    def _circle_transform_helper(
+        self, old_cx, old_cy, old_r, new_cx, new_cy, is_blitting: bool
+    ):
         if not isinstance(self.shape_artist, Circle):
             return
         current_shape = self.plotter.shapes[self.entry_id]
@@ -625,7 +635,7 @@ class _DraggableCircle(_DraggableShape):
             self.plotter.mouse_wheel_cx = new_cx
             self.plotter.mouse_wheel_cy = new_cy
             self.plotter.mouse_wheel_radius = current_shape["r"]
-            self.plotter.mouse_wheel_indicators.move_mouse_wheel_indicators()
+            self.plotter.mouse_wheel_indicators.move_mouse_wheel_indicators(is_blitting)
 
             if (
                 self.plotter.saved_sprint_distance
@@ -774,9 +784,9 @@ class _DraggableCircle(_DraggableShape):
         old_cx, old_cy = self.shape_artist.get_center()  # type: ignore
         old_r = self.shape_artist.get_radius()
         new_cx, new_cy = self._move_circle(dx, dy)
-        self._circle_transform_helper(old_cx, old_cy, old_r, new_cx, new_cy)
+        self._circle_transform_helper(old_cx, old_cy, old_r, new_cx, new_cy, False)
         self.canvas.draw()
-        self.plotter.drawn = False
+        self.plotter.captured = False
 
 
 class _DraggableRectangle(_DraggableShape):
@@ -974,7 +984,7 @@ class _DraggableRectangle(_DraggableShape):
         self.press = x, y, xdata_press, ydata_press, xpx_press, ypx_press
         self._move_rectangle(dx, dy)
         self.canvas.draw()
-        self.plotter.drawn = False
+        self.plotter.captured = False
 
 
 class _MouseWheelDragManager:
@@ -1030,12 +1040,13 @@ class _MouseWheelDragManager:
 class MouseWheelIndicators:
     def __init__(self, plotter_ref: LayoutsPlotterWidget) -> None:
         self.mouse_wheel_indicators_map: dict[int, int] = {}
-
         self.mouse_wheel_shapes_artists: dict[int, Circle] = {}
         self.mouse_wheel_labels_artists: dict[int, Text] = {}
         self.mouse_wheel_labels_drag_managers: dict[int, _MouseWheelDragManager] = {}
         self.current_mouse_wheel_indicator: int | None = None
         self.plotter = plotter_ref
+        self.canvas = self.plotter.canvas
+        self.mouse_wheel_indicators_captured = False
 
     def _calculate_translations(self) -> dict[int, tuple[float, float]]:
         cx = self.plotter.mouse_wheel_cx
@@ -1084,19 +1095,19 @@ class MouseWheelIndicators:
 
             if not scancode:
                 msg = f"Key '{key_name}' not mapped."
-                self.plotter.update_title(msg)
+                self.plotter.send_message.emit("Key Error", msg)
                 print(msg)
                 return
 
             if scancode == MOUSE_WHEEL_SIMULATOR_CODE:
                 msg = f"Key '{key_name}' with scancode '{scancode}' cannot be bound to the indicator as it is the mouse wheel code."
-                self.plotter.update_title(msg)
+                self.plotter.send_message.emit("Key Error", msg)
                 print(msg)
                 return
 
             elif scancode == SPRINT_DISTANCE_CODE:
                 msg = f"Key '{key_name}' with scancode '{scancode}' cannot be bound to the indicator as it is the sprint code."
-                self.plotter.update_title(msg)
+                self.plotter.send_message.emit("Key Error", msg)
                 print(msg)
                 return
 
@@ -1110,7 +1121,7 @@ class MouseWheelIndicators:
         scancode_key_name = get_key_from_scancode(scancode)
         if not scancode_key_name:
             msg = f"Key '{key_name}' with scancode '{scancode}' has no equivalent key name."
-            self.plotter.update_title(msg)
+            self.plotter.send_message.emit("Key Error", msg)
             print(msg)
             return
 
@@ -1152,7 +1163,7 @@ class MouseWheelIndicators:
             if i in self.mouse_wheel_shapes_artists:
                 self.mouse_wheel_shapes_artists[i].set_visible(target_vis)
 
-    def move_mouse_wheel_indicators(self):
+    def move_mouse_wheel_indicators(self, is_blitting: bool):
         translations = self._calculate_translations()
         for i in range(4):
             if (
@@ -1166,6 +1177,12 @@ class MouseWheelIndicators:
 
             label_artist.set_position((cx, cy))
             shape_artist.set_center((cx, cy))
+
+            if is_blitting and label_artist.axes is not None:
+                label_artist.axes.draw_artist(label_artist)
+
+            if is_blitting and shape_artist.axes is not None:
+                shape_artist.axes.draw_artist(shape_artist)
 
     def highlight_mouse_wheel_indicator(self, index: int | None):
         if index is None:
@@ -1199,11 +1216,59 @@ class MouseWheelIndicators:
             shape_artist.set_edgecolor(DEFAULT_EDGE_COLOR)
             shape_artist.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
 
+    def _capture_mouse_wheel_background(self):
+        for i in range(4):
+            if (
+                i not in self.mouse_wheel_labels_artists
+                or i not in self.mouse_wheel_shapes_artists
+            ):
+                continue
+
+            label_artist = self.mouse_wheel_labels_artists[i]
+            shape_artist = self.mouse_wheel_shapes_artists[i]
+
+            if (label_bbox := label_artist.get_bbox_patch()) is not None:
+                label_bbox.set_edgecolor(ACTIVE_EDGE_COLOR)
+                label_bbox.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
+            label_artist.set_animated(True)
+
+            shape_artist.set_edgecolor(ACTIVE_EDGE_COLOR)
+            shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
+            shape_artist.set_animated(True)
+
+        self.canvas.draw()
+        self.plotter.bg_cache = self.canvas.copy_from_bbox(self.plotter.ax.bbox)
+        self.mouse_wheel_indicators_captured = True
+
+    def _on_release_mouse_wheel(self):
+        if self.mouse_wheel_indicators_captured:
+            for i in range(4):
+                if (
+                    i not in self.mouse_wheel_labels_artists
+                    or i not in self.mouse_wheel_shapes_artists
+                ):
+                    continue
+
+                label_artist = self.mouse_wheel_labels_artists[i]
+                shape_artist = self.mouse_wheel_shapes_artists[i]
+
+                if (label_bbox := label_artist.get_bbox_patch()) is not None:
+                    label_bbox.set_edgecolor("black")
+                    label_bbox.set_linewidth(DEFAULT_SMALL_LINE_WIDTH)
+                label_artist.set_animated(False)
+
+                shape_artist.set_edgecolor(DEFAULT_EDGE_COLOR)
+                shape_artist.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
+                shape_artist.set_animated(False)
+
+            self.mouse_wheel_indicators_captured = False
+
 
 class LayoutsPlotterWidget(QWidget):
     layout_saved = Signal(str, int)
     zone_selected = Signal(int)
     status_updated = Signal(str)
+    send_message = Signal(str, str)
 
     def __init__(self, parent: QWidget | None = None, standalone: bool = False):
         super().__init__(parent)
@@ -1309,10 +1374,11 @@ class LayoutsPlotterWidget(QWidget):
         self.current_draggable_id = None
         self.current_draggable: _DraggableLabel | _DraggableShape | None = None
         self.draggables_ids = []
-        self.drawn = False
+        self.captured = False
         self.current_move_distance = 0.0
         self.iter_count = 0
         self.fire_on_motion = False
+        self.mouse_wheel_indicators.mouse_wheel_indicators_captured = False
 
     def _init_crosshairs(self):
         self.crosshair_h_bg = self.ax.axhline(
@@ -1589,7 +1655,6 @@ class LayoutsPlotterWidget(QWidget):
         return old_width, old_height
 
     def update_title(self, text: str, idle_override: bool = False):
-        # self.ax.set_title(text)
         self.status_updated.emit(text)
         self.cursor_manager.set_state_cursor(self.state)
 
@@ -1814,7 +1879,7 @@ class LayoutsPlotterWidget(QWidget):
 
         if (
             self.state == IDLE
-            and not self.drawn
+            and not self.captured
             and self.current_draggable_id is not None
         ):
             self._partial_release_all()
@@ -1830,7 +1895,8 @@ class LayoutsPlotterWidget(QWidget):
 
         # Invalidate stale blit cache from previous viewport dimensions
         self.bg_cache = None
-        self.drawn = False
+        self.captured = False
+        self.mouse_wheel_indicators.mouse_wheel_indicators_captured = False
         self._hide_crosshairs()
 
         # Rescale all zone and mouse wheel indicator labels to match new viewport size
@@ -1884,7 +1950,7 @@ class LayoutsPlotterWidget(QWidget):
 
         if (
             self.state == IDLE
-            and not self.drawn
+            and not self.captured
             and event.button is None
             and event.inaxes == self.ax
         ):
@@ -1961,7 +2027,7 @@ class LayoutsPlotterWidget(QWidget):
         (dot,) = self.ax.plot(event.xdata, event.ydata, "ro")
         self.point_artists.append(dot)
         self.fig.canvas.draw()
-        # self.bg_cache = None
+        self.bg_cache = None
 
         if (rem := self.artists_points - len(self.points)) > 0:
             self.update_title(
@@ -2100,6 +2166,7 @@ class LayoutsPlotterWidget(QWidget):
     def _delete_entry(self, uid):
         if uid not in self.shapes:
             return
+
         entry_scancode = int(self.shapes[uid]["scancode"])
         entry_key_name = str(self.shapes[uid]["key_name"])
 
@@ -2145,14 +2212,14 @@ class LayoutsPlotterWidget(QWidget):
         scancode = get_scancode_from_key(key_name)
         if not scancode:
             msg = f"Key '{key_name}' not mapped."
-            self.update_title(msg)
+            self.send_message.emit("Key Error", msg)
             print(msg)
             return
 
         scancode_key_name = get_key_from_scancode(scancode)
         if not scancode_key_name:
             msg = f"Key '{key_name}' with scancode '{scancode}' has no equivalent key name."
-            self.update_title(msg)
+            self.send_message.emit("Key Error", msg)
             print(msg)
             return
 
@@ -2237,7 +2304,7 @@ class LayoutsPlotterWidget(QWidget):
             self.shapes_drag_managers[entry_id] = _DraggableCircle(entry_id, self)
 
             if scancode == MOUSE_WHEEL_SIMULATOR_CODE:
-                self.mouse_wheel_indicators.move_mouse_wheel_indicators()
+                self.mouse_wheel_indicators.move_mouse_wheel_indicators(False)
                 self.mouse_wheel_indicators.set_indicators_visible(True)
 
         elif self.mode == RECTANGLE and bb is not None:
@@ -2503,7 +2570,7 @@ class LayoutsPlotterWidget(QWidget):
         if scancode == MOUSE_WHEEL_SIMULATOR_CODE:
             if self.mode == RECTANGLE or r is None:
                 msg = "Mouse wheel cannot be a rectangle."
-                self.update_title(msg)
+                self.send_message.emit("Mouse Wheel Error", msg)
                 print(msg)
                 return False, uid
 
@@ -2528,13 +2595,13 @@ class LayoutsPlotterWidget(QWidget):
         elif scancode == SPRINT_DISTANCE_CODE:
             if self.mode == RECTANGLE:
                 msg = "Sprint cannot be a rectangle."
-                self.update_title(msg)
+                self.send_message.emit("Sprint Error", msg)
                 print(msg)
                 return False, uid
 
             if not self.saved_mouse_wheel:
                 msg = "No mouse wheel found, create one first before attempting to create sprint."
-                self.update_title(msg)
+                self.send_message.emit("Sprint Error", msg)
                 print(msg)
                 return False, uid
 
@@ -2557,7 +2624,7 @@ class LayoutsPlotterWidget(QWidget):
 
             if actual_dist <= self.mouse_wheel_radius:
                 msg = "Sprint is too close to mouse wheel."
-                self.update_title(msg)
+                self.send_message.emit("Sprint Error", msg)
                 print(msg)
                 return False, uid
 

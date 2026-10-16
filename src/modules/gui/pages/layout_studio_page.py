@@ -499,6 +499,7 @@ class LayoutStudioPage(QWidget):
         self.plotter_widget.layout_saved.connect(self._on_layout_saved)
         self.plotter_widget.zone_selected.connect(self._on_canvas_zone_selected)
         self.plotter_widget.status_updated.connect(self.canvas_status_label.setText)
+        self.plotter_widget.send_message.connect(self._on_plotter_message_recieved)
 
         # Inspector controls
         self.top_bezel_spin.valueChanged.connect(
@@ -1231,6 +1232,9 @@ class LayoutStudioPage(QWidget):
             QMessageBox.information(
                 self, "Success", f"Reset {count} zones to default AppSettings."
             )
+    
+    def _on_plotter_message_recieved(self, title: str, text: str):
+        QMessageBox.information(self, title, text)
 
     def _on_canvas_zone_selected(self, uid: int) -> None:
         if uid == -1 or uid not in self.plotter_widget.shapes:
