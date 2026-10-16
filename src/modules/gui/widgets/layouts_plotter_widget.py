@@ -2195,10 +2195,10 @@ class LayoutsPlotterWidget(QWidget):
             return
 
         label = (
-            "MOUSE_WHEEL"
+            "MOUSE\nWHEEL"
             if scancode == MOUSE_WHEEL_SIMULATOR_CODE
             else (
-                "SPRINT_DISTANCE"
+                "SPRINT\nDISTANCE"
                 if scancode == SPRINT_DISTANCE_CODE
                 else key_name.upper()
             )
