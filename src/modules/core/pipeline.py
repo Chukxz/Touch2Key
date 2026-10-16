@@ -300,14 +300,13 @@ class DeltaTransform(Transformation[Vector]):
 @dataclass(slots=True)
 class JoystickTransform(Transformation[frozenset[int]]):
     dead_zone: float
-    walk_radius: float
-    sprint_distance: float
-    hysteresis_rad: float = math.radians(5.0)
-    up: int = 0x11  # "w"
-    down: int = 0x1F  # "s"
-    left: int = 0x1E  # "a"
-    right: int = 0x20  # "d"
-    sprint: int | None = 0x2A  # "lshift"
+    radius: float
+    hysteresis_rad: float
+    up: int
+    down: int
+    left: int
+    right: int
+    sprint: int | None
 
     _last_sector: int | None = field(init=False, default=None)
     _PI_8: float = field(init=False, default=math.pi / 8.0)
@@ -320,7 +319,7 @@ class JoystickTransform(Transformation[frozenset[int]]):
             self._sprint_set = frozenset({self.sprint})
         else:
             self._sprint_set = frozenset({})
-            
+
         self._sector_map = (
             frozenset({self.right}),
             frozenset({self.down, self.right}),
@@ -358,8 +357,10 @@ class JoystickTransform(Transformation[frozenset[int]]):
         self._last_sector = new_sector
         base_keys = self._sector_map[new_sector]
 
-        if self.sprint is not None and self.sprint_distance > 0.0 and dist_sq > (
-            self.sprint_distance * self.sprint_distance
+        if (
+            self.sprint is not None
+            and self.radius > 0.0
+            and dist_sq > (self.radius * self.radius)
         ):
             return base_keys | self._sprint_set
 

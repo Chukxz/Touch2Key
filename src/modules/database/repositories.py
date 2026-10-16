@@ -642,34 +642,36 @@ class LayoutZonesRepository:
             y2=_y2,
             pipeline_json=zone.CONFIG_HELPER.get_pipeline_json_from_config(),
         ).id
-    
-    def get_mouse_wheel_directional_scancodes(self, zones: Optional[list[LayoutZone]]):
+
+    def get_mouse_wheel_directional_scancodes(self, layout: Optional[Layout]):
         W = 0x11
         A = 0x1E
         S = 0x1F
         D = 0x20
-        
-        if zones is None:
-            return int(W), int(A), int(S), int(D)
-        
+
+        def_ret = int(W), int(A), int(S), int(D)
+
+        if layout is None:
+            return def_ret
+
+        current_zones = self.list_for_layout(layout.id, False)
         mouse_wheel_zone: Optional[LayoutZone] = None
-        
-        for zone in zones:
+
+        for zone in current_zones:
             if zone.scancode == MOUSE_WHEEL_SIMULATOR_CODE:
                 mouse_wheel_zone = zone
-                break      
-        
+                break
+
         if mouse_wheel_zone is None:
-            return int(W), int(A), int(S), int(D)
-        
+            return def_ret
+
         else:
             mouse_wheel_zone.set_parsed_config_from_json()
             zone_json = mouse_wheel_zone.CONFIG_HELPER.pipeline_config
-            
+
             up = int(zone_json.get("up", W))
             left = int(zone_json.get("left", A))
             down = int(zone_json.get("down", S))
             right = int(zone_json.get("right", D))
 
             return up, left, down, right
-            

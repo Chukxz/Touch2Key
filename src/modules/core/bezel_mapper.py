@@ -9,8 +9,6 @@ from modules.core.pipeline_factory import SystemToggle
 from modules.database import store
 from modules.utils import (
     BEZEL,
-    BOTTOM_BEZEL_ID,
-    TOP_BEZEL_ID,
     scale_coord,
 )
 

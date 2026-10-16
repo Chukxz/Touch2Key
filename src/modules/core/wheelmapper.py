@@ -106,18 +106,22 @@ class WheelMapper:
             scale_coord(w, wheel_zone_values.get("cx")),
             scale_coord(h, wheel_zone_values.get("cy")),
         )
+        
+        up, left, down, right = store.zones.get_mouse_wheel_directional_scancodes(layout)
 
         if settings.anchored_joystick:
             pipeline = AnchoredJoystick(
                 default_anchor=center,
                 region=half_screen_region,
                 dead_zone=deadzone * inner_r,
-                walk_radius=inner_r,
-                sprint_distance=outer_r,
-                radius=outer_r,
-                snap_radius=inner_r,
-                hysteresis_deg=hysteresis,
+                up=up,
+                left=left,
+                down=down,
+                right=right,
+                inner_radius=inner_r,
+                outer_radius=outer_r,
                 sprint=sprint,
+                hysteresis_deg=hysteresis,
                 priority=priority,
                 creation_id=z_id,
             )
@@ -131,11 +135,14 @@ class WheelMapper:
             pipeline = FloatingJoystick(
                 region=half_screen_region,
                 dead_zone=deadzone * inner_r,
-                walk_radius=inner_r,
-                sprint_distance=outer_r,
-                radius=outer_r,
-                hysteresis_deg=hysteresis,
+                up=up,
+                left=left,
+                down=down,
+                right=right,
+                inner_radius=inner_r,
+                outer_radius=outer_r,
                 sprint=sprint,
+                hysteresis_deg=hysteresis,
                 priority=priority,
                 creation_id=z_id,
             )
@@ -144,12 +151,13 @@ class WheelMapper:
         else:
             pipeline = FixedJoystick(
                 center=center,
-                radius=inner_r,
                 dead_zone=deadzone * inner_r,
-                walk_radius=inner_r,
-                sprint_distance=outer_r,
-                hysteresis_deg=hysteresis,
+                up=up,
+                left=left,
+                down=down,
+                right=right,
                 sprint=sprint,
+                hysteresis_deg=hysteresis,
                 priority=priority,
                 creation_id=z_id,
             )

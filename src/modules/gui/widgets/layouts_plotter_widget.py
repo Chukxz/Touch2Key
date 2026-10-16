@@ -51,7 +51,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout
 
 if TYPE_CHECKING:
-    from modules.database import Layout, LayoutZone
+    from modules.database import Layout
 
 COLLECTING = "COLLECTING"
 WAITING_FOR_KEY = "WAITING_FOR_KEY"
@@ -264,12 +264,39 @@ class _DraggableLabel(_Draggable):
             ]
 
     def _on_press(self, event):
-        if self.plotter.is_fatal_state or self.plotter.state != IDLE:
+        if (
+            self.plotter.is_fatal_state
+            or self.plotter.state != IDLE
+            or self.label_artist.axes is None
+        ):
             return
 
         self.plotter.ignore_current_draggable_id_n += 1
         self._on_press_helper(event)
         self.plotter.fire_on_motion = True
+
+        if (label_bbox := self.label_artist.get_bbox_patch()) is not None:
+            label_bbox.set_edgecolor(ACTIVE_EDGE_COLOR)
+            label_bbox.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
+
+        self.label_artist.set_visible(False)
+        self.shape_artist.set_edgecolor(ACTIVE_EDGE_COLOR)
+        self.shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
+
+        self.canvas.draw()
+        ax = self.label_artist.axes
+        if ax.bbox.width > 0 and ax.bbox.height > 0:
+            dpi_ratio = (
+                self.canvas.device_pixel_ratio
+                if hasattr(self.canvas, "device_pixel_ratio")
+                else 1.0
+            )
+            pad = 5 * dpi_ratio
+            padded_bbox = ax.bbox.padded(pad)
+            self.drag_bg = self.canvas.copy_from_bbox(padded_bbox)
+
+        self.label_artist.set_visible(True)
+        self.plotter.drawn = True
 
     def _on_press_helper(self, event):
         self.plotter.fire_on_motion = False
@@ -310,25 +337,6 @@ class _DraggableLabel(_Draggable):
             return
 
         self.plotter.ignore_current_draggable_id_n = 1
-        if not self.plotter.drawn:
-            if (label_bbox := self.label_artist.get_bbox_patch()) is not None:
-                label_bbox.set_edgecolor(ACTIVE_EDGE_COLOR)
-                label_bbox.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
-
-            self.label_artist.set_visible(False)
-            self.shape_artist.set_edgecolor(ACTIVE_EDGE_COLOR)
-            self.shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
-
-            self.canvas.draw()
-            ax = self.label_artist.axes
-            if ax.bbox.width > 0 and ax.bbox.height > 0:
-                dpi_ratio = self.canvas.device_pixel_ratio if hasattr(self.canvas, "device_pixel_ratio") else 1.0
-                pad = 5 * dpi_ratio
-                padded_bbox = ax.bbox.padded(pad)
-                self.drag_bg = self.canvas.copy_from_bbox(padded_bbox)
-
-            self.label_artist.set_visible(True)
-            self.plotter.drawn = True
 
         _, _, xdata_press, ydata_press, xpx_press, ypx_press = self.press
         dx = event.xdata - xdata_press
@@ -339,7 +347,7 @@ class _DraggableLabel(_Draggable):
 
         if self.drag_bg is not None:
             self.canvas.restore_region(self.drag_bg)
-            
+
         self._move_label(dx, dy)
         self.label_artist.axes.draw_artist(self.label_artist)
         self.canvas.blit(self.label_artist.axes.bbox)
@@ -414,12 +422,40 @@ class _DraggableShape(_Draggable):
         raise NotImplementedError()
 
     def _on_press(self, event):
-        if self.plotter.is_fatal_state or self.plotter.state != IDLE:
+        if (
+            self.plotter.is_fatal_state
+            or self.plotter.state != IDLE
+            or self.shape_artist.axes is None
+        ):
             return
 
         self.plotter.ignore_current_draggable_id_n += 1
         self._on_press_helper(event)
         self.plotter.fire_on_motion = True
+
+        self.shape_artist.set_edgecolor(ACTIVE_EDGE_COLOR)
+        self.shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
+        self.shape_artist.set_visible(False)
+
+        if (label_bbox := self.label_artist.get_bbox_patch()) is not None:
+            label_bbox.set_edgecolor(ACTIVE_EDGE_COLOR)
+            label_bbox.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
+
+        self.canvas.draw()
+        ax = self.shape_artist.axes
+        if ax.bbox.width > 0 and ax.bbox.height > 0:
+            # Pad the bbox by 5 pixels in display coordinates to capture thick stroke outlines
+            dpi_ratio = (
+                self.canvas.device_pixel_ratio
+                if hasattr(self.canvas, "device_pixel_ratio")
+                else 1.0
+            )
+            pad = 5 * dpi_ratio
+            padded_bbox = ax.bbox.padded(pad)
+            self.drag_bg = self.canvas.copy_from_bbox(padded_bbox)
+
+        self.shape_artist.set_visible(True)
+        self.plotter.drawn = True
 
     def _on_press_helper(self, event):
         self.plotter.fire_on_motion = False
@@ -466,27 +502,6 @@ class _DraggableShape(_Draggable):
         if self.plotter.current_draggable_id != self.artist_id:
             return
         self.plotter.ignore_current_draggable_id_n = 1
-
-        if not self.plotter.drawn:
-            self.shape_artist.set_edgecolor(ACTIVE_EDGE_COLOR)
-            self.shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
-            self.shape_artist.set_visible(False)
-
-            if (label_bbox := self.label_artist.get_bbox_patch()) is not None:
-                label_bbox.set_edgecolor(ACTIVE_EDGE_COLOR)
-                label_bbox.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
-
-            self.canvas.draw()
-            ax = self.shape_artist.axes
-            if ax.bbox.width > 0 and ax.bbox.height > 0:
-                # Pad the bbox by 5 pixels in display coordinates to capture thick stroke outlines
-                dpi_ratio = self.canvas.device_pixel_ratio if hasattr(self.canvas, "device_pixel_ratio") else 1.0
-                pad = 5 * dpi_ratio
-                padded_bbox = ax.bbox.padded(pad)
-                self.drag_bg = self.canvas.copy_from_bbox(padded_bbox)
-
-            self.shape_artist.set_visible(True)
-            self.plotter.drawn = True
 
         _, _, _, _, xpx_press, ypx_press = self.press
         dx_press = event.x - xpx_press
@@ -1029,9 +1044,9 @@ class MouseWheelIndicators:
         # 0: Up (cy - r), 1: Left (cx - r), 2: Down (cy + r), 3: Right (cx + r)
         return {0: (cx, cy - r), 1: (cx - r, cy), 2: (cx, cy + r), 3: (cx + r, cy)}
 
-    def create_mouse_wheel_indicators(self, active_zones: Optional[list[LayoutZone]]):
+    def create_mouse_wheel_indicators(self):
         directional_scancodes = store.zones.get_mouse_wheel_directional_scancodes(
-            active_zones
+            self.plotter.active_layout
         )
         translations = self._calculate_translations()
         for i in range(4):
@@ -1387,11 +1402,11 @@ class LayoutsPlotterWidget(QWidget):
         self.ax.set_xlim(-0.5, img.width - 0.5)
         self.ax.set_ylim(img.height - 0.5, -0.5)
 
-        active_zones = self._load_active_layout_zones(old_width, old_height)
+        self._load_active_layout_zones(old_width, old_height)
         self._render_bezels_notch()
 
         self.mouse_wheel_indicators.delete_mouse_wheel_indicators()
-        self.mouse_wheel_indicators.create_mouse_wheel_indicators(active_zones)
+        self.mouse_wheel_indicators.create_mouse_wheel_indicators()
 
         self.update_title(f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'}")
         self.canvas.draw_idle()
@@ -1608,9 +1623,7 @@ class LayoutsPlotterWidget(QWidget):
         self.mode, self.artists_points, self.state = mode, num_points, COLLECTING
         self.update_title(f"MODE: {mode}. Click {num_points} points on the image.")
 
-    def _load_active_layout_zones(
-        self, old_width: int, old_height: int
-    ) -> Optional[list[LayoutZone]]:
+    def _load_active_layout_zones(self, old_width: int, old_height: int) -> None:
         if not self.active_layout:
             return
 
@@ -1663,7 +1676,6 @@ class LayoutsPlotterWidget(QWidget):
         self.mouse_wheel_radius = self.active_layout.mouse_wheel_radius
         self.sprint_distance = self.active_layout.sprint_distance
         self.reset_state()
-        return zones
 
     def toggle_visibility(self):
         if self.is_fatal_state:
@@ -1949,6 +1961,7 @@ class LayoutsPlotterWidget(QWidget):
         (dot,) = self.ax.plot(event.xdata, event.ydata, "ro")
         self.point_artists.append(dot)
         self.fig.canvas.draw()
+        # self.bg_cache = None
 
         if (rem := self.artists_points - len(self.points)) > 0:
             self.update_title(

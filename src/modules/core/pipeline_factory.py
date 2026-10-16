@@ -74,27 +74,25 @@ def Button(
 
 def FixedJoystick(
     center: Point,
-    radius: float,
     dead_zone: float,
-    walk_radius: float,
-    sprint_distance: float = 0.0,
+    up: int,
+    down: int,
+    left: int,
+    right: int,
+    inner_radius: float = 80.0,
+    outer_radius: float = 120.0,
+    sprint: int | None = None,
     hysteresis_deg: float = 5.0,
-    up: int = 0x11,  # "w"
-    down: int = 0x1F,  # "s"
-    left: int = 0x1E,  # "a"
-    right: int = 0x20,  # "d"
-    sprint: int | None = 0x2A,  # "lshift"
     priority: int = 0,
     creation_id: int = 0,
 ) -> Pipeline[frozenset[int]]:
     return Pipeline(
-        region=CircularRegion(center=center, radius=radius),
+        region=CircularRegion(center=center, radius=inner_radius),
         origin=FixedOrigin(position=center),
-        constraint=RadialConstraint(radius=radius),
+        constraint=RadialConstraint(radius=outer_radius),
         transformation=JoystickTransform(
             dead_zone=dead_zone,
-            walk_radius=walk_radius,
-            sprint_distance=sprint_distance,
+            radius=inner_radius,
             hysteresis_rad=math.radians(hysteresis_deg),
             up=up,
             down=down,
@@ -112,25 +110,22 @@ def FixedJoystick(
 def FloatingJoystick(
     region: Region,
     dead_zone: float,
-    walk_radius: float,
-    sprint_distance: float = 0.0,
-    radius: float = 0.0,
+    up: int,
+    down: int,
+    left: int,
+    right: int,
+    inner_radius: float = 80.0,
+    outer_radius: float = 120.0,
+    sprint: int | None = None,
     hysteresis_deg: float = 5.0,
-    up: int = 0x11,  # "w"
-    down: int = 0x1F,  # "s"
-    left: int = 0x1E,  # "a"
-    right: int = 0x20,  # "d"
-    sprint: int | None = 0x2A,  # "lshift"
     priority: int = 0,
     creation_id: int = 0,
 ) -> Pipeline[frozenset[int]]:
     effective_leash = (
-        radius
-        if radius > 0.0
+        outer_radius
+        if outer_radius > 0.0
         else (
-            sprint_distance
-            if sprint_distance > 0.0
-            else float(dp_to_px(60.0, BASELINE_DPI))
+            inner_radius if inner_radius > 0.0 else float(dp_to_px(60.0, BASELINE_DPI))
         )
     )
     return Pipeline(
@@ -139,8 +134,7 @@ def FloatingJoystick(
         constraint=LeashConstraint(leash_radius=effective_leash),
         transformation=JoystickTransform(
             dead_zone=dead_zone,
-            walk_radius=walk_radius,
-            sprint_distance=sprint_distance,
+            radius=inner_radius,
             hysteresis_rad=math.radians(hysteresis_deg),
             up=up,
             down=down,
@@ -159,36 +153,31 @@ def AnchoredJoystick(
     default_anchor: Point,
     region: Region,
     dead_zone: float,
-    walk_radius: float,
-    sprint_distance: float = 0.0,
-    radius: float = 0.0,
-    snap_radius: float = 80.0,
+    up: int,
+    down: int,
+    left: int,
+    right: int,
+    inner_radius: float = 80.0,
+    outer_radius: float = 120.0,
+    sprint: int | None = None,
     hysteresis_deg: float = 5.0,
-    up: int = 0x11,  # "w"
-    down: int = 0x1F,  # "s"
-    left: int = 0x1E,  # "a"
-    right: int = 0x20,  # "d"
-    sprint: int | None = 0x2A,  # "lshift"
     priority: int = 0,
     creation_id: int = 0,
 ) -> Pipeline[frozenset[int]]:
     effective_leash = (
-        radius
-        if radius > 0.0
+        outer_radius
+        if outer_radius > 0.0
         else (
-            sprint_distance
-            if sprint_distance > 0.0
-            else float(dp_to_px(60.0, BASELINE_DPI))
+            inner_radius if inner_radius > 0.0 else float(dp_to_px(60.0, BASELINE_DPI))
         )
     )
     return Pipeline(
         region=region,
-        origin=AnchoredOrigin(default_anchor=default_anchor, snap_radius=snap_radius),
+        origin=AnchoredOrigin(default_anchor=default_anchor, snap_radius=inner_radius),
         constraint=LeashConstraint(leash_radius=effective_leash),
         transformation=JoystickTransform(
             dead_zone=dead_zone,
-            walk_radius=walk_radius,
-            sprint_distance=sprint_distance,
+            radius=inner_radius,
             hysteresis_rad=math.radians(hysteresis_deg),
             up=up,
             down=down,
@@ -252,10 +241,9 @@ def create_pipeline_from_zone(
     screen_width: float,
     screen_height: float,
     center: Point | None = None,
-    snap_radius: float = 80.0,
-    radius: float | None = None,
-    walk_radius: float = 80.0,
-    sprint_distance: float = 120.0,
+    inner_radius: float = 80.0,
+    outer_radius: float = 120.0,
+    sprint: int | None = None,
     **fields: Any,
 ) -> Pipeline[Any] | None:
     """Builds a typed 5-stage Pipeline instance from database zone metadata."""
@@ -296,7 +284,7 @@ def create_pipeline_from_zone(
         return None
 
     resolved_center = center if center is not None else detected_center
-    resolved_radius = radius if radius is not None else detected_radius
+    resolved_radius = outer_radius if outer_radius is not None else detected_radius
 
     # --- Stage 2: Origin Selection ---
     orig_idx, _ = zone.CONFIG_HELPER.get_origin_config()
@@ -306,7 +294,9 @@ def create_pipeline_from_zone(
     elif orig_idx == 1:  # DYNAMIC
         origin = DynamicOrigin()
     elif orig_idx == 2:  # ANCHORED
-        origin = AnchoredOrigin(default_anchor=resolved_center, snap_radius=snap_radius)
+        origin = AnchoredOrigin(
+            default_anchor=resolved_center, snap_radius=inner_radius
+        )
     else:
         return None
 
@@ -327,6 +317,12 @@ def create_pipeline_from_zone(
         zone.CONFIG_HELPER.get_transform_config()
     )
 
+    cfg = zone.CONFIG_HELPER.pipeline_config
+    W = 0x11
+    A = 0x1E
+    S = 0x1F
+    D = 0x20
+
     if trans_idx == 0:  # IDENTITY
         transformation = IdentityTransform()
     elif trans_idx == 1:  # DELTA
@@ -334,9 +330,13 @@ def create_pipeline_from_zone(
     elif trans_idx == 2:  # JOYSTICK
         transformation = JoystickTransform(
             dead_zone=dz,
-            walk_radius=walk_radius,
-            sprint_distance=sprint_distance,
+            radius=inner_radius,
             hysteresis_rad=math.radians(hys_deg),
+            up=cfg.get("up", W),
+            left=cfg.get("left", A),
+            down=cfg.get("down", S),
+            right=cfg.get("right", D),
+            sprint=sprint,
         )
     else:
         return None
