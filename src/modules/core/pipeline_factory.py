@@ -92,7 +92,7 @@ def FixedJoystick(
         constraint=RadialConstraint(radius=outer_radius),
         transformation=JoystickTransform(
             dead_zone=dead_zone,
-            radius=inner_radius,
+            radius=outer_radius,
             hysteresis_rad=math.radians(hysteresis_deg),
             up=up,
             down=down,
@@ -134,7 +134,7 @@ def FloatingJoystick(
         constraint=LeashConstraint(leash_radius=effective_leash),
         transformation=JoystickTransform(
             dead_zone=dead_zone,
-            radius=inner_radius,
+            radius=outer_radius,
             hysteresis_rad=math.radians(hysteresis_deg),
             up=up,
             down=down,
@@ -177,7 +177,7 @@ def AnchoredJoystick(
         constraint=LeashConstraint(leash_radius=effective_leash),
         transformation=JoystickTransform(
             dead_zone=dead_zone,
-            radius=inner_radius,
+            radius=outer_radius,
             hysteresis_rad=math.radians(hysteresis_deg),
             up=up,
             down=down,
@@ -330,7 +330,7 @@ def create_pipeline_from_zone(
     elif trans_idx == 2:  # JOYSTICK
         transformation = JoystickTransform(
             dead_zone=dz,
-            radius=inner_radius,
+            radius=resolved_radius,
             hysteresis_rad=math.radians(hys_deg),
             up=cfg.get("up", W),
             left=cfg.get("left", A),
