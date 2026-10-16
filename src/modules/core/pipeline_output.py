@@ -74,7 +74,7 @@ class BridgeOutputSink(OutputSink):
             self.bridge.button5_up()
 
     def mouse_move(self, dx: float, dy: float) -> None:
-        """Accumulates fractional deltas from ANY pipeline (MouseMapper, Pointer buttons, etc.)."""
+        """Accumulates fractional deltas from ANY pipeline (WheelMapper, Pointer buttons, etc.)."""
         with self._lock:
             self._acc_x += dx
             self._acc_y += dy
