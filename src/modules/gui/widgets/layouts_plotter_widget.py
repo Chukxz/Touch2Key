@@ -320,11 +320,13 @@ class _DraggableLabel(_Draggable):
             self.shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
 
             self.canvas.draw()
-            if (
-                self.label_artist.axes.bbox.width > 0
-                and self.label_artist.axes.bbox.height > 0
-            ):
-                self.drag_bg = self.canvas.copy_from_bbox(self.label_artist.axes.bbox)
+            ax = self.label_artist.axes
+            if ax.bbox.width > 0 and ax.bbox.height > 0:
+                dpi_ratio = self.canvas.device_pixel_ratio if hasattr(self.canvas, "device_pixel_ratio") else 1.0
+                pad = 5 * dpi_ratio
+                padded_bbox = ax.bbox.padded(pad)
+                self.drag_bg = self.canvas.copy_from_bbox(padded_bbox)
+
             self.label_artist.set_visible(True)
             self.plotter.drawn = True
 
@@ -475,11 +477,14 @@ class _DraggableShape(_Draggable):
                 label_bbox.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
 
             self.canvas.draw()
-            if (
-                self.shape_artist.axes.bbox.width > 0
-                and self.shape_artist.axes.bbox.height > 0
-            ):
-                self.drag_bg = self.canvas.copy_from_bbox(self.shape_artist.axes.bbox)
+            ax = self.shape_artist.axes
+            if ax.bbox.width > 0 and ax.bbox.height > 0:
+                # Pad the bbox by 5 pixels in display coordinates to capture thick stroke outlines
+                dpi_ratio = self.canvas.device_pixel_ratio if hasattr(self.canvas, "device_pixel_ratio") else 1.0
+                pad = 5 * dpi_ratio
+                padded_bbox = ax.bbox.padded(pad)
+                self.drag_bg = self.canvas.copy_from_bbox(padded_bbox)
+
             self.shape_artist.set_visible(True)
             self.plotter.drawn = True
 
