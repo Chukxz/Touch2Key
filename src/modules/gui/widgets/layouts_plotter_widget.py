@@ -1695,8 +1695,9 @@ class LayoutsPlotterWidget(QWidget):
         zones = store.zones.list_for_layout(self.active_layout.id)
         self.reset_state()
 
-        scale_x = old_width / self.active_layout.width
-        scale_y = old_height / self.active_layout.height
+        scale_x = (self.img_width / old_width) if old_width > 0 else 1.0
+        scale_y = (self.img_height / old_height) if old_height > 0 else 1.0
+
 
         for zone in zones:
             if zone.zone_type == BEZEL:
@@ -2181,6 +2182,7 @@ class LayoutsPlotterWidget(QWidget):
             self.mouse_wheel_radius = 0.0
             self.mouse_wheel_cx = 0
             self.mouse_wheel_cy = 0
+            self.mouse_wheel_indicators.set_indicators_visible(False)
 
         elif entry_scancode == SPRINT_DISTANCE_CODE:
             self.saved_sprint_distance = False
