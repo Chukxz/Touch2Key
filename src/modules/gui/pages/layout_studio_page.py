@@ -132,6 +132,7 @@ class LayoutStudioPage(QWidget):
         standalone=False,
     ):
         super().__init__(parent)
+        self.has_loaded_before = False
         self.dispatcher = dispatcher
         self.standalone = standalone
 
@@ -455,8 +456,10 @@ class LayoutStudioPage(QWidget):
 
     def on_page_shown(self) -> None:
         self.load_profiles()
-        self.plotter_widget.reload_active_layout()
+        if not self.has_loaded_before:
+            self.plotter_widget.reload_active_layout()
         self._load_bezel_thicknesses_to_ui()
+        self.has_loaded_before = True
 
     def _wire_signals(self) -> None:
         # Search shortcut & key navigation
@@ -757,6 +760,7 @@ class LayoutStudioPage(QWidget):
             self.plotter_widget.reload_active_layout()
             self._load_bezel_thicknesses_to_ui()
             self._notify_engine_reload()
+            
             logger.info("Activated profile ID %s", layout_id)
         except Exception as exc:
             logger.exception("Failed to set active profile ID %s", layout_id)
@@ -789,6 +793,7 @@ class LayoutStudioPage(QWidget):
             self.plotter_widget.reload_active_layout()
             self._load_bezel_thicknesses_to_ui()
             self._notify_engine_reload()
+            
             logger.info("Created new profile '%s' (ID: %s)", name, new_layout.id)
         except Exception as exc:
             logger.exception("Failed to create new profile '%s'", name)
@@ -824,6 +829,7 @@ class LayoutStudioPage(QWidget):
             store.layouts.update(layout_id, name=target_name)
             self.load_profiles()
             self._notify_engine_reload()
+            
             logger.info("Renamed profile ID %s to '%s'", layout_id, target_name)
         except Exception as exc:
             logger.exception("Failed to rename profile ID %s", layout_id)
@@ -887,7 +893,9 @@ class LayoutStudioPage(QWidget):
                 active = store.get_active_layout()
                 if active and active.id == layout_id:
                     self.plotter_widget.reload_active_layout()
+                    self._load_bezel_thicknesses_to_ui()
                     self._notify_engine_reload()
+                    
                 logger.info("Cleared all zones for profile ID %s", layout_id)
             except Exception as exc:
                 logger.exception("Failed to clear zones for profile ID %s", layout_id)
@@ -919,6 +927,7 @@ class LayoutStudioPage(QWidget):
             if is_active:
                 store.settings.update(active_layout_id=None)
                 self.plotter_widget.reload_active_layout()
+                self._load_bezel_thicknesses_to_ui()
                 self._notify_engine_reload()
 
             self.load_profiles()
@@ -945,7 +954,9 @@ class LayoutStudioPage(QWidget):
             if import_any(file_path):
                 self.load_profiles()
                 self.plotter_widget.reload_active_layout()
+                self._load_bezel_thicknesses_to_ui()
                 self._notify_engine_reload()
+                
                 logger.info("Imported configuration from '%s'", file_path.name)
                 QMessageBox.information(
                     self, "Success", f"Imported '{file_path.stem}' successfully."
@@ -1110,6 +1121,7 @@ class LayoutStudioPage(QWidget):
 
             self.load_profiles()
             self.plotter_widget.reload_active_layout(img, image_params)
+            self._load_bezel_thicknesses_to_ui()
             self._notify_engine_reload()
 
             logger.info(
@@ -1140,6 +1152,7 @@ class LayoutStudioPage(QWidget):
 
             self.load_profiles()
             self.plotter_widget.reload_active_layout(img, image_params)
+            self._load_bezel_thicknesses_to_ui()
             self._notify_engine_reload()
 
             logger.info(
@@ -1212,12 +1225,23 @@ class LayoutStudioPage(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             count = reset_layout_zones_to_app_settings(active.id)
             self.plotter_widget.reload_active_layout()
+            self._load_bezel_thicknesses_to_ui()
             self._notify_engine_reload()
+            
             QMessageBox.information(
                 self, "Success", f"Reset {count} zones to default AppSettings."
             )
 
-    def _on_inspect(self, uid: int) -> None:
+    def _on_canvas_zone_selected(self, uid: int) -> None:
+        if uid == -1 or uid not in self.plotter_widget.shapes:
+            self.inspector_stack.setCurrentIndex(0)
+            self._current_inspected_uid = None
+            self._load_bezel_thicknesses_to_ui()
+            return
+
+        self._current_inspected_uid = uid
+        self.inspector_stack.setCurrentIndex(1)
+
         shape_data = self.plotter_widget.shapes[uid]
         shape_scancode = int(shape_data["scancode"])
         is_pointer = bool(shape_data.get("pointer", False))
@@ -1256,12 +1280,9 @@ class LayoutStudioPage(QWidget):
         self.insp_hysteresis.setValue(hys)
         self.insp_hysteresis.setEnabled(shape_scancode == MOUSE_WHEEL_SIMULATOR_CODE)
 
-        active = store.get_active_layout()
-        r = active.mouse_wheel_radius if active else 50.0
-        self.insp_deadzone.setValue(dz / r if r > 0 else 0)
+        self.insp_deadzone.setValue(dz)
         self.insp_deadzone.setEnabled(shape_scancode == MOUSE_WHEEL_SIMULATOR_CODE)
 
-        _, sem_mode, ptr = p_cfg.get_semantic_config()
         self.insp_pointer.setEnabled(
             not any(
                 [
@@ -1283,20 +1304,25 @@ class LayoutStudioPage(QWidget):
         ]:
             w.blockSignals(False)
 
-    def _on_canvas_zone_selected(self, uid: int) -> None:
-        if uid == -1 or uid not in self.plotter_widget.shapes:
-            self.inspector_stack.setCurrentIndex(0)
-            self._current_inspected_uid = None
-            self._load_bezel_thicknesses_to_ui()
-            return
-
-        self._current_inspected_uid = uid
-        self.inspector_stack.setCurrentIndex(1)
-
-        self._on_inspect(uid)
-
     def _on_pointer_toggled(self, checked: bool) -> None:
         self._on_inspector_value_changed()
+
+        if self._current_inspected_uid is not None:
+            shape_data = self.plotter_widget.shapes[self._current_inspected_uid]
+            shape_scancode = int(shape_data["scancode"])
+            is_pointer = bool(shape_data.get("pointer", False))
+
+            self.insp_sens_x.blockSignals(True)
+            self.insp_sens_x.setEnabled(
+                any([is_pointer, shape_scancode == MOUSE_WHEEL_SIMULATOR_CODE])
+            )
+            self.insp_sens_x.blockSignals(False)
+
+            self.insp_sens_y.blockSignals(True)
+            self.insp_sens_y.setEnabled(
+                any([is_pointer, shape_scancode == MOUSE_WHEEL_SIMULATOR_CODE])
+            )
+            self.insp_sens_y.blockSignals(False)
 
         if self._current_inspected_uid is not None:
             self.plotter_widget.on_pointer_marked(self._current_inspected_uid)
@@ -1324,13 +1350,11 @@ class LayoutStudioPage(QWidget):
         p_cfg.set_region_config(r_idx, b_dp, prio)
 
         t_idx, t_mode, _, _, _, _ = p_cfg.get_transform_config()
-        active = store.get_active_layout()
-        r = active.mouse_wheel_radius if active else 50.0
         p_cfg.set_transform_config(
             t_idx,
             self.insp_sens_x.value(),
             self.insp_sens_y.value(),
-            self.insp_deadzone.value() * r,
+            self.insp_deadzone.value(),
             self.insp_hysteresis.value(),
         )
 
@@ -1342,17 +1366,34 @@ class LayoutStudioPage(QWidget):
             f"INSPECTING: {shape['key_name']} (Prio: {prio})", True
         )
 
-        self._on_inspect(uid)
-
     def _on_reset_single_zone(self) -> None:
         if self._current_inspected_uid is None:
             return
         settings = store.settings.get()
+        for w in [
+            self.insp_ignore_app_settings,
+            self.insp_sens_x,
+            self.insp_sens_y,
+            self.insp_deadzone,
+            self.insp_hysteresis,
+        ]:
+            w.blockSignals(True)
+
         self.insp_ignore_app_settings.setChecked(False)
         self.insp_sens_x.setValue(settings.sensitivity_x)
         self.insp_sens_y.setValue(settings.sensitivity_y)
         self.insp_deadzone.setValue(settings.deadzone)
         self.insp_hysteresis.setValue(settings.hysteresis)
+
+        for w in [
+            self.insp_ignore_app_settings,
+            self.insp_sens_x,
+            self.insp_sens_y,
+            self.insp_deadzone,
+            self.insp_hysteresis,
+        ]:
+            w.blockSignals(False)
+
         self._on_inspector_value_changed()
 
     def save_state(self) -> bool:

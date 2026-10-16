@@ -377,7 +377,6 @@ class MainWindow(QMainWindow):
             self.nav_buttons[title].setChecked(True)
 
         if page_widget is not None:
-            # Handles both on_page_shown and on_page_show conventions
             show_page = getattr(page_widget, "on_page_shown", None)
             if show_page is not None:
                 show_page()
