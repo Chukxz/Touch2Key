@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import sqlite3
 from dataclasses import dataclass, field, fields as dataclass_fields
 from typing import Any, Optional, TYPE_CHECKING
 
@@ -32,6 +34,24 @@ if TYPE_CHECKING:
     from . import AppSettings, Layout, LayoutZone
 
 logger = logging.getLogger("modules.database.repository")
+
+
+class DuplicateNameError(ValueError):
+    """Raised when a layout name collides with the UNIQUE constraint on layouts.name."""
+
+
+def _translate_integrity_error(exc: sqlite3.IntegrityError) -> Exception:
+    msg = str(exc)
+    if "UNIQUE" in msg and "layouts.name" in msg:
+        return DuplicateNameError("A layout with that name already exists.")
+    return exc
+
+
+def _close(a: Optional[float], b: Optional[float], tol: float = 1e-6) -> bool:
+    if a is None or b is None:
+        return a is None and b is None
+    return math.isclose(float(a), float(b), abs_tol=tol)
+
 
 # NATIVE Repository DEFAULT TEMPLATE
 _DEFAULT_BEZEL_PIPELINE_JSON = json.dumps(
@@ -278,7 +298,15 @@ class LayoutsRepository:
         row = conn.execute("SELECT * FROM layouts WHERE name = ?;", (name,)).fetchone()
         return Layout.from_row(row) if row is not None else None
 
-    def create(self, auto_seed: bool = True, **fields: Any) -> Layout:
+    def name_exists(self, name: str, exclude_id: int | None = None) -> bool:
+        """True if another layout (not `exclude_id`) already uses this name."""
+        found = self.get_by_name(name)
+        return found is not None and found.id != exclude_id
+
+    # ------------------------------------------------------------------
+    # Low-level helpers that run inside a caller-owned transaction
+    # ------------------------------------------------------------------
+    def _validate_create_fields(self, fields: dict[str, Any]) -> None:
         unknown = set(fields) - self.ALLOWED_FIELDS
         if unknown:
             raise InvalidFieldError(f"Unknown layouts field(s): {sorted(unknown)}")
@@ -286,18 +314,44 @@ class LayoutsRepository:
         if missing:
             raise ValueError(f"Missing required layout field(s): {sorted(missing)}")
 
+    def _insert_layout(self, conn: sqlite3.Connection, fields: dict[str, Any]) -> int:
+        self._validate_create_fields(fields)
         fields.setdefault("mouse_wheel_radius", 50.0)
         fields.setdefault("sprint_distance", 10.0)
         fields.setdefault("image_path", None)
         columns = ", ".join(fields)
         placeholders = ", ".join(f":{key}" for key in fields)
+        cursor = conn.execute(
+            f"INSERT INTO layouts ({columns}) VALUES ({placeholders});", fields
+        )
+        return int(cursor.lastrowid)  # type: ignore[arg-type]
 
+    def _update_layout(
+        self, conn: sqlite3.Connection, layout_id: int, fields: dict[str, Any]
+    ) -> None:
+        unknown = set(fields) - self.ALLOWED_FIELDS
+        if unknown:
+            raise InvalidFieldError(f"Unknown layouts field(s): {sorted(unknown)}")
+        params = dict(fields)
+        params["id"] = layout_id
+        assignments = [f"{key} = :{key}" for key in fields]
+        assignments.append("updated_at = datetime('now')")
+        cursor = conn.execute(
+            f"UPDATE layouts SET {', '.join(assignments)} WHERE id = :id;", params
+        )
+        if cursor.rowcount == 0:
+            raise KeyError(f"No layout with id={layout_id}.")
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+    def create(self, auto_seed: bool = True, **fields: Any) -> Layout:
         conn = connection_manager.get_connection()
-        with conn:
-            cursor = conn.execute(
-                f"INSERT INTO layouts ({columns}) VALUES ({placeholders});", fields
-            )
-            new_id = cursor.lastrowid
+        try:
+            with conn:
+                new_id = self._insert_layout(conn, fields)
+        except sqlite3.IntegrityError as exc:
+            raise _translate_integrity_error(exc) from exc
 
         layout = self.get(new_id)
         if layout is None:
@@ -318,20 +372,122 @@ class LayoutsRepository:
                 raise KeyError(f"No layout with id={layout_id}")
             return existing
 
-        set_clause = ", ".join(f"{key} = :{key}" for key in fields)
-        params = dict(fields)
-        params["id"] = layout_id
+        conn = connection_manager.get_connection()
+        try:
+            with conn:
+                self._update_layout(conn, layout_id, fields)
+        except sqlite3.IntegrityError as exc:
+            raise _translate_integrity_error(exc) from exc
 
+        layout = self.get(layout_id)
+        if layout is None:
+            raise KeyError(f"No layout with id={layout_id}.")
+        return layout
+
+    def apply_image_params(
+        self,
+        layout_id: int,
+        width: int,
+        height: int,
+        dpi: int,
+        image_path: Optional[str],
+    ) -> Layout:
+        """Atomically stores new canvas params. If the resolution changed, rescales
+        every non-bezel zone plus mouse_wheel_radius/sprint_distance in the same
+        transaction. Writes nothing (and leaves updated_at alone) if nothing changed."""
         conn = connection_manager.get_connection()
         with conn:
-            conn.execute(
-                f"UPDATE layouts SET {set_clause}, updated_at = datetime('now') WHERE id = :id;",
-                params,
+            row = conn.execute(
+                "SELECT * FROM layouts WHERE id = ?;", (layout_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"No layout with id={layout_id}.")
+
+            old_w, old_h = int(row["width"]), int(row["height"])
+            unchanged = (
+                old_w == width
+                and old_h == height
+                and int(row["dpi"]) == dpi
+                and row["image_path"] == image_path
+            )
+            if unchanged:
+                return Layout.from_row(row)
+
+            radius = float(row["mouse_wheel_radius"])
+            sprint = float(row["sprint_distance"])
+
+            if old_w > 0 and old_h > 0 and (old_w != width or old_h != height):
+                sx = width / old_w
+                sy = height / old_h
+                sa = (sx + sy) / 2.0
+                conn.execute(
+                    "UPDATE layout_zones SET "
+                    "cx = ROUND(cx * :sx), cy = ROUND(cy * :sy), r = ROUND(r * :sa), "
+                    "x1 = ROUND(x1 * :sx), y1 = ROUND(y1 * :sy), "
+                    "x2 = ROUND(x2 * :sx), y2 = ROUND(y2 * :sy), "
+                    "updated_at = datetime('now') "
+                    "WHERE layout_id = :id AND zone_type != 'BEZEL';",
+                    {"sx": sx, "sy": sy, "sa": sa, "id": layout_id},
+                )
+                radius = round(radius * sa)
+                sprint = round(sprint * sa)
+
+            self._update_layout(
+                conn,
+                layout_id,
+                {
+                    "width": width,
+                    "height": height,
+                    "dpi": dpi,
+                    "image_path": image_path,
+                    "mouse_wheel_radius": radius,
+                    "sprint_distance": sprint,
+                },
             )
 
         layout = self.get(layout_id)
         if layout is None:
             raise KeyError(f"No layout with id={layout_id}.")
+        return layout
+
+    def save_with_zones(
+        self,
+        layout_id: Optional[int],
+        layout_fields: dict[str, Any],
+        top_bezel_dp: int,
+        bottom_bezel_dp: int,
+        zones: list[dict[str, Any]],
+    ) -> Layout:
+        """Atomic save: create-or-update the layout row, then replace ALL of its zones
+        (both bezels + `zones`) in ONE transaction. Any failure rolls everything back.
+
+        layout_id=None creates a new layout (layout_fields must hold name/width/height/dpi).
+        """
+        zones_repo = LayoutZonesRepository()
+        conn = connection_manager.get_connection()
+        try:
+            with conn:
+                if layout_id is None:
+                    target_id = self._insert_layout(conn, dict(layout_fields))
+                else:
+                    target_id = layout_id
+                    self._update_layout(conn, target_id, dict(layout_fields))
+
+                row = conn.execute(
+                    "SELECT * FROM layouts WHERE id = ?;", (target_id,)
+                ).fetchone()
+                if row is None:
+                    raise KeyError(f"No layout with id={target_id}.")
+                layout = Layout.from_row(row)
+
+                conn.execute(
+                    "DELETE FROM layout_zones WHERE layout_id = ?;", (target_id,)
+                )
+                zones_repo._insert_bezels_and_zones(
+                    conn, layout, top_bezel_dp, bottom_bezel_dp, zones
+                )
+        except sqlite3.IntegrityError as exc:
+            raise _translate_integrity_error(exc) from exc
         return layout
 
     def delete(self, layout_id: int) -> None:
@@ -345,38 +501,42 @@ class LayoutsRepository:
             conn.execute("DELETE FROM layouts;")
 
     def duplicate(self, layout_id: int, new_name: str) -> Layout:
-        source = self.get(layout_id)
-        if source is None:
-            raise KeyError(f"No layout with id={layout_id}")
+        """Atomic: the new layout and all of its zones are created in one transaction."""
+        conn = connection_manager.get_connection()
+        try:
+            with conn:
+                row = conn.execute(
+                    "SELECT * FROM layouts WHERE id = ?;", (layout_id,)
+                ).fetchone()
+                if row is None:
+                    raise KeyError(f"No layout with id={layout_id}")
 
-        new_layout = self.create(
-            auto_seed=False,
-            name=new_name,
-            width=source.width,
-            height=source.height,
-            dpi=source.dpi,
-            mouse_wheel_radius=source.mouse_wheel_radius,
-            sprint_distance=source.sprint_distance,
-            image_path=source.image_path,
-        )
+                new_id = self._insert_layout(
+                    conn,
+                    {
+                        "name": new_name,
+                        "width": row["width"],
+                        "height": row["height"],
+                        "dpi": row["dpi"],
+                        "mouse_wheel_radius": row["mouse_wheel_radius"],
+                        "sprint_distance": row["sprint_distance"],
+                        "image_path": row["image_path"],
+                    },
+                )
+                conn.execute(
+                    "INSERT INTO layout_zones (layout_id, scancode, name, zone_type, "
+                    "cx, cy, r, x1, y1, x2, y2, ignore_app_settings, pipeline_json) "
+                    "SELECT ?, scancode, name, zone_type, cx, cy, r, x1, y1, x2, y2, "
+                    "ignore_app_settings, pipeline_json "
+                    "FROM layout_zones WHERE layout_id = ? ORDER BY id;",
+                    (new_id, layout_id),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise _translate_integrity_error(exc) from exc
 
-        zones_repo = LayoutZonesRepository()
-        for zone in zones_repo.list_for_layout(layout_id, auto_heal=False):
-            zones_repo.create(
-                layout_id=new_layout.id,
-                scancode=zone.scancode,
-                name=zone.name,
-                zone_type=zone.zone_type,
-                cx=zone.cx,
-                cy=zone.cy,
-                r=zone.r,
-                x1=zone.x1,
-                y1=zone.y1,
-                x2=zone.x2,
-                y2=zone.y2,
-                ignore_app_settings=zone.ignore_app_settings,
-                pipeline_json=zone.pipeline_json,
-            )
+        new_layout = self.get(new_id)
+        if new_layout is None:
+            raise KeyError("Error duplicating layout.")
         return new_layout
 
 
@@ -411,7 +571,18 @@ class LayoutZonesRepository:
         ).fetchone()
         return LayoutZone.from_row(row) if row is not None else None
 
-    def create(self, **fields: Any) -> LayoutZone:
+    def count_by_layout(self) -> dict[int, int]:
+        """Non-bezel zone counts for every layout in ONE query (no per-layout N+1, no auto-heal)."""
+        conn = connection_manager.get_connection()
+        rows = conn.execute(
+            "SELECT layout_id, COUNT(*) AS n FROM layout_zones "
+            "WHERE zone_type != ? GROUP BY layout_id;",
+            (BEZEL,),
+        ).fetchall()
+        return {int(r["layout_id"]): int(r["n"]) for r in rows}
+
+    def _insert(self, conn: sqlite3.Connection, fields: dict[str, Any]) -> int:
+        """Validated INSERT that runs inside the caller's transaction (no commit)."""
         unknown = set(fields) - self.ALLOWED_CREATE_FIELDS
         if unknown:
             raise InvalidFieldError(f"Unknown layout_zones field(s): {sorted(unknown)}")
@@ -427,19 +598,45 @@ class LayoutZonesRepository:
 
         columns = ", ".join(fields)
         placeholders = ", ".join(f":{key}" for key in fields)
+        cursor = conn.execute(
+            f"INSERT INTO layout_zones ({columns}) VALUES ({placeholders});", fields
+        )
+        return int(cursor.lastrowid)  # type: ignore[arg-type]
 
+    def create(self, **fields: Any) -> LayoutZone:
         conn = connection_manager.get_connection()
         with conn:
-            cursor = conn.execute(
-                f"INSERT INTO layout_zones ({columns}) VALUES ({placeholders});",
-                fields,
-            )
-            new_id = cursor.lastrowid
+            new_id = self._insert(conn, fields)
 
         zone = self.get(new_id)
         if zone is None:
             raise KeyError("Error creating zone.")
         return zone
+
+    def _insert_bezels_and_zones(
+        self,
+        conn: sqlite3.Connection,
+        layout: Layout,
+        top_bezel_dp: int,
+        bottom_bezel_dp: int,
+        zones: list[dict[str, Any]],
+    ) -> None:
+        self._insert(
+            conn,
+            self._bezel_fields(
+                layout, TOP_BEZEL_ID, TOP_BEZEL_NAME, True, int(top_bezel_dp)
+            ),
+        )
+        self._insert(
+            conn,
+            self._bezel_fields(
+                layout, BOTTOM_BEZEL_ID, BOTTOM_BEZEL_NAME, False, int(bottom_bezel_dp)
+            ),
+        )
+        for zone_fields in zones:
+            fields = dict(zone_fields)
+            fields["layout_id"] = layout.id
+            self._insert(conn, fields)
 
     def update(self, zone_id: int, **fields: Any) -> LayoutZone:
         unknown = set(fields) - self.ALLOWED_UPDATE_FIELDS
@@ -516,7 +713,11 @@ class LayoutZonesRepository:
     def ensure_bezels(
         self, layout: Layout, current_zones: list[LayoutZone] | None = None
     ) -> bool:
-        """Guarantees the existence of top and bottom bezels in the layout while removing all duplicates of each."""
+        """Guarantees the existence of top and bottom bezels in the layout while removing all duplicates of each.
+
+        Returns True only if rows were created or deleted. Re-syncing an existing bezel's
+        geometry is a no-op write when nothing differs, so reads no longer bump updated_at.
+        """
         if current_zones is None:
             conn = connection_manager.get_connection()
             rows = conn.execute(
@@ -569,12 +770,46 @@ class LayoutZonesRepository:
         else:
             dp_thickness = BEZEL_DP_THICKNESS
 
-        thickness_px = float(dp_to_px(max(1, min(100, dp_thickness)), layout.dpi))
+        # Clamp the dp value itself so the stored dp and the computed px always agree.
+        dp_thickness = max(1, min(100, int(dp_thickness)))
+
+        thickness_px = float(dp_to_px(dp_thickness, layout.dpi))
         y1 = 0.0 if is_top else layout.height - thickness_px
         y2 = thickness_px if is_top else layout.height
         cx, cy, _x1, _y1, _x2, _y2 = calculate_rect(0.0, y1, layout.width, y2)
 
         return cx, cy, _x1, _y1, _x2, _y2, dp_thickness
+
+    def _bezel_fields(
+        self,
+        layout: Layout,
+        scancode: int,
+        name: str,
+        is_top: bool,
+        thickness_dp: int | None = None,
+    ) -> dict[str, Any]:
+        cx, cy, _x1, _y1, _x2, _y2, dp_thickness = self._calculate_native_bezel(
+            layout, is_top, thickness_dp
+        )
+
+        p_cfg = PipelineConfig()
+        p_cfg.set_pipeline_config_from_json(_DEFAULT_BEZEL_PIPELINE_JSON)
+        p_cfg.set_region_config(bezel_dp_thickness=dp_thickness)
+
+        return {
+            "layout_id": layout.id,
+            "scancode": scancode,
+            "name": name,
+            "zone_type": BEZEL,
+            "cx": cx,
+            "cy": cy,
+            "r": None,
+            "x1": _x1,
+            "y1": _y1,
+            "x2": _x2,
+            "y2": _y2,
+            "pipeline_json": p_cfg.get_pipeline_json_from_config(),
+        }
 
     def create_bezel(
         self,
@@ -585,31 +820,38 @@ class LayoutZonesRepository:
         thickness_dp: int | None = None,
     ) -> int:
         """If thickness dp is None it uses the default BEZEL_DP_THICKNESS."""
-        cx, cy, _x1, _y1, _x2, _y2, dp_thickness = self._calculate_native_bezel(
-            layout, is_top, thickness_dp
-        )
-
-        p_cfg = PipelineConfig()
-        p_cfg.set_pipeline_config_from_json(_DEFAULT_BEZEL_PIPELINE_JSON)
-        p_cfg.set_region_config(bezel_dp_thickness=dp_thickness)
-
         created_bezel_zone = self.create(
-            layout_id=layout.id,
-            scancode=scancode,
-            name=name,
-            zone_type=BEZEL,
-            cx=cx,
-            cy=cy,
-            r=None,
-            x1=_x1,
-            y1=_y1,
-            x2=_x2,
-            y2=_y2,
-            pipeline_json=p_cfg.get_pipeline_json_from_config(),
+            **self._bezel_fields(layout, scancode, name, is_top, thickness_dp)
         )
-
         created_bezel_zone.set_parsed_config_from_json()
         return created_bezel_zone.id
+
+    @staticmethod
+    def _bezel_unchanged(
+        zone: LayoutZone,
+        cx: float,
+        cy: float,
+        x1: float,
+        y1: float,
+        x2: float,
+        y2: float,
+        new_json: str,
+    ) -> bool:
+        if zone.r is not None:
+            return False
+        if not (
+            _close(zone.cx, cx)
+            and _close(zone.cy, cy)
+            and _close(zone.x1, x1)
+            and _close(zone.y1, y1)
+            and _close(zone.x2, x2)
+            and _close(zone.y2, y2)
+        ):
+            return False
+        try:
+            return json.loads(zone.pipeline_json) == json.loads(new_json)
+        except (TypeError, ValueError):
+            return False
 
     def update_bezel(
         self,
@@ -618,7 +860,10 @@ class LayoutZonesRepository:
         is_top: bool,
         thickness_dp: int | None = None,
     ):
-        """If thickness_dp is None, it uses the parsed dp thickness from its region config."""
+        """If thickness_dp is None, it uses the parsed dp thickness from its region config.
+
+        Skips the write entirely when geometry and config already match.
+        """
         zone.set_parsed_config_from_json()
 
         if thickness_dp is None:
@@ -630,6 +875,10 @@ class LayoutZonesRepository:
         )
 
         zone.CONFIG_HELPER.set_region_config(bezel_dp_thickness=dp_thickness)
+        new_json = zone.CONFIG_HELPER.get_pipeline_json_from_config()
+
+        if self._bezel_unchanged(zone, cx, cy, _x1, _y1, _x2, _y2, new_json):
+            return zone.id
 
         return self.update(
             zone_id=zone.id,
@@ -640,7 +889,7 @@ class LayoutZonesRepository:
             y1=_y1,
             x2=_x2,
             y2=_y2,
-            pipeline_json=zone.CONFIG_HELPER.get_pipeline_json_from_config(),
+            pipeline_json=new_json,
         ).id
 
     def get_mouse_wheel_directional_scancodes(self, layout: Optional[Layout]):
