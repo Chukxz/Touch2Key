@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import os
 import sys
@@ -9,6 +10,7 @@ from typing import TYPE_CHECKING, Optional, Any
 
 from modules.platforms import get_platform, get_specific_mt_key
 from modules.database import store
+from modules.database.repositories import DuplicateNameError
 
 get_platform().SystemConfig().set_dpi_awareness()
 
@@ -17,7 +19,6 @@ from modules.utils import (
     BEZEL,
     BEZEL_DP_THICKNESS,
     BOTTOM_BEZEL_ID,
-    BOTTOM_BEZEL_NAME,
     CIRCLE,
     IDLE,
     IMAGES_FOLDER,
@@ -25,13 +26,12 @@ from modules.utils import (
     RECTANGLE,
     SPRINT_DISTANCE_CODE,
     TOP_BEZEL_ID,
-    TOP_BEZEL_NAME,
+    dp_to_px,
     get_dulled_hue_color,
     get_hue_modified_alpha_from_hsv,
     get_key_from_scancode,
     get_scancode_from_key,
     get_vibrant_random_color,
-    make_copy_name,
 )
 
 from modules.core.pipeline import PipelineConfig
@@ -53,10 +53,11 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout
 if TYPE_CHECKING:
     from modules.database import Layout
 
+logger = logging.getLogger("modules.gui.layouts_plotter_widget")
+
 COLLECTING = "COLLECTING"
 WAITING_FOR_KEY = "WAITING_FOR_KEY"
 WAITING_FOR_WHEEL_INDICATOR = "WAITING_FOR_WHEEL_INDICATOR"
-NAMING = "NAMING"
 DELETING = "DELETING"
 CONFIRM_DELETE_ALL = "CONFIRM_DELETE_ALL"
 CONFIRM_EXIT = "CONFIRM_EXIT"
@@ -77,6 +78,10 @@ DEFAULT_RADIAL_TOLERANCE = 5
 DEFAULT_EDGE_TOLERANCE = 5
 DEFAULT_VERTEX_TOLERANCE = 10
 DEFAULT_SPEC_MAX_RATIO = 0.3
+MIN_BEZEL_DP = 1
+MAX_BEZEL_DP = 100
+MIN_PRIORITY = -100
+MAX_PRIORITY = 200
 
 
 def calculate_raw_rectangle(values: tuple[tuple[float, float], tuple[float, float]]):
@@ -92,6 +97,16 @@ def calculate_raw_rectangle(values: tuple[tuple[float, float], tuple[float, floa
     )
 
 
+def _parse_artist_id(artist_id: Optional[str]) -> Optional[int]:
+    """'shape_12' / 'label_12' -> 12."""
+    if not artist_id:
+        return None
+    try:
+        return int(artist_id.partition("_")[2])
+    except ValueError:
+        return None
+
+
 class _CursorManager:
     def __init__(self, canvas: FigureCanvasQTAgg):
         self.canvas = canvas
@@ -100,7 +115,6 @@ class _CursorManager:
             COLLECTING: Qt.CursorShape.CrossCursor,
             WAITING_FOR_KEY: Qt.CursorShape.PointingHandCursor,
             WAITING_FOR_WHEEL_INDICATOR: Qt.CursorShape.PointingHandCursor,
-            NAMING: Qt.CursorShape.IBeamCursor,
             DELETING: Qt.CursorShape.ForbiddenCursor,
             CONFIRM_DELETE_ALL: Qt.CursorShape.WaitCursor,
             CONFIRM_EXIT: Qt.CursorShape.WaitCursor,
@@ -114,14 +128,13 @@ class _CursorManager:
 
 
 class _Draggable:
-    def __init__(
-        self, entry_id: int, is_shape: bool, plotter_ref: LayoutsPlotterWidget
-    ):
+    """Shared base. Event wiring lives in LayoutsPlotterWidget (one connection per event), which dispatches to the _on_press/_on_motion/_reset_edge/_finish_release hooks below."""
+
+    def __init__( self, entry_id: int, is_shape: bool, plotter_ref: LayoutsPlotterWidget ):
         self.entry_id = entry_id
         self.plotter = plotter_ref
         self.cursor_manager = plotter_ref.cursor_manager
         self.is_shape = is_shape
-        self.cids: list[int] = []
 
         if is_shape:
             self.artist_id = "shape_" + str(entry_id)
@@ -133,102 +146,13 @@ class _Draggable:
             label_bbox = self.plotter.labels_artists[entry_id].get_bbox_patch()
             self.default_face_color = label_bbox.get_facecolor() if label_bbox else None
 
-    def _capture_background(self, entry_id: int | None = None):
-        if entry_id is None:
-            return
-
-        current_shape = self.plotter.shapes[self.entry_id]
-        scancode = int(current_shape["scancode"])
-
-        if (
-            not self.plotter.mouse_wheel_indicators.mouse_wheel_indicators_captured
-            and scancode == MOUSE_WHEEL_SIMULATOR_CODE
-        ):
-            self.plotter.mouse_wheel_indicators._capture_mouse_wheel_background()
-
-    def _on_release(self):
-        self.plotter.mouse_wheel_indicators._on_release_mouse_wheel()
-
     def populate_draggables_list(self):
-        self.plotter.draggables_ids.append(self.artist_id)
-
-    def select_current_draggable_id(self):
-        if not self.plotter.draggables_ids:
-            self.plotter.iter_count = 0
-            return None
-        if self.plotter.last_artist_id is None:
-            self.plotter.iter_count = 0
-            return self.plotter.draggables_ids[0]
-
-        if self.plotter.last_artist_id in self.plotter.draggables_ids:
-            if self.plotter.iter_count >= 2:
-                idx = self.plotter.draggables_ids.index(self.plotter.last_artist_id)
-                self.plotter.iter_count = 0
-                return self.plotter.draggables_ids[
-                    (idx + 1) % len(self.plotter.draggables_ids)
-                ]
-            else:
-                return self.plotter.last_artist_id
-        else:
-            self.plotter.iter_count = 0
-            return self.plotter.draggables_ids[0]
-
-    def indicate_current_draggable_id(self):
-        curr_id = self.plotter.current_draggable_id
-        if curr_id is None:
-            return
-
-        self.plotter.zone_selected.emit(self.entry_id)
-        current_shape = self.plotter.shapes[self.entry_id]
-        priority = current_shape.get("priority", 0)
-        pointer_info = (
-            "Pointer Enabled"
-            if current_shape.get("pointer", False)
-            else "Pointer Disabled"
-        )
-
-        if curr_id.startswith("label_"):
-            draggable_artist = self.plotter.labels_drag_managers.get(self.entry_id)
-            if draggable_artist and draggable_artist.artist_id == curr_id:
-                if (
-                    label_bbox := draggable_artist.label_artist.get_bbox_patch()
-                ) is not None:
-                    label_bbox.set_edgecolor(INDICATED_EDGE_COLOR)
-                    label_bbox.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
-                self.plotter.update_title(
-                    f"Current Artist: {curr_id} (ID: {self.entry_id}, Prio: {priority}) | Drag/Nudge | {pointer_info}",
-                    True,
-                )
-            self.plotter.current_draggable = draggable_artist
-
-        elif curr_id.startswith("shape_"):
-            draggable_artist = self.plotter.shapes_drag_managers.get(self.entry_id)
-            if draggable_artist and draggable_artist.artist_id == curr_id:
-                shape_artist = draggable_artist.shape_artist
-                shape_artist.set_edgecolor(INDICATED_EDGE_COLOR)
-                shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
-                self.plotter.update_title(
-                    f"Current Artist: {curr_id} (ID: {self.entry_id}, Prio: {priority}) | Drag/Resize/Nudge | {pointer_info}",
-                    True,
-                )
-            self.plotter.current_draggable = draggable_artist
-
-        self.cursor_manager.set_custom_cursor(Qt.CursorShape.SizeAllCursor)
-
-    def clean_up_current_draggable_id(self):
-        self.indicate_current_draggable_id()
-        if self.plotter.current_move_distance <= DEFAULT_MIN_MOVE_DIST:
-            self.plotter.iter_count += 1
-        else:
-            self.plotter.iter_count = 0
-
-        self.plotter.captured = False
-        self.plotter.last_artist_id = self.plotter.current_draggable_id
-        self.plotter.current_draggable_id = None
-        self.plotter.current_move_distance = 0.0
-        self.plotter.draggables_ids = []
+        if self.artist_id not in self.plotter.draggables_ids:
+            self.plotter.draggables_ids.append(self.artist_id)
 
     def dull_face_color(self):
+        if self.default_face_color is None:
+            return
         if self.is_shape:
             shape = self.plotter.shapes_artists[self.entry_id]
             shape.set_facecolor(
@@ -249,6 +173,8 @@ class _Draggable:
                 )
 
     def restore_face_color(self):
+        if self.default_face_color is None:
+            return
         if self.is_shape:
             self.plotter.shapes_artists[self.entry_id].set_facecolor(
                 self.default_face_color
@@ -261,6 +187,22 @@ class _Draggable:
             ) is not None:
                 label_bbox.set_facecolor(self.default_face_color)
 
+    # Hooks implemented by subclasses ---------------------------------
+    def _on_press(self, event) -> None:
+        raise NotImplementedError()
+
+    def _on_motion(self, event) -> None:
+        raise NotImplementedError()
+
+    def _reset_edge(self) -> None:
+        raise NotImplementedError()
+
+    def _finish_release(self) -> None:
+        raise NotImplementedError()
+
+    def _move(self, dx, dy) -> None:
+        raise NotImplementedError()
+
 
 class _DraggableLabel(_Draggable):
     def __init__(self, entry_id: int, plotter_ref: LayoutsPlotterWidget):
@@ -269,16 +211,6 @@ class _DraggableLabel(_Draggable):
         self.shape_artist = self.plotter.shapes_artists[entry_id]
         self.canvas = self.plotter.canvas
         self.press = None
-        self._connect_cids()
-
-    def _connect_cids(self):
-
-        if self.canvas.supports_blit:
-            self.cids = [
-                self.canvas.mpl_connect("button_press_event", self._on_press),
-                self.canvas.mpl_connect("motion_notify_event", self._on_motion),
-                self.canvas.mpl_connect("button_release_event", self._on_release),
-            ]
 
     def _on_press(self, event):
         if (
@@ -328,8 +260,8 @@ class _DraggableLabel(_Draggable):
         self.canvas.draw()
         self.plotter.bg_cache = self.canvas.copy_from_bbox(self.plotter.ax.bbox)
         self.plotter.captured = True
-
-        super()._capture_background(self.entry_id)
+        # NOTE: dragging a label never moves the wheel indicators, so they stay in the
+        # cached background (capturing them here used to make them vanish mid-drag).
 
     def _on_motion(self, event):
         if not self.plotter.fire_on_motion or self.label_artist.axes is None:
@@ -338,8 +270,10 @@ class _DraggableLabel(_Draggable):
             return
 
         if self.plotter.current_draggable_id is None:
-            self.plotter.current_draggable_id = self.select_current_draggable_id()
-            self.indicate_current_draggable_id()
+            self.plotter.current_draggable_id = (
+                self.plotter._select_current_draggable_id()
+            )
+            self.plotter._indicate_current_draggable_id()
 
         if self.plotter.current_draggable_id != self.artist_id:
             return
@@ -352,6 +286,8 @@ class _DraggableLabel(_Draggable):
         dx_press = event.x - xpx_press
         dy_press = event.y - ypx_press
         self.plotter.current_move_distance = ((dx_press**2) + (dy_press**2)) ** 0.5
+        if self.plotter.current_move_distance > DEFAULT_MIN_MOVE_DIST:
+            self.plotter.mark_dirty()
 
         if not self.plotter.captured:
             self._capture_background()
@@ -376,45 +312,20 @@ class _DraggableLabel(_Draggable):
         x, y = self.label_artist.get_position()
         self.press = x, y, xdata_press, ydata_press, xpx_press, ypx_press
         self._move_label(dx, dy)
+        self.plotter.mark_dirty()
         self.canvas.draw()
         self.plotter.captured = False
 
-    def _on_release(self, event=None):
-        if self.plotter.is_fatal_state or self.plotter.state != IDLE:
-            return
-
-        self._partial_release()
-
-        if self.plotter.current_draggable_id is None and self.plotter.draggables_ids:
-            self.plotter.current_draggable_id = self.select_current_draggable_id()
-            self.indicate_current_draggable_id()
-
-        if self.artist_id == self.plotter.current_draggable_id:
-            if self.plotter.captured:
-                self.shape_artist.set_edgecolor(DEFAULT_EDGE_COLOR)
-                self.shape_artist.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
-                self.label_artist.set_animated(False)
-
-            self.clean_up_current_draggable_id()
-            self.plotter.ax.add_artist(self.label_artist)
-
-        super()._on_release()
-        self.canvas.draw_idle()
-
-    def _partial_release(self):
-        if self.plotter.ignore_current_draggable_id_n <= 0:
-            self.plotter.update_title(
-                f"OVERLAYS: {'VISIBLE' if self.plotter.show_overlays else 'HIDDEN'}",
-                True,
-            )
-
+    def _reset_edge(self):
         if (label_bbox := self.label_artist.get_bbox_patch()) is not None:
             label_bbox.set_edgecolor("black")
             label_bbox.set_linewidth(DEFAULT_SMALL_LINE_WIDTH)
 
-    def _disconnect_cids(self):
-        for cid in self.cids:
-            self.canvas.mpl_disconnect(cid)
+    def _finish_release(self):
+        if self.plotter.captured:
+            self.shape_artist.set_edgecolor(DEFAULT_EDGE_COLOR)
+            self.shape_artist.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
+            self.label_artist.set_animated(False)
 
 
 class _DraggableShape(_Draggable):
@@ -426,9 +337,6 @@ class _DraggableShape(_Draggable):
         self.press = None
         self.drag_bg = None
         self.shape_mode = None
-
-    def _connect_cids(self) -> None:
-        raise NotImplementedError()
 
     def _move(self, dx, dy) -> None:
         raise NotImplementedError()
@@ -484,7 +392,16 @@ class _DraggableShape(_Draggable):
         self.plotter.bg_cache = self.canvas.copy_from_bbox(self.plotter.ax.bbox)
         self.plotter.captured = True
 
-        super()._capture_background(self.entry_id)
+        # Dragging the wheel also moves its 4 indicators (and may move the sprint circle),
+        # so those must be animated too, otherwise they ghost in the cached background.
+        current_shape = self.plotter.shapes.get(self.entry_id)
+        if (
+            current_shape is not None
+            and int(current_shape["scancode"]) == MOUSE_WHEEL_SIMULATOR_CODE
+            and self.plotter.saved_mouse_wheel
+            and not self.plotter.mouse_wheel_indicators.mouse_wheel_indicators_captured
+        ):
+            self.plotter.mouse_wheel_indicators._capture_mouse_wheel_background()
 
     def _on_press_shape_helper(self, event) -> tuple[float, float] | None:
         raise NotImplementedError()
@@ -499,8 +416,10 @@ class _DraggableShape(_Draggable):
             return
 
         if self.plotter.current_draggable_id is None:
-            self.plotter.current_draggable_id = self.select_current_draggable_id()
-            self.indicate_current_draggable_id()
+            self.plotter.current_draggable_id = (
+                self.plotter._select_current_draggable_id()
+            )
+            self.plotter._indicate_current_draggable_id()
 
         if self.plotter.current_draggable_id != self.artist_id:
             return
@@ -510,6 +429,8 @@ class _DraggableShape(_Draggable):
         dx_press = event.x - xpx_press
         dy_press = event.y - ypx_press
         self.plotter.current_move_distance = ((dx_press**2) + (dy_press**2)) ** 0.5
+        if self.plotter.current_move_distance > DEFAULT_MIN_MOVE_DIST:
+            self.plotter.mark_dirty()
 
         if not self.plotter.captured:
             self._capture_background()
@@ -521,42 +442,16 @@ class _DraggableShape(_Draggable):
         self.shape_artist.axes.draw_artist(self.shape_artist)
         self.canvas.blit(self.plotter.ax.bbox)
 
-    def _on_release(self, event=None):
-        if self.plotter.is_fatal_state or self.plotter.state != IDLE:
-            return
-
-        self._partial_release()
-
-        if self.plotter.current_draggable_id is None and self.plotter.draggables_ids:
-            self.plotter.current_draggable_id = self.select_current_draggable_id()
-            self.indicate_current_draggable_id()
-
-        if self.artist_id == self.plotter.current_draggable_id:
-            if self.plotter.captured:
-                if (label_bbox := self.label_artist.get_bbox_patch()) is not None:
-                    label_bbox.set_edgecolor("black")
-                    label_bbox.set_linewidth(DEFAULT_SMALL_LINE_WIDTH)
-                    self.shape_artist.set_animated(False)
-
-            self.clean_up_current_draggable_id()
-            self.plotter.ax.add_patch(self.shape_artist)
-
-        super()._on_release()
-        self.canvas.draw_idle()
-
-    def _partial_release(self):
-        if self.plotter.ignore_current_draggable_id_n <= 0:
-            self.plotter.update_title(
-                f"OVERLAYS: {'VISIBLE' if self.plotter.show_overlays else 'HIDDEN'}",
-                True,
-            )
-
+    def _reset_edge(self):
         self.shape_artist.set_edgecolor(DEFAULT_EDGE_COLOR)
         self.shape_artist.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
 
-    def _disconnect_cids(self):
-        for cid in self.cids:
-            self.canvas.mpl_disconnect(cid)
+    def _finish_release(self):
+        if self.plotter.captured:
+            if (label_bbox := self.label_artist.get_bbox_patch()) is not None:
+                label_bbox.set_edgecolor("black")
+                label_bbox.set_linewidth(DEFAULT_SMALL_LINE_WIDTH)
+            self.shape_artist.set_animated(False)
 
 
 class _DraggableCircle(_DraggableShape):
@@ -565,28 +460,17 @@ class _DraggableCircle(_DraggableShape):
         if not isinstance(self.shape_artist, Circle):
             return
 
-        new_r = max(self.shape_artist.get_radius(), DEFAULT_MIN_CIRCLE_R)
-        self.shape_artist.set_radius(new_r)
-        self.plotter.shapes[self.entry_id]["r"] = new_r
-        self._connect_cids()
-
-    def _connect_cids(self):
-        if self.canvas.supports_blit:
-            self.cids.extend(
-                [
-                    self.canvas.mpl_connect("button_press_event", self._on_press),
-                    self.canvas.mpl_connect("motion_notify_event", self._on_motion),
-                    self.canvas.mpl_connect("button_release_event", self._on_release),
-                ]
+        old_r = self.shape_artist.get_radius()
+        new_r = max(old_r, DEFAULT_MIN_CIRCLE_R)
+        if new_r != old_r:
+            logger.warning(
+                "Zone %s radius %s is below the minimum; raised to %s.",
+                entry_id,
+                old_r,
+                new_r,
             )
-
-    def _on_press(self, event):
-        if self.plotter.is_fatal_state or self.plotter.state != IDLE:
-            return
-
-        self.plotter.ignore_current_draggable_id_n += 1
-        self._on_press_helper(event)
-        self.plotter.fire_on_motion = True
+            self.shape_artist.set_radius(new_r)
+            self.plotter.shapes[self.entry_id]["r"] = new_r
 
     def _on_press_shape_helper(self, event):
         if not isinstance(self.shape_artist, Circle):
@@ -621,75 +505,69 @@ class _DraggableCircle(_DraggableShape):
 
         self._circle_transform_helper(old_cx, old_cy, old_r, new_cx, new_cy, True)
 
-    def _circle_transform_helper(
-        self, old_cx, old_cy, old_r, new_cx, new_cy, is_blitting: bool
-    ):
+    def _circle_transform_helper( self, old_cx, old_cy, old_r, new_cx, new_cy, is_blitting: bool ):
         if not isinstance(self.shape_artist, Circle):
             return
-        current_shape = self.plotter.shapes[self.entry_id]
+        plotter = self.plotter
+        current_shape = plotter.shapes[self.entry_id]
 
         if (
-            self.plotter.saved_mouse_wheel
+            plotter.saved_mouse_wheel
             and current_shape["scancode"] == MOUSE_WHEEL_SIMULATOR_CODE
         ):
-            self.plotter.mouse_wheel_cx = new_cx
-            self.plotter.mouse_wheel_cy = new_cy
-            self.plotter.mouse_wheel_radius = current_shape["r"]
-            self.plotter.mouse_wheel_indicators.move_mouse_wheel_indicators(is_blitting)
+            plotter.mouse_wheel_cx = new_cx
+            plotter.mouse_wheel_cy = new_cy
+            plotter.mouse_wheel_radius = current_shape["r"]
 
-            if (
-                self.plotter.saved_sprint_distance
-                and self.plotter.sprint_artist_id is not None
-            ):
-                sprint_artist = self.plotter.shapes_drag_managers[
-                    self.plotter.sprint_artist_id
-                ]
+            if plotter.saved_sprint_distance and plotter.sprint_artist_id is not None:
+                sprint_shape_artist = plotter.shapes_artists.get(
+                    plotter.sprint_artist_id
+                )
+                sprint_shape = plotter.shapes.get(plotter.sprint_artist_id)
                 if (
-                    sprint_shape_artist := sprint_artist.shape_artist
-                ) is not None and isinstance(sprint_shape_artist, Circle):
+                    isinstance(sprint_shape_artist, Circle)
+                    and sprint_shape is not None
+                ):
                     cx, cy = sprint_shape_artist.get_center()  # type: ignore
-                    actual_dist = self.plotter._euclidean_distance(
-                        cx, cy, new_cx, new_cy
-                    )
+                    actual_dist = plotter._euclidean_distance(cx, cy, new_cx, new_cy)
 
-                    if actual_dist <= self.plotter.mouse_wheel_radius:
-                        r = self.plotter.mouse_wheel_radius
+                    if actual_dist <= plotter.mouse_wheel_radius:
+                        r = plotter.mouse_wheel_radius
                         screen_rect = (
                             (0, 0),
-                            (self.plotter.img_width, self.plotter.img_height),
+                            (plotter.img_width, plotter.img_height),
                         )
-                        sp_x, sp_y = self.plotter._constrain_point_to_rect_radial(
+                        sp_x, sp_y = plotter._constrain_point_to_rect_radial(
                             new_cx, new_cy - r - 1, new_cx, new_cy, screen_rect
                         )
                         sp_x, sp_y = int(round(sp_x)), int(round(sp_y))
 
-                        sprint_shape = self.plotter.shapes[
-                            self.plotter.sprint_artist_id
-                        ]
                         sprint_shape_artist.set_center((sp_x, sp_y))
                         sprint_shape["cx"] = sp_x
                         sprint_shape["cy"] = sp_y
-                        self.plotter.sprint_distance = self.plotter._euclidean_distance(
+                        plotter.sprint_distance = plotter._euclidean_distance(
                             sp_x, sp_y, new_cx, new_cy
                         )
                     else:
-                        self.plotter.sprint_distance = actual_dist
+                        plotter.sprint_distance = actual_dist
+
+            plotter.mouse_wheel_indicators.move_mouse_wheel_indicators(is_blitting)
 
         if (
-            self.plotter.saved_sprint_distance
+            plotter.saved_sprint_distance
             and current_shape["scancode"] == SPRINT_DISTANCE_CODE
         ):
-            actual_dist = self.plotter._euclidean_distance(
-                new_cx, new_cy, self.plotter.mouse_wheel_cx, self.plotter.mouse_wheel_cy
+            actual_dist = plotter._euclidean_distance(
+                new_cx, new_cy, plotter.mouse_wheel_cx, plotter.mouse_wheel_cy
             )
-            if actual_dist <= self.plotter.mouse_wheel_radius:
+            if actual_dist <= plotter.mouse_wheel_radius:
                 self.shape_artist.set_center((old_cx, old_cy))
                 self.shape_artist.set_radius(old_r)
                 current_shape["cx"] = old_cx
                 current_shape["cy"] = old_cy
                 current_shape["r"] = old_r
             else:
-                self.plotter.sprint_distance = actual_dist
+                plotter.sprint_distance = actual_dist
 
     def _get_circumference(self, event, cx, cy):
         if not isinstance(self.shape_artist, Circle) or self.shape_artist.axes is None:
@@ -710,13 +588,14 @@ class _DraggableCircle(_DraggableShape):
     def _update_radius(self, xdata, ydata):
         if not isinstance(self.shape_artist, Circle):
             return
+        plotter = self.plotter
         cx, cy = self.shape_artist.get_center()  # type: ignore
         new_r = int(round(((xdata - cx) ** 2 + (ydata - cy) ** 2) ** 0.5))
-        current_shape = self.plotter.shapes[self.entry_id]
+        current_shape = plotter.shapes[self.entry_id]
         new_sp_r = None
 
         if (
-            self.plotter.saved_mouse_wheel
+            plotter.saved_mouse_wheel
             and current_shape["scancode"] == MOUSE_WHEEL_SIMULATOR_CODE
         ):
             new_r = min(
@@ -724,40 +603,33 @@ class _DraggableCircle(_DraggableShape):
                 int(
                     round(
                         DEFAULT_SPEC_MAX_RATIO
-                        * ((self.plotter.img_width + self.plotter.img_height) / 2)
+                        * ((plotter.img_width + plotter.img_height) / 2)
                     )
                 ),
             )
-            if (
-                self.plotter.saved_sprint_distance
-                and self.plotter.sprint_artist_id is not None
-            ):
-                sprint_artist = self.plotter.shapes_drag_managers[
-                    self.plotter.sprint_artist_id
-                ]
-                if (
-                    sprint_shape_artist := sprint_artist.shape_artist
-                ) is not None and isinstance(sprint_shape_artist, Circle):
+            if plotter.saved_sprint_distance and plotter.sprint_artist_id is not None:
+                sprint_shape_artist = plotter.shapes_artists.get(
+                    plotter.sprint_artist_id
+                )
+                if isinstance(sprint_shape_artist, Circle):
                     if new_r < sprint_shape_artist.get_radius():
                         new_sp_r = new_r
 
         if (
-            self.plotter.saved_sprint_distance
+            plotter.saved_sprint_distance
             and current_shape["scancode"] == SPRINT_DISTANCE_CODE
         ):
-            new_r = min(new_r, self.plotter.mouse_wheel_radius)
+            new_r = min(new_r, plotter.mouse_wheel_radius)
 
         if new_r >= DEFAULT_MIN_CIRCLE_R:
             self.shape_artist.set_radius(new_r)
             current_shape["r"] = new_r
-            if new_sp_r is not None and self.plotter.sprint_artist_id is not None:
-                sprint_artist = self.plotter.shapes_drag_managers[
-                    self.plotter.sprint_artist_id
-                ]
-                if (
-                    sprint_shape_artist := sprint_artist.shape_artist
-                ) is not None and isinstance(sprint_shape_artist, Circle):
-                    sprint_shape = self.plotter.shapes[self.plotter.sprint_artist_id]
+            if new_sp_r is not None and plotter.sprint_artist_id is not None:
+                sprint_shape_artist = plotter.shapes_artists.get(
+                    plotter.sprint_artist_id
+                )
+                sprint_shape = plotter.shapes.get(plotter.sprint_artist_id)
+                if isinstance(sprint_shape_artist, Circle) and sprint_shape:
                     sprint_shape_artist.set_radius(new_sp_r)
                     sprint_shape["r"] = new_sp_r
 
@@ -785,6 +657,7 @@ class _DraggableCircle(_DraggableShape):
         old_r = self.shape_artist.get_radius()
         new_cx, new_cy = self._move_circle(dx, dy)
         self._circle_transform_helper(old_cx, old_cy, old_r, new_cx, new_cy, False)
+        self.plotter.mark_dirty()
         self.canvas.draw()
         self.plotter.captured = False
 
@@ -798,25 +671,6 @@ class _DraggableRectangle(_DraggableShape):
         self._update_rectangle_safe(
             x, y, self.shape_artist.get_width(), self.shape_artist.get_height()
         )
-        self._connect_cids()
-
-    def _connect_cids(self):
-        if self.canvas.supports_blit:
-            self.cids.extend(
-                [
-                    self.canvas.mpl_connect("button_press_event", self._on_press),
-                    self.canvas.mpl_connect("motion_notify_event", self._on_motion),
-                    self.canvas.mpl_connect("button_release_event", self._on_release),
-                ]
-            )
-
-    def _on_press(self, event):
-        if self.plotter.is_fatal_state or self.plotter.state != IDLE:
-            return
-
-        self.plotter.ignore_current_draggable_id_n += 1
-        self._on_press_helper(event)
-        self.plotter.fire_on_motion = True
 
     def _on_press_shape_helper(self, event):
         if not isinstance(self.shape_artist, Rectangle):
@@ -983,21 +837,17 @@ class _DraggableRectangle(_DraggableShape):
         x, y = self.shape_artist.get_xy()
         self.press = x, y, xdata_press, ydata_press, xpx_press, ypx_press
         self._move_rectangle(dx, dy)
+        self.plotter.mark_dirty()
         self.canvas.draw()
         self.plotter.captured = False
 
 
 class _MouseWheelDragManager:
+    """Click target for one of the four wheel direction indicators. The plotter dispatches presses here AFTER all zone managers, so this can reliably cancel any zone drag that started underneath the indicator."""
+
     def __init__(self, entry_id: int, plotter_ref: LayoutsPlotterWidget):
-        self.cids: list[int] = []
         self.entry_id = entry_id
         self.plotter = plotter_ref
-        self._connect_cids()
-
-    def _connect_cids(self):
-        self.cids.extend(
-            [self.plotter.canvas.mpl_connect("button_press_event", self._on_press)]
-        )
 
     def _on_press(self, event):
         if (
@@ -1032,10 +882,6 @@ class _MouseWheelDragManager:
             "Press KEY to bind or click anywhere outside the indicator to cancel."
         )
 
-    def _disconnect_cids(self):
-        for cid in self.cids:
-            self.plotter.canvas.mpl_disconnect(cid)
-
 
 class MouseWheelIndicators:
     def __init__(self, plotter_ref: LayoutsPlotterWidget) -> None:
@@ -1054,6 +900,13 @@ class MouseWheelIndicators:
         r = self.plotter.mouse_wheel_radius
         # 0: Up (cy - r), 1: Left (cx - r), 2: Down (cy + r), 3: Right (cx + r)
         return {0: (cx, cy - r), 1: (cx - r, cy), 2: (cx, cy + r), 3: (cx + r, cy)}
+
+    def _sprint_shape_artist(self) -> Optional[Circle]:
+        sid = self.plotter.sprint_artist_id
+        if sid is None or not self.plotter.saved_sprint_distance:
+            return None
+        art = self.plotter.shapes_artists.get(sid)
+        return art if isinstance(art, Circle) else None
 
     def create_mouse_wheel_indicators(self):
         directional_scancodes = store.zones.get_mouse_wheel_directional_scancodes(
@@ -1087,10 +940,15 @@ class MouseWheelIndicators:
             art.set_visible(is_vis)
             self.plotter.ax.add_patch(art)
 
-    def update_mouse_wheel_indicator_from_key(self, key_name: str):
+    def update_mouse_wheel_indicator_from_key(self, key_name: Optional[str]):
         current_indicator = self.current_mouse_wheel_indicator
 
         if current_indicator is not None:
+            if not key_name:
+                msg = "Key could not be identified."
+                self.plotter.send_message.emit("Key Error", msg)
+                return
+
             scancode = get_scancode_from_key(key_name)
 
             if not scancode:
@@ -1111,13 +969,17 @@ class MouseWheelIndicators:
                 print(msg)
                 return
 
+            for idx, bound in self.mouse_wheel_indicators_map.items():
+                if idx != current_indicator and bound == scancode:
+                    msg = f"Key '{key_name}' is already bound to another wheel direction."
+                    self.plotter.send_message.emit("Key Error", msg)
+                    return
+
             self.update_mouse_wheel_indicator_from_scancode(
                 current_indicator, key_name, scancode
             )
 
-    def update_mouse_wheel_indicator_from_scancode(
-        self, current_indicator: int, key_name: str, scancode: int
-    ):
+    def update_mouse_wheel_indicator_from_scancode( self, current_indicator: int, key_name: str, scancode: int ):
         scancode_key_name = get_key_from_scancode(scancode)
         if not scancode_key_name:
             msg = f"Key '{key_name}' with scancode '{scancode}' has no equivalent key name."
@@ -1134,23 +996,22 @@ class MouseWheelIndicators:
 
         self.current_mouse_wheel_indicator = None
         self.unhighlight_mouse_wheel_indicator(current_indicator)
+        self.plotter.mark_dirty()
         self.plotter.reset_state()
 
     def delete_mouse_wheel_indicators(self):
         for uid in list(self.mouse_wheel_labels_artists.keys()):
             label_artist = self.mouse_wheel_labels_artists[uid]
-            if label_artist in self.plotter.ax.artists:
+            if label_artist.axes is not None:
                 label_artist.remove()
         self.mouse_wheel_labels_artists = {}
 
         for uid in list(self.mouse_wheel_shapes_artists.keys()):
             shape_artist = self.mouse_wheel_shapes_artists[uid]
-            if shape_artist in self.plotter.ax.patches:
+            if shape_artist.axes is not None:
                 shape_artist.remove()
         self.mouse_wheel_shapes_artists = {}
 
-        for uid in list(self.mouse_wheel_labels_drag_managers.keys()):
-            self.mouse_wheel_labels_drag_managers[uid]._disconnect_cids()
         self.mouse_wheel_labels_drag_managers = {}
 
     def set_indicators_visible(self, visible: bool) -> None:
@@ -1183,6 +1044,13 @@ class MouseWheelIndicators:
 
             if is_blitting and shape_artist.axes is not None:
                 shape_artist.axes.draw_artist(shape_artist)
+
+        # The sprint circle is animated during a wheel drag (see _capture_*), so it must be
+        # redrawn every frame or it disappears / ghosts at its old position.
+        if is_blitting and self.mouse_wheel_indicators_captured:
+            sprint_art = self._sprint_shape_artist()
+            if sprint_art is not None and sprint_art.axes is not None:
+                sprint_art.axes.draw_artist(sprint_art)
 
     def highlight_mouse_wheel_indicator(self, index: int | None):
         if index is None:
@@ -1236,6 +1104,10 @@ class MouseWheelIndicators:
             shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
             shape_artist.set_animated(True)
 
+        sprint_art = self._sprint_shape_artist()
+        if sprint_art is not None:
+            sprint_art.set_animated(True)
+
         self.canvas.draw()
         self.plotter.bg_cache = self.canvas.copy_from_bbox(self.plotter.ax.bbox)
         self.mouse_wheel_indicators_captured = True
@@ -1261,6 +1133,10 @@ class MouseWheelIndicators:
                 shape_artist.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
                 shape_artist.set_animated(False)
 
+            sprint_art = self._sprint_shape_artist()
+            if sprint_art is not None:
+                sprint_art.set_animated(False)
+
             self.mouse_wheel_indicators_captured = False
 
 
@@ -1269,11 +1145,21 @@ class LayoutsPlotterWidget(QWidget):
     zone_selected = Signal(int)
     status_updated = Signal(str)
     send_message = Signal(str, str)
+    dirty_changed = Signal(bool)
+    save_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None, standalone: bool = False):
         super().__init__(parent)
         self.standalone = standalone
         self.is_fatal_state = False
+        self.loaded_layout_id: int | None = None
+        self.selected_entry_id: int | None = None
+        self.top_bezel_id: int | None = None
+        self.bottom_bezel_id: int | None = None
+        self.top_bezel_dp: int = BEZEL_DP_THICKNESS
+        self.bottom_bezel_dp: int = BEZEL_DP_THICKNESS
+        self._dirty = False
+        self.show_overlays = True
 
         self.fig = Figure()
         self.fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
@@ -1283,8 +1169,7 @@ class LayoutsPlotterWidget(QWidget):
         self.canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self.ax = self.fig.add_subplot(1, 1, 1)
-        self.ax.set_axis_off()
-        self.ax.set_position((0, 0, 1, 1))
+        self._reset_axes()
 
         self.fig.patch.set_visible(False)
         self.ax.patch.set_visible(False)
@@ -1306,18 +1191,25 @@ class LayoutsPlotterWidget(QWidget):
         self.labels_drag_managers: dict[int, _DraggableLabel] = {}
         self.shapes_drag_managers: dict[int, _DraggableShape] = {}
 
-        self.top_bezel_id: int | None = None
         self.top_bezel_label_artist = Text()
         self.top_bezel_shape_artist = Rectangle((0, 0), 0, 0)
-        self.bottom_bezel_id: int | None = None
         self.bottom_bezel_label_artist = Text()
         self.bottom_bezel_shape_artist = Rectangle((0, 0), 0, 0)
 
         self.mouse_wheel_indicators = MouseWheelIndicators(self)
 
+        # Every attribute that handlers read must exist BEFORE the first (possibly failing)
+        # reload, otherwise _render_empty_state -> update_title raises AttributeError.
+        self._init_params_helper()
+
+        # One connection per event; managers are dispatched from here (no N-fold handlers).
         self.canvas.mpl_connect("motion_notify_event", self._on_mouse_move)
-        self.canvas.mpl_connect("key_press_event", self._on_key_press)
         self.canvas.mpl_connect("button_press_event", self._on_click)
+        if self.canvas.supports_blit:
+            self.canvas.mpl_connect("motion_notify_event", self._on_motion_all)
+            self.canvas.mpl_connect("button_press_event", self._on_press_all)
+            self.canvas.mpl_connect("button_release_event", self._on_release_all)
+        self.canvas.mpl_connect("key_press_event", self._on_key_press)
         self.canvas.mpl_connect("resize_event", self.on_resize)
         self.canvas.mpl_connect("draw_event", self._on_draw)
         self.canvas.mpl_connect("axes_leave_event", self._on_mouse_leave)
@@ -1325,13 +1217,31 @@ class LayoutsPlotterWidget(QWidget):
 
         self.reload_active_layout()
 
+    # ------------------------------------------------------------------
+    # State / dirty tracking
+    # ------------------------------------------------------------------
+@property
+    def is_dirty(self) -> bool:
+        return self._dirty
+
+    def mark_dirty(self) -> None:
+        self._set_dirty(True)
+
+    def _set_dirty(self, value: bool) -> None:
+        if self._dirty != value:
+            self._dirty = value
+            self.dirty_changed.emit(value)
+
+    def _reset_axes(self) -> None:
+        self.ax.set_axis_off()
+        self.ax.set_position((0, 0, 1, 1))
+
     def _init_params_helper(self):
         self.points = []
         self.point_artists = []
         self.mode = None
         self.state = IDLE
         self.input_buffer = ""
-        self.current_bound_keys: list[str] = []
 
         self.buffer_default = True
         self.shapes: dict[int, Any] = {}
@@ -1344,29 +1254,29 @@ class LayoutsPlotterWidget(QWidget):
         self.mouse_wheel_cx: int = 0
         self.mouse_wheel_cy: int = 0
         self.sprint_distance: float = 0.0
-        self.show_overlays = True
         self.img_width: int = 0
         self.img_height: int = 0
         self.img_dpi: float = 0
         self.bg_cache = None
+        self.top_bezel_id = None
+        self.bottom_bezel_id = None
+        self.top_bezel_dp = BEZEL_DP_THICKNESS
+        self.bottom_bezel_dp = BEZEL_DP_THICKNESS
+        self.selected_entry_id = None
 
         for uid in list(self.labels_artists.keys()):
             label_artist = self.labels_artists[uid]
-            if label_artist in self.ax.artists:
+            if label_artist.axes is not None:
                 label_artist.remove()
         self.labels_artists = {}
 
         for uid in list(self.shapes_artists.keys()):
             shape_artist = self.shapes_artists[uid]
-            if shape_artist in self.ax.patches:
+            if shape_artist.axes is not None:
                 shape_artist.remove()
         self.shapes_artists = {}
 
-        for uid in list(self.labels_drag_managers.keys()):
-            self.labels_drag_managers[uid]._disconnect_cids()
         self.labels_drag_managers = {}
-        for uid in list(self.shapes_drag_managers.keys()):
-            self.shapes_drag_managers[uid]._disconnect_cids()
         self.shapes_drag_managers = {}
 
         self.last_artist_id: str | None = None
@@ -1418,140 +1328,90 @@ class LayoutsPlotterWidget(QWidget):
             animated=True,
         )
 
-    def reload_active_layout(
-        self,
-        img: Optional[Image.Image] = None,
-        image_params: Optional[tuple[int, int, int, int, int]] = None,
-    ) -> bool:
+    def reload_active_layout( self, img: Optional[Image.Image] = None, image_params: Optional[tuple[int, int, int]] = None, ) -> bool:
         self.active_layout = store.get_active_layout()
+        self.loaded_layout_id = self.active_layout.id if self.active_layout else None
+
         if not self.active_layout:
-            self._render_empty_state(
+            return self._render_empty_state(
                 "No active layout set. Please select or create a layout first."
             )
-            return False
 
         if not self.active_layout.image_path:
-            self._render_empty_state(
+            return self._render_empty_state(
                 f"Layout '{self.active_layout.name}' has no assigned HUD image."
             )
-            return False
 
         img_path = Path(self.active_layout.image_path)
         if not img_path.is_absolute():
             img_path = Path(IMAGES_FOLDER) / img_path
 
         if not img_path.exists():
-            self._render_empty_state(
+            return self._render_empty_state(
                 f"Image '{img_path.as_posix()}' does not exist on disk."
             )
-            return False
 
         # Try to get the layout's image with its parameters if it wasn't provided
         if img is None or image_params is None:
-            img, image_params = self.get_image_params(self.active_layout)
+            try:
+                img, image_params = self.get_image_params(self.active_layout)
+            except Exception as exc:
+                logger.exception("Failed to read/store image parameters")
+                return self._render_empty_state(f"Could not read image: {exc}")
 
         if img is None:
-            self._render_empty_state("Could not load image file.")
-            return False
+            return self._render_empty_state("Could not load image file.")
 
         if image_params is None:
-            self._render_empty_state("Could not get image parameters")
-            return False
+            return self._render_empty_state("Could not get image parameters")
 
+        # get_image_params() may have changed width/height/dpi/image_path in the DB.
+        # Re-read so bezel dpi, copy-saves, etc. never use a stale snapshot.
+        refreshed = store.layouts.get(self.active_layout.id)
+        if refreshed is not None:
+            self.active_layout = refreshed
+
+        prev_overlays = self.show_overlays
         self.is_fatal_state = False
         self.ax.clear()
+        self._reset_axes()
         self._init_params_helper()
+        self.show_overlays = prev_overlays
         self._init_crosshairs()
 
-        old_width, old_height = self._update_image_params(*image_params)
+        self._update_image_params(*image_params)
         self.ax.imshow(img, aspect="equal")
         self.ax.set_xlim(-0.5, img.width - 0.5)
         self.ax.set_ylim(img.height - 0.5, -0.5)
 
-        self._load_active_layout_zones(old_width, old_height)
+        self._load_active_layout_zones()
         self._render_bezels_notch()
 
         self.mouse_wheel_indicators.delete_mouse_wheel_indicators()
         self.mouse_wheel_indicators.create_mouse_wheel_indicators()
 
+        self._set_dirty(False)
+        self.zone_selected.emit(-1)
         self.update_title(f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'}")
         self.canvas.draw_idle()
 
         return True
 
-    def _render_bezels_notch(self):
-        if self.img_width <= 0 or self.img_height <= 0:
-            return
-
-        top_kwargs = self._render_bezel_notch(self.top_bezel_id, True)
-        bot_kwargs = self._render_bezel_notch(self.bottom_bezel_id, False)
-
-        if top_kwargs:
-            self.top_bezel_label_artist.set(**top_kwargs[0])
-            self.top_bezel_shape_artist.set(**top_kwargs[1])
-        else:
-            if self.top_bezel_label_artist in self.ax.artists:
-                self.top_bezel_label_artist.remove()
-            if self.top_bezel_shape_artist in self.ax.patches:
-                self.top_bezel_shape_artist.remove()
-
-        if bot_kwargs:
-            self.bottom_bezel_label_artist.set(**bot_kwargs[0])
-            self.bottom_bezel_shape_artist.set(**bot_kwargs[1])
-        else:
-            if self.bottom_bezel_label_artist in self.ax.artists:
-                self.bottom_bezel_label_artist.remove()
-            if self.bottom_bezel_shape_artist in self.ax.patches:
-                self.bottom_bezel_shape_artist.remove()
-
-        for art in [
-            self.top_bezel_label_artist,
-            self.top_bezel_shape_artist,
-            self.bottom_bezel_label_artist,
-            self.bottom_bezel_shape_artist,
-        ]:
-            art.set_visible(self.show_overlays)
-            if art.axes is None:
-                if isinstance(art, Text):
-                    self.ax.add_artist(art)
-                else:
-                    self.ax.add_patch(art)
-
-    def _render_bezel_notch(self, bezel_id: int | None, is_top: bool):
-        dpi = (
-            int(self.active_layout.dpi)
-            if self.active_layout
-            else (int(self.img_dpi) if self.img_dpi > 0 else BASELINE_DPI)
-        )
-
-        store_bezel_zone = store.zones.get(bezel_id)
-        if store_bezel_zone:
-            bezel_px_thickness = store_bezel_zone.get_bezel_thickness_px(dpi)
-            _x = store_bezel_zone.x1
-            _y = store_bezel_zone.y1
-            _width = store_bezel_zone.x2
-
-            if _x is None or _y is None or _width is None:
-                return
-
-        else:
-            return
-
+    def _bezel_kwargs(self, is_top: bool):
+        dp = self.top_bezel_dp if is_top else self.bottom_bezel_dp
+        dpi = int(self.img_dpi) if self.img_dpi > 0 else BASELINE_DPI
+        thickness_px = float(dp_to_px(dp, dpi))
         label_y = (
-            (bezel_px_thickness / 2.0)
-            if is_top
-            else (self.img_height - bezel_px_thickness / 2.0)
+            (thickness_px / 2.0) if is_top else (self.img_height - thickness_px / 2.0)
         )
-
+        y = 0.0 if is_top else self.img_height - thickness_px
         label = "Top Bezel Notch" if is_top else "Bottom Bezel Notch"
-
-        self.current_bound_keys.append(label)
 
         return (
             {
-                "x": _width / 2.0,
+                "x": self.img_width / 2.0,
                 "y": label_y,
-                "text": f"{label} ({bezel_px_thickness:.0f}px)",
+                "text": f"{label} ({thickness_px:.0f}px)",
                 "color": "white",
                 "fontsize": self._get_scaled_font_size(),
                 "ha": "center",
@@ -1560,9 +1420,9 @@ class LayoutsPlotterWidget(QWidget):
                 "alpha": 0.8,
             },
             {
-                "xy": (_x, _y),
-                "width": _width,
-                "height": bezel_px_thickness,
+                "xy": (0.0, y),
+                "width": float(self.img_width),
+                "height": thickness_px,
                 "fill": True,
                 "facecolor": (1.0, 0.2, 0.2, 0.25),
                 "edgecolor": (1.0, 0.4, 0.4, 0.7),
@@ -1572,11 +1432,60 @@ class LayoutsPlotterWidget(QWidget):
             },
         )
 
-    def _render_empty_state(self, message: str) -> None:
-        self.is_fatal_state = True
-        self.ax.clear()
-        self.update_title("ERROR: Missing Active Layout")
+    def _render_bezels_notch(self):
+        if self.img_width <= 0 or self.img_height <= 0:
+            return
+
+        for is_top, lbl, shp in (
+            (True, self.top_bezel_label_artist, self.top_bezel_shape_artist),
+            (False, self.bottom_bezel_label_artist, self.bottom_bezel_shape_artist),
+        ):
+            label_kwargs, shape_kwargs = self._bezel_kwargs(is_top)
+            lbl.set(**label_kwargs)
+            shp.set(**shape_kwargs)
+            lbl.set_visible(self.show_overlays)
+            shp.set_visible(self.show_overlays)
+            if lbl.axes is None:
+                self.ax.add_artist(lbl)
+            if shp.axes is None:
+                self.ax.add_patch(shp)
+
+    def set_bezel_dp(self, is_top: bool, dp: float) -> None:
+        """Edits a bezel thickness in memory (saved with the layout, like every other edit)."""
+        if self.is_fatal_state:
+            return
+        value = max(MIN_BEZEL_DP, min(MAX_BEZEL_DP, int(round(dp))))
+        current = self.top_bezel_dp if is_top else self.bottom_bezel_dp
+        if value == current:
+            return
+        if is_top:
+            self.top_bezel_dp = value
+        else:
+            self.bottom_bezel_dp = value
+        self._render_bezels_notch()
+        self.mark_dirty()
         self.canvas.draw_idle()
+
+    def _render_empty_state(self, message: str) -> bool:
+        self.ax.clear()
+        self._reset_axes()
+        self._init_params_helper()  # drop every stale shape/id so nothing can be saved
+        self.is_fatal_state = True
+        self.ax.text(
+            0.5,
+            0.5,
+            message,
+            transform=self.ax.transAxes,
+            ha="center",
+            va="center",
+            wrap=True,
+            color="gray",
+        )
+        self._set_dirty(False)
+        self.zone_selected.emit(-1)
+        self.update_title(f"ERROR: {message}")
+        self.canvas.draw_idle()
+        return False
 
     def _load_image(self, path: Optional[Path] = None) -> Optional[Image.Image]:
         target_path = path
@@ -1584,7 +1493,9 @@ class LayoutsPlotterWidget(QWidget):
             return
 
         try:
-            img = Image.open(target_path)
+            # Copy into memory and close the file handle right away (Windows file locks).
+            with Image.open(target_path) as raw:
+                img = raw.copy()
 
             # If the raw file is in portrait but tagged for landscape rotation, rotate the PIL buffer
             parts = target_path.stem.split("_")
@@ -1603,10 +1514,8 @@ class LayoutsPlotterWidget(QWidget):
             print(f"Error loading image: {exc}")
             return
 
-    def get_image_params(
-        self, active_layout: Layout, img_path: Optional[Path] = None
-    ) -> tuple[Optional[Image.Image], Optional[tuple[int, int, int, int, int]]]:
-        """Gets canvas dimensions directly from the image buffer generated by loading the image from the image path."""
+    def get_image_params( self, active_layout: Layout, img_path: Optional[Path] = None ) -> tuple[Optional[Image.Image], Optional[tuple[int, int, int]]]:
+        """Loads the image and atomically stores its width/height/dpi/path on the layout. If the resolution changed, the DB layer rescales all zones in the same transaction, so the stored zones and the stored canvas size can never disagree. """
         if img_path is None:
             active_path = active_layout.image_path
             if active_path is None:
@@ -1624,9 +1533,11 @@ class LayoutsPlotterWidget(QWidget):
         # Safely extract DPI from image metadata without scalar indexing errors
         dpi_meta = img.info.get("dpi", (BASELINE_DPI, BASELINE_DPI))
         if isinstance(dpi_meta, (tuple, list)):
-            img_dpi = int(round(dpi_meta[0]))
+            img_dpi = int(round(dpi_meta[0])) if dpi_meta else BASELINE_DPI
         else:
             img_dpi = int(round(dpi_meta)) if dpi_meta else BASELINE_DPI
+        if img_dpi <= 0:
+            img_dpi = BASELINE_DPI
 
         # Store clean filename if placed in data/images/ for cross-machine portability
         saved_img_ref = (
@@ -1635,28 +1546,17 @@ class LayoutsPlotterWidget(QWidget):
             else str(img_path.resolve())
         )
 
-        old_width = active_layout.width
-        old_height = active_layout.height
-
-        store.layouts.update(
-            active_layout.id,
-            width=img_width,
-            height=img_height,
-            dpi=img_dpi,
-            image_path=saved_img_ref,
+        store.layouts.apply_image_params(
+            active_layout.id, img_width, img_height, img_dpi, saved_img_ref
         )
 
-        return img, (img_width, img_height, img_dpi, old_width, old_height)
+        return img, (img_width, img_height, img_dpi)
 
-    def _update_image_params(
-        self, width: int, height: int, dpi: int, old_width: int, old_height: int
-    ) -> tuple[int, int]:
+    def _update_image_params(self, width: int, height: int, dpi: int) -> None:
         """Sets canvas dimensions"""
         self.img_width = width
         self.img_height = height
         self.img_dpi = dpi
-
-        return old_width, old_height
 
     def update_title(self, text: str, idle_override: bool = False):
         self.status_updated.emit(text)
@@ -1667,9 +1567,15 @@ class LayoutsPlotterWidget(QWidget):
         else:
             self.fig.canvas.draw()
 
+    def _overlay_title(self, idle_override: bool = True):
+        self.update_title(
+            f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'}", idle_override
+        )
+
     def _clear_visuals(self):
         for artist in self.point_artists:
-            artist.remove()
+            if artist.axes is not None:
+                artist.remove()
         self.point_artists = []
         self.fig.canvas.draw()
 
@@ -1680,53 +1586,64 @@ class LayoutsPlotterWidget(QWidget):
         self._clear_visuals()
         self.state, self.mode, self.points = IDLE, None, []
         self.input_buffer, self.buffer_default = "", True
-        self.update_title(f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'}")
+        self._overlay_title(False)
         if self.ax.bbox.width > 0 and self.ax.bbox.height > 0:
             self.bg_cache = self.canvas.copy_from_bbox(self.ax.bbox)
 
     def start_mode(self, mode: str, num_points: int):
-        if self.state != IDLE:
+        if self.is_fatal_state or self.state != IDLE:
             return
 
         self.reset_state()
         self.mode, self.artists_points, self.state = mode, num_points, COLLECTING
         self.update_title(f"MODE: {mode}. Click {num_points} points on the image.")
 
-    def _load_active_layout_zones(self, old_width: int, old_height: int) -> None:
+    def _load_active_layout_zones(self) -> None:
         if not self.active_layout:
             return
 
         zones = store.zones.list_for_layout(self.active_layout.id)
         self.reset_state()
 
-        scale_x = (self.img_width / old_width) if old_width > 0 else 1.0
-        scale_y = (self.img_height / old_height) if old_height > 0 else 1.0
+        # Wheel first, then sprint, then everything else: the sprint is only valid relative
+        # to an existing wheel, and list_for_layout() orders by id (import/duplicate can
+        # put the sprint before the wheel).
+        def load_order(z):
+            if z.scancode == MOUSE_WHEEL_SIMULATOR_CODE:
+                return (0, z.id)
+            if z.scancode == SPRINT_DISTANCE_CODE:
+                return (1, z.id)
+            return (2, z.id)
 
         for zone in zones:
             if zone.zone_type == BEZEL:
+                zone.set_parsed_config_from_json()
+                _, _, dp, _ = zone.CONFIG_HELPER.get_region_config()
+                dp = max(MIN_BEZEL_DP, min(MAX_BEZEL_DP, int(dp)))
                 if zone.scancode == TOP_BEZEL_ID:
                     self.top_bezel_id = zone.id
+                    self.top_bezel_dp = dp
                 elif zone.scancode == BOTTOM_BEZEL_ID:
                     self.bottom_bezel_id = zone.id
+                    self.bottom_bezel_dp = dp
+
+        for zone in sorted(
+            (z for z in zones if z.zone_type != BEZEL), key=load_order
+        ):
+            if zone.zone_type not in (CIRCLE, RECTANGLE):
                 continue
 
             self.mode = zone.zone_type
-            cx = int(round((zone.cx or 0.0) * scale_x))
-            cy = int(round((zone.cy or 0.0) * scale_y))
+            cx = int(round(zone.cx or 0.0))
+            cy = int(round(zone.cy or 0.0))
 
             r, bb = None, None
             if zone.zone_type == CIRCLE:
-                r = int(round((zone.r or 0.0) * ((scale_x + scale_y) / 2)))
-            elif zone.zone_type == RECTANGLE:
+                r = int(round(zone.r or 0.0))
+            else:
                 bb = (
-                    (
-                        int(round((zone.x1 or 0.0) * scale_x)),
-                        int(round((zone.y1 or 0.0) * scale_y)),
-                    ),
-                    (
-                        int(round((zone.x2 or 0.0) * scale_x)),
-                        int(round((zone.y2 or 0.0) * scale_y)),
-                    ),
+                    (int(round(zone.x1 or 0.0)), int(round(zone.y1 or 0.0))),
+                    (int(round(zone.x2 or 0.0)), int(round(zone.y2 or 0.0))),
                 )
 
             self._finalize_shape(
@@ -1740,10 +1657,15 @@ class LayoutsPlotterWidget(QWidget):
                 priority=zone.priority,
                 pipeline_json=zone.pipeline_json,
                 ignore_app_settings=zone.ignore_app_settings,
+                strict=False,
             )
 
-        self.mouse_wheel_radius = self.active_layout.mouse_wheel_radius
-        self.sprint_distance = self.active_layout.sprint_distance
+        # The zones are authoritative when they exist; fall back to the stored layout values
+        # only when there is no wheel / sprint zone.
+        if not self.saved_mouse_wheel:
+            self.mouse_wheel_radius = float(self.active_layout.mouse_wheel_radius)
+        if not self.saved_sprint_distance:
+            self.sprint_distance = float(self.active_layout.sprint_distance)
         self.reset_state()
 
     def toggle_visibility(self):
@@ -1772,7 +1694,7 @@ class LayoutsPlotterWidget(QWidget):
             for art in d.values():
                 art.set_visible(self.show_overlays if self.saved_mouse_wheel else False)
 
-        self.update_title(f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'}")
+        self._overlay_title(False)
 
     def _get_scaled_font_size(self) -> int:
         """Calculates label font size proportional to the rendered image viewport."""
@@ -1794,13 +1716,7 @@ class LayoutsPlotterWidget(QWidget):
 
         return max(5, int(round(self.fig.get_size_inches()[1] * 72 * 0.02)))
 
-    def _create_label(
-        self,
-        center_x: float,
-        center_y: float,
-        label_text: str,
-        fc: tuple[float, float, float, float],
-    ):
+    def _create_label( self, center_x: float, center_y: float, label_text: str, fc: tuple[float, float, float, float], ):
         return Text(
             center_x,
             center_y,
@@ -1816,9 +1732,7 @@ class LayoutsPlotterWidget(QWidget):
             ),
         )
 
-    def _create_circle(
-        self, cx: float, cy: float, r: float, fc: tuple[float, float, float, float]
-    ):
+    def _create_circle( self, cx: float, cy: float, r: float, fc: tuple[float, float, float, float] ):
         return Circle(
             (cx, cy),
             r,
@@ -1828,14 +1742,7 @@ class LayoutsPlotterWidget(QWidget):
             ec=DEFAULT_EDGE_COLOR,
         )
 
-    def _create_rectangle(
-        self,
-        x1: float,
-        y1: float,
-        x2: float,
-        y2: float,
-        fc: tuple[float, float, float, float],
-    ):
+    def _create_rectangle( self, x1: float, y1: float, x2: float, y2: float, fc: tuple[float, float, float, float], ):
         return Rectangle(
             (x1, y1),
             x2 - x1,
@@ -1861,9 +1768,7 @@ class LayoutsPlotterWidget(QWidget):
         return True
 
     def _on_draw(self, event=None) -> None:
-        """Captures a fresh background cache immediately after every full render.
-        Because crosshairs use animated=True, this snapshot is always clean
-        and matches the exact post-resize ax.bbox dimensions."""
+        """Captures a fresh background cache immediately after every full render. Because crosshairs use animated=True, this snapshot is always clean and matches the exact post-resize ax.bbox dimensions."""
         if self.is_fatal_state:
             return
         if self.ax.bbox.width > 0 and self.ax.bbox.height > 0:
@@ -1887,13 +1792,10 @@ class LayoutsPlotterWidget(QWidget):
             and self.current_draggable_id is not None
         ):
             self._partial_release_all()
-            self.update_title(
-                f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'}", True
-            )
+            self._overlay_title(True)
 
     def on_resize(self, event=None) -> None:
-        """Keeps overlays and blit caches dynamically aligned to the canvas viewport on resize.
-        Invalidates stale blit caches on resize so _on_draw rebuilds them cleanly."""
+        """Keeps overlays and blit caches dynamically aligned to the canvas viewport on resize. Invalidates stale blit caches on resize so _on_draw rebuilds them cleanly."""
         if self.is_fatal_state:
             return
 
@@ -1963,12 +1865,16 @@ class LayoutsPlotterWidget(QWidget):
 
             hovering = None
             for uid, mgr in self.labels_drag_managers.items():
-                if mgr.label_artist.contains(event)[0]:
+                if mgr.label_artist.get_visible() and mgr.label_artist.contains(event)[0]:
                     hovering = (uid, mgr, "label")
                     break
             if not hovering:
                 for uid, mgr in self.shapes_drag_managers.items():
-                    if mgr.shape_artist and mgr.shape_artist.contains(event)[0]:
+                    if (
+                        mgr.shape_artist
+                        and mgr.shape_artist.get_visible()
+                        and mgr.shape_artist.contains(event)[0]
+                    ):
                         hovering = (uid, mgr, "shape")
                         break
 
@@ -1978,22 +1884,167 @@ class LayoutsPlotterWidget(QWidget):
                     self._partial_release_all()
                     mgr._on_press_helper(event)
                     self.current_draggable_id = curr_id
-                    mgr.indicate_current_draggable_id()
+                    self._indicate_current_draggable_id()
                     self.fire_on_motion = False
             else:
                 self._partial_release_all()
-                self.update_title(
-                    f"OVERLAYS: {'VISIBLE' if self.show_overlays else 'HIDDEN'}", True
-                )
+                self._overlay_title(True)
 
     def _partial_release_all(self):
-        for mgr in self.labels_drag_managers.values():
-            mgr._partial_release()
-        for mgr in self.shapes_drag_managers.values():
-            mgr._partial_release()
+        """Clears hover state. Does not touch the sticky inspector selection."""
+        for mgr in self._iter_drag_managers():
+            mgr._reset_edge()
         self.current_draggable_id = None
-        self.zone_selected.emit(-1)
+        self.draggables_ids = []
         self.fig.canvas.draw_idle()
+
+    # ------------------------------------------------------------------
+    # Central drag dispatch (replaces one mpl connection per manager)
+    # ------------------------------------------------------------------
+    def _iter_drag_managers(self) -> list[_Draggable]:
+        out: list[_Draggable] = []
+        for uid in sorted(set(self.labels_drag_managers) | set(self.shapes_drag_managers)):
+            if uid in self.labels_drag_managers:
+                out.append(self.labels_drag_managers[uid])
+            if uid in self.shapes_drag_managers:
+                out.append(self.shapes_drag_managers[uid])
+        return out
+
+    def _on_press_all(self, event):
+        if self.is_fatal_state or self.state != IDLE:
+            return
+        for mgr in self._iter_drag_managers():
+            mgr._on_press(event)
+        # Wheel indicators run LAST so they can always veto a zone drag underneath them.
+        for ind in list(
+            self.mouse_wheel_indicators.mouse_wheel_labels_drag_managers.values()
+        ):
+            ind._on_press(event)
+
+    def _on_motion_all(self, event):
+        if self.is_fatal_state:
+            return
+        for mgr in self._iter_drag_managers():
+            mgr._on_motion(event)
+
+    def _on_release_all(self, event=None):
+        if self.is_fatal_state or self.state != IDLE:
+            return
+
+        managers = self._iter_drag_managers()
+        for mgr in managers:
+            mgr._reset_edge()
+
+        if self.ignore_current_draggable_id_n <= 0:
+            self._overlay_title(True)
+
+        if self.current_draggable_id is None and self.draggables_ids:
+            self.current_draggable_id = self._select_current_draggable_id()
+            self._indicate_current_draggable_id()
+
+        chosen = None
+        if self.current_draggable_id is not None:
+            chosen = next(
+                (m for m in managers if m.artist_id == self.current_draggable_id), None
+            )
+
+        if chosen is not None:
+            chosen._finish_release()
+            self._finish_drag_cycle()
+        elif (
+            not self.draggables_ids
+            and event is not None
+            and getattr(event, "inaxes", None) == self.ax
+        ):
+            # Clicked empty canvas: drop the inspector selection.
+            self._select_entry(None)
+
+        self.mouse_wheel_indicators._on_release_mouse_wheel()
+        self.canvas.draw_idle()
+
+    def _select_current_draggable_id(self):
+        if not self.draggables_ids:
+            self.iter_count = 0
+            return None
+        if self.last_artist_id is None:
+            self.iter_count = 0
+            return self.draggables_ids[0]
+
+        if self.last_artist_id in self.draggables_ids:
+            if self.iter_count >= 2:
+                idx = self.draggables_ids.index(self.last_artist_id)
+                self.iter_count = 0
+                return self.draggables_ids[(idx + 1) % len(self.draggables_ids)]
+            else:
+                return self.last_artist_id
+        else:
+            self.iter_count = 0
+            return self.draggables_ids[0]
+
+    def _indicate_current_draggable_id(self):
+        """Highlights the current artist and updates the status text. The entry is parsed from the id itself (the caller may be another artist's manager)."""
+        curr_id = self.current_draggable_id
+        if curr_id is None:
+            return
+        entry_id = _parse_artist_id(curr_id)
+        if entry_id is None or entry_id not in self.shapes:
+            return
+
+        current_shape = self.shapes[entry_id]
+        priority = current_shape.get("priority", 0)
+        pointer_info = (
+            "Pointer Enabled"
+            if current_shape.get("pointer", False)
+            else "Pointer Disabled"
+        )
+
+        if curr_id.startswith("label_"):
+            mgr = self.labels_drag_managers.get(entry_id)
+            if mgr is not None:
+                if (label_bbox := mgr.label_artist.get_bbox_patch()) is not None:
+                    label_bbox.set_edgecolor(INDICATED_EDGE_COLOR)
+                    label_bbox.set_linewidth(DEFAULT_MEDIUM_LINE_WIDTH)
+                self.update_title(
+                    f"Current Artist: {curr_id} (ID: {entry_id}, Prio: {priority}) | Drag/Nudge | {pointer_info}",
+                    True,
+                )
+            self.current_draggable = mgr
+
+        elif curr_id.startswith("shape_"):
+            mgr = self.shapes_drag_managers.get(entry_id)
+            if mgr is not None:
+                mgr.shape_artist.set_edgecolor(INDICATED_EDGE_COLOR)
+                mgr.shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
+                self.update_title(
+                    f"Current Artist: {curr_id} (ID: {entry_id}, Prio: {priority}) | Drag/Resize/Nudge | {pointer_info}",
+                    True,
+                )
+            self.current_draggable = mgr
+
+        self.cursor_manager.set_custom_cursor(Qt.CursorShape.SizeAllCursor)
+
+    def _finish_drag_cycle(self):
+        self._indicate_current_draggable_id()
+        entry_id = _parse_artist_id(self.current_draggable_id)
+
+        if self.current_move_distance <= DEFAULT_MIN_MOVE_DIST:
+            self.iter_count += 1
+        else:
+            self.iter_count = 0
+
+        self.captured = False
+        self.last_artist_id = self.current_draggable_id
+        self.current_draggable_id = None
+        self.current_move_distance = 0.0
+        self.draggables_ids = []
+
+        if entry_id is not None:
+            self._select_entry(entry_id)
+
+    def _select_entry(self, entry_id: Optional[int]) -> None:
+        """Sticky inspector selection (set by click/drag, cleared by empty click / Esc / delete)."""
+        self.selected_entry_id = entry_id
+        self.zone_selected.emit(-1 if entry_id is None else entry_id)
 
     def _on_click(self, event):
         if self.is_fatal_state:
@@ -2024,7 +2075,12 @@ class LayoutsPlotterWidget(QWidget):
             self.reset_state()
             return
 
-        if self.state != COLLECTING or event.xdata is None or event.ydata is None:
+        if (
+            self.state != COLLECTING
+            or event.button != 1
+            or event.xdata is None
+            or event.ydata is None
+        ):
             return
 
         self.points.append((int(round(event.xdata)), int(round(event.ydata))))
@@ -2045,20 +2101,22 @@ class LayoutsPlotterWidget(QWidget):
         if self.is_fatal_state:
             return
 
-        state_handlers = {
-            NAMING: self._handle_naming_input,
-            DELETING: self._handle_deleting_input,
-        }
+        key = event.key
+        if key is None:
+            return
 
-        if self.state in state_handlers:
-            state_handlers[self.state](event.key)
+        if self.state == DELETING:
+            self._handle_deleting_input(key)
             return
 
         if self.state == CONFIRM_DELETE_ALL:
-            self._delete_all_shapes() if event.key == "enter" else self.reset_state()
+            if key == "enter":
+                self._delete_all_shapes()
+            else:
+                self.reset_state()
             return
         if self.state in (CONFIRM_EXIT, COLLECTING):
-            if event.key == "escape":
+            if key == "escape":
                 self.reset_state()
             return
         if self.state == WAITING_FOR_KEY:
@@ -2071,41 +2129,48 @@ class LayoutsPlotterWidget(QWidget):
             return
 
         if self.state == IDLE:
-            if event.key == "f1":
+            if key == "f1":
                 self.reset_state()
-            elif event.key == "f2":
+            elif key == "f2":
+                if not self.shapes:
+                    self.update_title("List empty. Nothing to delete.")
+                    return
                 self.state = CONFIRM_DELETE_ALL
                 self.update_title(
                     "[DELETE ALL?] Press ENTER to Confirm or Any other key to Cancel."
                 )
-            elif event.key == "f4":
+            elif key == "f4":
                 self.toggle_visibility()
-            elif event.key == "f6":
+            elif key == "f6":
                 self.start_mode(CIRCLE, 3)
-            elif event.key == "f7":
+            elif key == "f7":
                 self.start_mode(RECTANGLE, 4)
-            elif event.key == "f9":
+            elif key == "f9":
                 self._print_data()
-            elif event.key == "f12":
-                self._enter_naming_mode()
-            elif event.key == "delete":
+            elif key == "f12":
+                self.save_requested.emit()
+            elif key == "delete":
                 self._enter_deleting_mode()
-            elif event.key == "escape":
+            elif key == "escape":
                 self.reset_state()
-            elif event.key in ("p", "o") and self.current_draggable:
+                self._select_entry(None)
+            elif key in ("p", "o") and self.current_draggable:
                 eid = self.current_draggable.entry_id
-                self.shapes[eid]["priority"] += 1 if event.key == "p" else -1
-                self.shapes[eid]["priority"] = max(
-                    -100, min(100, self.shapes[eid]["priority"])
-                )
-                self.update_title(
-                    f"Priority {'increased' if event.key == 'p' else 'decreased'}: {self.shapes[eid]['priority']} (ID: {eid})",
-                    True,
-                )
-                self.zone_selected.emit(eid)
+                if eid in self.shapes:
+                    delta = 1 if key == "p" else -1
+                    self.shapes[eid]["priority"] = max(
+                        MIN_PRIORITY,
+                        min(MAX_PRIORITY, self.shapes[eid]["priority"] + delta),
+                    )
+                    self.mark_dirty()
+                    self.update_title(
+                        f"Priority {'increased' if key == 'p' else 'decreased'}: {self.shapes[eid]['priority']} (ID: {eid})",
+                        True,
+                    )
+                    self._select_entry(eid)
             else:
-                step = 5 if event.key.startswith("shift+") else 1
-                clean_key = event.key.replace("shift+", "")
+                step = 5 if key.startswith("shift+") else 1
+                clean_key = key.replace("shift+", "")
                 dirs = {
                     "left": (-step, 0),
                     "right": (step, 0),
@@ -2126,13 +2191,15 @@ class LayoutsPlotterWidget(QWidget):
         self.update_title("DELETE MODE: Type ID... (Enter to Confirm | Esc to Cancel)")
 
     def _delete_all_shapes(self):
-        if not self.shapes:
-            self.update_title("List empty. Nothing to delete.")
-            return
+        # Always leave CONFIRM_DELETE_ALL first (it used to stay stuck when the list was empty).
+        had_shapes = bool(self.shapes)
         for uid in list(self.shapes.keys()):
             self._delete_entry(uid)
         self.count = 0
         self.reset_state()
+        self._select_entry(None)
+        if not had_shapes:
+            self.update_title("List empty. Nothing to delete.")
 
     def _handle_deleting_input(self, key):
         if key == "escape":
@@ -2143,8 +2210,8 @@ class LayoutsPlotterWidget(QWidget):
                 try:
                     if (uid := int(self.input_buffer)) in self.shapes:
                         self._delete_entry(uid)
-                        self.update_title(f"Deleted ID {uid}. Returning to IDLE...")
                         self.reset_state()
+                        self.update_title(f"Deleted ID {uid}.", True)
                     else:
                         self.update_title(
                             f"Error: ID {uid} not found. Try again or Press ESC to Cancel."
@@ -2167,16 +2234,35 @@ class LayoutsPlotterWidget(QWidget):
                 f"DELETE MODE: ID [{self.input_buffer}] (Enter to delete | Esc to Cancel)"
             )
 
+    def _discard_artists(self, uid: int) -> None:
+        """Removes an entry's data, artists and managers, and every reference to them."""
+        self.shapes.pop(uid, None)
+
+        for d in (self.labels_artists, self.shapes_artists):
+            art = d.pop(uid, None)
+            if art is not None and art.axes is not None:
+                art.remove()
+        self.labels_drag_managers.pop(uid, None)
+        self.shapes_drag_managers.pop(uid, None)
+
+        ids = (f"shape_{uid}", f"label_{uid}")
+        if self.current_draggable_id in ids:
+            self.current_draggable_id = None
+        if self.current_draggable is not None and self.current_draggable.entry_id == uid:
+            self.current_draggable = None
+        if self.last_artist_id in ids:
+            self.last_artist_id = None
+        self.draggables_ids = [i for i in self.draggables_ids if i not in ids]
+        if self.selected_entry_id == uid:
+            self._select_entry(None)
+
     def _delete_entry(self, uid):
         if uid not in self.shapes:
             return
 
         entry_scancode = int(self.shapes[uid]["scancode"])
-        entry_key_name = str(self.shapes[uid]["key_name"])
-        label = entry_key_name.upper()
 
         if entry_scancode == MOUSE_WHEEL_SIMULATOR_CODE:
-            label = "MOUSE\nWHEEL"
             for sid in [
                 k
                 for k, v in self.shapes.items()
@@ -2190,33 +2276,18 @@ class LayoutsPlotterWidget(QWidget):
             self.mouse_wheel_indicators.set_indicators_visible(False)
 
         elif entry_scancode == SPRINT_DISTANCE_CODE:
-            label = "SPRINT\nDISTANCE"
             self.saved_sprint_distance = False
             self.sprint_artist_id = None
             self.sprint_distance = 0.0
 
-        if self.current_draggable_id in [f"shape_{uid}", f"label_{uid}"]:
-            self.current_draggable_id = self.current_draggable = None
-        del self.shapes[uid]
-        if uid in self.shapes_artists:
-            self.shapes_artists.pop(uid).remove()
-        if uid in self.labels_artists:
-            self.labels_artists.pop(uid).remove()
-        if uid in self.labels_drag_managers:
-            self.labels_drag_managers.pop(uid)._disconnect_cids()
-        if uid in self.shapes_drag_managers:
-            self.shapes_drag_managers.pop(uid)._disconnect_cids()
-        if self.last_artist_id in [f"shape_{uid}", f"label_{uid}"]:
-            self.last_artist_id = None
+        self._discard_artists(uid)
+        self.mark_dirty()
 
-        try:
-            self.current_bound_keys.remove(label)
-        except ValueError:
-            pass
+    def calculate_shape(self, key_name: Optional[str]):
+        if not key_name:
+            self.send_message.emit("Key Error", "Key could not be identified.")
+            return
 
-        self.zone_selected.emit(-1)
-
-    def calculate_shape(self, key_name: str):
         scancode = get_scancode_from_key(key_name)
         if not scancode:
             msg = f"Key '{key_name}' not mapped."
@@ -2237,7 +2308,7 @@ class LayoutsPlotterWidget(QWidget):
         elif self.mode == RECTANGLE:
             cx, cy, r, bb = self._calculate_rectangle()
 
-        self._finalize_shape(
+        if self._finalize_shape(
             cx=cx,
             cy=cy,
             r=r,
@@ -2248,24 +2319,38 @@ class LayoutsPlotterWidget(QWidget):
             priority=0,
             pipeline_json="{}",
             ignore_app_settings=False,
-        )
+        ):
+            self.mark_dirty()
         self.reset_state()
 
-    def _finalize_shape(
-        self,
-        cy: Optional[int],
-        cx: Optional[int],
-        r: Optional[int],
-        bb: Optional[tuple[tuple[int, int], tuple[int, int]]],
-        key_name: str,
-        scancode: int,
-        pointer: bool,
-        priority: int,
-        pipeline_json: str,
-        ignore_app_settings: bool,
-    ):
+    def _finalize_shape( self, cy: Optional[int], cx: Optional[int], r: Optional[int], bb: Optional[tuple[tuple[int, int], tuple[int, int]]], key_name: str, scancode: int, pointer: bool, priority: int, pipeline_json: str, ignore_app_settings: bool, strict: bool = True, ) -> bool:
+        """Creates the data entry and its artists. Returns True if a shape was added. `strict=False` is used while loading saved zones (no destructive validation)."""
         if cx is None or cy is None:
-            return
+            return False
+
+        # Validate geometry BEFORE touching any state, so no artist-less entry can be saved.
+        if self.mode == CIRCLE:
+            if r is None:
+                return False
+            r = max(int(r), DEFAULT_MIN_CIRCLE_R)
+            if scancode == MOUSE_WHEEL_SIMULATOR_CODE:
+                max_r = int(
+                    round(
+                        DEFAULT_SPEC_MAX_RATIO * ((self.img_width + self.img_height) / 2)
+                    )
+                )
+                r = min(r, max(DEFAULT_MIN_CIRCLE_R, max_r))
+            elif scancode == SPRINT_DISTANCE_CODE and self.saved_mouse_wheel:
+                r = max(DEFAULT_MIN_CIRCLE_R, min(r, int(self.mouse_wheel_radius)))
+        elif self.mode == RECTANGLE:
+            if bb is None:
+                return False
+            (x1, y1), (x2, y2) = bb
+            x2 = max(x2, x1 + DEFAULT_MIN_RECTANGLE_DIST)
+            y2 = max(y2, y1 + DEFAULT_MIN_RECTANGLE_DIST)
+            cx, cy, _, bb = calculate_raw_rectangle(((x1, y1), (x2, y2)))
+        else:
+            return False
 
         saved, entry_id = self._save_entry(
             key_name,
@@ -2278,9 +2363,10 @@ class LayoutsPlotterWidget(QWidget):
             priority,
             pipeline_json,
             ignore_app_settings,
+            strict,
         )
         if not saved:
-            return
+            return False
 
         label = (
             "MOUSE\nWHEEL"
@@ -2292,7 +2378,7 @@ class LayoutsPlotterWidget(QWidget):
             )
         )
 
-        if self.mode == CIRCLE and r is not None:
+        if self.mode == CIRCLE:
             fc = (
                 DEFAULT_MOUSE_WHEEL_FACE_COLOR
                 if scancode == MOUSE_WHEEL_SIMULATOR_CODE
@@ -2315,7 +2401,7 @@ class LayoutsPlotterWidget(QWidget):
                 self.mouse_wheel_indicators.move_mouse_wheel_indicators(False)
                 self.mouse_wheel_indicators.set_indicators_visible(True)
 
-        elif self.mode == RECTANGLE and bb is not None:
+        else:
             fc = get_vibrant_random_color(DEFAULT_FACE_COLOR_ALPHA)
             (x1, y1), (x2, y2) = bb
 
@@ -2326,8 +2412,6 @@ class LayoutsPlotterWidget(QWidget):
             self.shapes_artists[entry_id] = art
             self.labels_drag_managers[entry_id] = _DraggableLabel(entry_id, self)
             self.shapes_drag_managers[entry_id] = _DraggableRectangle(entry_id, self)
-        else:
-            return
 
         lbl.set_visible(self.show_overlays)
         self.ax.add_artist(lbl)
@@ -2339,110 +2423,60 @@ class LayoutsPlotterWidget(QWidget):
             self.labels_drag_managers[entry_id].dull_face_color()
             self.shapes_drag_managers[entry_id].dull_face_color()
 
-        self.current_bound_keys.append(label)
-
-    def _enter_naming_mode(self):
-        if self.state != IDLE:
-            return
-
-        self.state, self.buffer_default = NAMING, True
-
-        if self.active_layout is None:
-            return
-
-        self.input_buffer = self.active_layout.name
-        self.update_title(
-            f"SAVE: [{self.input_buffer}] | Enter: Save/Rename | Shift+Enter: Save as Copy | Esc: Cancel"
-        )
-
-    def _handle_naming_input(self, key):
-        if key == "escape":
-            self.reset_state()
-            return
-
-        if self.active_layout is None:
-            return
-
-        if key in ("enter", "shift+enter"):
-            self.save_to_database(
-                self.input_buffer.strip() or self.active_layout.name,
-                as_copy=key != "enter",
-            )
-            self.reset_state()
-            return
-        if key == "backspace":
-            if self.buffer_default:
-                self.input_buffer, self.buffer_default = "", False
-            else:
-                self.input_buffer = self.input_buffer[:-1]
-        elif len(key) == 1 and (key.isalnum() or key in "_ -.()"):
-            if self.buffer_default:
-                self.input_buffer, self.buffer_default = "", False
-            self.input_buffer += key
-        self.update_title(
-            f"SAVE: [{self.input_buffer or self.active_layout.name}] | Enter: Save/Rename | Shift+Enter: Save as Copy | Esc: Cancel"
-        )
+        return True
 
     def on_pointer_marked(self, uid):
+        if uid not in self.shapes or uid not in self.labels_drag_managers:
+            return
         if self.shapes[uid]["pointer"]:
             self.labels_drag_managers[uid].dull_face_color()
             self.shapes_drag_managers[uid].dull_face_color()
         else:
             self.labels_drag_managers[uid].restore_face_color()
             self.shapes_drag_managers[uid].restore_face_color()
+        self.mark_dirty()
+        self.canvas.draw_idle()
 
-    def save_to_database(self, user_name: str, as_copy=False):
-        if self.active_layout is None:
-            return
-
-        output = []
+    def _build_zone_rows(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
         for _, data in self.shapes.items():
-            entry = {
-                "name": data["key_name"],
-                "scancode": data["scancode"],
-                "type": data["type"],
-                "cx": data["cx"],
-                "cy": data["cy"],
-                "val1": 0,
-                "val2": 0,
-                "val3": 0,
-                "val4": 0,
-                "ignore_app_settings": data.get("ignore_app_settings", False),
-            }
-
-            pipeline_json_src = data.get("pipeline_json", "{}")
+            entry_scancode = int(data["scancode"])
             p_cfg = PipelineConfig()
-            p_cfg.set_pipeline_config_from_json(pipeline_json=pipeline_json_src)
+            p_cfg.set_pipeline_config_from_json(
+                pipeline_json=data.get("pipeline_json", "{}")
+            )
+
+            row: dict[str, Any] = {
+                "scancode": entry_scancode,
+                "name": data["key_name"],
+                "zone_type": data["type"],
+                "cx": float(data["cx"]),
+                "cy": float(data["cy"]),
+                "r": None,
+                "x1": None,
+                "y1": None,
+                "x2": None,
+                "y2": None,
+                "ignore_app_settings": bool(data.get("ignore_app_settings", False)),
+            }
 
             if data["type"] == CIRCLE:
                 region_idx = 1
-                entry["val1"] = data["r"]
+                row["r"] = float(data["r"])
             else:
                 region_idx = 2
                 (x_min, y_min), (x_max, y_max) = data["bb"]
-                entry["val1"], entry["val2"], entry["val3"], entry["val4"] = (
-                    x_min,
-                    y_min,
-                    x_max,
-                    y_max,
-                )
-
-            entry_scancode = int(data["scancode"])
+                row["x1"], row["y1"] = float(x_min), float(y_min)
+                row["x2"], row["y2"] = float(x_max), float(y_max)
 
             if entry_scancode == MOUSE_WHEEL_SIMULATOR_CODE:
-                p_cfg.pipeline_config["up"] = (
-                    self.mouse_wheel_indicators.mouse_wheel_indicators_map[0]
-                )
-                p_cfg.pipeline_config["left"] = (
-                    self.mouse_wheel_indicators.mouse_wheel_indicators_map[1]
-                )
-                p_cfg.pipeline_config["down"] = (
-                    self.mouse_wheel_indicators.mouse_wheel_indicators_map[2]
-                )
-                p_cfg.pipeline_config["right"] = (
-                    self.mouse_wheel_indicators.mouse_wheel_indicators_map[3]
-                )
+                indicators_map = self.mouse_wheel_indicators.mouse_wheel_indicators_map
+                p_cfg.pipeline_config["up"] = indicators_map[0]
+                p_cfg.pipeline_config["left"] = indicators_map[1]
+                p_cfg.pipeline_config["down"] = indicators_map[2]
+                p_cfg.pipeline_config["right"] = indicators_map[3]
 
+            # VERIFY (needs pipeline.py): these re-assert the idx of every stage on each save.
             p_cfg.set_origin_config(
                 idx=0 if entry_scancode == MOUSE_WHEEL_SIMULATOR_CODE else 1
             )
@@ -2458,185 +2492,156 @@ class LayoutsPlotterWidget(QWidget):
 
             p_cfg.set_region_config(idx=region_idx, priority=data.get("priority", 0))
             p_cfg.set_semantic_config(pointer=data.get("pointer", False))
-            entry["pipeline_json"] = p_cfg.get_pipeline_json_from_config()
-            output.append(entry)
+            row["pipeline_json"] = p_cfg.get_pipeline_json_from_config()
+            rows.append(row)
+        return rows
 
-        is_new_name = user_name != self.active_layout.name
+    def save_to_database(self, user_name: str, as_copy: bool = False) -> bool:
+        """Atomically saves the canvas. Returns True on success. as_copy=False: saves in place; if `user_name` differs from the current name the layout is RENAMED (never forked). as_copy=True : saves everything as a brand-new layout called `user_name`. """
+        if self.is_fatal_state or self.active_layout is None:
+            self.send_message.emit(
+                "Cannot Save", "There is no loaded layout image to save."
+            )
+            return False
 
-        if as_copy or is_new_name:
-            if as_copy and not is_new_name:
-                user_name = make_copy_name(user_name)
+        user_name = (user_name or "").strip() or self.active_layout.name
 
-            layout_id = store.layouts.create(
-                name=user_name,
-                width=self.img_width,
-                height=self.img_height,
-                dpi=self.img_dpi,
-                mouse_wheel_radius=self.mouse_wheel_radius,
-                sprint_distance=self.sprint_distance,
-                image_path=self.active_layout.image_path,
-            ).id
+        try:
+            zone_rows = self._build_zone_rows()
+            layout_fields: dict[str, Any] = {
+                "width": self.img_width,
+                "height": self.img_height,
+                "dpi": int(self.img_dpi),
+                "mouse_wheel_radius": float(self.mouse_wheel_radius),
+                "sprint_distance": float(self.sprint_distance),
+            }
 
+            if as_copy:
+                if store.layouts.name_exists(user_name):
+                    raise DuplicateNameError("A layout with that name already exists.")
+                layout_fields["name"] = user_name
+                layout_fields["image_path"] = self.active_layout.image_path
+                target_id = None
+            else:
+                if user_name != self.active_layout.name:
+                    if store.layouts.name_exists(user_name, self.active_layout.id):
+                        raise DuplicateNameError(
+                            "A layout with that name already exists."
+                        )
+                    layout_fields["name"] = user_name
+                target_id = self.active_layout.id
+
+            saved_layout = store.layouts.save_with_zones(
+                target_id,
+                layout_fields,
+                self.top_bezel_dp,
+                self.bottom_bezel_dp,
+                zone_rows,
+            )
+            store.set_active_layout(saved_layout.id)
+        except DuplicateNameError:
+            self.send_message.emit(
+                "Name Conflict", f"A layout named '{user_name}' already exists."
+            )
+            return False
+        except Exception as exc:
+            logger.exception("Failed to save layout '%s'", user_name)
+            self.send_message.emit("Save Error", f"Could not save layout:\n{exc}")
+            return False
+
+        self.active_layout = store.layouts.get(saved_layout.id)
+        self.loaded_layout_id = saved_layout.id
+
+        # Zone rows were recreated, so refresh the bezel row ids.
+        for zone in store.zones.list_for_layout(saved_layout.id, auto_heal=False):
+            if zone.zone_type == BEZEL:
+                if zone.scancode == TOP_BEZEL_ID:
+                    self.top_bezel_id = zone.id
+                elif zone.scancode == BOTTOM_BEZEL_ID:
+                    self.bottom_bezel_id = zone.id
+
+        self._set_dirty(False)
+        self.layout_saved.emit(saved_layout.name, saved_layout.id)
+        self.update_title(
+            f"SAVED COPY: {saved_layout.name}" if as_copy else f"SAVED: {saved_layout.name}"
+        )
+        return True
+
+    def _discard_special_entry(self, scancode: int) -> Optional[int]:
+        """Removes the single existing wheel/sprint entry (for replacement); returns its uid."""
+        for k, v in list(self.shapes.items()):
+            if v["scancode"] == scancode:
+                self._discard_artists(k)
+                return k
+        return None
+
+    def _reject_entry(self, title: str, msg: str, strict: bool) -> None:
+        """User-facing error when creating a shape; silent (log only) while loading saved zones."""
+        if strict:
+            self.send_message.emit(title, msg)
+            print(msg)
         else:
-            layout_id = self.active_layout.id
+            logger.warning("%s: %s", title, msg)
 
-            store.layouts.update(
-                layout_id,
-                width=self.img_width,
-                height=self.img_height,
-                dpi=self.img_dpi,
-                mouse_wheel_radius=self.mouse_wheel_radius,
-                sprint_distance=self.sprint_distance,
-            )
-
-        # Cache the bezel zones dp_thicknesses if they exist else fallback to defaults
-        top_bezel_thickness_dp: float = float(BEZEL_DP_THICKNESS)
-        bottom_bezel_thickness_dp: float = float(BEZEL_DP_THICKNESS)
-
-        top_bezel = store.zones.get(self.top_bezel_id)
-        if top_bezel:
-            top_bezel.set_parsed_config_from_json()
-            _, _, top_bezel_thickness_dp, _ = (
-                top_bezel.CONFIG_HELPER.get_region_config()
-            )
-
-        bottom_bezel = store.zones.get(self.bottom_bezel_id)
-        if bottom_bezel:
-            bottom_bezel.set_parsed_config_from_json()
-            _, _, bottom_bezel_thickness_dp, _ = (
-                bottom_bezel.CONFIG_HELPER.get_region_config()
-            )
-
-        # Clear the database layout of all zones
-        store.zones.delete_all_for_layout(layout_id)
-
-        # Ensure the bezels exist (removing duplicates) and update them with the cached dp_thicknesses
-        target_layout = store.layouts.get(layout_id)
-        if target_layout:
-            store.zones.create_bezel(
-                target_layout,
-                TOP_BEZEL_ID,
-                TOP_BEZEL_NAME,
-                True,
-                int(top_bezel_thickness_dp),
-            )
-            store.zones.create_bezel(
-                target_layout,
-                BOTTOM_BEZEL_ID,
-                BOTTOM_BEZEL_NAME,
-                False,
-                int(bottom_bezel_thickness_dp),
-            )
-
-        # Repopulate the other zones
-        for item in output:
-            store.zones.create(
-                layout_id=layout_id,
-                scancode=str(item["scancode"]),
-                name=item["name"],
-                zone_type=item["type"],
-                cx=float(item["cx"]),
-                cy=float(item["cy"]),
-                r=float(item["val1"]) if item["type"] == CIRCLE else None,
-                x1=float(item["val1"]) if item["type"] == RECTANGLE else None,
-                y1=float(item["val2"]) if item["type"] == RECTANGLE else None,
-                x2=float(item["val3"]) if item["type"] == RECTANGLE else None,
-                y2=float(item["val4"]) if item["type"] == RECTANGLE else None,
-                ignore_app_settings=item["ignore_app_settings"],
-                pipeline_json=item["pipeline_json"],
-            )
-
-        # Refresh local active layout model and verify bezel integrity
-        store.set_active_layout(layout_id)
-        self.active_layout = store.layouts.get(layout_id)
-
-        if self.active_layout:
-            for zone in store.zones.list_for_layout(layout_id, auto_heal=True):
-                if zone.zone_type == BEZEL:
-                    if zone.scancode == TOP_BEZEL_ID:
-                        self.top_bezel_id = zone.id
-                    elif zone.scancode == BOTTOM_BEZEL_ID:
-                        self.bottom_bezel_id = zone.id
-
-        self.layout_saved.emit(user_name, layout_id)
-        self.update_title(f"SAVED: {user_name}")
-
-    def _save_entry(
-        self,
-        key_name: str,
-        scancode: int,
-        cx: int,
-        cy: int,
-        r: Optional[int],
-        bb: Optional[tuple[tuple[int, int], tuple[int, int]]],
-        pointer: bool,
-        priority: int,
-        pipeline_json: str,
-        ignore_app_settings: bool,
-    ):
+    def _save_entry( self, key_name: str, scancode: int, cx: int, cy: int, r: Optional[int], bb: Optional[tuple[tuple[int, int], tuple[int, int]]], pointer: bool, priority: int, pipeline_json: str, ignore_app_settings: bool, strict: bool = True, ):
         uid, inc_count = self.count, True
+        replace_scancode: Optional[int] = None
+
+        # ---- 1. Validate everything first; mutate nothing until it all passes ----
         if scancode == MOUSE_WHEEL_SIMULATOR_CODE:
             if self.mode == RECTANGLE or r is None:
                 msg = "Mouse wheel cannot be a rectangle."
-                self.send_message.emit("Mouse Wheel Error", msg)
-                print(msg)
+                self._reject_entry("Mouse Wheel Error", msg, strict)
                 return False, uid
 
-            if self.saved_mouse_wheel:
-                for k, v in list(self.shapes.items()):
-                    if v["scancode"] == MOUSE_WHEEL_SIMULATOR_CODE:
-                        uid, inc_count = k, False
-                        self.shapes.pop(k)
-                        for d in (self.labels_artists, self.shapes_artists):
-                            if k in d:
-                                d.pop(k).remove()
-                        for d in (self.labels_drag_managers, self.shapes_drag_managers):
-                            if k in d:
-                                d.pop(k)._disconnect_cids()
-                        break
+            if strict and self.saved_sprint_distance and self.sprint_artist_id in self.shapes:
+                sp = self.shapes[self.sprint_artist_id]
+                if self._euclidean_distance(sp["cx"], sp["cy"], cx, cy) <= r:
+                    msg = "The existing sprint would end up inside the new mouse wheel. Delete or move the sprint first."
+                    self._reject_entry("Mouse Wheel Error", msg, strict)
+                    return False, uid
 
-            self.mouse_wheel_radius = r
+            if self.saved_mouse_wheel:
+                replace_scancode = MOUSE_WHEEL_SIMULATOR_CODE
+
+        elif scancode == SPRINT_DISTANCE_CODE:
+            if self.mode == RECTANGLE:
+                msg = "Sprint cannot be a rectangle."
+                self._reject_entry("Sprint Error", msg, strict)
+                return False, uid
+
+            if not self.saved_mouse_wheel:
+                msg = "No mouse wheel found, create one first before attempting to create sprint."
+                self._reject_entry("Sprint Error", msg, strict)
+                return False, uid
+
+            actual_dist = self._euclidean_distance(
+                cx, cy, self.mouse_wheel_cx, self.mouse_wheel_cy
+            )
+            if strict and actual_dist <= self.mouse_wheel_radius:
+                msg = "Sprint is too close to mouse wheel."
+                self._reject_entry("Sprint Error", msg, strict)
+                return False, uid
+
+            if self.saved_sprint_distance:
+                replace_scancode = SPRINT_DISTANCE_CODE
+
+        # ---- 2. Commit ----
+        if replace_scancode is not None:
+            old_uid = self._discard_special_entry(replace_scancode)
+            if old_uid is not None:
+                uid, inc_count = old_uid, False
+
+        if scancode == MOUSE_WHEEL_SIMULATOR_CODE:
+            self.mouse_wheel_radius = r  # type: ignore[assignment]
             self.mouse_wheel_cx = cx
             self.mouse_wheel_cy = cy
             self.saved_mouse_wheel = True
 
         elif scancode == SPRINT_DISTANCE_CODE:
-            if self.mode == RECTANGLE:
-                msg = "Sprint cannot be a rectangle."
-                self.send_message.emit("Sprint Error", msg)
-                print(msg)
-                return False, uid
-
-            if not self.saved_mouse_wheel:
-                msg = "No mouse wheel found, create one first before attempting to create sprint."
-                self.send_message.emit("Sprint Error", msg)
-                print(msg)
-                return False, uid
-
-            if self.saved_sprint_distance:
-                for k, v in list(self.shapes.items()):
-                    if v["scancode"] == SPRINT_DISTANCE_CODE:
-                        uid, inc_count = k, False
-                        self.shapes.pop(k)
-                        for d in (self.labels_artists, self.shapes_artists):
-                            if k in d:
-                                d.pop(k).remove()
-                        for d in (self.labels_drag_managers, self.shapes_drag_managers):
-                            if k in d:
-                                d.pop(k)._disconnect_cids()
-                        break
-
-            actual_dist = self._euclidean_distance(
+            self.sprint_distance = self._euclidean_distance(
                 cx, cy, self.mouse_wheel_cx, self.mouse_wheel_cy
             )
-
-            if actual_dist <= self.mouse_wheel_radius:
-                msg = "Sprint is too close to mouse wheel."
-                self.send_message.emit("Sprint Error", msg)
-                print(msg)
-                return False, uid
-
-            self.sprint_distance = actual_dist
             self.saved_sprint_distance = True
             self.sprint_artist_id = uid
 
@@ -2654,7 +2659,7 @@ class LayoutsPlotterWidget(QWidget):
             "ignore_app_settings": ignore_app_settings,
         }
         if inc_count:
-            self.count += 1
+            self.count = max(self.count, uid) + 1
         return True, uid
 
     def _print_data(self):
@@ -2665,7 +2670,17 @@ class LayoutsPlotterWidget(QWidget):
             self.update_title("List empty. Nothing to print.")
             return
 
-        print(f"\nCurrently bound: {",".join(k for k in set(self.current_bound_keys))}")
+        bound = sorted(
+            {
+                "MOUSE WHEEL"
+                if int(v["scancode"]) == MOUSE_WHEEL_SIMULATOR_CODE
+                else "SPRINT DISTANCE"
+                if int(v["scancode"]) == SPRINT_DISTANCE_CODE
+                else str(v["key_name"]).upper()
+                for v in self.shapes.values()
+            }
+        )
+        print("\nCurrently bound: " + ", ".join(bound))
         print("\nCurrent Shapes:")
         for k, v in self.shapes.items():
             print(k, v)
@@ -2677,7 +2692,7 @@ class LayoutsPlotterWidget(QWidget):
         x1, y1, x2, y2, x3, y3 = *self.points[0], *self.points[1], *self.points[2]
         d = 2 * (x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2))
         if d == 0:
-            self.update_title("Error: Points are collinear.")
+            self.send_message.emit("Shape Error", "The three points are collinear.")
             return None, None, None, None
         h = (
             (x1**2 + y1**2) * (y2 - y3)
@@ -2700,12 +2715,8 @@ class LayoutsPlotterWidget(QWidget):
         if len(self.points) < 4:
             return None, None, None, None
         xs, ys = [p[0] for p in self.points], [p[1] for p in self.points]
-        return (
-            int(round(sum(xs) / 4)),
-            int(round(sum(ys) / 4)),
-            None,
-            ((min(xs), min(ys)), (max(xs), max(ys))),
-        )
+        # Same center rule as every later edit (bbox center, not the mean of the 4 clicks).
+        return calculate_raw_rectangle(((min(xs), min(ys)), (max(xs), max(ys))))
 
     def _euclidean_distance(self, x1: float, y1: float, x2: float, y2: float):
         return math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
