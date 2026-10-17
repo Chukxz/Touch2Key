@@ -43,6 +43,7 @@ from modules.database.config_io import (
     export_settings_toml,
     import_any,
 )
+from modules.database.repositories import DuplicateNameError
 from modules.gui.widgets.layouts_plotter_widget import LayoutsPlotterWidget
 from modules.scripts.adb_screen_capture import capture_android_screen
 from modules.utils import (
@@ -54,6 +55,7 @@ from modules.utils import (
     MOUSE_WHEEL_SIMULATOR_CODE,
     SPRINT_DISTANCE_CODE,
     MapperEvent,
+    make_copy_name,
 )
 
 if TYPE_CHECKING:
@@ -63,8 +65,9 @@ logger = logging.getLogger("modules.gui.layout_studio_page")
 
 STATIC_HELP = (
     "<b>Help:</b> "
+    "<span style='color: palette(highlight);'>Ctrl+S</span> Save | "
+    "<span style='color: palette(highlight);'>Ctrl+Shift+S</span> Save As Copy | "
     "<span style='color: palette(highlight);'>Ctrl+F</span> Find | "
-    "<span style='color: palette(highlight);'>F12</span> Save | "
     "<span style='color: palette(highlight);'>Esc</span> Cancel | "
     "<span style='color: palette(highlight);'>F6</span> Circle | "
     "<span style='color: palette(highlight);'>F7</span> Rect | "
@@ -75,6 +78,8 @@ STATIC_HELP = (
     "<span style='color: palette(highlight);'>]</span> Bind Mousewheel | "
     "<span style='color: palette(highlight);'>Arrows</span> Nudge"
 )
+
+_DIRTY_BADGE = " *"
 
 
 def _format_timestamp(raw_ts: Optional[str]) -> str:
@@ -136,6 +141,10 @@ class LayoutStudioPage(QWidget):
         self.dispatcher = dispatcher
         self.standalone = standalone
 
+        # Remembered per-panel widths (never overwritten with a collapsed 0 width).
+        self._profiles_width = 240
+        self._inspector_width = 280
+
         # Sidebar controls stay visible when the panels are collapsed.
         self.profiles_toggle_btn = QToolButton()
         self.profiles_toggle_btn.setText("◀ Profiles")
@@ -173,13 +182,18 @@ class LayoutStudioPage(QWidget):
         self._setup_center_canvas()
         self._setup_right_inspector()
 
-        self._saved_splitter_sizes = [240, 560, 280]
-        self.splitter.setSizes(self._saved_splitter_sizes)
+        self.splitter.setSizes([self._profiles_width, 560, self._inspector_width])
         self._current_inspected_uid: Optional[int] = None
 
         self._wire_signals()
         self.load_profiles()
+        self._load_bezel_thicknesses_to_ui()
+        self._update_enabled_state()
+        self._update_dirty_ui()
 
+    # ------------------------------------------------------------------
+    # UI construction
+    # ------------------------------------------------------------------
     def _setup_left_sidebar(self) -> None:
         self.sidebar_widget = QWidget()
         self.sidebar_widget.setMinimumWidth(200)
@@ -260,7 +274,7 @@ class LayoutStudioPage(QWidget):
         io_layout.addLayout(export_row)
         sidebar_layout.addWidget(io_group)
 
-        maintenance_group = QGroupBox("maintenance")
+        maintenance_group = QGroupBox("Maintenance")
         maintenance_layout = QHBoxLayout(maintenance_group)
         self.clear_zones_btn = QPushButton("Clear Zones")
         self.delete_btn = QPushButton("Delete")
@@ -285,10 +299,16 @@ class LayoutStudioPage(QWidget):
         status_layout.setContentsMargins(0, 0, 0, 2)
         status_layout.setSpacing(2)
 
+        status_row = QHBoxLayout()
         self.canvas_status_label = QLabel("Initializing...")
         self.canvas_status_label.setStyleSheet(
             "font-size: 13px; font-weight: bold; color: palette(highlight);"
         )
+        self.unsaved_label = QLabel("● Unsaved changes")
+        self.unsaved_label.setStyleSheet("font-size: 12px; color: #d9a441;")
+        self.unsaved_label.setVisible(False)
+        status_row.addWidget(self.canvas_status_label, stretch=1)
+        status_row.addWidget(self.unsaved_label)
 
         self.canvas_help_label = QLabel(STATIC_HELP)
         self.canvas_help_label.setStyleSheet("font-size: 11px;")
@@ -309,7 +329,7 @@ class LayoutStudioPage(QWidget):
 
         self.canvas_help_toggle.toggled.connect(self._toggle_canvas_help)
 
-        status_layout.addWidget(self.canvas_status_label)
+        status_layout.addLayout(status_row)
         status_layout.addWidget(self.canvas_help_toggle)
         status_layout.addWidget(self.canvas_help_label)
 
@@ -332,13 +352,15 @@ class LayoutStudioPage(QWidget):
         self.add_circle_btn = QPushButton("Add Circle (F6)")
         self.add_rect_btn = QPushButton("Add Rectangle (F7)")
         self.cancel_action_btn = QPushButton("Cancel (Esc)")
-        self.save_btn = QPushButton("Save to DB (F12)")
+        self.save_btn = QPushButton("Save (Ctrl+S)")
         self.save_btn.setStyleSheet("font-weight: bold; color: palette(highlight);")
+        self.save_as_btn = QPushButton("Save As Copy… (Ctrl+Shift+S)")
 
         tools_row_2.addWidget(self.add_circle_btn)
         tools_row_2.addWidget(self.add_rect_btn)
         tools_row_2.addWidget(self.cancel_action_btn)
         tools_row_2.addWidget(self.save_btn)
+        tools_row_2.addWidget(self.save_as_btn)
         tools_row_2.addStretch()
         canvas_layout.addLayout(tools_row_2)
 
@@ -454,17 +476,64 @@ class LayoutStudioPage(QWidget):
 
         self.splitter.addWidget(self.inspector_widget)
 
+    # ------------------------------------------------------------------
+    # Page lifecycle
+    # ------------------------------------------------------------------
     def on_page_shown(self) -> None:
         self.load_profiles()
+
+        active = store.get_active_layout()
+        active_id = active.id if active else None
+
         if not self.has_loaded_before:
-            self.plotter_widget.reload_active_layout()
-        self._load_bezel_thicknesses_to_ui()
+            self._reload_plotter()
+        elif self.plotter_widget.loaded_layout_id != active_id:
+            # The active layout was changed elsewhere; never save the old canvas into it.
+            if not self._confirm_unsaved("switching to the newly active layout"):
+                return
+            # A "Save" in the prompt re-activates the layout that was just saved; restore the
+            # layout that was activated elsewhere.
+            if active_id is not None and store.layouts.get(active_id) is not None:
+                if store.settings.get().active_layout_id != active_id:
+                    store.settings.update(active_layout_id=active_id)
+                    self._notify_engine_reload()
+            self.load_profiles()
+            self._reload_plotter()
+        else:
+            self._load_bezel_thicknesses_to_ui()
+
+        self._update_enabled_state()
+        self._update_dirty_ui()
         self.has_loaded_before = True
+
+    def _reload_plotter(self, img=None, image_params=None) -> bool:
+        ok = self.plotter_widget.reload_active_layout(img, image_params)
+        self._current_inspected_uid = None
+        self.inspector_stack.setCurrentIndex(0)
+        self._load_bezel_thicknesses_to_ui()
+        self._update_enabled_state()
+        self._update_dirty_ui()
+        return ok
 
     def _wire_signals(self) -> None:
         # Search shortcut & key navigation
         self.search_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
+        self.search_shortcut.setContext(
+            Qt.ShortcutContext.WidgetWithChildrenShortcut
+        )
         self.search_shortcut.activated.connect(self._focus_search)
+
+        # Save shortcuts (the canvas has its own F12 -> save_requested)
+        self.save_shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
+        self.save_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.save_shortcut.activated.connect(self._save)
+
+        self.save_as_shortcut = QShortcut(QKeySequence("Ctrl+Shift+S"), self)
+        self.save_as_shortcut.setContext(
+            Qt.ShortcutContext.WidgetWithChildrenShortcut
+        )
+        self.save_as_shortcut.activated.connect(self._save_as_copy)
+
         self.search_input.returnPressed.connect(self._on_search_return_pressed)
         self.search_input.textChanged.connect(self._filter_profiles)
 
@@ -493,13 +562,16 @@ class LayoutStudioPage(QWidget):
         self.add_rect_btn.clicked.connect(lambda: self._start_draw_mode(RECTANGLE, 4))
         self.toggle_overlays_btn.clicked.connect(self.plotter_widget.toggle_visibility)
         self.cancel_action_btn.clicked.connect(self.plotter_widget.reset_state)
-        self.save_btn.clicked.connect(self._on_save_button_clicked)
+        self.save_btn.clicked.connect(self._save)
+        self.save_as_btn.clicked.connect(self._save_as_copy)
 
         # Plotter canvas bridge
         self.plotter_widget.layout_saved.connect(self._on_layout_saved)
         self.plotter_widget.zone_selected.connect(self._on_canvas_zone_selected)
         self.plotter_widget.status_updated.connect(self.canvas_status_label.setText)
         self.plotter_widget.send_message.connect(self._on_plotter_message_recieved)
+        self.plotter_widget.dirty_changed.connect(self._on_dirty_changed)
+        self.plotter_widget.save_requested.connect(self._save)
 
         # Inspector controls
         self.top_bezel_spin.valueChanged.connect(
@@ -519,54 +591,45 @@ class LayoutStudioPage(QWidget):
         self.insp_pointer.toggled.connect(self._on_pointer_toggled)
         self.insp_reset_zone_btn.clicked.connect(self._on_reset_single_zone)
 
+    # ------------------------------------------------------------------
+    # Panels
+    # ------------------------------------------------------------------
     def _toggle_profiles(self, visible: bool) -> None:
         sizes = self.splitter.sizes()
 
         if not visible:
             if sizes[0] > 0:
-                self._saved_splitter_sizes = sizes
+                self._profiles_width = sizes[0]
 
             self.sidebar_widget.hide()
             self.profiles_toggle_btn.setText("▶ Profiles")
 
             # Give the available space to the canvas.
-            self.splitter.setSizes(
-                [
-                    0,
-                    max(1, sizes[1] + sizes[0]),
-                    sizes[2],
-                ]
-            )
+            self.splitter.setSizes([0, max(1, sizes[1] + sizes[0]), sizes[2]])
         else:
             self.sidebar_widget.show()
             self.profiles_toggle_btn.setText("◀ Profiles")
 
-            saved = self._saved_splitter_sizes
-            self.splitter.setSizes(saved)
+            width = self._profiles_width
+            self.splitter.setSizes([width, max(1, sizes[1] - width), sizes[2]])
 
     def _toggle_inspector(self, visible: bool) -> None:
         sizes = self.splitter.sizes()
 
         if not visible:
             if sizes[2] > 0:
-                self._saved_splitter_sizes = sizes
+                self._inspector_width = sizes[2]
 
             self.inspector_widget.hide()
             self.inspector_toggle_btn.setText("Inspector ◀")
 
-            self.splitter.setSizes(
-                [
-                    sizes[0],
-                    max(1, sizes[1] + sizes[2]),
-                    0,
-                ]
-            )
+            self.splitter.setSizes([sizes[0], max(1, sizes[1] + sizes[2]), 0])
         else:
             self.inspector_widget.show()
             self.inspector_toggle_btn.setText("Inspector ▶")
 
-            saved = self._saved_splitter_sizes
-            self.splitter.setSizes(saved)
+            width = self._inspector_width
+            self.splitter.setSizes([sizes[0], max(1, sizes[1] - width), width])
 
     def _toggle_canvas_help(self, expanded: bool) -> None:
         self.canvas_help_label.setVisible(expanded)
@@ -574,6 +637,167 @@ class LayoutStudioPage(QWidget):
 
         self.canvas_help_toggle.setText("Help ▲" if expanded else "Help ▼")
 
+    # ------------------------------------------------------------------
+    # Dirty tracking, enabled state, prompts
+    # ------------------------------------------------------------------
+    def _on_dirty_changed(self, _dirty: bool) -> None:
+        self._update_dirty_ui()
+
+    def _update_dirty_ui(self) -> None:
+        dirty = self.plotter_widget.is_dirty
+        fatal = self.plotter_widget.is_fatal_state
+        self.unsaved_label.setVisible(dirty)
+        self.save_btn.setEnabled(dirty and not fatal)
+
+        loaded_id = self.plotter_widget.loaded_layout_id
+        for index in range(self.profile_list.count()):
+            item = self.profile_list.item(index)
+            base = item.data(Qt.ItemDataRole.UserRole + 2)
+            if base is None:
+                continue
+            is_loaded = item.data(Qt.ItemDataRole.UserRole) == loaded_id
+            item.setText(base + (_DIRTY_BADGE if dirty and is_loaded else ""))
+
+    def _update_enabled_state(self) -> None:
+        fatal = self.plotter_widget.is_fatal_state
+        has_active = store.get_active_layout() is not None
+
+        for w in (
+            self.add_circle_btn,
+            self.add_rect_btn,
+            self.cancel_action_btn,
+            self.toggle_overlays_btn,
+            self.save_as_btn,
+            self.top_bezel_spin,
+            self.bottom_bezel_spin,
+            self.reset_all_zones_btn,
+        ):
+            w.setEnabled(not fatal)
+
+        # Image buttons must stay usable in the "no image" state: they are the way out of it.
+        self.select_image_btn.setEnabled(has_active)
+        self.capture_btn.setEnabled(has_active)
+        self.save_btn.setEnabled(self.plotter_widget.is_dirty and not fatal)
+
+    def _confirm_unsaved(
+        self, action: str, discard_text: str = "Discard Changes"
+    ) -> bool:
+        """Save / Discard / Cancel prompt. True = safe to continue with `action`."""
+        if not self.plotter_widget.is_dirty:
+            return True
+
+        layout = self.plotter_widget.active_layout
+        name = layout.name if layout else "this layout"
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Unsaved Changes")
+        box.setText(f"'{name}' has unsaved changes.")
+        box.setInformativeText(f"Save them before {action}?")
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel
+        )
+        box.setDefaultButton(QMessageBox.StandardButton.Save)
+        discard_btn = box.button(QMessageBox.StandardButton.Discard)
+        if discard_btn is not None:
+            discard_btn.setText(discard_text)
+
+        choice = box.exec()
+        if choice == QMessageBox.StandardButton.Save:
+            return self._save()
+        return choice == QMessageBox.StandardButton.Discard
+
+    def _prompt_unique_name(
+        self,
+        title: str,
+        label: str,
+        suggested: str,
+        exclude_id: Optional[int] = None,
+    ) -> Optional[str]:
+        """Asks for a profile name until it is non-empty and unused. None = cancelled."""
+        text = suggested
+        while True:
+            name, ok = QInputDialog.getText(self, title, label, text=text)
+            if not ok:
+                return None
+            name = name.strip()
+            if not name:
+                QMessageBox.warning(self, "Invalid Name", "The name cannot be empty.")
+                text = suggested
+                continue
+            try:
+                taken = store.layouts.name_exists(name, exclude_id)
+            except Exception:
+                logger.exception("Name lookup failed")
+                taken = False
+            if taken:
+                QMessageBox.warning(
+                    self, "Name Conflict", f"A profile named '{name}' already exists."
+                )
+                text = name
+                continue
+            return name
+
+    # ------------------------------------------------------------------
+    # Save / Save As
+    # ------------------------------------------------------------------
+    def _save(self) -> bool:
+        """Saves the canvas in place (no prompt). Returns True on success."""
+        layout = self.plotter_widget.active_layout
+        if self.plotter_widget.is_fatal_state or layout is None:
+            self.plotter_widget.update_title("Nothing to save: no layout image loaded.")
+            return False
+        return self.plotter_widget.save_to_database(layout.name)
+
+    def _save_as_copy(self) -> bool:
+        layout = self.plotter_widget.active_layout
+        if self.plotter_widget.is_fatal_state or layout is None:
+            self.plotter_widget.update_title("Nothing to save: no layout image loaded.")
+            return False
+
+        suggested = make_copy_name(layout.name)
+        while store.layouts.name_exists(suggested):
+            suggested = make_copy_name(suggested)
+
+        name = self._prompt_unique_name(
+            "Save As Copy", "Name for the new profile:", suggested
+        )
+        if name is None:
+            return False
+        return self.plotter_widget.save_to_database(name, as_copy=True)
+
+    def save_state(self) -> bool:
+        """Persists unsaved canvas/inspector edits (called on app close). True = safe to exit."""
+        try:
+            if self.plotter_widget.is_fatal_state or not self.plotter_widget.is_dirty:
+                return True
+            layout = self.plotter_widget.active_layout
+            if layout is None:
+                return True
+            return self.plotter_widget.save_to_database(layout.name)
+        except Exception as exc:
+            logger.exception("Failed to save Layout Studio state")
+            QMessageBox.critical(
+                self,
+                "Save Error",
+                f"Could not save Layout Studio changes:\n\n{exc}",
+            )
+            return False
+
+    def _on_layout_saved(self, name: str, layout_id: int) -> None:
+        logger.info("Layout '%s' (ID: %s) saved to database", name, layout_id)
+        self.load_profiles()
+        self._update_enabled_state()
+        self._notify_engine_reload()
+
+    def _on_plotter_message_recieved(self, title: str, text: str):
+        QMessageBox.warning(self, title, text)
+
+    # ------------------------------------------------------------------
+    # Profile list
+    # ------------------------------------------------------------------
     def _focus_search(self) -> None:
         """Focuses search bar and selects existing text for immediate overwrite."""
         self.search_input.setFocus()
@@ -622,9 +846,10 @@ class LayoutStudioPage(QWidget):
 
         for index in range(self.profile_list.count()):
             item = self.profile_list.item(index)
-            raw_name = item.data(Qt.ItemDataRole.UserRole + 1) or item.text()
+            # Match the profile NAME only, never the decorations ("zones", "(Active)", "*").
+            raw_name = item.data(Qt.ItemDataRole.UserRole + 1) or ""
             item_layout_id = item.data(Qt.ItemDataRole.UserRole)
-            matches = query in raw_name.lower() or query in item.text().lower()
+            matches = query in raw_name.lower()
 
             item.setHidden(not matches)
 
@@ -649,9 +874,13 @@ class LayoutStudioPage(QWidget):
             self._on_selection_changed()
 
     def load_profiles(self) -> None:
+        selected = self.profile_list.selectedItems()
+        prev_selected_id = selected[0].data(Qt.ItemDataRole.UserRole) if selected else None
+
         self.profile_list.clear()
         try:
             layouts = store.layouts.list_all()
+            zone_counts = store.zones.count_by_layout()  # one query, no auto-heal writes
             active_layout = store.get_active_layout()
             active_id = active_layout.id if active_layout else None
 
@@ -666,19 +895,22 @@ class LayoutStudioPage(QWidget):
                 layouts.sort(key=lambda l: l.name.lower())
 
             for layout in layouts:
-                zones = store.zones.list_for_layout(layout.id)
+                zone_count = zone_counts.get(layout.id, 0)
                 rel_time, is_recent = _get_relative_time_and_recency(
                     layout.updated_at, threshold_hours=24
                 )
 
                 recent_badge = " ●" if is_recent else ""
                 display_text = (
-                    f"{layout.name}  [{len(zones)} zones]  ({rel_time}){recent_badge}"
+                    f"{layout.name}  [{zone_count} zones]  ({rel_time}){recent_badge}"
                 )
+                if layout.id == active_id:
+                    display_text = f"★ {display_text} (Active)"
 
                 item = QListWidgetItem(display_text)
                 item.setData(Qt.ItemDataRole.UserRole, layout.id)
                 item.setData(Qt.ItemDataRole.UserRole + 1, layout.name)
+                item.setData(Qt.ItemDataRole.UserRole + 2, display_text)
 
                 created_str = _format_timestamp(layout.created_at)
                 updated_str = _format_timestamp(layout.updated_at)
@@ -686,15 +918,14 @@ class LayoutStudioPage(QWidget):
                 item.setToolTip(
                     f"<b>{layout.name}</b><br>"
                     f"Canvas: {layout.width}x{layout.height} ({layout.dpi} DPI)<br>"
-                    f"Mapped Zones: {len(zones)}<br>"
+                    f"Mapped Zones: {zone_count}<br>"
                     f"Image path: {img_info}<br>"
                     f"<b>Modified:</b> {updated_str} ({rel_time})<br>"
                     f"<b>Created:</b> {created_str}"
                 )
 
-                font = item.font()
                 if layout.id == active_id:
-                    item.setText(f"★ {display_text} (Active)")
+                    font = item.font()
                     font.setBold(True)
                     item.setFont(font)
                 elif is_recent:
@@ -705,7 +936,19 @@ class LayoutStudioPage(QWidget):
                 self.profile_list.addItem(item)
 
             self._filter_profiles()
+
+            if prev_selected_id is not None:
+                for index in range(self.profile_list.count()):
+                    item = self.profile_list.item(index)
+                    if (
+                        item.data(Qt.ItemDataRole.UserRole) == prev_selected_id
+                        and not item.isHidden()
+                    ):
+                        self.profile_list.setCurrentItem(item)
+                        break
+
             self._on_selection_changed()
+            self._update_dirty_ui()
         except Exception as exc:
             logger.exception("Failed to load layout profiles from database")
             QMessageBox.critical(
@@ -733,35 +976,40 @@ class LayoutStudioPage(QWidget):
             if not layout:
                 return
 
-            zones = store.zones.list_for_layout(layout.id)
+            zone_count = store.zones.count_by_layout().get(layout.id, 0)
             img_info = Path(layout.image_path).name if layout.image_path else "None"
 
             self.details_label.setText(
                 f"Canvas: {layout.width} x {layout.height} @ {layout.dpi} DPI\n"
-                f"Zones: {len(zones)} | Image: {img_info}"
+                f"Zones: {zone_count} | Image: {img_info}"
             )
-        except Exception as exc:
-            logger.exception(
-                "Failed to fetch details for layout ID %s", layout_id, exc_info=True
-            )
+        except Exception:
+            logger.exception("Failed to fetch details for layout ID %s", layout_id)
 
     def _notify_engine_reload(self) -> None:
         if self.dispatcher is not None:
             self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
             self.dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
 
+    # ------------------------------------------------------------------
+    # Profile actions
+    # ------------------------------------------------------------------
     def _on_set_active(self) -> None:
         layout_id = self._get_selected_layout_id()
         if layout_id is None:
             return
 
+        if layout_id != self.plotter_widget.loaded_layout_id and not self._confirm_unsaved(
+            "switching profiles"
+        ):
+            return
+
         try:
             store.settings.update(active_layout_id=layout_id)
             self.load_profiles()
-            self.plotter_widget.reload_active_layout()
-            self._load_bezel_thicknesses_to_ui()
+            self._reload_plotter()
             self._notify_engine_reload()
-            
+
             logger.info("Activated profile ID %s", layout_id)
         except Exception as exc:
             logger.exception("Failed to set active profile ID %s", layout_id)
@@ -770,18 +1018,14 @@ class LayoutStudioPage(QWidget):
             )
 
     def _on_new_profile(self) -> None:
-        name, ok = QInputDialog.getText(self, "New Profile", "Enter profile name:")
-        if not ok or not name.strip():
+        if not self._confirm_unsaved("creating a new profile"):
             return
-        name = name.strip()
+
+        name = self._prompt_unique_name("New Profile", "Enter profile name:", "")
+        if name is None:
+            return
 
         try:
-            if store.layouts.get_by_name(name) is not None:
-                QMessageBox.warning(
-                    self, "Name Conflict", f"Profile '{name}' already exists."
-                )
-                return
-
             settings = store.settings.get()
             new_layout = store.layouts.create(
                 name=name,
@@ -791,11 +1035,14 @@ class LayoutStudioPage(QWidget):
             )
             store.settings.update(active_layout_id=new_layout.id)
             self.load_profiles()
-            self.plotter_widget.reload_active_layout()
-            self._load_bezel_thicknesses_to_ui()
+            self._reload_plotter()
             self._notify_engine_reload()
-            
+
             logger.info("Created new profile '%s' (ID: %s)", name, new_layout.id)
+        except DuplicateNameError:
+            QMessageBox.warning(
+                self, "Name Conflict", f"Profile '{name}' already exists."
+            )
         except Exception as exc:
             logger.exception("Failed to create new profile '%s'", name)
             QMessageBox.critical(
@@ -812,26 +1059,27 @@ class LayoutStudioPage(QWidget):
             if not layout:
                 return
 
-            new_name, ok = QInputDialog.getText(
-                self, "Rename Profile", "Enter new name:", text=layout.name
+            target_name = self._prompt_unique_name(
+                "Rename Profile", "Enter new name:", layout.name, exclude_id=layout_id
             )
-            if not ok or not new_name.strip() or new_name.strip() == layout.name:
-                return
-
-            target_name = new_name.strip()
-            if store.layouts.get_by_name(target_name) is not None:
-                QMessageBox.warning(
-                    self,
-                    "Name Conflict",
-                    f"A profile named '{target_name}' already exists.",
-                )
+            if target_name is None or target_name == layout.name:
                 return
 
             store.layouts.update(layout_id, name=target_name)
+
+            # Keep the canvas' snapshot in sync, otherwise the next Save would see a
+            # name mismatch.
+            if layout_id == self.plotter_widget.loaded_layout_id:
+                self.plotter_widget.active_layout = store.layouts.get(layout_id)
+
             self.load_profiles()
             self._notify_engine_reload()
-            
+
             logger.info("Renamed profile ID %s to '%s'", layout_id, target_name)
+        except DuplicateNameError:
+            QMessageBox.warning(
+                self, "Name Conflict", "A profile with that name already exists."
+            )
         except Exception as exc:
             logger.exception("Failed to rename profile ID %s", layout_id)
             QMessageBox.critical(self, "Error", f"Could not rename profile:\n{exc}")
@@ -841,27 +1089,25 @@ class LayoutStudioPage(QWidget):
         if layout_id is None:
             return
 
+        # Duplicate copies what is in the DATABASE; offer to save pending edits first.
+        if layout_id == self.plotter_widget.loaded_layout_id and not self._confirm_unsaved(
+            "duplicating", discard_text="Duplicate Without Changes"
+        ):
+            return
+
         try:
             source = store.layouts.get(layout_id)
             if source is None:
                 return
 
-            new_name, ok = QInputDialog.getText(
-                self,
-                "Duplicate Profile",
-                "New profile name:",
-                text=f"{source.name}_copy",
-            )
-            if not ok or not new_name.strip():
-                return
+            suggested = make_copy_name(source.name)
+            while store.layouts.name_exists(suggested):
+                suggested = make_copy_name(suggested)
 
-            target_name = new_name.strip()
-            if store.layouts.get_by_name(target_name) is not None:
-                QMessageBox.warning(
-                    self,
-                    "Name Conflict",
-                    f"A profile named '{target_name}' already exists.",
-                )
+            target_name = self._prompt_unique_name(
+                "Duplicate Profile", "New profile name:", suggested
+            )
+            if target_name is None:
                 return
 
             new_layout = store.layouts.duplicate(layout_id, target_name)
@@ -871,6 +1117,10 @@ class LayoutStudioPage(QWidget):
                 layout_id,
                 target_name,
                 new_layout.id,
+            )
+        except DuplicateNameError:
+            QMessageBox.warning(
+                self, "Name Conflict", "A profile with that name already exists."
             )
         except Exception as exc:
             logger.exception("Failed to duplicate profile ID %s", layout_id)
@@ -893,10 +1143,9 @@ class LayoutStudioPage(QWidget):
                 self.load_profiles()
                 active = store.get_active_layout()
                 if active and active.id == layout_id:
-                    self.plotter_widget.reload_active_layout()
-                    self._load_bezel_thicknesses_to_ui()
+                    self._reload_plotter()
                     self._notify_engine_reload()
-                    
+
                 logger.info("Cleared all zones for profile ID %s", layout_id)
             except Exception as exc:
                 logger.exception("Failed to clear zones for profile ID %s", layout_id)
@@ -920,16 +1169,18 @@ class LayoutStudioPage(QWidget):
 
         try:
             active_layout = store.get_active_layout()
-            is_active = active_layout and active_layout.id == layout_id
+            is_active = bool(active_layout and active_layout.id == layout_id)
 
+            # Zones are removed by ON DELETE CASCADE; the explicit call is kept for clarity.
             store.zones.delete_all_for_layout(layout_id)
             store.layouts.delete(layout_id)
 
             if is_active:
                 store.settings.update(active_layout_id=None)
-                self.plotter_widget.reload_active_layout()
-                self._load_bezel_thicknesses_to_ui()
+                self._reload_plotter()
                 self._notify_engine_reload()
+            elif layout_id == self.plotter_widget.loaded_layout_id:
+                self._reload_plotter()
 
             self.load_profiles()
             logger.info("Deleted profile ID %s", layout_id)
@@ -939,7 +1190,13 @@ class LayoutStudioPage(QWidget):
                 self, "Database Error", f"Could not delete profile:\n{exc}"
             )
 
+    # ------------------------------------------------------------------
+    # Import / Export
+    # ------------------------------------------------------------------
     def _on_import_clicked(self) -> None:
+        if not self._confirm_unsaved("importing"):
+            return
+
         PROFILES_FOLDER.mkdir(parents=True, exist_ok=True)
         file_path_str, _ = QFileDialog.getOpenFileName(
             self,
@@ -954,10 +1211,9 @@ class LayoutStudioPage(QWidget):
         try:
             if import_any(file_path):
                 self.load_profiles()
-                self.plotter_widget.reload_active_layout()
-                self._load_bezel_thicknesses_to_ui()
+                self._reload_plotter()
                 self._notify_engine_reload()
-                
+
                 logger.info("Imported configuration from '%s'", file_path.name)
                 QMessageBox.information(
                     self, "Success", f"Imported '{file_path.stem}' successfully."
@@ -972,9 +1228,17 @@ class LayoutStudioPage(QWidget):
             logger.exception("Unexpected error while importing '%s'", file_path.name)
             QMessageBox.critical(self, "Import Error", f"Failed to import:\n{exc}")
 
+    def _export_allowed(self, layout_id: int) -> bool:
+        """Exports read the database, so pending edits of the loaded layout would be missing."""
+        if layout_id != self.plotter_widget.loaded_layout_id:
+            return True
+        return self._confirm_unsaved(
+            "exporting", discard_text="Export Without Changes"
+        )
+
     def _on_export_json_clicked(self) -> None:
         layout_id = self._get_selected_layout_id()
-        if layout_id is None:
+        if layout_id is None or not self._export_allowed(layout_id):
             return
 
         layout = store.layouts.get(layout_id)
@@ -1005,7 +1269,7 @@ class LayoutStudioPage(QWidget):
 
     def _on_export_toml_clicked(self) -> None:
         layout_id = self._get_selected_layout_id()
-        if layout_id is None:
+        if layout_id is None or not self._export_allowed(layout_id):
             return
 
         layout = store.layouts.get(layout_id)
@@ -1045,7 +1309,7 @@ class LayoutStudioPage(QWidget):
 
     def _on_export_bundle_clicked(self) -> None:
         layout_id = self._get_selected_layout_id()
-        if layout_id is None:
+        if layout_id is None or not self._export_allowed(layout_id):
             return
 
         layout = store.layouts.get(layout_id)
@@ -1073,6 +1337,9 @@ class LayoutStudioPage(QWidget):
             logger.exception("Failed to export bundle")
             QMessageBox.critical(self, "Export Failed", str(exc))
 
+    # ------------------------------------------------------------------
+    # Canvas tools
+    # ------------------------------------------------------------------
     def _start_draw_mode(self, shape_type: str, clicks: int) -> None:
         if store.get_active_layout() is None:
             QMessageBox.warning(
@@ -1083,18 +1350,6 @@ class LayoutStudioPage(QWidget):
             return
         self.plotter_widget.start_mode(shape_type, clicks)
 
-    def _on_save_button_clicked(self) -> None:
-        active = store.get_active_layout()
-        if active is not None:
-            self.plotter_widget.save_to_database(active.name)
-        else:
-            self.plotter_widget.update_title("No active layout")
-
-    def _on_layout_saved(self, name: str, layout_id: int) -> None:
-        logger.info("Layout '%s' (ID: %s) saved to database", name, layout_id)
-        self.load_profiles()
-        self._notify_engine_reload()
-
     def _select_background_image(self) -> None:
         active = store.get_active_layout()
         if active is None:
@@ -1103,6 +1358,9 @@ class LayoutStudioPage(QWidget):
                 "No Active Layout",
                 "Please select or create an active layout before setting an image.",
             )
+            return
+
+        if not self._confirm_unsaved("changing the image"):
             return
 
         IMAGES_FOLDER.mkdir(parents=True, exist_ok=True)
@@ -1118,24 +1376,31 @@ class LayoutStudioPage(QWidget):
         img_path = Path(file_path_str)
 
         try:
-            img, image_params = self.plotter_widget.get_image_params(active, img_path)
-
-            self.load_profiles()
-            self.plotter_widget.reload_active_layout(img, image_params)
-            self._load_bezel_thicknesses_to_ui()
-            self._notify_engine_reload()
-
+            self._apply_image(active, img_path)
             logger.info(
                 "Updated active layout ID %s background image to '%s'",
                 active.id,
                 img_path.name,
             )
-
         except Exception as exc:
             logger.exception("Failed to update background image")
             QMessageBox.critical(
                 self, "Error", f"Failed to set background image:\n{exc}"
             )
+
+    def _apply_image(self, active, img_path: Path) -> bool:
+        """Stores the image on the layout (DB rescales zones atomically) and reloads the canvas."""
+        img, image_params = self.plotter_widget.get_image_params(active, img_path)
+        if img is None or image_params is None:
+            QMessageBox.warning(
+                self, "Image Error", f"Could not load image:\n{img_path.name}"
+            )
+            return False
+
+        self.load_profiles()
+        self._reload_plotter(img, image_params)
+        self._notify_engine_reload()
+        return True
 
     def _trigger_screenshot_capture(self) -> None:
         active = store.get_active_layout()
@@ -1147,71 +1412,47 @@ class LayoutStudioPage(QWidget):
             )
             return
 
+        if not self._confirm_unsaved("capturing a screenshot"):
+            return
+
         try:
+            # NOTE: capture_android_screen blocks the UI thread while adb runs.
             img_path = capture_android_screen(parent=self)
-            img, image_params = self.plotter_widget.get_image_params(active, img_path)
+            if not img_path:
+                return  # cancelled / nothing captured: leave everything untouched
 
-            self.load_profiles()
-            self.plotter_widget.reload_active_layout(img, image_params)
-            self._load_bezel_thicknesses_to_ui()
-            self._notify_engine_reload()
-
-            logger.info(
-                "Screenshot '%s' captured and linked to active layout ID %s",
-                img_path.name,
-                active.id,
-            )
-            QMessageBox.information(
-                self, "Screenshot", "Reference screenshot captured and linked."
-            )
+            if self._apply_image(active, Path(img_path)):
+                logger.info(
+                    "Screenshot '%s' captured and linked to active layout ID %s",
+                    Path(img_path).name,
+                    active.id,
+                )
+                QMessageBox.information(
+                    self, "Screenshot", "Reference screenshot captured and linked."
+                )
 
         except Exception as exc:
             logger.exception("Screenshot capture failed")
             QMessageBox.critical(self, "Capture Failed", str(exc))
 
+    # ------------------------------------------------------------------
+    # Inspector
+    # ------------------------------------------------------------------
     def _load_bezel_thicknesses_to_ui(self) -> None:
-        active = store.get_active_layout()
-        if not active:
-            return
-
+        """Shows the canvas' in-memory bezel thicknesses (saved together with the layout)."""
         self.top_bezel_spin.blockSignals(True)
         self.bottom_bezel_spin.blockSignals(True)
 
-        top_zone = store.zones.get(self.plotter_widget.top_bezel_id)
-        if top_zone:
-            top_zone.set_parsed_config_from_json()
-            _, _, val, _ = top_zone.CONFIG_HELPER.get_region_config()
-            self.top_bezel_spin.setValue(val)
-
-        bot_zone = store.zones.get(self.plotter_widget.bottom_bezel_id)
-        if bot_zone:
-            bot_zone.set_parsed_config_from_json()
-            _, _, val, _ = bot_zone.CONFIG_HELPER.get_region_config()
-            self.bottom_bezel_spin.setValue(val)
+        self.top_bezel_spin.setValue(self.plotter_widget.top_bezel_dp)
+        self.bottom_bezel_spin.setValue(self.plotter_widget.bottom_bezel_dp)
 
         self.top_bezel_spin.blockSignals(False)
         self.bottom_bezel_spin.blockSignals(False)
 
     def _on_bezel_thickness_changed(self, is_top: bool, val: float) -> None:
-        active = store.get_active_layout()
-        if not active:
-            return
-        bid = (
-            self.plotter_widget.top_bezel_id
-            if is_top
-            else self.plotter_widget.bottom_bezel_id
-        )
-        if not bid:
-            return
-
-        zone = store.zones.get(bid)
-        if not zone:
-            return
-
-        store.zones.update_bezel(active, zone, is_top, int(val))
-
-        self.plotter_widget._render_bezels_notch()
-        self.plotter_widget.canvas.draw_idle()
+        # In-memory edit + dirty flag, like every other canvas edit. It is written to the
+        # database (and the engine notified) on Save.
+        self.plotter_widget.set_bezel_dp(is_top, val)
 
     def _on_reset_all_zones(self) -> None:
         active = store.get_active_layout()
@@ -1220,21 +1461,18 @@ class LayoutStudioPage(QWidget):
         reply = QMessageBox.question(
             self,
             "Reset All Zones",
-            f"Reset all zones in layout '{active.name}' to default AppSettings?",
+            f"Reset all zones in layout '{active.name}' to default AppSettings?\n"
+            "Unsaved edits on the canvas will be discarded.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
             count = reset_layout_zones_to_app_settings(active.id)
-            self.plotter_widget.reload_active_layout()
-            self._load_bezel_thicknesses_to_ui()
+            self._reload_plotter()
             self._notify_engine_reload()
-            
+
             QMessageBox.information(
                 self, "Success", f"Reset {count} zones to default AppSettings."
             )
-    
-    def _on_plotter_message_recieved(self, title: str, text: str):
-        QMessageBox.information(self, title, text)
 
     def _on_canvas_zone_selected(self, uid: int) -> None:
         if uid == -1 or uid not in self.plotter_widget.shapes:
@@ -1252,7 +1490,7 @@ class LayoutStudioPage(QWidget):
 
         self.insp_name_label.setText(f"<b>Zone:</b> {shape_data['key_name']}")
 
-        for w in [
+        inspector_widgets = [
             self.insp_ignore_app_settings,
             self.insp_priority,
             self.insp_sens_x,
@@ -1260,7 +1498,8 @@ class LayoutStudioPage(QWidget):
             self.insp_deadzone,
             self.insp_hysteresis,
             self.insp_pointer,
-        ]:
+        ]
+        for w in inspector_widgets:
             w.blockSignals(True)
 
         self.insp_ignore_app_settings.setChecked(
@@ -1272,64 +1511,47 @@ class LayoutStudioPage(QWidget):
         p_cfg.set_pipeline_config_from_json(shape_data.get("pipeline_json", "{}"))
         _, _, sx, sy, dz, hys = p_cfg.get_transform_config()
 
+        is_wheel = shape_scancode == MOUSE_WHEEL_SIMULATOR_CODE
+        sens_enabled = is_pointer or is_wheel
+
         self.insp_sens_x.setValue(sx)
-        self.insp_sens_x.setEnabled(
-            any([is_pointer, shape_scancode == MOUSE_WHEEL_SIMULATOR_CODE])
-        )
+        self.insp_sens_x.setEnabled(sens_enabled)
         self.insp_sens_y.setValue(sy)
-        self.insp_sens_y.setEnabled(
-            any([is_pointer, shape_scancode == MOUSE_WHEEL_SIMULATOR_CODE])
-        )
+        self.insp_sens_y.setEnabled(sens_enabled)
 
         self.insp_hysteresis.setValue(hys)
-        self.insp_hysteresis.setEnabled(shape_scancode == MOUSE_WHEEL_SIMULATOR_CODE)
+        self.insp_hysteresis.setEnabled(is_wheel)
 
         self.insp_deadzone.setValue(dz)
-        self.insp_deadzone.setEnabled(shape_scancode == MOUSE_WHEEL_SIMULATOR_CODE)
+        self.insp_deadzone.setEnabled(is_wheel)
 
         self.insp_pointer.setEnabled(
-            not any(
-                [
-                    shape_scancode == MOUSE_WHEEL_SIMULATOR_CODE,
-                    shape_scancode == SPRINT_DISTANCE_CODE,
-                ]
-            )
+            shape_scancode not in (MOUSE_WHEEL_SIMULATOR_CODE, SPRINT_DISTANCE_CODE)
         )
         self.insp_pointer.setChecked(is_pointer)
 
-        for w in [
-            self.insp_ignore_app_settings,
-            self.insp_priority,
-            self.insp_sens_x,
-            self.insp_sens_y,
-            self.insp_deadzone,
-            self.insp_hysteresis,
-            self.insp_pointer,
-        ]:
+        for w in inspector_widgets:
             w.blockSignals(False)
 
     def _on_pointer_toggled(self, checked: bool) -> None:
         self._on_inspector_value_changed()
 
-        if self._current_inspected_uid is not None:
-            shape_data = self.plotter_widget.shapes[self._current_inspected_uid]
-            shape_scancode = int(shape_data["scancode"])
-            is_pointer = bool(shape_data.get("pointer", False))
+        if self._current_inspected_uid is None:
+            return
+        shape_data = self.plotter_widget.shapes.get(self._current_inspected_uid)
+        if shape_data is None:
+            return
 
-            self.insp_sens_x.blockSignals(True)
-            self.insp_sens_x.setEnabled(
-                any([is_pointer, shape_scancode == MOUSE_WHEEL_SIMULATOR_CODE])
-            )
-            self.insp_sens_x.blockSignals(False)
+        shape_scancode = int(shape_data["scancode"])
+        is_pointer = bool(shape_data.get("pointer", False))
+        sens_enabled = is_pointer or shape_scancode == MOUSE_WHEEL_SIMULATOR_CODE
 
-            self.insp_sens_y.blockSignals(True)
-            self.insp_sens_y.setEnabled(
-                any([is_pointer, shape_scancode == MOUSE_WHEEL_SIMULATOR_CODE])
-            )
-            self.insp_sens_y.blockSignals(False)
+        for spin in (self.insp_sens_x, self.insp_sens_y):
+            spin.blockSignals(True)
+            spin.setEnabled(sens_enabled)
+            spin.blockSignals(False)
 
-        if self._current_inspected_uid is not None:
-            self.plotter_widget.on_pointer_marked(self._current_inspected_uid)
+        self.plotter_widget.on_pointer_marked(self._current_inspected_uid)
 
     def _on_inspector_value_changed(self, *_args: Any) -> None:
         if self._current_inspected_uid is None:
@@ -1353,19 +1575,24 @@ class LayoutStudioPage(QWidget):
         r_idx, r_mode, b_dp, _ = p_cfg.get_region_config()
         p_cfg.set_region_config(r_idx, b_dp, prio)
 
-        t_idx, t_mode, _, _, _, _ = p_cfg.get_transform_config()
-        p_cfg.set_transform_config(
-            t_idx,
-            self.insp_sens_x.value(),
-            self.insp_sens_y.value(),
-            self.insp_deadzone.value(),
-            self.insp_hysteresis.value(),
+        # Only write back widgets that are enabled. Disabled spin boxes show clamped
+        # placeholder values (e.g. sens 0 -> 0.01) that must never overwrite stored data.
+        t_idx, t_mode, cur_sx, cur_sy, cur_dz, cur_hys = p_cfg.get_transform_config()
+        sx = self.insp_sens_x.value() if self.insp_sens_x.isEnabled() else cur_sx
+        sy = self.insp_sens_y.value() if self.insp_sens_y.isEnabled() else cur_sy
+        dz = self.insp_deadzone.value() if self.insp_deadzone.isEnabled() else cur_dz
+        hys = (
+            self.insp_hysteresis.value()
+            if self.insp_hysteresis.isEnabled()
+            else cur_hys
         )
+        p_cfg.set_transform_config(t_idx, sx, sy, dz, hys)
 
         s_idx, s_mode, _ = p_cfg.get_semantic_config()
         p_cfg.set_semantic_config(s_idx, ptr)
 
         shape["pipeline_json"] = p_cfg.get_pipeline_json_from_config()
+        self.plotter_widget.mark_dirty()
         self.plotter_widget.update_title(
             f"INSPECTING: {shape['key_name']} (Prio: {prio})", True
         )
@@ -1374,13 +1601,14 @@ class LayoutStudioPage(QWidget):
         if self._current_inspected_uid is None:
             return
         settings = store.settings.get()
-        for w in [
+        widgets = [
             self.insp_ignore_app_settings,
             self.insp_sens_x,
             self.insp_sens_y,
             self.insp_deadzone,
             self.insp_hysteresis,
-        ]:
+        ]
+        for w in widgets:
             w.blockSignals(True)
 
         self.insp_ignore_app_settings.setChecked(False)
@@ -1389,29 +1617,7 @@ class LayoutStudioPage(QWidget):
         self.insp_deadzone.setValue(settings.deadzone)
         self.insp_hysteresis.setValue(settings.hysteresis)
 
-        for w in [
-            self.insp_ignore_app_settings,
-            self.insp_sens_x,
-            self.insp_sens_y,
-            self.insp_deadzone,
-            self.insp_hysteresis,
-        ]:
+        for w in widgets:
             w.blockSignals(False)
 
         self._on_inspector_value_changed()
-
-    def save_state(self) -> bool:
-        """Persists any active layout, zone edits, and inspector values to the database."""
-        try:
-            active = store.get_active_layout()
-            if active is not None:
-                self.plotter_widget.save_to_database(active.name)
-            return True
-        except Exception as exc:
-            logger.exception("Failed to save Layout Studio state")
-            QMessageBox.critical(
-                self,
-                "Save Error",
-                f"Could not save Layout Studio changes:\n\n{exc}",
-            )
-            return False
