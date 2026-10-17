@@ -1543,11 +1543,15 @@ class LayoutsPlotterWidget(QWidget):
             else (self.img_height - bezel_px_thickness / 2.0)
         )
 
+        label = "Top Bezel Notch" if is_top else "Bottom Bezel Notch"
+
+        self.current_bound_keys.append(label)
+
         return (
             {
                 "x": _width / 2.0,
                 "y": label_y,
-                "text": f"Bezel Notch ({bezel_px_thickness:.0f}px)",
+                "text": f"{label} ({bezel_px_thickness:.0f}px)",
                 "color": "white",
                 "fontsize": self._get_scaled_font_size(),
                 "ha": "center",
@@ -1697,7 +1701,6 @@ class LayoutsPlotterWidget(QWidget):
 
         scale_x = (self.img_width / old_width) if old_width > 0 else 1.0
         scale_y = (self.img_height / old_height) if old_height > 0 else 1.0
-
 
         for zone in zones:
             if zone.zone_type == BEZEL:
@@ -2170,8 +2173,10 @@ class LayoutsPlotterWidget(QWidget):
 
         entry_scancode = int(self.shapes[uid]["scancode"])
         entry_key_name = str(self.shapes[uid]["key_name"])
+        label = entry_key_name.upper()
 
         if entry_scancode == MOUSE_WHEEL_SIMULATOR_CODE:
+            label = "MOUSE\nWHEEL"
             for sid in [
                 k
                 for k, v in self.shapes.items()
@@ -2185,6 +2190,7 @@ class LayoutsPlotterWidget(QWidget):
             self.mouse_wheel_indicators.set_indicators_visible(False)
 
         elif entry_scancode == SPRINT_DISTANCE_CODE:
+            label = "SPRINT\nDISTANCE"
             self.saved_sprint_distance = False
             self.sprint_artist_id = None
             self.sprint_distance = 0.0
@@ -2204,7 +2210,7 @@ class LayoutsPlotterWidget(QWidget):
             self.last_artist_id = None
 
         try:
-            self.current_bound_keys.remove(entry_key_name)
+            self.current_bound_keys.remove(label)
         except ValueError:
             pass
 
@@ -2333,7 +2339,7 @@ class LayoutsPlotterWidget(QWidget):
             self.labels_drag_managers[entry_id].dull_face_color()
             self.shapes_drag_managers[entry_id].dull_face_color()
 
-        self.current_bound_keys.append(key_name)
+        self.current_bound_keys.append(label)
 
     def _enter_naming_mode(self):
         if self.state != IDLE:
@@ -2658,6 +2664,8 @@ class LayoutsPlotterWidget(QWidget):
         if not self.shapes:
             self.update_title("List empty. Nothing to print.")
             return
+
+        print(f"\nCurrently bound: {",".join(k for k in set(self.current_bound_keys))}")
         print("\nCurrent Shapes:")
         for k, v in self.shapes.items():
             print(k, v)
