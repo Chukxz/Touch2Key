@@ -47,6 +47,7 @@ from modules.database.repositories import DuplicateNameError
 from modules.gui.widgets.layouts_plotter_widget import LayoutsPlotterWidget
 from modules.scripts.adb_screen_capture import capture_android_screen
 from modules.utils import (
+    BEZEL,
     CIRCLE,
     IMAGES_FOLDER,
     JSONS_FOLDER,
@@ -999,6 +1000,16 @@ class LayoutStudioPage(QWidget):
         if layout_id is None:
             return
 
+        # Already active AND loaded on the canvas: nothing to do. Reloading here would
+        # silently discard unsaved edits.
+        active = store.get_active_layout()
+        if (
+            active is not None
+            and active.id == layout_id
+            and layout_id == self.plotter_widget.loaded_layout_id
+        ):
+            return
+
         if layout_id != self.plotter_widget.loaded_layout_id and not self._confirm_unsaved(
             "switching profiles"
         ):
@@ -1139,11 +1150,18 @@ class LayoutStudioPage(QWidget):
         )
         if confirm == QMessageBox.StandardButton.Yes:
             try:
-                store.zones.delete_all_for_layout(layout_id)
+                # Keep the system bezels: deleting them would reset their thickness to the
+                # default when the layout is next auto-healed.
+                for zone in store.zones.list_for_layout(layout_id, auto_heal=False):
+                    if zone.zone_type != BEZEL:
+                        store.zones.delete(zone.id)
+
                 self.load_profiles()
                 active = store.get_active_layout()
-                if active and active.id == layout_id:
+                is_active = bool(active and active.id == layout_id)
+                if is_active or layout_id == self.plotter_widget.loaded_layout_id:
                     self._reload_plotter()
+                if is_active:
                     self._notify_engine_reload()
 
                 logger.info("Cleared all zones for profile ID %s", layout_id)
