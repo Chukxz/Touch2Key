@@ -20,6 +20,10 @@ from modules.utils import (
     CIRCLE,
     EXCLUDED_KEYS,
     InvalidFieldError,
+    MAX_BEZEL_DP,
+    MAX_PRIORITY,
+    MIN_BEZEL_DP,
+    MIN_PRIORITY,
     RECTANGLE,
     TOP_BEZEL_ID,
     TOP_BEZEL_NAME,
@@ -581,6 +585,41 @@ class LayoutZonesRepository:
         ).fetchall()
         return {int(r["layout_id"]): int(r["n"]) for r in rows}
 
+    @staticmethod
+    def _normalise_pipeline(pipeline_json: str) -> str:
+        """Clamps region priority and bezel dp to the supported ranges.
+
+        Returns the input untouched when it is unparseable, has no region, or is already
+        in range, so well-formed JSON is never rewritten (and `{}` never gains idx -1).
+        """
+        p_cfg = PipelineConfig()
+        p_cfg.set_pipeline_config_from_json(pipeline_json)
+        region = p_cfg.pipeline_config.get("region")
+        if not isinstance(region, dict):
+            return pipeline_json
+
+        try:
+            dp = int(float(region.get("bezel_dp_thickness", BEZEL_DP_THICKNESS)))
+            prio = int(region.get("priority", 0))
+        except (TypeError, ValueError):
+            return pipeline_json
+
+        new_dp = max(MIN_BEZEL_DP, min(MAX_BEZEL_DP, dp))
+        new_prio = max(MIN_PRIORITY, min(MAX_PRIORITY, prio))
+        if new_dp == dp and new_prio == prio:
+            return pipeline_json
+
+        logger.warning(
+            "Clamped pipeline values: bezel_dp %s -> %s, priority %s -> %s",
+            dp,
+            new_dp,
+            prio,
+            new_prio,
+        )
+        region["bezel_dp_thickness"] = new_dp
+        region["priority"] = new_prio
+        return p_cfg.get_pipeline_json_from_config()
+
     def _insert(self, conn: sqlite3.Connection, fields: dict[str, Any]) -> int:
         """Validated INSERT that runs inside the caller's transaction (no commit)."""
         unknown = set(fields) - self.ALLOWED_CREATE_FIELDS
@@ -595,6 +634,7 @@ class LayoutZonesRepository:
         fields.setdefault("name", "")
         fields.setdefault("ignore_app_settings", False)
         fields.setdefault("pipeline_json", "{}")
+        fields["pipeline_json"] = self._normalise_pipeline(fields["pipeline_json"])
 
         columns = ", ".join(fields)
         placeholders = ", ".join(f":{key}" for key in fields)
@@ -649,6 +689,9 @@ class LayoutZonesRepository:
             if existing is None:
                 raise KeyError(f"No zone with id={zone_id}")
             return existing
+
+        if "pipeline_json" in fields:
+            fields["pipeline_json"] = self._normalise_pipeline(fields["pipeline_json"])
 
         set_clause = ", ".join(f"{key} = :{key}" for key in fields)
         params = dict(fields)
@@ -771,7 +814,7 @@ class LayoutZonesRepository:
             dp_thickness = BEZEL_DP_THICKNESS
 
         # Clamp the dp value itself so the stored dp and the computed px always agree.
-        dp_thickness = max(1, min(100, int(dp_thickness)))
+        dp_thickness = max(MIN_BEZEL_DP, min(MAX_BEZEL_DP, int(dp_thickness)))
 
         thickness_px = float(dp_to_px(dp_thickness, layout.dpi))
         y1 = 0.0 if is_top else layout.height - thickness_px
