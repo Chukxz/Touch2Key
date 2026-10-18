@@ -33,9 +33,23 @@ from modules.database.config_io import (
 from modules.platforms import get_specific_qt_key
 from modules.scripts.list_windows import select_window
 from modules.utils import (
+    ADB_RATE_CAP_MAX,
+    ADB_RATE_CAP_MIN,
+    DEADZONE_MAX,
+    DEADZONE_MIN,
+    HYSTERESIS_MAX,
+    HYSTERESIS_MIN,
     MapperEvent,
+    PPS_ALERT_MAX,
+    PPS_ALERT_MIN,
     PROFILES_FOLDER,
+    SENSITIVITY_MAX,
+    SENSITIVITY_MIN,
     TOML_PATH,
+    TYPEMATIC_DELAY_MAX_MS,
+    TYPEMATIC_DELAY_MIN_MS,
+    TYPEMATIC_RATE_MAX_HZ,
+    TYPEMATIC_RATE_MIN_HZ,
     get_scancode_from_key,
 )
 
@@ -343,22 +357,22 @@ class SettingsPage(QWidget):
 
         input_form = QFormLayout()
         self.sensitivity_spin_x = QDoubleSpinBox()
-        self.sensitivity_spin_x.setRange(0.1, 10.0)
+        self.sensitivity_spin_x.setRange(SENSITIVITY_MIN, SENSITIVITY_MAX)
         self.sensitivity_spin_x.setSingleStep(0.1)
         input_form.addRow("Sensitivity X:", self.sensitivity_spin_x)
 
         self.sensitivity_spin_y = QDoubleSpinBox()
-        self.sensitivity_spin_y.setRange(0.1, 10.0)
+        self.sensitivity_spin_y.setRange(SENSITIVITY_MIN, SENSITIVITY_MAX)
         self.sensitivity_spin_y.setSingleStep(0.1)
         input_form.addRow("Sensitivity Y:", self.sensitivity_spin_y)
 
         self.deadzone_spin = QDoubleSpinBox()
-        self.deadzone_spin.setRange(0.0, 1.0)
+        self.deadzone_spin.setRange(DEADZONE_MIN, DEADZONE_MAX)
         self.deadzone_spin.setSingleStep(0.01)
         input_form.addRow("Deadzone:", self.deadzone_spin)
 
         self.hysteresis_spin = QDoubleSpinBox()
-        self.hysteresis_spin.setRange(0.0, 45.0)
+        self.hysteresis_spin.setRange(HYSTERESIS_MIN, HYSTERESIS_MAX)
         self.hysteresis_spin.setSingleStep(1.0)
         self.hysteresis_spin.setSuffix("°")
         input_form.addRow("Hysteresis:", self.hysteresis_spin)
@@ -371,13 +385,13 @@ class SettingsPage(QWidget):
         perf_form = QFormLayout(perf_group)
 
         self.rate_cap_spin = QDoubleSpinBox()
-        self.rate_cap_spin.setRange(30.0, 1000.0)
+        self.rate_cap_spin.setRange(ADB_RATE_CAP_MIN, ADB_RATE_CAP_MAX)
         self.rate_cap_spin.setSingleStep(10.0)
         self.rate_cap_spin.setSuffix(" Hz")
         perf_form.addRow("ADB Rate Cap:", self.rate_cap_spin)
 
         self.pps_alert_spin = QDoubleSpinBox()
-        self.pps_alert_spin.setRange(10.0, 500.0)
+        self.pps_alert_spin.setRange(PPS_ALERT_MIN, PPS_ALERT_MAX)
         self.pps_alert_spin.setSingleStep(5.0)
         self.pps_alert_spin.setSuffix(" PPS")
         perf_form.addRow("PPS Alert Threshold:", self.pps_alert_spin)
@@ -397,13 +411,13 @@ class SettingsPage(QWidget):
         typematic_form.addRow(self.typematic_enabled_check)
 
         self.typematic_delay_spin = QDoubleSpinBox()
-        self.typematic_delay_spin.setRange(100.0, 1000.0)
+        self.typematic_delay_spin.setRange(TYPEMATIC_DELAY_MIN_MS, TYPEMATIC_DELAY_MAX_MS)
         self.typematic_delay_spin.setSingleStep(10.0)
         self.typematic_delay_spin.setSuffix(" ms")
         typematic_form.addRow("Typematic Delay:", self.typematic_delay_spin)
 
         self.typematic_rate_spin = QDoubleSpinBox()
-        self.typematic_rate_spin.setRange(1.0, 100.0)
+        self.typematic_rate_spin.setRange(TYPEMATIC_RATE_MIN_HZ, TYPEMATIC_RATE_MAX_HZ)
         self.typematic_rate_spin.setSingleStep(1.0)
         self.typematic_rate_spin.setSuffix(" Hz")
         typematic_form.addRow("Typematic Rate:", self.typematic_rate_spin)
