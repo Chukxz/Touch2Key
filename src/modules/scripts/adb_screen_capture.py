@@ -102,7 +102,7 @@ def capture_android_screen(custom_img_name: str | None = None, parent=None) -> P
         err_msg = f"ADB screen capture failed: {exc}"
         logger.exception(err_msg)
         raise RuntimeError(err_msg) from exc
-    
+
     finally:
         try:
             subprocess.run(

@@ -528,10 +528,7 @@ class _DraggableCircle(_DraggableShape):
                     plotter.sprint_artist_id
                 )
                 sprint_shape = plotter.shapes.get(plotter.sprint_artist_id)
-                if (
-                    isinstance(sprint_shape_artist, Circle)
-                    and sprint_shape is not None
-                ):
+                if isinstance(sprint_shape_artist, Circle) and sprint_shape is not None:
                     cx, cy = sprint_shape_artist.get_center()  # type: ignore
                     actual_dist = plotter._euclidean_distance(cx, cy, new_cx, new_cy)
 
@@ -611,13 +608,18 @@ class _DraggableCircle(_DraggableShape):
                     )
                 ),
             )
-            if plotter.saved_sprint_distance and plotter.sprint_artist_id is not None:
-                sprint_shape_artist = plotter.shapes_artists.get(
-                    plotter.sprint_artist_id
-                )
-                if isinstance(sprint_shape_artist, Circle):
-                    if new_r < sprint_shape_artist.get_radius():
-                        new_sp_r = new_r
+
+            if plotter.saved_sprint_distance:
+                if plotter.sprint_distance > DEFAULT_MIN_CIRCLE_R:
+                    new_r = min(new_r, int(plotter.sprint_distance) - 1)
+
+                if plotter.sprint_artist_id is not None:
+                    sprint_shape_artist = plotter.shapes_artists.get(
+                        plotter.sprint_artist_id
+                    )
+                    if isinstance(sprint_shape_artist, Circle):
+                        if new_r < sprint_shape_artist.get_radius():
+                            new_sp_r = new_r
 
         if (
             plotter.saved_sprint_distance
@@ -975,7 +977,9 @@ class MouseWheelIndicators:
 
             for idx, bound in self.mouse_wheel_indicators_map.items():
                 if idx != current_indicator and bound == scancode:
-                    msg = f"Key '{key_name}' is already bound to another wheel direction."
+                    msg = (
+                        f"Key '{key_name}' is already bound to another wheel direction."
+                    )
                     self.plotter.send_message.emit("Key Error", msg)
                     return
 
@@ -1890,7 +1894,10 @@ class LayoutsPlotterWidget(QWidget):
 
             hovering = None
             for uid, mgr in self.labels_drag_managers.items():
-                if mgr.label_artist.get_visible() and mgr.label_artist.contains(event)[0]:
+                if (
+                    mgr.label_artist.get_visible()
+                    and mgr.label_artist.contains(event)[0]
+                ):
                     hovering = (uid, mgr, "label")
                     break
             if not hovering:
@@ -1928,7 +1935,9 @@ class LayoutsPlotterWidget(QWidget):
     # ------------------------------------------------------------------
     def _iter_drag_managers(self) -> list[_Draggable]:
         out: list[_Draggable] = []
-        for uid in sorted(set(self.labels_drag_managers) | set(self.shapes_drag_managers)):
+        for uid in sorted(
+            set(self.labels_drag_managers) | set(self.shapes_drag_managers)
+        ):
             if uid in self.labels_drag_managers:
                 out.append(self.labels_drag_managers[uid])
             if uid in self.shapes_drag_managers:
@@ -2273,7 +2282,10 @@ class LayoutsPlotterWidget(QWidget):
         ids = (f"shape_{uid}", f"label_{uid}")
         if self.current_draggable_id in ids:
             self.current_draggable_id = None
-        if self.current_draggable is not None and self.current_draggable.entry_id == uid:
+        if (
+            self.current_draggable is not None
+            and self.current_draggable.entry_id == uid
+        ):
             self.current_draggable = None
         if self.last_artist_id in ids:
             self.last_artist_id = None
@@ -2353,7 +2365,7 @@ class LayoutsPlotterWidget(QWidget):
         cy: Optional[int],
         cx: Optional[int],
         r: Optional[int],
-        bb: Optional[tuple[tuple[int, int], tuple[int, int]]],
+        bb: Optional[tuple[tuple[float, float], tuple[float, float]]],
         key_name: str,
         scancode: int,
         pointer: bool,
@@ -2374,7 +2386,8 @@ class LayoutsPlotterWidget(QWidget):
             if scancode == MOUSE_WHEEL_SIMULATOR_CODE:
                 max_r = int(
                     round(
-                        DEFAULT_SPEC_MAX_RATIO * ((self.img_width + self.img_height) / 2)
+                        DEFAULT_SPEC_MAX_RATIO
+                        * ((self.img_width + self.img_height) / 2)
                     )
                 )
                 r = min(r, max(DEFAULT_MIN_CIRCLE_R, max_r))
@@ -2417,6 +2430,11 @@ class LayoutsPlotterWidget(QWidget):
         )
 
         if self.mode == CIRCLE:
+            if r is None:
+                msg = f"{self.mode.capitalize()} shape with key name '{key_name}' and scancode '{scancode}' has no defined radius (r)."
+                self._reject_entry("Shape Error", msg, strict)
+                return False
+
             fc = (
                 DEFAULT_MOUSE_WHEEL_FACE_COLOR
                 if scancode == MOUSE_WHEEL_SIMULATOR_CODE
@@ -2440,6 +2458,11 @@ class LayoutsPlotterWidget(QWidget):
                 self.mouse_wheel_indicators.set_indicators_visible(True)
 
         else:
+            if bb is None:
+                msg = f"{self.mode.capitalize()} shape with key name '{key_name}' and scancode '{scancode}' has no defined bounding box (bb)."
+                self._reject_entry("Shape Error", msg, strict)
+                return False
+
             fc = get_vibrant_random_color(DEFAULT_FACE_COLOR_ALPHA)
             (x1, y1), (x2, y2) = bb
 
@@ -2630,7 +2653,7 @@ class LayoutsPlotterWidget(QWidget):
         cx: int,
         cy: int,
         r: Optional[int],
-        bb: Optional[tuple[tuple[int, int], tuple[int, int]]],
+        bb: Optional[tuple[tuple[float, float], tuple[float, float]]],
         pointer: bool,
         priority: int,
         pipeline_json: str,
@@ -2647,7 +2670,11 @@ class LayoutsPlotterWidget(QWidget):
                 self._reject_entry("Mouse Wheel Error", msg, strict)
                 return False, uid
 
-            if strict and self.saved_sprint_distance and self.sprint_artist_id in self.shapes:
+            if (
+                strict
+                and self.saved_sprint_distance
+                and self.sprint_artist_id in self.shapes
+            ):
                 sp = self.shapes[self.sprint_artist_id]
                 if self._euclidean_distance(sp["cx"], sp["cy"], cx, cy) <= r:
                     msg = "The existing sprint would end up inside the new mouse wheel. Delete or move the sprint first."
@@ -2732,11 +2759,15 @@ class LayoutsPlotterWidget(QWidget):
 
         bound = sorted(
             {
-                "MOUSE WHEEL"
-                if int(v["scancode"]) == MOUSE_WHEEL_SIMULATOR_CODE
-                else "SPRINT DISTANCE"
-                if int(v["scancode"]) == SPRINT_DISTANCE_CODE
-                else str(v["key_name"]).upper()
+                (
+                    "MOUSE WHEEL"
+                    if int(v["scancode"]) == MOUSE_WHEEL_SIMULATOR_CODE
+                    else (
+                        "SPRINT DISTANCE"
+                        if int(v["scancode"]) == SPRINT_DISTANCE_CODE
+                        else str(v["key_name"]).upper()
+                    )
+                )
                 for v in self.shapes.values()
             }
         )

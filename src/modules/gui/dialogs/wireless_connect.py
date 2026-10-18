@@ -64,7 +64,7 @@ class WirelessConnectDialog(QProgressDialog):
         self.setMinimumDuration(0)
         self.setAutoClose(False)
         self.setAutoReset(False)
-        
+
         self.endpoint: str | None = None
         self.error_msg: str | None = None
 

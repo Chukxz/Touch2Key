@@ -74,7 +74,7 @@ class Mapping(AbstractMapping):
                 clean = SPECIAL_MAP.get(raw_os_name, raw_os_name)
                 if clean is not None:
                     return clean.lower()
-                
+
         except Exception:
             pass
 
@@ -82,7 +82,7 @@ class Mapping(AbstractMapping):
         return f"0x{norm_code:x}"
 
     def get_key_code_from_name(self, key_name: str) -> int | None:
-        """Translates a key string token or hex string to a Windows native scancode."""        
+        """Translates a key string token or hex string to a Windows native scancode."""
         clean = key_name.strip().lower()
 
         if clean in self._MODIFIER_MAP_INV:

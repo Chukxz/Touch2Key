@@ -51,7 +51,7 @@ class AppLogManager:
         log_prefix: str = "touch2key",
         log_queue: multiprocessing.Queue | None = None,
     ) -> None:
-        """Initializes logging pipeline. If log_queue is provided, routes logs to the queue 
+        """Initializes logging pipeline. If log_queue is provided, routes logs to the queue
         and skips local file creation.
         """
         if cls._initialized:

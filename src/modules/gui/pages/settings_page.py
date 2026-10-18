@@ -169,7 +169,7 @@ class KeySequenceRow(QWidget):
                 self.sequence.append(k)
         self._update_display()
         self.save()
-        
+
     def _apply_arrows_preset(self) -> None:
         for k in ["left", "up", "down", "right"]:
             if k not in self.sequence:

@@ -99,14 +99,20 @@ class WheelMapper:
             if ignore_app_settings
             else float(settings.hysteresis)
         )
-        sprint = get_scancode_from_key(settings.sprint_key) if settings.sprint_key is not None else None
+        sprint = (
+            get_scancode_from_key(settings.sprint_key)
+            if settings.sprint_key is not None
+            else None
+        )
 
         center = Point(
             scale_coord(w, wheel_zone_values.get("cx")),
             scale_coord(h, wheel_zone_values.get("cy")),
         )
 
-        up, left, down, right = store.zones.get_mouse_wheel_directional_scancodes(layout)
+        up, left, down, right = store.zones.get_mouse_wheel_directional_scancodes(
+            layout
+        )
 
         if settings.anchored_joystick:
             pipeline = AnchoredJoystick(

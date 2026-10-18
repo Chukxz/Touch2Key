@@ -657,7 +657,7 @@ class InterceptionBridge(AbstractBridge):
 
         self._stop_heartbeat.set()
         self._stop_log_event.set()
-        
+
         if self.heartbeat_thread.is_alive():
             self.heartbeat_thread.join(timeout=1.0)
         if self._log_consumer_thread and self._log_consumer_thread.is_alive():

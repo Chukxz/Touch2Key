@@ -243,7 +243,7 @@ def migrate_json_layout(
                 zone_type=zone_type,
                 cx=float(item.get("cx")),
                 cy=float(item.get("cy")),
-                r= float(item.get("val1")) if zone_type == CIRCLE else None,
+                r=float(item.get("val1")) if zone_type == CIRCLE else None,
                 x1=float(item.get("val1")),
                 y1=float(item.get("val2")),
                 x2=float(item.get("val3")),

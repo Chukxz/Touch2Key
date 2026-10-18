@@ -306,7 +306,7 @@ SCANCODES = {
     "num_7": 0x47,
     "num_8": 0x48,
     "num_9": 0x49,
-    "num_minu": 0x4A,
+    "num_minus": 0x4A,
     "num_4": 0x4B,
     "num_5": 0x4C,
     "num_6": 0x4D,
@@ -492,7 +492,7 @@ class MapperEventDispatcher:
     def register_callback(
         self,
         event_type: EVENT_TYPE,
-        func: Callback,
+        callback: Callback,
     ) -> None:
         try:
             with self._lock:
@@ -503,22 +503,23 @@ class MapperEventDispatcher:
                     return
 
                 callbacks = self.callback_registry[event_type]
+                callback_name = getattr(callback, "__name__", repr(callback))
 
-                if func not in callbacks:
-                    callbacks.append(func)
+                if callback not in callbacks:
+                    callbacks.append(callback)
                     logger.debug(
-                        f"[+] Registered callback {func.__name__} for event {event_type}"
+                        f"[+] Registered callback {callback_name} for event {event_type}"
                     )
                 else:
                     logger.debug(
-                        f"[!] Callback {func.__name__} already registered for event {event_type}"
+                        f"[!] Callback {callback_name} already registered for event {event_type}"
                     )
 
         except Exception as exc:
-            func_name = getattr(func, "__name__", repr(func))
+            callback_name = getattr(callback, "__name__", repr(callback))
             logger.debug(
                 "[!] Error registering callback %s for event %s: %s",
-                func_name,
+                callback_name,
                 event_type,
                 exc,
                 exc_info=True,
@@ -527,7 +528,7 @@ class MapperEventDispatcher:
     def unregister_callback(
         self,
         event_type: EVENT_TYPE,
-        func: Callback,
+        callback: Callback,
     ) -> None:
         try:
             with self._lock:
@@ -538,21 +539,22 @@ class MapperEventDispatcher:
                     return
 
                 callbacks = self.callback_registry[event_type]
+                callback_name = getattr(callback, "__name__", repr(callback))
 
-                if func in callbacks:
-                    callbacks.remove(func)
+                if callback in callbacks:
+                    callbacks.remove(callback)
                     logger.debug(
-                        f"[+] Unregistered callback {func.__name__} for event {event_type}"
+                        f"[+] Unregistered callback {callback_name} for event {event_type}"
                     )
                 else:
                     logger.debug(
-                        f"[!] Callback {func.__name__} not found for event {event_type}"
+                        f"[!] Callback {callback_name} not found for event {event_type}"
                     )
 
         except Exception as exc:
-            func_name = getattr(func, "__name__", repr(func))
+            callback_name = getattr(callback, "__name__", repr(callback))
             logger.error(
-                f"[!] Error unregistering callback {func_name} for event {event_type}: {exc}",
+                f"[!] Error unregistering callback {callback_name} for event {event_type}: {exc}",
                 exc_info=True,
             )
 
@@ -592,15 +594,16 @@ class MapperEventDispatcher:
         args = self._get_callback_args(event)
 
         for callback in callbacks:
+            callback_name = getattr(callback, "__name__", repr(callback_name))
+
             try:
                 callback(*args)
                 logger.debug(
-                    f"[+] Dispatched event {event.action} to callback {callback.__name__}"
+                    f"[+] Dispatched event {event.action} to callback {callback_name}"
                 )
             except Exception as exc:
-                func_name = getattr(callback, "__name__", repr(callback))
                 logger.error(
-                    f"[!] Error in callback {func_name} for event {event.action}: {exc}",
+                    f"[!] Error in callback {callback_name} for event {event.action}: {exc}",
                     exc_info=True,
                 )
 
@@ -913,7 +916,11 @@ def get_adb_device():
         .splitlines()
     )
     real = [
-        d.split()[0] for d in out[1:] if "device" in d and not d.startswith("emulator-")
+        p[0]
+        for line in out[1:]
+        if len(p := line.split()) >= 2
+        and p[1] == "device"
+        and not p[0].startswith("emulator-")
     ]
     if not real:
         raise RuntimeError("No real device detected.")
@@ -958,7 +965,7 @@ def is_device_online(device: str):
             timeout=10,
             creationflags=CREATE_NO_WINDOW,
         )
-        return "device" in res.stdout
+        return res.stdout.strip() == "device"
     except Exception:
         return False
 

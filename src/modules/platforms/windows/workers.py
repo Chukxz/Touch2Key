@@ -89,9 +89,13 @@ def _release_all_buttons(
         if left_down:
             m_ctx.send(m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, LEFT_BUTTON_UP, 0, 0, 0))
         if right_down:
-            m_ctx.send(m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, RIGHT_BUTTON_UP, 0, 0, 0))
+            m_ctx.send(
+                m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, RIGHT_BUTTON_UP, 0, 0, 0)
+            )
         if middle_down:
-            m_ctx.send(m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, MIDDLE_BUTTON_UP, 0, 0, 0))
+            m_ctx.send(
+                m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, MIDDLE_BUTTON_UP, 0, 0, 0)
+            )
         if btn4_down:
             m_ctx.send(m_handle, M_Stroke(MOUSE_MOVE_RELATIVE, BUTTON_4_UP, 0, 0, 0))
         if btn5_down:

@@ -64,12 +64,14 @@ def check_single_instance(instance_name: str) -> tuple[bool, object | None]:
 
     raise RuntimeError(f"Unsupported platform: {sys.platform}")
 
+
 def notify_existing_instance(instance_name: str) -> None:
-    """Pings the already-running primary GUI instance via a local socket 
+    """Pings the already-running primary GUI instance via a local socket
     to request it to pop its window to the foreground.
     """
     try:
         from PySide6.QtNetwork import QLocalSocket
+
         socket = QLocalSocket()
         socket.connectToServer(instance_name)
         if socket.waitForConnected(500):

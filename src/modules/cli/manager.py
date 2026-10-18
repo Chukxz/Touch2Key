@@ -328,7 +328,9 @@ def configure_system_interactive() -> None:
         .lower()
     )
     two_finger_tap_enabled = (
-        s.two_finger_tap_enabled if not en_two_finger_tap_in else (en_two_finger_tap_in == "y")
+        s.two_finger_tap_enabled
+        if not en_two_finger_tap_in
+        else (en_two_finger_tap_in == "y")
     )
 
     en_bezel_in = (
@@ -343,7 +345,8 @@ def configure_system_interactive() -> None:
     )
 
     store.settings.update(
-        two_finger_tap_enabled=two_finger_tap_enabled, bezel_toggle_enabled=bezel_toggle_enabled
+        two_finger_tap_enabled=two_finger_tap_enabled,
+        bezel_toggle_enabled=bezel_toggle_enabled,
     )
     print("Two finger tap and Bezel Toggle settings updated successfully.")
     show_system()
@@ -536,7 +539,9 @@ def interactive_menu() -> None:
 
         elif choice == "rss":
             confirm = (
-                input("Reset two finger tap and bezel toggle settings to defaults? (y/N): ")
+                input(
+                    "Reset two finger tap and bezel toggle settings to defaults? (y/N): "
+                )
                 .strip()
                 .lower()
             )

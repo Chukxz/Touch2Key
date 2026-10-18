@@ -9,9 +9,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -81,6 +82,11 @@ STATIC_HELP = (
 )
 
 _DIRTY_BADGE = " *"
+
+
+def _help_html() -> str:
+    color = QApplication.palette().highlight().color().name()
+    return STATIC_HELP.replace("palette(highlight)", color)
 
 
 def _format_timestamp(raw_ts: Optional[str]) -> str:
@@ -311,7 +317,7 @@ class LayoutStudioPage(QWidget):
         status_row.addWidget(self.canvas_status_label, stretch=1)
         status_row.addWidget(self.unsaved_label)
 
-        self.canvas_help_label = QLabel(STATIC_HELP)
+        self.canvas_help_label = QLabel(_help_html())
         self.canvas_help_label.setStyleSheet("font-size: 11px;")
         self.canvas_help_label.setWordWrap(True)
         self.canvas_help_label.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -519,9 +525,7 @@ class LayoutStudioPage(QWidget):
     def _wire_signals(self) -> None:
         # Search shortcut & key navigation
         self.search_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
-        self.search_shortcut.setContext(
-            Qt.ShortcutContext.WidgetWithChildrenShortcut
-        )
+        self.search_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.search_shortcut.activated.connect(self._focus_search)
 
         # Save shortcuts (the canvas has its own F12 -> save_requested)
@@ -530,9 +534,7 @@ class LayoutStudioPage(QWidget):
         self.save_shortcut.activated.connect(self._save)
 
         self.save_as_shortcut = QShortcut(QKeySequence("Ctrl+Shift+S"), self)
-        self.save_as_shortcut.setContext(
-            Qt.ShortcutContext.WidgetWithChildrenShortcut
-        )
+        self.save_as_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.save_as_shortcut.activated.connect(self._save_as_copy)
 
         self.search_input.returnPressed.connect(self._on_search_return_pressed)
@@ -876,12 +878,16 @@ class LayoutStudioPage(QWidget):
 
     def load_profiles(self) -> None:
         selected = self.profile_list.selectedItems()
-        prev_selected_id = selected[0].data(Qt.ItemDataRole.UserRole) if selected else None
+        prev_selected_id = (
+            selected[0].data(Qt.ItemDataRole.UserRole) if selected else None
+        )
 
         self.profile_list.clear()
         try:
             layouts = store.layouts.list_all()
-            zone_counts = store.zones.count_by_layout()  # one query, no auto-heal writes
+            zone_counts = (
+                store.zones.count_by_layout()
+            )  # one query, no auto-heal writes
             active_layout = store.get_active_layout()
             active_id = active_layout.id if active_layout else None
 
@@ -1010,8 +1016,9 @@ class LayoutStudioPage(QWidget):
         ):
             return
 
-        if layout_id != self.plotter_widget.loaded_layout_id and not self._confirm_unsaved(
-            "switching profiles"
+        if (
+            layout_id != self.plotter_widget.loaded_layout_id
+            and not self._confirm_unsaved("switching profiles")
         ):
             return
 
@@ -1101,8 +1108,11 @@ class LayoutStudioPage(QWidget):
             return
 
         # Duplicate copies what is in the DATABASE; offer to save pending edits first.
-        if layout_id == self.plotter_widget.loaded_layout_id and not self._confirm_unsaved(
-            "duplicating", discard_text="Duplicate Without Changes"
+        if (
+            layout_id == self.plotter_widget.loaded_layout_id
+            and not self._confirm_unsaved(
+                "duplicating", discard_text="Duplicate Without Changes"
+            )
         ):
             return
 
@@ -1250,9 +1260,7 @@ class LayoutStudioPage(QWidget):
         """Exports read the database, so pending edits of the loaded layout would be missing."""
         if layout_id != self.plotter_widget.loaded_layout_id:
             return True
-        return self._confirm_unsaved(
-            "exporting", discard_text="Export Without Changes"
-        )
+        return self._confirm_unsaved("exporting", discard_text="Export Without Changes")
 
     def _on_export_json_clicked(self) -> None:
         layout_id = self._get_selected_layout_id()
@@ -1639,3 +1647,14 @@ class LayoutStudioPage(QWidget):
             w.blockSignals(False)
 
         self._on_inspector_value_changed()
+
+    # ------------------------------------------------------------------
+    # Events
+    # ------------------------------------------------------------------
+    def changeEvent(self, event: QEvent) -> None:
+        if hasattr(self, "canvas_help_label") and event.type() in (
+            QEvent.Type.PaletteChange,
+            QEvent.Type.ApplicationPaletteChange,
+        ):
+            self.canvas_help_label.setText(_help_html())
+        super().changeEvent(event)

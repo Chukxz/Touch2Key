@@ -132,9 +132,7 @@ LINUX_KEY_MAP = {
 
 LINUX_KEY_MAP_INV = {v: k for k, v in LINUX_KEY_MAP.items()}
 
-KEYBOARD_CAP = {
-    ecodes.EV_KEY: sorted(set(range(1, 256)) | set(LINUX_KEY_MAP.values()))
-}
+KEYBOARD_CAP = {ecodes.EV_KEY: sorted(set(range(1, 256)) | set(LINUX_KEY_MAP.values()))}
 
 MOUSE_CAP = {
     ecodes.EV_KEY: [

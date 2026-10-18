@@ -47,7 +47,9 @@ if TYPE_CHECKING:
     from multiprocessing.queues import Queue
 
 
-def _release_all_keys(log_queue: Queue, ui_device, ecodes, keys_set: set[int], reason=""):
+def _release_all_keys(
+    log_queue: Queue, ui_device, ecodes, keys_set: set[int], reason=""
+):
     log_queue.put(f"{reason}.")
     if keys_set:
         log_queue.put(f"Releasing {len(keys_set)} keys.")
