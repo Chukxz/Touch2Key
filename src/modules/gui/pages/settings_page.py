@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -35,6 +36,7 @@ from modules.utils import (
     MapperEvent,
     PROFILES_FOLDER,
     TOML_PATH,
+    get_scancode_from_key,
 )
 
 if TYPE_CHECKING:
@@ -43,9 +45,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger("modules.gui.settings_page")
 
 # -------------------------------------------------------------------------
-# Input Interception Filters
+# Input Filters
 # -------------------------------------------------------------------------
 
+def verify_key(key_name: str) -> bool:
+    if get_scancode_from_key(key_name) is None:
+        QMessageBox.warning(self, "Unsupported Key", f"'{key_name}' can't be mapped.")
+        return False
+    return True
 
 class KeyCaptureFilter(QObject):
     """Intercepts the next raw keypress (single stroke) without modal dialogs."""
@@ -72,6 +79,7 @@ class KeyCaptureFilter(QObject):
             precise_key = get_specific_qt_key(event)
             self.callback(precise_key)
             return True
+
         return False
 
 
@@ -83,6 +91,14 @@ class ContinuousSequenceFilter(QObject):
         self.key_callback = key_callback
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        # Block focus traversal before Qt converts Tab into a navigation event
+        if event.type() == QEvent.Type.ShortcutOverride and isinstance(
+            event, QKeyEvent
+        ):
+            if event.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
+                event.accept()
+                return True
+
         if event.type() == QEvent.Type.KeyPress and isinstance(event, QKeyEvent):
             if event.isAutoRepeat():
                 return True
@@ -155,9 +171,10 @@ class KeySequenceRow(QWidget):
 
     def add_key(self, db_key: str) -> None:
         if db_key not in self.sequence:
-            self.sequence.append(db_key)
-            self._update_display()
-            self.save()
+            if verify_key(db_key):
+                self.sequence.append(db_key)
+                self._update_display()
+                self.save()
 
     def stop_recording(self) -> None:
         if self.record_btn.isChecked():
@@ -573,7 +590,22 @@ class SettingsPage(QWidget):
         row.addStretch()
         return wrapper
 
+    def _cancel_captures(self) -> None:
+        if self._single_key_filter is not None:
+            QApplication.instance().removeEventFilter(self._single_key_filter)
+            self._single_key_filter = None
+        self.toggle_key_btn.setEnabled(True)
+        self.sprint_key_btn.setEnabled(True)
+        if self._active_seq_row is not None:
+            self._active_seq_row.stop_recording()
+
+    def hideEvent(self, event) -> None:
+        self._cancel_captures()
+        self.load_settings()
+        super().hideEvent(event)
+
     def _begin_single_key_capture(self, target_field: str) -> None:
+        self._cancel_captures()
         btn = (
             self.toggle_key_btn if target_field == "toggle_key" else self.sprint_key_btn
         )
@@ -588,16 +620,16 @@ class SettingsPage(QWidget):
 
         def on_captured(key_name: str | None):
             if self._single_key_filter is not None:
-                self.removeEventFilter(self._single_key_filter)
+                QApplication.instance().removeEventFilter(self._single_key_filter)
                 self._single_key_filter = None
             btn.setEnabled(True)
 
-            if key_name:
+            if key_name and verify_key(key_name):
                 self.persist_binding(target_field, key_name)
             self.load_settings()
 
         self._single_key_filter = KeyCaptureFilter(on_captured, self)
-        self.installEventFilter(self._single_key_filter)
+        QApplication.instance().installEventFilter(self._single_key_filter)
         self.setFocus()
 
     def begin_sequence_capture(self, row: KeySequenceRow) -> None:
@@ -606,12 +638,12 @@ class SettingsPage(QWidget):
 
         self._active_seq_row = row
         if self._sequence_filter is not None:
-            self.removeEventFilter(self._sequence_filter)
+            QApplication.instance().removeEventFilter(self._sequence_filter)
 
         self._sequence_filter = ContinuousSequenceFilter(
             key_callback=self._on_seq_key_captured, parent=self
         )
-        self.installEventFilter(self._sequence_filter)
+        QApplication.instance().installEventFilter(self._sequence_filter)
         self.setFocus()
 
     def end_sequence_capture(self, row: KeySequenceRow) -> None:
@@ -696,6 +728,10 @@ class SettingsPage(QWidget):
             self.typematic_rate_spin.blockSignals(False)
             self.two_finger_tap_enabled_check.blockSignals(False)
             self.bezel_toggle_enabled_check.blockSignals(False)
+
+            on = settings.typematic_enabled
+            self.typematic_delay_spin.setEnabled(on)
+            self.typematic_rate_spin.setEnabled(on)
 
         except Exception:
             logger.exception("Failed to load settings from database")
@@ -906,8 +942,7 @@ class SettingsPage(QWidget):
         )
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                for layout in store.layouts.list_all():
-                    store.layouts.delete(layout.id)
+                store.layouts.delete_all()
                 store.settings.reset_to_defaults()
                 store.settings.update(active_layout_id=None)
 
