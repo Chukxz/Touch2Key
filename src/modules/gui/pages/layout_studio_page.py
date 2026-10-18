@@ -43,6 +43,7 @@ from modules.database.config_io import (
     export_layout_json,
     export_settings_toml,
     import_any,
+    save_filename,
 )
 from modules.database.repositories import DuplicateNameError
 from modules.gui.widgets.layouts_plotter_widget import LayoutsPlotterWidget
@@ -1272,7 +1273,7 @@ class LayoutStudioPage(QWidget):
             return
 
         JSONS_FOLDER.mkdir(parents=True, exist_ok=True)
-        default_save_path = str(JSONS_FOLDER / f"{layout.name}.json")
+        default_save_path = str(JSONS_FOLDER / f"{safe_filename(layout.name)}.json")
 
         save_path_str, _ = QFileDialog.getSaveFileName(
             self,
@@ -1303,7 +1304,7 @@ class LayoutStudioPage(QWidget):
             return
 
         PROFILES_FOLDER.mkdir(parents=True, exist_ok=True)
-        default_save_path = str(PROFILES_FOLDER / f"{layout.name}.toml")
+        default_save_path = str(PROFILES_FOLDER / f"{safe_filename(layout.name)}.toml")
 
         save_path_str, _ = QFileDialog.getSaveFileName(
             self,
@@ -1315,11 +1316,11 @@ class LayoutStudioPage(QWidget):
             return
 
         try:
-            json_path = JSONS_FOLDER / f"{layout.name}.json"
-            linked_json = json_path if json_path.exists() else None
-            out_file = export_settings_toml(
-                Path(save_path_str), linked_json_path=linked_json
-            )
+            json_path = JSONS_FOLDER / f"{safe_filename(layout.name)}.json"
+export_layout_json(layout_id, json_path)
+out_file = export_settings_toml(
+    Path(save_path_str), linked_json_path=json_path, layout=layout
+)
 
             logger.info(
                 "Exported settings TOML for profile %s to %s", layout.name, out_file
@@ -1352,7 +1353,9 @@ class LayoutStudioPage(QWidget):
             return
 
         try:
-            t_file, j_file = export_bundle(Path(folder), profile_name=layout.name)
+            t_file, j_file = export_bundle(
+    Path(folder), profile_name=layout.name, layout_id=layout_id
+)
             logger.info("Exported bundle for %s", layout.name)
             QMessageBox.information(
                 self,
