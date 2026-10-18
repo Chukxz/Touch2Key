@@ -33,7 +33,29 @@ from modules.utils import (
     PROFILES_FOLDER,
     RECTANGLE,
     TOML_PATH,
+    TYPEMATIC_DELAY_MAX_MS,
+    TYPEMATIC_DELAY_MIN_MS,
+    TYPEMATIC_RATE_MAX_HZ,
+    TYPEMATIC_RATE_MIN_HZ,
+    clamp,
 )
+
+# ---------------------------------------------------------------------------
+# Input helpers
+# ---------------------------------------------------------------------------
+
+
+def _prompt_float(prompt: str, current: float) -> float:
+    """Asks for a float; blank or invalid input keeps `current`."""
+    raw = input(prompt).strip()
+    if not raw:
+        return current
+    try:
+        return float(raw)
+    except ValueError:
+        print(f"Invalid number '{raw}'; keeping {current}.")
+        return current
+
 
 # ---------------------------------------------------------------------------
 # Profile Inspection & Management
@@ -58,7 +80,14 @@ def set_profile_image(layout_id: int, image_path_input: str | Path) -> bool:
             )
             return False
 
-    store.layouts.update(layout_id, image_path=str(path.resolve()))
+    # Same convention as the GUI: a bare filename when the image lives in IMAGES_FOLDER
+    # (portable across machines), otherwise the absolute path.
+    if path.resolve().parent == IMAGES_FOLDER.resolve():
+        stored_ref = path.name
+    else:
+        stored_ref = str(path.resolve())
+
+    store.layouts.update(layout_id, image_path=stored_ref)
     print(f"Updated profile '{target.name}' background image to: {path.name}")
     return True
 
@@ -95,14 +124,16 @@ def list_profiles() -> None:
         print("\nNo layouts found in the database.\n")
         return
 
+    # One query; excludes the system bezels (same count the GUI shows).
+    zone_counts = store.zones.count_by_layout()
+
     print("\n--- Available Profiles ---")
     for l in layouts:
-        zones = store.zones.list_for_layout(l.id)
         active_flag = " [* ACTIVE]" if l.id == active_id else ""
         img_flag = f" (Img: {Path(l.image_path).name})" if l.image_path else ""
         print(
             f"  [{l.id}] {l.name} - {l.width}x{l.height} @ {l.dpi} DPI "
-            f"[{len(zones)} zones]{img_flag}{active_flag}"
+            f"[{zone_counts.get(l.id, 0)} zones]{img_flag}{active_flag}"
         )
     print()
 
@@ -220,17 +251,19 @@ def delete_profile(layout_id: int) -> bool:
 
 
 def clear_zones(layout_id: int) -> bool:
-    """Removes all touch zones from a profile while keeping the layout entry and reseeding its bezels."""
+    """Removes all touch zones from a profile while keeping the layout entry and its system bezels."""
     target = store.layouts.get(layout_id)
     if not target:
         print(f"Error: Layout ID {layout_id} not found.")
         return False
 
-    store.zones.delete_all_for_layout(layout_id)
-    store.zones.list_for_layout(layout_id)
+    # Delete only non-bezel zones so custom bezel thickness survives.
+    for zone in store.zones.list_for_layout(layout_id, auto_heal=False):
+        if zone.zone_type != BEZEL:
+            store.zones.delete(zone.id)
 
     print(
-        f"All touch zones cleared (system bezels auto-restored) for layout '{target.name}' (ID: {layout_id})."
+        f"All touch zones cleared (system bezels kept) for layout '{target.name}' (ID: {layout_id})."
     )
     return True
 
@@ -264,13 +297,24 @@ def configure_typematic_interactive() -> None:
     )
     enabled = s.typematic_enabled if not en_in else (en_in == "y")
 
-    delay_in = input(
-        f"Initial repeat delay ms (current: {s.typematic_delay_ms:.1f}): "
-    ).strip()
-    delay = float(delay_in) if delay_in else s.typematic_delay_ms
-
-    rate_in = input(f"Repeat rate Hz (current: {s.typematic_rate_hz:.1f}): ").strip()
-    rate = float(rate_in) if rate_in else s.typematic_rate_hz
+    delay = clamp(
+        _prompt_float(
+            f"Initial repeat delay ms {TYPEMATIC_DELAY_MIN_MS:.0f}-{TYPEMATIC_DELAY_MAX_MS:.0f} "
+            f"(current: {s.typematic_delay_ms:.1f}): ",
+            s.typematic_delay_ms,
+        ),
+        TYPEMATIC_DELAY_MIN_MS,
+        TYPEMATIC_DELAY_MAX_MS,
+    )
+    rate = clamp(
+        _prompt_float(
+            f"Repeat rate Hz {TYPEMATIC_RATE_MIN_HZ:.0f}-{TYPEMATIC_RATE_MAX_HZ:.0f} "
+            f"(current: {s.typematic_rate_hz:.1f}): ",
+            s.typematic_rate_hz,
+        ),
+        TYPEMATIC_RATE_MIN_HZ,
+        TYPEMATIC_RATE_MAX_HZ,
+    )
 
     ex_in = input(
         f"Excluded keys comma-separated (current: {s.typematic_excluded_keys or ''}): "
@@ -584,7 +628,9 @@ def interactive_menu() -> None:
                     else store.get_active_layout()
                 )
                 if active:
-                    t_path, j_path = export_bundle(profile_name=active.name)
+                    t_path, j_path = export_bundle(
+                        profile_name=active.name, layout_id=active.id
+                    )
                     print(f"Bundle exported:\n  - TOML: {t_path}\n  - JSON: {j_path}")
                 else:
                     print("No active layout available to bundle.")
@@ -820,9 +866,13 @@ def run() -> None:
                 True if args.set_typematic == "on" else False
             )
         if args.typematic_delay is not None:
-            typematic_updates["typematic_delay_ms"] = args.typematic_delay
+            typematic_updates["typematic_delay_ms"] = clamp(
+                args.typematic_delay, TYPEMATIC_DELAY_MIN_MS, TYPEMATIC_DELAY_MAX_MS
+            )
         if args.typematic_rate is not None:
-            typematic_updates["typematic_rate_hz"] = args.typematic_rate
+            typematic_updates["typematic_rate_hz"] = clamp(
+                args.typematic_rate, TYPEMATIC_RATE_MIN_HZ, TYPEMATIC_RATE_MAX_HZ
+            )
         if args.typematic_excludes is not None:
             typematic_updates["typematic_excluded_keys"] = ",".join(
                 k.strip().lower()
