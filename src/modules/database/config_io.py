@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Optional
 import tomlkit
@@ -12,6 +13,14 @@ from modules.utils import CIRCLE, JSONS_FOLDER, PROFILES_FOLDER, TOML_PATH
 
 logger = logging.getLogger("modules.database.config_io")
 
+_ILLEGAL_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def safe_filename(name: str) -> str:
+    """Layout names may contain characters that are illegal in file names."""
+    cleaned = _ILLEGAL_FILENAME_CHARS.sub("_", name).strip(" .")
+    return cleaned or "profile"
+
 
 def export_layout_json(layout_id: int, target_path: Optional[Path] = None) -> Path:
     """Exports a single layout row and its zones to a JSON file in data/jsons/."""
@@ -20,7 +29,7 @@ def export_layout_json(layout_id: int, target_path: Optional[Path] = None) -> Pa
         raise ValueError(f"Layout ID {layout_id} does not exist.")
 
     JSONS_FOLDER.mkdir(parents=True, exist_ok=True)
-    out_file = target_path or (JSONS_FOLDER / f"{layout.name}.json")
+    out_file = target_path or (JSONS_FOLDER / f"{safe_filename(layout.name)}.json")
 
     zones = store.zones.list_for_layout(layout.id)
     content = []
@@ -65,10 +74,15 @@ def export_layout_json(layout_id: int, target_path: Optional[Path] = None) -> Pa
 def export_settings_toml(
     target_path: Path = TOML_PATH,
     linked_json_path: Optional[Path] = None,
+    layout=None,
 ) -> Path:
-    """Exports app_settings to TOML in data/settings.toml or custom target."""
+    """Exports app_settings to TOML in data/settings.toml or custom target.
+
+    `layout` selects which layout's canvas/image fields are written (defaults to the
+    active layout).
+    """
     s = store.settings.get()
-    active_layout = store.get_active_layout()
+    active_layout = layout if layout is not None else store.get_active_layout()
 
     doc = tomlkit.document()
 
@@ -82,7 +96,8 @@ def export_settings_toml(
         "json_dev_height", active_layout.height if active_layout else s.json_dev_height
     )
     system.add("json_dev_dpi", active_layout.dpi if active_layout else s.json_dev_dpi)
-    system.add("image_path", active_layout.image_path if active_layout else "")
+    # image_path is None for layouts without an image; TOML has no null.
+    system.add("image_path", (active_layout.image_path if active_layout else "") or "")
 
     if linked_json_path:
         system.add("json_path", str(linked_json_path.resolve()))
@@ -140,22 +155,27 @@ def export_settings_toml(
 
 
 def export_bundle(
-    target_dir: Optional[Path] = None, profile_name: Optional[str] = None
+    target_dir: Optional[Path] = None,
+    profile_name: Optional[str] = None,
+    layout_id: Optional[int] = None,
 ) -> tuple[Path, Path]:
-    """Exports both active layout (.json) and linked settings (.toml) into data/profiles/<name>/."""
-    active_layout = store.get_active_layout()
-    if not active_layout:
-        raise ValueError("No active layout available to bundle.")
+    """Exports a layout (.json) and linked settings (.toml) into <target_dir>/<name>/.
 
-    name = profile_name or active_layout.name
+    `layout_id` selects the layout to bundle; it defaults to the active layout.
+    """
+    layout = store.layouts.get(layout_id) if layout_id is not None else store.get_active_layout()
+    if not layout:
+        raise ValueError("No layout available to bundle.")
+
+    name = safe_filename(profile_name or layout.name)
 
     PROFILES_FOLDER.mkdir(parents=True, exist_ok=True)
-    out_dir = (target_dir or PROFILES_FOLDER) / f"{name}"
+    out_dir = (target_dir or PROFILES_FOLDER) / name
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    json_file = export_layout_json(active_layout.id, out_dir / f"{name}.json")
+    json_file = export_layout_json(layout.id, out_dir / f"{name}.json")
     toml_file = export_settings_toml(
-        out_dir / f"{name}.toml", linked_json_path=json_file
+        out_dir / f"{name}.toml", linked_json_path=json_file, layout=layout
     )
 
     logger.info("Exported full profile bundle to %s", out_dir)
@@ -172,9 +192,10 @@ def import_any(file_or_dir_path: Path | str) -> bool:
     if path.is_dir():
         toml_files = sorted(path.glob("*.toml"))
         if toml_files:
-            migrate_all(toml_files[0])
-            logger.info("Imported profile bundle from directory: %s", path)
-            return True
+            ok = migrate_all(toml_files[0])
+            if ok:
+                logger.info("Imported profile bundle from directory: %s", path)
+            return ok
         json_files = sorted(path.glob("*.json"))
         if json_files:
             return migrate_json_layout(json_files[0], set_active=True) is not None
@@ -185,7 +206,6 @@ def import_any(file_or_dir_path: Path | str) -> bool:
         layout_id = migrate_json_layout(path, set_active=True)
         return layout_id is not None
     elif suffix == ".toml":
-        migrate_all(path)
-        return True
+        return migrate_all(path)
 
     return False
