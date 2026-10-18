@@ -130,7 +130,9 @@ class _CursorManager:
 class _Draggable:
     """Shared base. Event wiring lives in LayoutsPlotterWidget (one connection per event), which dispatches to the _on_press/_on_motion/_reset_edge/_finish_release hooks below."""
 
-    def __init__( self, entry_id: int, is_shape: bool, plotter_ref: LayoutsPlotterWidget ):
+    def __init__(
+        self, entry_id: int, is_shape: bool, plotter_ref: LayoutsPlotterWidget
+    ):
         self.entry_id = entry_id
         self.plotter = plotter_ref
         self.cursor_manager = plotter_ref.cursor_manager
@@ -505,7 +507,9 @@ class _DraggableCircle(_DraggableShape):
 
         self._circle_transform_helper(old_cx, old_cy, old_r, new_cx, new_cy, True)
 
-    def _circle_transform_helper( self, old_cx, old_cy, old_r, new_cx, new_cy, is_blitting: bool ):
+    def _circle_transform_helper(
+        self, old_cx, old_cy, old_r, new_cx, new_cy, is_blitting: bool
+    ):
         if not isinstance(self.shape_artist, Circle):
             return
         plotter = self.plotter
@@ -979,7 +983,9 @@ class MouseWheelIndicators:
                 current_indicator, key_name, scancode
             )
 
-    def update_mouse_wheel_indicator_from_scancode( self, current_indicator: int, key_name: str, scancode: int ):
+    def update_mouse_wheel_indicator_from_scancode(
+        self, current_indicator: int, key_name: str, scancode: int
+    ):
         scancode_key_name = get_key_from_scancode(scancode)
         if not scancode_key_name:
             msg = f"Key '{key_name}' with scancode '{scancode}' has no equivalent key name."
@@ -1220,7 +1226,7 @@ class LayoutsPlotterWidget(QWidget):
     # ------------------------------------------------------------------
     # State / dirty tracking
     # ------------------------------------------------------------------
-@property
+    @property
     def is_dirty(self) -> bool:
         return self._dirty
 
@@ -1328,7 +1334,11 @@ class LayoutsPlotterWidget(QWidget):
             animated=True,
         )
 
-    def reload_active_layout( self, img: Optional[Image.Image] = None, image_params: Optional[tuple[int, int, int]] = None, ) -> bool:
+    def reload_active_layout(
+        self,
+        img: Optional[Image.Image] = None,
+        image_params: Optional[tuple[int, int, int]] = None,
+    ) -> bool:
         self.active_layout = store.get_active_layout()
         self.loaded_layout_id = self.active_layout.id if self.active_layout else None
 
@@ -1514,8 +1524,10 @@ class LayoutsPlotterWidget(QWidget):
             print(f"Error loading image: {exc}")
             return
 
-    def get_image_params( self, active_layout: Layout, img_path: Optional[Path] = None ) -> tuple[Optional[Image.Image], Optional[tuple[int, int, int]]]:
-        """Loads the image and atomically stores its width/height/dpi/path on the layout. If the resolution changed, the DB layer rescales all zones in the same transaction, so the stored zones and the stored canvas size can never disagree. """
+    def get_image_params(
+        self, active_layout: Layout, img_path: Optional[Path] = None
+    ) -> tuple[Optional[Image.Image], Optional[tuple[int, int, int]]]:
+        """Loads the image and atomically stores its width/height/dpi/path on the layout. If the resolution changed, the DB layer rescales all zones in the same transaction, so the stored zones and the stored canvas size can never disagree."""
         if img_path is None:
             active_path = active_layout.image_path
             if active_path is None:
@@ -1627,9 +1639,7 @@ class LayoutsPlotterWidget(QWidget):
                     self.bottom_bezel_id = zone.id
                     self.bottom_bezel_dp = dp
 
-        for zone in sorted(
-            (z for z in zones if z.zone_type != BEZEL), key=load_order
-        ):
+        for zone in sorted((z for z in zones if z.zone_type != BEZEL), key=load_order):
             if zone.zone_type not in (CIRCLE, RECTANGLE):
                 continue
 
@@ -1716,7 +1726,13 @@ class LayoutsPlotterWidget(QWidget):
 
         return max(5, int(round(self.fig.get_size_inches()[1] * 72 * 0.02)))
 
-    def _create_label( self, center_x: float, center_y: float, label_text: str, fc: tuple[float, float, float, float], ):
+    def _create_label(
+        self,
+        center_x: float,
+        center_y: float,
+        label_text: str,
+        fc: tuple[float, float, float, float],
+    ):
         return Text(
             center_x,
             center_y,
@@ -1732,7 +1748,9 @@ class LayoutsPlotterWidget(QWidget):
             ),
         )
 
-    def _create_circle( self, cx: float, cy: float, r: float, fc: tuple[float, float, float, float] ):
+    def _create_circle(
+        self, cx: float, cy: float, r: float, fc: tuple[float, float, float, float]
+    ):
         return Circle(
             (cx, cy),
             r,
@@ -1742,7 +1760,14 @@ class LayoutsPlotterWidget(QWidget):
             ec=DEFAULT_EDGE_COLOR,
         )
 
-    def _create_rectangle( self, x1: float, y1: float, x2: float, y2: float, fc: tuple[float, float, float, float], ):
+    def _create_rectangle(
+        self,
+        x1: float,
+        y1: float,
+        x2: float,
+        y2: float,
+        fc: tuple[float, float, float, float],
+    ):
         return Rectangle(
             (x1, y1),
             x2 - x1,
@@ -2323,7 +2348,20 @@ class LayoutsPlotterWidget(QWidget):
             self.mark_dirty()
         self.reset_state()
 
-    def _finalize_shape( self, cy: Optional[int], cx: Optional[int], r: Optional[int], bb: Optional[tuple[tuple[int, int], tuple[int, int]]], key_name: str, scancode: int, pointer: bool, priority: int, pipeline_json: str, ignore_app_settings: bool, strict: bool = True, ) -> bool:
+    def _finalize_shape(
+        self,
+        cy: Optional[int],
+        cx: Optional[int],
+        r: Optional[int],
+        bb: Optional[tuple[tuple[int, int], tuple[int, int]]],
+        key_name: str,
+        scancode: int,
+        pointer: bool,
+        priority: int,
+        pipeline_json: str,
+        ignore_app_settings: bool,
+        strict: bool = True,
+    ) -> bool:
         """Creates the data entry and its artists. Returns True if a shape was added. `strict=False` is used while loading saved zones (no destructive validation)."""
         if cx is None or cy is None:
             return False
@@ -2497,7 +2535,7 @@ class LayoutsPlotterWidget(QWidget):
         return rows
 
     def save_to_database(self, user_name: str, as_copy: bool = False) -> bool:
-        """Atomically saves the canvas. Returns True on success. as_copy=False: saves in place; if `user_name` differs from the current name the layout is RENAMED (never forked). as_copy=True : saves everything as a brand-new layout called `user_name`. """
+        """Atomically saves the canvas. Returns True on success. as_copy=False: saves in place; if `user_name` differs from the current name the layout is RENAMED (never forked). as_copy=True : saves everything as a brand-new layout called `user_name`."""
         if self.is_fatal_state or self.active_layout is None:
             self.send_message.emit(
                 "Cannot Save", "There is no loaded layout image to save."
@@ -2563,7 +2601,9 @@ class LayoutsPlotterWidget(QWidget):
         self._set_dirty(False)
         self.layout_saved.emit(saved_layout.name, saved_layout.id)
         self.update_title(
-            f"SAVED COPY: {saved_layout.name}" if as_copy else f"SAVED: {saved_layout.name}"
+            f"SAVED COPY: {saved_layout.name}"
+            if as_copy
+            else f"SAVED: {saved_layout.name}"
         )
         return True
 
@@ -2583,7 +2623,20 @@ class LayoutsPlotterWidget(QWidget):
         else:
             logger.warning("%s: %s", title, msg)
 
-    def _save_entry( self, key_name: str, scancode: int, cx: int, cy: int, r: Optional[int], bb: Optional[tuple[tuple[int, int], tuple[int, int]]], pointer: bool, priority: int, pipeline_json: str, ignore_app_settings: bool, strict: bool = True, ):
+    def _save_entry(
+        self,
+        key_name: str,
+        scancode: int,
+        cx: int,
+        cy: int,
+        r: Optional[int],
+        bb: Optional[tuple[tuple[int, int], tuple[int, int]]],
+        pointer: bool,
+        priority: int,
+        pipeline_json: str,
+        ignore_app_settings: bool,
+        strict: bool = True,
+    ):
         uid, inc_count = self.count, True
         replace_scancode: Optional[int] = None
 
@@ -2637,6 +2690,13 @@ class LayoutsPlotterWidget(QWidget):
             self.mouse_wheel_cx = cx
             self.mouse_wheel_cy = cy
             self.saved_mouse_wheel = True
+
+            # A surviving sprint is now measured against the NEW wheel position.
+            if self.saved_sprint_distance and self.sprint_artist_id in self.shapes:
+                sp = self.shapes[self.sprint_artist_id]
+                self.sprint_distance = self._euclidean_distance(
+                    sp["cx"], sp["cy"], cx, cy
+                )
 
         elif scancode == SPRINT_DISTANCE_CODE:
             self.sprint_distance = self._euclidean_distance(
