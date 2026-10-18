@@ -14,31 +14,29 @@ import tomlkit
 
 from modules.core.pipeline import PipelineConfig
 from modules.database import store
-from modules.limits import (
+from modules.utils import (
     ADB_RATE_CAP_MAX,
     ADB_RATE_CAP_MIN,
+    BEZEL,
+    BEZEL_DP_THICKNESS,
+    CIRCLE,
     DEADZONE_MAX,
     DEADZONE_MIN,
     HYSTERESIS_MAX,
     HYSTERESIS_MIN,
+    JSONS_FOLDER,
+    MOUSE_WHEEL_SIMULATOR_CODE,
     PPS_ALERT_MAX,
     PPS_ALERT_MIN,
+    RECTANGLE,
     SENSITIVITY_MAX,
     SENSITIVITY_MIN,
+    TOML_PATH
     TYPEMATIC_DELAY_MAX_MS,
     TYPEMATIC_DELAY_MIN_MS,
     TYPEMATIC_RATE_MAX_HZ,
     TYPEMATIC_RATE_MIN_HZ,
     clamp,
-)
-from modules.utils import (
-    BEZEL,
-    BEZEL_DP_THICKNESS,
-    CIRCLE,
-    JSONS_FOLDER,
-    MOUSE_WHEEL_SIMULATOR_CODE,
-    RECTANGLE,
-    TOML_PATH,
 )
 
 logger = logging.getLogger("modules.database.legacy_migration")
