@@ -166,6 +166,23 @@ MAX_CLASS_NAME = 256
 DEFAULT_ADB_RATE_CAP = 250
 DEFAULT_PPS = 60
 
+# Mouse / joystick
+SENSITIVITY_MIN, SENSITIVITY_MAX = 0.1, 10.0
+DEADZONE_MIN, DEADZONE_MAX = 0.0, 1.0
+HYSTERESIS_MIN, HYSTERESIS_MAX = 0.0, 45.0  # degrees
+
+# Performance
+ADB_RATE_CAP_MIN, ADB_RATE_CAP_MAX = 30.0, 1000.0  # Hz
+PPS_ALERT_MIN, PPS_ALERT_MAX = 10.0, 500.0
+
+# Typematic
+TYPEMATIC_DELAY_MIN_MS, TYPEMATIC_DELAY_MAX_MS = 100.0, 1000.0
+TYPEMATIC_RATE_MIN_HZ, TYPEMATIC_RATE_MAX_HZ = 1.0, 100.0
+
+# Zones
+MIN_PRIORITY, MAX_PRIORITY = -100, 200
+MIN_BEZEL_DP, MAX_BEZEL_DP = 1, 100
+
 # Bridge Constants
 MOUSE_MOVE_RELATIVE = 0x00
 MOUSE_MOVE_ABSOLUTE = 0x01
@@ -402,7 +419,6 @@ _ROUTE_SRC_RE = re.compile(
 )
 
 _PHYSICAL_SIZE_RE = re.compile(r"Physical size:\s*(\d+)x(\d+)")
-
 
 class InvalidFieldError(ValueError):
     """Raised when update()/create()/create_pipeline_from_zone() receives a field name outside ALLOWED_FIELDS."""
@@ -1135,6 +1151,10 @@ def scale_coord(base: float, val: float | None = None) -> float:
     if val is None:
         return 0.0
     return val * base if val <= 1.0 else val
+
+
+def clamp(value, lo, hi):
+    return max(lo, min(hi, value))
 
 
 def make_copy_name(name: str) -> str:
