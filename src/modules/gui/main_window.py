@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 import threading
-from typing import TYPE_CHECKING
+import queue
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QCloseEvent
@@ -44,9 +44,6 @@ from modules.utils import (
 )
 
 logger = logging.getLogger("modules.gui.main_window")
-
-if TYPE_CHECKING:
-    from queue import Empty
 
 
 class SingleInstanceServer(QObject):
@@ -679,19 +676,24 @@ class MainWindow(QMainWindow):
                 f"Failed to launch uninstaller:\n\n{exc}",
             )
 
+    
     def _consume_engine_logs(self) -> None:
         while not self._stop_log_thread.is_set():
             try:
                 record = self.log_queue.get(timeout=0.2)
-                if record:
-                    msg = (
-                        record.getMessage()
-                        if hasattr(record, "getMessage")
-                        else str(record)
-                    )
-                    self.log_message.emit(msg)
-            except Empty:
+            except queue.Empty:
                 continue
+
+            if record is None:
+                continue
+
+            msg = (
+                record.getMessage()
+                if hasattr(record, "getMessage")
+                else str(record)
+            )
+            self.log_message.emit(msg)
+
 
     def closeEvent(self, event) -> None:
         if not self.save_all_pages():
