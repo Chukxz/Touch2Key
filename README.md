@@ -43,7 +43,7 @@ The first version with only CLI support and basic GUI windows can be accessed [h
 * **Hybrid Mode Switching (In-Game vs. Menu/Lobby):**
   * **In-Game Mode (Cursor Hidden):** Custom HUD zones capture taps/drags to drive game controls.
   * **Menu Mode (Cursor Visible):** Game buttons deactivate automatically, passing single-touch events through as absolute desktop clicks (`device_to_game_abs`) for clean lobby, map, and inventory navigation.
-  * **Hardware-Free Return Gates & Bezel Toggles:** Control the engine state directly from the touchscreen without reaching for your PC keyboard. *Both systems are independently toggleable in your global settings, and the required bezel zones are automatically seeded and guaranteed to exist in every layout:*
+  * **Hardware-Free Return Gates & Bezel Toggles (SystemToggle):** Control the engine state directly from the touchscreen without reaching for your PC keyboard. *Both systems are independently toggleable in your global settings, and the required bezel zones are automatically seeded and guaranteed to exist in every layout:*
     * **Top Bezel:** Instantly toggles cursor visibility (switches between Game Mode and Menu Mode).
     * **Bottom Bezel:** Loads the Virtual Keyboard. This runs in production mode sending direct IPC commands to the engine for zero-latency typing, bypassing standalone CLI testing modes.
     * **Two Finger Tap Quick Return:** If the cursor is currently *visible* (Menu Mode), tapping two fingers anywhere on the screen will instantly hide it and return you to Game Mode. (Two finger tap is ignored while already in-game to prevent accidental triggers).
