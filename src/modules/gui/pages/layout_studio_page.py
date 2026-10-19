@@ -43,7 +43,7 @@ from modules.database.config_io import (
     export_layout_json,
     export_settings_toml,
     import_any,
-    save_filename,
+    safe_filename,
 )
 from modules.database.repositories import DuplicateNameError
 from modules.gui.widgets.layouts_plotter_widget import LayoutsPlotterWidget
@@ -51,11 +51,21 @@ from modules.scripts.adb_screen_capture import capture_android_screen
 from modules.utils import (
     BEZEL,
     CIRCLE,
+    DEADZONE_MAX,
+    DEADZONE_MIN,
+    HYSTERESIS_MAX,
+    HYSTERESIS_MIN,
     IMAGES_FOLDER,
     JSONS_FOLDER,
+    MIN_BEZEL_DP,
+    MAX_BEZEL_DP,
+    MAX_PRIORITY,
+    MIN_PRIORITY,
     PROFILES_FOLDER,
     RECTANGLE,
     MOUSE_WHEEL_SIMULATOR_CODE,
+    SENSITIVITY_MAX,
+    SENSITIVITY_MIN,
     SPRINT_DISTANCE_CODE,
     MapperEvent,
     make_copy_name,
@@ -401,11 +411,11 @@ class LayoutStudioPage(QWidget):
         bezels_group = QGroupBox("System Bezels")
         bezels_form = QFormLayout(bezels_group)
         self.top_bezel_spin = QDoubleSpinBox()
-        self.top_bezel_spin.setRange(1, 100)
+        self.top_bezel_spin.setRange(MIN_BEZEL_DP, MAX_BEZEL_DP)
         self.top_bezel_spin.setSuffix(" dp")
 
         self.bottom_bezel_spin = QDoubleSpinBox()
-        self.bottom_bezel_spin.setRange(1, 100)
+        self.bottom_bezel_spin.setRange(MIN_BEZEL_DP, MAX_BEZEL_DP)
         self.bottom_bezel_spin.setSuffix(" dp")
 
         bezels_form.addRow("Top Bezel:", self.top_bezel_spin)
@@ -435,7 +445,7 @@ class LayoutStudioPage(QWidget):
         region_group = QGroupBox("Region")
         region_form = QFormLayout(region_group)
         self.insp_priority = QSpinBox()
-        self.insp_priority.setRange(-100, 200)
+        self.insp_priority.setRange(MIN_PRIORITY, MAX_PRIORITY)
         region_form.addRow("Priority Value:", self.insp_priority)
         zone_layout.addWidget(region_group)
 
@@ -443,12 +453,12 @@ class LayoutStudioPage(QWidget):
         transform_form = QFormLayout(transform_group)
 
         self.insp_sens_x = QDoubleSpinBox()
-        self.insp_sens_x.setRange(0.01, 10.0)
-        self.insp_sens_x.setSingleStep(0.01)
+        self.insp_sens_x.setRange(SENSITIVITY_MIN, SENSITIVITY_MAX)
+        self.insp_sens_x.setSingleStep(0.1)
 
         self.insp_sens_y = QDoubleSpinBox()
-        self.insp_sens_y.setRange(0.01, 10.0)
-        self.insp_sens_y.setSingleStep(0.01)
+        self.insp_sens_y.setRange(SENSITIVITY_MIN, SENSITIVITY_MAX)
+        self.insp_sens_y.setSingleStep(0.1)
 
         wrapper = QWidget()
         row = QHBoxLayout(wrapper)
@@ -458,11 +468,12 @@ class LayoutStudioPage(QWidget):
         transform_form.addRow("Sens (X, Y):", wrapper)
 
         self.insp_deadzone = QDoubleSpinBox()
-        self.insp_deadzone.setRange(0, 1.0)
+        self.insp_deadzone.setRange(DEADZONE_MIN, DEADZONE_MAX)
         self.insp_deadzone.setSingleStep(0.01)
 
         self.insp_hysteresis = QDoubleSpinBox()
-        self.insp_hysteresis.setRange(0, 45)
+        self.insp_hysteresis.setRange(HYSTERESIS_MIN, HYSTERESIS_MAX)
+        self.insp_hysteresis.setSingleStep(1.0)
         self.insp_hysteresis.setSuffix("°")
 
         transform_form.addRow("Deadzone:", self.insp_deadzone)
@@ -573,7 +584,7 @@ class LayoutStudioPage(QWidget):
         self.plotter_widget.layout_saved.connect(self._on_layout_saved)
         self.plotter_widget.zone_selected.connect(self._on_canvas_zone_selected)
         self.plotter_widget.status_updated.connect(self.canvas_status_label.setText)
-        self.plotter_widget.send_message.connect(self._on_plotter_message_recieved)
+        self.plotter_widget.send_message.connect(self._on_plotter_message_received)
         self.plotter_widget.dirty_changed.connect(self._on_dirty_changed)
         self.plotter_widget.save_requested.connect(self._save)
 
@@ -782,7 +793,7 @@ class LayoutStudioPage(QWidget):
                 return True
             return self.plotter_widget.save_to_database(layout.name)
         except Exception as exc:
-            logger.exception("Failed to save Layout Studio state")
+            logger.exception("Failed to save Layout Studio state.")
             QMessageBox.critical(
                 self,
                 "Save Error",
@@ -796,7 +807,7 @@ class LayoutStudioPage(QWidget):
         self._update_enabled_state()
         self._notify_engine_reload()
 
-    def _on_plotter_message_recieved(self, title: str, text: str):
+    def _on_plotter_message_received(self, title: str, text: str):
         QMessageBox.warning(self, title, text)
 
     # ------------------------------------------------------------------
@@ -1317,10 +1328,10 @@ class LayoutStudioPage(QWidget):
 
         try:
             json_path = JSONS_FOLDER / f"{safe_filename(layout.name)}.json"
-export_layout_json(layout_id, json_path)
-out_file = export_settings_toml(
-    Path(save_path_str), linked_json_path=json_path, layout=layout
-)
+            export_layout_json(layout_id, json_path)
+            out_file = export_settings_toml(
+                Path(save_path_str), linked_json_path=json_path, layout=layout
+            )
 
             logger.info(
                 "Exported settings TOML for profile %s to %s", layout.name, out_file
@@ -1354,8 +1365,8 @@ out_file = export_settings_toml(
 
         try:
             t_file, j_file = export_bundle(
-    Path(folder), profile_name=layout.name, layout_id=layout_id
-)
+                Path(folder), profile_name=layout.name, layout_id=layout_id
+            )
             logger.info("Exported bundle for %s", layout.name)
             QMessageBox.information(
                 self,

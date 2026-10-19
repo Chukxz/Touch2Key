@@ -533,6 +533,7 @@ class MapperEventDispatcher:
 
         except Exception as exc:
             callback_name = getattr(callback, "__name__", repr(callback))
+            
             logger.debug(
                 "[!] Error registering callback %s for event %s: %s",
                 callback_name,
@@ -569,6 +570,7 @@ class MapperEventDispatcher:
 
         except Exception as exc:
             callback_name = getattr(callback, "__name__", repr(callback))
+            
             logger.error(
                 f"[!] Error unregistering callback {callback_name} for event {event_type}: {exc}",
                 exc_info=True,
@@ -610,7 +612,7 @@ class MapperEventDispatcher:
         args = self._get_callback_args(event)
 
         for callback in callbacks:
-            callback_name = getattr(callback, "__name__", repr(callback_name))
+            callback_name = getattr(callback, "__name__", repr(callback))
 
             try:
                 callback(*args)

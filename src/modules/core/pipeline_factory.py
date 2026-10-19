@@ -30,11 +30,12 @@ from modules.utils import (
     ALLOWED_PIPELINE_FIELDS,
     BASELINE_DPI,
     BOTTOM_BEZEL_ID,
-    InvalidFieldError,
+    MIN_PRIORITY,
     MOUSE_SCANCODES,
-    Point,
     TOP_BEZEL_ID,
     dp_to_px,
+    InvalidFieldError,
+    Point,
 )
 
 if TYPE_CHECKING:
@@ -196,7 +197,7 @@ def MousePointer(
     region: Region | None,
     sensitivity_x: float = 1.0,
     sensitivity_y: float = 1.0,
-    priority: int = -100,
+    priority: int = MIN_PRIORITY,
     creation_id: int = sys.maxsize,
 ) -> Pipeline[Vector]:
     return Pipeline(
@@ -225,7 +226,7 @@ def SystemToggle(
         transformation=IdentityTransform(),
         semantics=[ToggleSemantic(output=output)],
         priority=priority,
-        type_precedence=2,
+        type_precedence=4,
         creation_id=creation_id,
         is_system=True,
     )
@@ -346,19 +347,18 @@ def create_pipeline_from_zone(
 
     semantics: list[Any] = []
     allow_multi_claim = False
-    type_precedence = 2
     is_system = False
     scancode = zone.scancode
 
     if sem_idx == 0:  # BUTTON
         is_mouse_button = scancode in MOUSE_SCANCODES
-
         semantics.append(
             ButtonSemantic(output=zone.scancode, mouse_button=is_mouse_button)
         )
         if pointer:
             semantics.append(PointerSemantic(pointer=True))
         allow_multi_claim = True
+        type_precedence = 2
 
     elif sem_idx == 1:  # DIRECTIONAL
         semantics.append(DirectionalSemantic())
@@ -371,10 +371,13 @@ def create_pipeline_from_zone(
     elif sem_idx == 3:  # SYSTEM TOGGLE
         if scancode == TOP_BEZEL_ID:
             semantics.append(ToggleSemantic(output=scancode))
+            type_precedence = 4
             is_system = True
         elif scancode == BOTTOM_BEZEL_ID:
             semantics.append(ToggleSemantic(output=scancode))
+            type_precedence = 4
             is_system = True
+        
         else:
             return None
 

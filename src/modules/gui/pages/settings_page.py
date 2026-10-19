@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtCore import QEvent, QObject, Qt, QCoreApplication
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -55,6 +55,7 @@ from modules.utils import (
 
 if TYPE_CHECKING:
     from modules.utils import MapperEventDispatcher
+    from modules.gui.main_window import EngineProcessController
 
 logger = logging.getLogger("modules.gui.settings_page")
 
@@ -62,18 +63,20 @@ logger = logging.getLogger("modules.gui.settings_page")
 # Input Filters
 # -------------------------------------------------------------------------
 
-def verify_key(key_name: str) -> bool:
+
+def verify_key(parent: QWidget | None, key_name: str) -> bool:
     if get_scancode_from_key(key_name) is None:
-        QMessageBox.warning(self, "Unsupported Key", f"'{key_name}' can't be mapped.")
+        QMessageBox.warning(parent, "Unsupported Key", f"'{key_name}' can't be mapped.")
         return False
     return True
+
 
 class KeyCaptureFilter(QObject):
     """Intercepts the next raw keypress (single stroke) without modal dialogs."""
 
     def __init__(self, callback, parent=None):
         super().__init__(parent)
-        self.callback = callback
+        self.key_callback = callback
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         # Block focus traversal before Qt converts Tab into a navigation event
@@ -87,11 +90,11 @@ class KeyCaptureFilter(QObject):
         # Capture the actual key stroke
         if event.type() == QEvent.Type.KeyPress:
             if isinstance(event, QKeyEvent) and event.key() == Qt.Key.Key_Escape:
-                self.callback(None)
+                self.key_callback(None)
                 return True
 
             precise_key = get_specific_qt_key(event)
-            self.callback(precise_key)
+            self.key_callback(precise_key)
             return True
 
         return False
@@ -183,12 +186,15 @@ class KeySequenceRow(QWidget):
         self.sequence = [k.strip().lower() for k in sequence if k.strip()]
         self._update_display()
 
-    def add_key(self, db_key: str) -> None:
-        if db_key not in self.sequence:
-            if verify_key(db_key):
-                self.sequence.append(db_key)
-                self._update_display()
-                self.save()
+    def add_key(self, db_key):
+        if db_key in self.sequence:
+            return
+        if get_scancode_from_key(db_key) is None:
+            self.status_label.setText(f"'{db_key}' can't be mapped.")
+            return
+        self.sequence.append(db_key)
+        self._update_display()
+        self.save()
 
     def stop_recording(self) -> None:
         if self.record_btn.isChecked():
@@ -259,18 +265,20 @@ class SettingsPage(QWidget):
 
     def __init__(
         self,
+        engine_controller: EngineProcessController,
         dispatcher: MapperEventDispatcher | None = None,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
+        self.engine_controller = engine_controller
         self.dispatcher = dispatcher
 
         self._single_key_filter: KeyCaptureFilter | None = None
         self._sequence_filter: ContinuousSequenceFilter | None = None
         self._active_seq_row: KeySequenceRow | None = None
 
+        self.w_title: str | None = None
         self.w_id: int | None = None
-        self.w_title = ""
         self.k_id: int | None = None
         self.m_id: int | None = None
 
@@ -411,7 +419,9 @@ class SettingsPage(QWidget):
         typematic_form.addRow(self.typematic_enabled_check)
 
         self.typematic_delay_spin = QDoubleSpinBox()
-        self.typematic_delay_spin.setRange(TYPEMATIC_DELAY_MIN_MS, TYPEMATIC_DELAY_MAX_MS)
+        self.typematic_delay_spin.setRange(
+            TYPEMATIC_DELAY_MIN_MS, TYPEMATIC_DELAY_MAX_MS
+        )
         self.typematic_delay_spin.setSingleStep(10.0)
         self.typematic_delay_spin.setSuffix(" ms")
         typematic_form.addRow("Typematic Delay:", self.typematic_delay_spin)
@@ -473,9 +483,22 @@ class SettingsPage(QWidget):
         self._refresh_hw_ui()
         self.load_settings()
 
+    def _app(self) -> QCoreApplication:
+        app = QApplication.instance()
+        assert app is not None  # a widget can't exist without one
+        return app
+
     def on_page_shown(self) -> None:
+        self.refresh_state()
         self._refresh_hw_ui()
         self.load_settings()
+
+    def refresh_state(self) -> None:
+        with self.engine_controller.lock:
+            self.w_title = self.engine_controller.window_title
+            self.w_id = self.engine_controller.window_id
+            self.k_id = self.engine_controller.k_id
+            self.m_id = self.engine_controller.m_id
 
     def _notify_reload(self) -> None:
         if self.dispatcher:
@@ -519,17 +542,23 @@ class SettingsPage(QWidget):
         self.delete_all_btn.clicked.connect(self._on_delete_all)
 
     def _refresh_hw_ui(self) -> None:
+        w_id = self.w_id if self.w_id is not None else 'Unassigned'
+        w_title = self.w_title if self.w_title is not None else ""
+        
         self.w_label.setText(
-            f"Target Window ID:       {self.w_id if self.w_id is not None else 'Unassigned'} ({self.w_title})"
+            f"Target Window ID:       {w_id} ({w_title})"
         )
         self.select_window_btn.setEnabled(True)
 
         if sys.platform == "win32":
+            k_id = self.k_id if self.k_id is not None else 'Unassigned'
+            m_id = self.m_id if self.m_id is not None else 'Unassigned'
+            
             self.k_label.setText(
-                f"Configured Keyboard ID: {self.k_id if self.k_id is not None else 'Unassigned'}"
+                f"Configured Keyboard ID: {k_id}"
             )
             self.m_label.setText(
-                f"Configured Mouse ID:    {self.m_id if self.m_id is not None else 'Unassigned'}"
+                f"Configured Mouse ID:    {m_id}"
             )
             self.rebind_hw_btn.setEnabled(True)
         else:
@@ -550,6 +579,9 @@ class SettingsPage(QWidget):
             return
 
         self.w_id, self.w_title = window_result
+        with self.engine_controller.lock:
+            self.engine_controller.window_id = self.w_id
+            self.engine_controller.window_title = self.w_title
         self._refresh_hw_ui()
 
         if self.dispatcher:
@@ -578,6 +610,9 @@ class SettingsPage(QWidget):
             return
 
         self.k_id, self.m_id = devices
+        with self.engine_controller.lock:
+            self.engine_controller.k_id = self.k_id
+            self.engine_controller.m_id =  self.m_id
         self._refresh_hw_ui()
 
         if self.dispatcher:
@@ -606,8 +641,10 @@ class SettingsPage(QWidget):
 
     def _cancel_captures(self) -> None:
         if self._single_key_filter is not None:
-            QApplication.instance().removeEventFilter(self._single_key_filter)
+            self._app().removeEventFilter(self._single_key_filter)
+            self._single_key_filter.deleteLater()
             self._single_key_filter = None
+
         self.toggle_key_btn.setEnabled(True)
         self.sprint_key_btn.setEnabled(True)
         if self._active_seq_row is not None:
@@ -620,6 +657,8 @@ class SettingsPage(QWidget):
 
     def _begin_single_key_capture(self, target_field: str) -> None:
         self._cancel_captures()
+        self.load_settings()
+        
         btn = (
             self.toggle_key_btn if target_field == "toggle_key" else self.sprint_key_btn
         )
@@ -634,16 +673,18 @@ class SettingsPage(QWidget):
 
         def on_captured(key_name: str | None):
             if self._single_key_filter is not None:
-                QApplication.instance().removeEventFilter(self._single_key_filter)
+                self._app().removeEventFilter(self._single_key_filter)
+                self._single_key_filter.deleteLater()
                 self._single_key_filter = None
+
             btn.setEnabled(True)
 
-            if key_name and verify_key(key_name):
+            if key_name and verify_key(self, key_name):
                 self.persist_binding(target_field, key_name)
             self.load_settings()
 
         self._single_key_filter = KeyCaptureFilter(on_captured, self)
-        QApplication.instance().installEventFilter(self._single_key_filter)
+        self._app().installEventFilter(self._single_key_filter)
         self.setFocus()
 
     def begin_sequence_capture(self, row: KeySequenceRow) -> None:
@@ -652,18 +693,20 @@ class SettingsPage(QWidget):
 
         self._active_seq_row = row
         if self._sequence_filter is not None:
-            QApplication.instance().removeEventFilter(self._sequence_filter)
+            self._app().removeEventFilter(self._sequence_filter)
 
         self._sequence_filter = ContinuousSequenceFilter(
             key_callback=self._on_seq_key_captured, parent=self
         )
-        QApplication.instance().installEventFilter(self._sequence_filter)
+        self._app().installEventFilter(self._sequence_filter)
         self.setFocus()
 
     def end_sequence_capture(self, row: KeySequenceRow) -> None:
         if self._sequence_filter is not None:
-            self.removeEventFilter(self._sequence_filter)
+            self._app().removeEventFilter(self._sequence_filter)
+            self._sequence_filter.deleteLater()
             self._sequence_filter = None
+
         if self._active_seq_row is row:
             self._active_seq_row = None
 
@@ -691,10 +734,6 @@ class SettingsPage(QWidget):
                 if not val or not val.strip():
                     return []
                 return [k.strip().lower() for k in val.split(",") if k.strip()]
-
-            self.typematic_excluded_keys.set_sequence(
-                parse_seq(settings.typematic_excluded_keys)
-            )
 
             self.left_handed_check.blockSignals(True)
             self.floating_check.blockSignals(True)
@@ -727,6 +766,10 @@ class SettingsPage(QWidget):
                 settings.two_finger_tap_enabled
             )
             self.bezel_toggle_enabled_check.setChecked(settings.bezel_toggle_enabled)
+            
+            self.typematic_excluded_keys.set_sequence(
+                parse_seq(settings.typematic_excluded_keys)
+            )
 
             self.left_handed_check.blockSignals(False)
             self.floating_check.blockSignals(False)

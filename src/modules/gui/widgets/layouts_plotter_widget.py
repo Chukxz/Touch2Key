@@ -22,6 +22,10 @@ from modules.utils import (
     CIRCLE,
     IDLE,
     IMAGES_FOLDER,
+    MAX_BEZEL_DP,
+    MAX_PRIORITY,
+    MIN_BEZEL_DP,
+    MIN_PRIORITY,
     MOUSE_WHEEL_SIMULATOR_CODE,
     RECTANGLE,
     SPRINT_DISTANCE_CODE,
@@ -78,11 +82,6 @@ DEFAULT_RADIAL_TOLERANCE = 5
 DEFAULT_EDGE_TOLERANCE = 5
 DEFAULT_VERTEX_TOLERANCE = 10
 DEFAULT_SPEC_MAX_RATIO = 0.3
-MIN_BEZEL_DP = 1
-MAX_BEZEL_DP = 100
-MIN_PRIORITY = -100
-MAX_PRIORITY = 200
-
 
 def calculate_raw_rectangle(values: tuple[tuple[float, float], tuple[float, float]]):
     if len(values) < 2:

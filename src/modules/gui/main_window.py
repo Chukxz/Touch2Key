@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import threading
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QCloseEvent
@@ -43,6 +44,9 @@ from modules.utils import (
 )
 
 logger = logging.getLogger("modules.gui.main_window")
+
+if TYPE_CHECKING:
+    from queue import Empty
 
 
 class SingleInstanceServer(QObject):
@@ -91,7 +95,11 @@ class EngineProcessController(QObject):
         self.process: multiprocessing.Process | None = None
         self.dispatcher: QtIpcMapperEventDispatcher | None = None
         self.window_id: int | None = None
+        self.window_title: str | None = None
+        self.k_id: int | None = None
+        self.m_id: int | None = None
         self._gui_conn = None
+        self.lock = threading.Lock()
 
         self._watchdog = QTimer(self)
         self._watchdog.setInterval(500)
@@ -106,6 +114,8 @@ class EngineProcessController(QObject):
     ) -> None:
         if self.is_running():
             return
+
+        self._stop_requested = False
 
         if self.dispatcher is not None:
             self.dispatcher.close()
@@ -144,11 +154,25 @@ class EngineProcessController(QObject):
         self._stop_requested = True
         self.dispatcher.send_stop()
 
+        with self.lock:
+            self.window_title = None
+            self.window_id = None
+            self.k_id = None
+            self.m_id = None
+
     def shutdown(self, timeout: float = 2.0) -> None:
         self._stop_requested = True
         self._watchdog.stop()
+
         if self.dispatcher is not None:
             self.dispatcher.send_stop()
+
+        with self.lock:
+            self.window_title = None
+            self.window_id = None
+            self.k_id = None
+            self.m_id = None
+
         if self.process is not None:
             self.process.join(timeout)
             if self.process.is_alive():
@@ -156,22 +180,25 @@ class EngineProcessController(QObject):
                 self.process.join(timeout)
                 if self.process.is_alive():
                     self.process.kill()
+
         if self.dispatcher is not None:
             self.dispatcher.close()
 
     def _check_process_alive(self) -> None:
-        if self.process is not None and not self.process.is_alive():
+        if self.is_running():
             self._watchdog.stop()
             if not self._stop_requested and self.dispatcher is not None:
                 self.dispatcher.engine_error.emit(
                     "Engine process terminated unexpectedly"
                 )
                 self.dispatcher.engine_stopped.emit()
-        self._stop_requested = False
+            self._stop_requested = False
 
 
 class MainWindow(QMainWindow):
     """Root Application Window with scannable layout, pages stack, and log console."""
+
+    log_message = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -240,14 +267,18 @@ class MainWindow(QMainWindow):
         self.nav_group.setExclusive(True)
         self.nav_buttons: dict[str, QPushButton] = {}
 
-        self.dashboard_page = DashboardPage(self.dispatcher, self)
+        self.dashboard_page = DashboardPage(
+            self.engine_controller,
+            self.dispatcher,
+            self,
+        )
         self.dashboard_page.start_requested.connect(self._start_engine_from_dashboard)
         self.dashboard_page.stop_requested.connect(self._stop_engine_from_dashboard)
 
         self.pages: dict[str, QWidget] = {
             "Dashboard": self.dashboard_page,
             "Layout Studio": LayoutStudioPage(self.dispatcher, self),
-            "Settings": SettingsPage(self.dispatcher, self),
+            "Settings": SettingsPage(self.engine_controller, self.dispatcher, self),
         }
 
         self.stack = QStackedWidget()
@@ -311,7 +342,6 @@ class MainWindow(QMainWindow):
 
         self.custom_log_dock.setWidget(self.log_console)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.custom_log_dock)
-        self.custom_log_dock.closeEvent
 
         self._switch_page(0, "Dashboard")
 
@@ -320,6 +350,7 @@ class MainWindow(QMainWindow):
         handler.emitter.message.connect(
             lambda msg, level: self.log_console.appendPlainText(msg)
         )
+        self.log_message.connect(self.log_console.appendPlainText)
 
     def _wire_engine_signals(self) -> None:
         self.engine_controller.dispatcher_ready.connect(self._wire_engine_dispatcher)
@@ -367,7 +398,6 @@ class MainWindow(QMainWindow):
             self.engine_controller.dispatcher.send_target_window_change(
                 target_window_id, target_window_title
             )
-            self.engine_controller.window_id = target_window_id
 
     def _switch_page(self, index: int, title: str) -> None:
         self.stack.setCurrentIndex(index)
@@ -406,28 +436,46 @@ class MainWindow(QMainWindow):
         connect_wireless_gui(parent=self)
 
     def _toggle_engine(self) -> None:
-        if self.engine_controller.is_running():
-            self.sidebar_engine_btn.setEnabled(False)
-            self.engine_controller.stop_engine()
-        else:
-            self.sidebar_engine_btn.setEnabled(False)
-            self.engine_controller.start_engine(
-                window_id=self.engine_controller.window_id,
-                log_queue=self.log_queue,
-            )
+        self.sidebar_engine_btn.setEnabled(False)
+
+        try:
+            if self.engine_controller.is_running():
+                self.engine_controller.stop_engine()
+            else:
+                self.engine_controller.start_engine(
+                    window_id=self.engine_controller.window_id,
+                    log_queue=self.log_queue,
+                )
+
+        except Exception as exc:
+            logger.exception("Engine toggle failed")
+            self.sidebar_engine_btn.setEnabled(True)
+            QMessageBox.critical(self, "Engine Error", str(exc))
 
     def _start_engine_from_dashboard(self) -> None:
-        if not self.engine_controller.is_running():
-            self.dashboard_page.start_btn.setEnabled(False)
-            self.engine_controller.start_engine(
-                window_id=self.engine_controller.window_id,
-                log_queue=self.log_queue,
-            )
+        try:
+            if not self.engine_controller.is_running():
+                self.dashboard_page.start_btn.setEnabled(False)
+                self.engine_controller.start_engine(
+                    window_id=self.engine_controller.window_id,
+                    log_queue=self.log_queue,
+                )
+
+        except Exception as exc:
+            logger.exception("Engine toggle failed")
+            self.dashboard_page.set_running(self.engine_controller.is_running())
+            QMessageBox.critical(self, "Engine Error", str(exc))
 
     def _stop_engine_from_dashboard(self) -> None:
-        if self.engine_controller.is_running():
-            self.dashboard_page.stop_btn.setEnabled(False)
-            self.engine_controller.stop_engine()
+        try:
+            if self.engine_controller.is_running():
+                self.dashboard_page.stop_btn.setEnabled(False)
+                self.engine_controller.stop_engine()
+
+        except Exception as exc:
+            logger.exception("Engine toggle failed")
+            self.dashboard_page.set_running(self.engine_controller.is_running())
+            QMessageBox.critical(self, "Engine Error", str(exc))
 
     def _on_engine_started(self) -> None:
         self.sidebar_engine_btn.setText("Toggle Engine OFF")
@@ -457,6 +505,12 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(
             self, "Engine Error", f"Mapping engine encountered an error:\n{err_msg}"
         )
+
+        with self.engine_controller.lock:
+            self.engine_controller.window_title = None
+            self.engine_controller.window_id = None
+            self.engine_controller.k_id = None
+            self.engine_controller.m_id = None
 
     def _setup_tools(self) -> None:
         toolbar = self.addToolBar("Tools")
@@ -510,9 +564,7 @@ class MainWindow(QMainWindow):
                 save_state = getattr(page_widget, "save_state", None)
                 if save_state is not None:
                     if not save_state():
-                        logger.info(
-                            "GUI page: %s state saved successfully to database.", title
-                        )
+                        logger.info("GUI page: %s state not saved to database.", title)
                         return False
 
             logger.info("All GUI page states saved successfully to database.")
@@ -637,11 +689,15 @@ class MainWindow(QMainWindow):
                         if hasattr(record, "getMessage")
                         else str(record)
                     )
-                    self.log_console.appendPlainText(msg)
-            except Exception:
+                    self.log_message.emit(msg)
+            except Empty:
                 continue
 
     def closeEvent(self, event) -> None:
+        if not self.save_all_pages():
+            event.ignore()
+            return
+
         self._stop_log_thread.set()
         if self.engine_controller.is_running():
             self.engine_controller.shutdown()

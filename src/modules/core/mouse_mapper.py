@@ -13,7 +13,7 @@ from modules.core.pipeline import (
 )
 from modules.core.pipeline_factory import MousePointer
 from modules.database import store
-from modules.utils import scale_coord
+from modules.utils import MIN_PRIORITY, scale_coord
 
 if TYPE_CHECKING:
     from modules.core.pipeline import Pipeline
@@ -67,7 +67,7 @@ class MouseMapper:
         sens_y = settings.sensitivity_y
 
         custom_look_zone = None
-        zone_priority = -100
+        zone_priority = MIN_PRIORITY
         zone_creation_id = sys.maxsize
 
         for zone in store.zones.list_for_layout(layout.id):
@@ -163,8 +163,6 @@ class MouseMapper:
         with self.lock:
             if self.pipeline is not None:
                 self.pipeline.reset(self.output_sink)
-
-    release_all = touch_up
 
     def _on_worker_respawn_mouse(self, worker_type: str) -> None:
         if worker_type == "mouse":

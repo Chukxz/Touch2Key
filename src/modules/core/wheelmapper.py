@@ -180,8 +180,6 @@ class WheelMapper:
             if self.pipeline is not None:
                 self.pipeline.reset(self.output_sink)
 
-    release_all = touch_up
-
     def _on_respawn_wheel(self, worker_type: str) -> None:
         if worker_type == "keyboard":
             self.touch_up()

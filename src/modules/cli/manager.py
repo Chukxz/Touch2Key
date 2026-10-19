@@ -12,6 +12,8 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
+from PIL import Image
+
 from modules import AppLogManager
 from modules.database import reset_layout_zones_to_app_settings, store
 from modules.database.config_io import (
@@ -80,15 +82,38 @@ def set_profile_image(layout_id: int, image_path_input: str | Path) -> bool:
             )
             return False
 
-    # Same convention as the GUI: a bare filename when the image lives in IMAGES_FOLDER
-    # (portable across machines), otherwise the absolute path.
-    if path.resolve().parent == IMAGES_FOLDER.resolve():
+    # Keep the same portable path convention as Layout Studio: a bare filename
+    # for images in IMAGES_FOLDER, otherwise an absolute path.
+    resolved_path = path.resolve()
+    if resolved_path.parent == IMAGES_FOLDER.resolve():
         stored_ref = path.name
     else:
-        stored_ref = str(path.resolve())
+        stored_ref = str(resolved_path)
 
-    store.layouts.update(layout_id, image_path=stored_ref)
-    print(f"Updated profile '{target.name}' background image to: {path.name}")
+    # Layout Studio treats the selected image dimensions as the canvas dimensions.
+    # Use the repository's atomic helper so changing resolution rescales non-bezel
+    # zones and layout-level distances in the same transaction.
+    try:
+        with Image.open(resolved_path) as image:
+            width, height = image.size
+            if width <= 0 or height <= 0:
+                raise ValueError("Image has invalid dimensions.")
+
+        updated = store.layouts.apply_image_params(
+            layout_id,
+            width=width,
+            height=height,
+            dpi=target.dpi,
+            image_path=stored_ref,
+        )
+    except Exception as exc:
+        print(f"Error: Could not apply image '{path.name}' to profile '{target.name}': {exc}")
+        return False
+
+    print(
+        f"Updated profile '{updated.name}' background image to: {path.name} "
+        f"({updated.width}x{updated.height}; existing DPI {updated.dpi} retained)."
+    )
     return True
 
 
@@ -193,7 +218,7 @@ def duplicate_profile(layout_id: int, new_name: str) -> Optional[int]:
         print("Error: Target name cannot be empty.")
         return None
 
-    if store.layouts.get_by_name(clean_name) is not None:
+    if store.layouts.name_exists(clean_name):
         print(f"Error: A layout named '{clean_name}' already exists.")
         return None
 
@@ -220,7 +245,12 @@ def rename_profile(layout_id: int, new_name: str) -> bool:
         print("Error: New name cannot be empty.")
         return False
 
-    if store.layouts.get_by_name(clean_name) is not None:
+    # Match Layout Studio: the current profile's own name is not a conflict.
+    if clean_name == target.name:
+        print(f"Profile '{target.name}' is already named that; no changes made.")
+        return True
+
+    if store.layouts.name_exists(clean_name, exclude_id=layout_id):
         print(f"Error: A layout named '{clean_name}' already exists.")
         return False
 

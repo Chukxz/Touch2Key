@@ -31,7 +31,7 @@ from modules.utils import (
     RECTANGLE,
     SENSITIVITY_MAX,
     SENSITIVITY_MIN,
-    TOML_PATH
+    TOML_PATH,
     TYPEMATIC_DELAY_MAX_MS,
     TYPEMATIC_DELAY_MIN_MS,
     TYPEMATIC_RATE_MAX_HZ,
@@ -190,7 +190,9 @@ def migrate_json_layout(
         mouse_wheel_radius = float(metadata.get("mouse_wheel_radius", 50.0))
         sprint_distance = float(metadata.get("sprint_distance", 10.0))
     except (KeyError, TypeError, ValueError) as e:
-        logger.error("JSON layout %s has missing or invalid metadata/content: %s", path, e)
+        logger.error(
+            "JSON layout %s has missing or invalid metadata/content: %s", path, e
+        )
         return None
 
     target_name = layout_name or path.stem
