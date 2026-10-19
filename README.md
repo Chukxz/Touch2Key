@@ -25,10 +25,11 @@ The first version with only CLI support and basic GUI windows can be accessed [h
   Decoupling spatial detection, reference baselines, mechanical bounds, mathematical transforms, and driver emissions eliminates state drift and input fighting.
 
 * **Prioritized Deterministic Dispatching:** Touch contacts are routed using a strict 4-key precedence sort:
-  1. **Explicit Priority** (Custom user tier: `+100` to `-100`)
-  2. **Type Precedence** (`Button: 2` > `Joystick: 1` > `Mouse: 0`)
-  3. **Hitbox Specificity** (Smaller bounding areas evaluate before broad/full-screen zones)
-  4. **Creation Order** (Deterministic tie-breaker)
+    1. **Type Precedence** (`SystemToggle 4` > `Button: 2` > `Joystick: 1` > `Mouse: 0`)
+  2. **Explicit Priority** (Custom user tier: `+200` to `-100`)
+  3. **Allow Multi Claim** (Splits a tier into allow_multi_claim `True` and `False` tiers.
+  4. **Hitbox Specificity** (Smaller bounding areas evaluate before broad/full-screen zones)
+  5. **Creation Order** (Deterministic tie-breaker)
 
 * **Hardware-Accurate Typematic Engine (Key Auto-Repeat):**
   * **Dedicated Low-Level Repeat Loop:** Hardware-accurate repeat pulses execute directly inside driver worker processes without pipe saturation or IPC latency.
