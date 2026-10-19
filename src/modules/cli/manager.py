@@ -1,9 +1,10 @@
 """CLI Layout & Profile Manager.
 
-Provides terminal-based profile switching, duplication, renaming,
-zone/pipeline inspection, JSON layout import/export, TOML app_settings
-import/export, schema reset, bulk synchronization of zones to AppSettings,
-and typematic (keyboard repeat) configuration and reset routines.
+Provides terminal-based profile switching, creation, sorting, filtering,
+duplication, renaming, zone/pipeline inspection and per-zone editing, bezel
+tuning, JSON layout import/export, TOML app_settings import/export, schema
+reset/wipe, bulk and single-zone synchronization to AppSettings, input/joystick
+tuning, global keybinding configuration, and typematic configuration/reset routines.
 """
 
 from __future__ import annotations
@@ -15,35 +16,55 @@ from typing import Optional
 from PIL import Image
 
 from modules import AppLogManager
+from modules.core.pipeline import PipelineConfig
 from modules.database import reset_layout_zones_to_app_settings, store
 from modules.database.config_io import (
     export_bundle,
     export_layout_json,
     export_settings_toml,
     import_any,
+    safe_filename,
 )
 from modules.database.legacy_migration import (
     migrate_json_layout,
     migrate_toml_config,
 )
+from modules.database.repositories import DuplicateNameError
 from modules.utils import (
     BEZEL,
+    BOTTOM_BEZEL_ID,
     CIRCLE,
+    DEADZONE_MAX,
+    DEADZONE_MIN,
     EXCLUDED_KEYS,
+    HYSTERESIS_MAX,
+    HYSTERESIS_MIN,
     IMAGES_FOLDER,
     JSONS_FOLDER,
+    MAX_BEZEL_DP,
+    MAX_PRIORITY,
+    MIN_BEZEL_DP,
+    MIN_PRIORITY,
+    MOUSE_WHEEL_SIMULATOR_CODE,
     PROFILES_FOLDER,
     RECTANGLE,
+    SENSITIVITY_MAX,
+    SENSITIVITY_MIN,
+    SPRINT_DISTANCE_CODE,
     TOML_PATH,
+    TOP_BEZEL_ID,
     TYPEMATIC_DELAY_MAX_MS,
     TYPEMATIC_DELAY_MIN_MS,
     TYPEMATIC_RATE_MAX_HZ,
     TYPEMATIC_RATE_MIN_HZ,
     clamp,
+    get_scancode_from_key,
 )
 
+VALID_SORT_ORDERS = ("Recently Modified", "Name (A-Z)", "Created (Newest)")
+
 # ---------------------------------------------------------------------------
-# Input helpers
+# Input & Validation Helpers
 # ---------------------------------------------------------------------------
 
 
@@ -57,6 +78,60 @@ def _prompt_float(prompt: str, current: float) -> float:
     except ValueError:
         print(f"Invalid number '{raw}'; keeping {current}.")
         return current
+
+
+def _prompt_int(prompt: str, current: int) -> int:
+    """Asks for an int; blank or invalid input keeps `current`."""
+    raw = input(prompt).strip()
+    if not raw:
+        return current
+    try:
+        return int(raw)
+    except ValueError:
+        print(f"Invalid integer '{raw}'; keeping {current}.")
+        return current
+
+
+def _validate_key_or_none(raw_key: str) -> tuple[bool, Optional[str]]:
+    """Validates a single key name against scancode mappings. 'none'/'clear' unsets it."""
+    clean = raw_key.strip().lower()
+    if clean in ("none", "clear", "null"):
+        return True, None
+    if get_scancode_from_key(clean) is None:
+        print(f"Error: '{raw_key}' cannot be mapped to a valid scancode.")
+        return False, None
+    return True, clean
+
+
+def _normalize_excluded_keys(raw_csv: str, current_csv: Optional[str] = None) -> str:
+    """Expands +wasd / +arrows presets and validates every key via get_scancode_from_key."""
+    seq: list[str] = []
+    if current_csv:
+        seq.extend(k.strip().lower() for k in current_csv.split(",") if k.strip())
+
+    tokens = [t.strip().lower() for t in raw_csv.split(",") if t.strip()]
+    if tokens in (["none"], ["clear"]):
+        return ""
+
+    if not any(t.startswith("+") for t in tokens):
+        seq.clear()
+
+    for token in tokens:
+        if token == "+wasd":
+            candidates = ["w", "a", "s", "d"]
+        elif token == "+arrows":
+            candidates = ["left", "up", "down", "right"]
+        else:
+            candidates = [token.lstrip("+")]
+
+        for key in candidates:
+            if get_scancode_from_key(key) is None:
+                print(f"Warning: Skipping unsupported key '{key}'.")
+                continue
+            if key not in seq:
+                seq.append(key)
+
+    return ",".join(seq)
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +182,9 @@ def set_profile_image(layout_id: int, image_path_input: str | Path) -> bool:
             image_path=stored_ref,
         )
     except Exception as exc:
-        print(f"Error: Could not apply image '{path.name}' to profile '{target.name}': {exc}")
+        print(
+            f"Error: Could not apply image '{path.name}' to profile '{target.name}': {exc}"
+        )
         return False
 
     print(
@@ -139,28 +216,225 @@ def configure_left_handed_interactive() -> None:
     show_left_handed()
 
 
-def list_profiles() -> None:
-    """Lists all saved layouts with resolution, DPI, and zone metrics."""
+def show_input_controls() -> None:
+    """Prints all global touch, joystick, sensitivity, deadzone, hysteresis, and keybinding settings."""
+    s = store.settings.get()
+    print("\n--- Touch, Input Controls & Global Keybindings ---")
+    print(f"  Left-Handed Mode:  {'Yes' if s.left_handed else 'No'}")
+    print(f"  Floating Joystick: {'Yes' if s.floating_joystick else 'No'}")
+    print(f"  Anchored Joystick: {'Yes' if s.anchored_joystick else 'No'}")
+    print(f"  Sensitivity X / Y: {s.sensitivity_x:.2f} / {s.sensitivity_y:.2f}")
+    print(f"  Deadzone:          {s.deadzone:.2f}")
+    print(f"  Hysteresis:        {s.hysteresis:.1f}°")
+    print(f"  Toggle Key:        {s.toggle_key or 'Not set'}")
+    print(f"  Sprint Key:        {s.sprint_key or 'Not set'}\n")
+
+
+def configure_input_controls_interactive() -> None:
+    """Prompts for touch/input tuning knobs and global keybindings interactively."""
+    s = store.settings.get()
+    show_input_controls()
+
+    lh = (
+        input(f"Left-handed mode? (y/n, current: {'y' if s.left_handed else 'n'}): ")
+        .strip()
+        .lower()
+    )
+    fl = (
+        input(
+            f"Floating joystick? (y/n, current: {'y' if s.floating_joystick else 'n'}): "
+        )
+        .strip()
+        .lower()
+    )
+    an = (
+        input(
+            f"Anchored joystick? (y/n, current: {'y' if s.anchored_joystick else 'n'}): "
+        )
+        .strip()
+        .lower()
+    )
+
+    sx = clamp(
+        _prompt_float(
+            f"Sensitivity X ({SENSITIVITY_MIN}-{SENSITIVITY_MAX}, current: {s.sensitivity_x:.2f}): ",
+            s.sensitivity_x,
+        ),
+        SENSITIVITY_MIN,
+        SENSITIVITY_MAX,
+    )
+    sy = clamp(
+        _prompt_float(
+            f"Sensitivity Y ({SENSITIVITY_MIN}-{SENSITIVITY_MAX}, current: {s.sensitivity_y:.2f}): ",
+            s.sensitivity_y,
+        ),
+        SENSITIVITY_MIN,
+        SENSITIVITY_MAX,
+    )
+    dz = clamp(
+        _prompt_float(
+            f"Deadzone ({DEADZONE_MIN}-{DEADZONE_MAX}, current: {s.deadzone:.2f}): ",
+            s.deadzone,
+        ),
+        DEADZONE_MIN,
+        DEADZONE_MAX,
+    )
+    hys = clamp(
+        _prompt_float(
+            f"Hysteresis ({HYSTERESIS_MIN}-{HYSTERESIS_MAX}°, current: {s.hysteresis:.1f}): ",
+            s.hysteresis,
+        ),
+        HYSTERESIS_MIN,
+        HYSTERESIS_MAX,
+    )
+
+    updates: dict = {
+        "left_handed": s.left_handed if lh not in ("y", "n") else (lh == "y"),
+        "floating_joystick": (
+            s.floating_joystick if fl not in ("y", "n") else (fl == "y")
+        ),
+        "anchored_joystick": (
+            s.anchored_joystick if an not in ("y", "n") else (an == "y")
+        ),
+        "sensitivity_x": sx,
+        "sensitivity_y": sy,
+        "deadzone": dz,
+        "hysteresis": hys,
+    }
+
+    tk_in = input(
+        f"Toggle key ('none' to clear, blank to keep '{s.toggle_key or 'Not set'}'): "
+    ).strip()
+    if tk_in:
+        ok, val = _validate_key_or_none(tk_in)
+        if ok:
+            updates["toggle_key"] = val
+
+    sk_in = input(
+        f"Sprint key ('none' to clear, blank to keep '{s.sprint_key or 'Not set'}'): "
+    ).strip()
+    if sk_in:
+        ok, val = _validate_key_or_none(sk_in)
+        if ok:
+            updates["sprint_key"] = val
+
+    store.settings.update(**updates)
+    print("Input controls and global keybindings updated successfully.")
+    show_input_controls()
+
+
+def reset_input_controls_defaults() -> None:
+    """Resets only input/joystick tuning knobs to factory defaults."""
+    store.settings.update(
+        left_handed=False,
+        floating_joystick=False,
+        anchored_joystick=False,
+        sensitivity_x=1.0,
+        sensitivity_y=1.0,
+        deadzone=0.1,
+        hysteresis=5.0,
+    )
+    print("Input controls reset to factory defaults.")
+    show_input_controls()
+
+
+def set_profile_sort_order(sort_order: str) -> bool:
+    """Persists the profile list sort order in AppSettings."""
+    matching = next(
+        (m for m in VALID_SORT_ORDERS if m.lower() == sort_order.strip().lower()),
+        None,
+    )
+    if not matching:
+        print(
+            f"Error: Invalid sort order '{sort_order}'. Choose from: {', '.join(VALID_SORT_ORDERS)}"
+        )
+        return False
+
+    store.settings.update(profile_sort_order=matching)
+    print(f"Profile sort order updated to: '{matching}'.")
+    return True
+
+
+def list_profiles(search_query: str = "") -> None:
+    """Lists all saved layouts with resolution, DPI, sort order, and zone metrics."""
     layouts = store.layouts.list_all()
+    settings = store.settings.get()
     active_layout = store.get_active_layout()
     active_id = active_layout.id if active_layout else None
+    sort_mode = getattr(settings, "profile_sort_order", "Recently Modified")
 
     if not layouts:
         print("\nNo layouts found in the database.\n")
         return
 
+    if sort_mode == "Recently Modified":
+        layouts.sort(key=lambda l: l.updated_at or l.created_at or "", reverse=True)
+    elif sort_mode == "Created (Newest)":
+        layouts.sort(key=lambda l: l.created_at or "", reverse=True)
+    elif sort_mode == "Name (A-Z)":
+        layouts.sort(key=lambda l: l.name.lower())
+
+    if search_query.strip():
+        q = search_query.strip().lower()
+        layouts = [l for l in layouts if q in l.name.lower()]
+        if not layouts:
+            print(f"\nNo profiles matching '{search_query.strip()}'.\n")
+            return
+
     # One query; excludes the system bezels (same count the GUI shows).
     zone_counts = store.zones.count_by_layout()
 
-    print("\n--- Available Profiles ---")
+    header_filter = (
+        f" | Filter: '{search_query.strip()}'" if search_query.strip() else ""
+    )
+    print(f"\n--- Available Profiles (Sort: {sort_mode}{header_filter}) ---")
     for l in layouts:
         active_flag = " [* ACTIVE]" if l.id == active_id else ""
         img_flag = f" (Img: {Path(l.image_path).name})" if l.image_path else ""
+        mod_ts = (l.updated_at or l.created_at or "")[:16].replace("T", " ")
+        mod_flag = f" [Modified: {mod_ts}]" if mod_ts else ""
         print(
             f"  [{l.id}] {l.name} - {l.width}x{l.height} @ {l.dpi} DPI "
-            f"[{zone_counts.get(l.id, 0)} zones]{img_flag}{active_flag}"
+            f"[{zone_counts.get(l.id, 0)} zones]{img_flag}{mod_flag}{active_flag}"
         )
     print()
+
+
+def create_new_profile(
+    name: str,
+    width: Optional[int] = None,
+    height: Optional[int] = None,
+    dpi: Optional[int] = None,
+) -> Optional[int]:
+    """Creates a new blank layout (defaulting to AppSettings canvas dimensions) and activates it."""
+    clean_name = name.strip()
+    if not clean_name:
+        print("Error: Profile name cannot be empty.")
+        return None
+
+    if store.layouts.name_exists(clean_name):
+        print(f"Error: A layout named '{clean_name}' already exists.")
+        return None
+
+    s = store.settings.get()
+    w = int(width) if width is not None else s.json_dev_width
+    h = int(height) if height is not None else s.json_dev_height
+    d = int(dpi) if dpi is not None else s.json_dev_dpi
+
+    try:
+        new_layout = store.layouts.create(name=clean_name, width=w, height=h, dpi=d)
+        store.settings.update(active_layout_id=new_layout.id)
+        print(
+            f"Created and activated new profile '{new_layout.name}' "
+            f"(ID: {new_layout.id}, {w}x{h} @ {d} DPI)."
+        )
+        return new_layout.id
+    except DuplicateNameError:
+        print(f"Error: A layout named '{clean_name}' already exists.")
+        return None
+    except Exception as exc:
+        print(f"Failed to create profile: {exc}")
+        return None
 
 
 def list_layout_zones(layout_id: int) -> None:
@@ -181,17 +455,157 @@ def list_layout_zones(layout_id: int) -> None:
 
     for z in zones:
         coords = "N/A"
+        extra = ""
         if z.zone_type == CIRCLE:
             coords = f"Center=({z.cx}, {z.cy}), R={z.r}"
-        elif z.zone_type in (RECTANGLE, BEZEL):
+        elif z.zone_type == RECTANGLE:
             coords = f"Rect=({z.x1}, {z.y1}) -> ({z.x2}, {z.y2})"
+        elif z.zone_type == BEZEL:
+            z.set_parsed_config_from_json()
+            _, _, dp_thick, _ = z.CONFIG_HELPER.get_region_config()
+            coords = f"Rect=({z.x1}, {z.y1}) -> ({z.x2}, {z.y2}) [{dp_thick} dp]"
+
+        if z.zone_type != BEZEL:
+            z.set_parsed_config_from_json()
+            _, _, sx, sy, dz, hys = z.CONFIG_HELPER.get_transform_config()
+            ign = "Yes" if z.ignore_app_settings else "No"
+            extra = (
+                f" | IgnApp: {ign} | Sens: ({sx:.2f}, {sy:.2f}) "
+                f"| DZ: {dz:.2f} | Hys: {hys:.1f}°"
+            )
 
         cam_flag = " [MoveCam/TrackFire]" if z.pointer else ""
         print(
             f"  [{z.id}] {z.name or 'Unnamed'} | Key: {z.scancode} | "
-            f"Type: {z.zone_type} | Prio: {z.priority} | {coords}{cam_flag}"
+            f"Type: {z.zone_type} | Prio: {z.priority} | {coords}{extra}{cam_flag}"
         )
     print()
+
+
+def set_bezel_thickness(
+    layout_id: int, top_dp: Optional[float] = None, bottom_dp: Optional[float] = None
+) -> bool:
+    """Updates top and/or bottom system bezel thickness (in dp) for a layout."""
+    layout = store.layouts.get(layout_id)
+    if not layout:
+        print(f"Error: Layout ID {layout_id} not found.")
+        return False
+
+    zones = store.zones.list_for_layout(layout_id, auto_heal=True)
+    for z in zones:
+        if z.zone_type == BEZEL and z.scancode == TOP_BEZEL_ID and top_dp is not None:
+            clamped_top = int(clamp(top_dp, MIN_BEZEL_DP, MAX_BEZEL_DP))
+            store.zones.update_bezel(layout, z, True, clamped_top)
+        elif (
+            z.zone_type == BEZEL
+            and z.scancode == BOTTOM_BEZEL_ID
+            and bottom_dp is not None
+        ):
+            clamped_bot = int(clamp(bottom_dp, MIN_BEZEL_DP, MAX_BEZEL_DP))
+            store.zones.update_bezel(layout, z, False, clamped_bot)
+
+    print(f"System bezels updated for layout '{layout.name}' (ID: {layout_id}).")
+    return True
+
+
+def edit_single_zone(
+    zone_id: int,
+    priority: Optional[int] = None,
+    ignore_app_settings: Optional[bool] = None,
+    pointer: Optional[bool] = None,
+    sens_x: Optional[float] = None,
+    sens_y: Optional[float] = None,
+    deadzone: Optional[float] = None,
+    hysteresis: Optional[float] = None,
+) -> bool:
+    """Updates a single non-bezel zone's pipeline and inspector properties."""
+    zone = store.zones.get(zone_id)
+    if not zone or zone.zone_type == BEZEL:
+        print(f"Error: Non-bezel Zone ID {zone_id} not found.")
+        return False
+
+    p_cfg = PipelineConfig()
+    p_cfg.set_pipeline_config_from_json(zone.pipeline_json)
+
+    r_idx, _, b_dp, cur_prio = p_cfg.get_region_config()
+    new_prio = (
+        int(clamp(priority, MIN_PRIORITY, MAX_PRIORITY))
+        if priority is not None
+        else cur_prio
+    )
+    p_cfg.set_region_config(r_idx, b_dp, new_prio)
+
+    s_idx, _, cur_ptr = p_cfg.get_semantic_config()
+    if pointer is not None and zone.scancode not in (
+        MOUSE_WHEEL_SIMULATOR_CODE,
+        SPRINT_DISTANCE_CODE,
+    ):
+        cur_ptr = pointer
+    p_cfg.set_semantic_config(s_idx, cur_ptr)
+
+    t_idx, _, cur_sx, cur_sy, cur_dz, cur_hys = p_cfg.get_transform_config()
+    is_wheel = zone.scancode == MOUSE_WHEEL_SIMULATOR_CODE
+    if cur_ptr or is_wheel:
+        if sens_x is not None:
+            cur_sx = clamp(sens_x, SENSITIVITY_MIN, SENSITIVITY_MAX)
+        if sens_y is not None:
+            cur_sy = clamp(sens_y, SENSITIVITY_MIN, SENSITIVITY_MAX)
+    if is_wheel:
+        if deadzone is not None:
+            cur_dz = clamp(deadzone, DEADZONE_MIN, DEADZONE_MAX)
+        if hysteresis is not None:
+            cur_hys = clamp(hysteresis, HYSTERESIS_MIN, HYSTERESIS_MAX)
+    p_cfg.set_transform_config(t_idx, cur_sx, cur_sy, cur_dz, cur_hys)
+
+    ign = (
+        zone.ignore_app_settings if ignore_app_settings is None else ignore_app_settings
+    )
+    store.zones.update(
+        zone_id,
+        ignore_app_settings=ign,
+        pipeline_json=p_cfg.get_pipeline_json_from_config(),
+    )
+    print(f"Zone ID {zone_id} ('{zone.name or 'Unnamed'}') updated successfully.")
+    return True
+
+
+def reset_single_zone_to_app_settings(zone_id: int) -> bool:
+    """Resets a single non-bezel zone's transform parameters to global AppSettings."""
+    zone = store.zones.get(zone_id)
+    if not zone or zone.zone_type == BEZEL:
+        print(f"Error: Non-bezel Zone ID {zone_id} not found.")
+        return False
+
+    s = store.settings.get()
+    p_cfg = PipelineConfig()
+    p_cfg.set_pipeline_config_from_json(zone.pipeline_json)
+    t_idx, _, _, _, _, _ = p_cfg.get_transform_config()
+    p_cfg.set_transform_config(
+        t_idx,
+        s.sensitivity_x,
+        s.sensitivity_y,
+        s.deadzone,
+        s.hysteresis,
+    )
+    store.zones.update(
+        zone_id,
+        ignore_app_settings=False,
+        pipeline_json=p_cfg.get_pipeline_json_from_config(),
+    )
+    print(f"Zone ID {zone_id} ('{zone.name or 'Unnamed'}') reset to AppSettings.")
+    return True
+
+
+def delete_single_zone(zone_id: int) -> bool:
+    """Deletes a single non-bezel zone by its ID."""
+    zone = store.zones.get(zone_id)
+    if not zone or zone.zone_type == BEZEL:
+        print(f"Error: Non-bezel Zone ID {zone_id} not found.")
+        return False
+
+    store.zones.delete(zone_id, delete_bezel=False)
+    print(f"Zone ID {zone_id} ('{zone.name or 'Unnamed'}') deleted.")
+    return True
 
 
 def set_active_profile(layout_id: int) -> bool:
@@ -290,6 +704,12 @@ def clear_zones(layout_id: int) -> bool:
     return True
 
 
+def wipe_database() -> None:
+    """Atomically deletes all layouts, zones, and resets app_settings to factory defaults."""
+    store.settings.wipe_database()
+    print("Database wiped and reset to factory defaults.")
+
+
 # ---------------------------------------------------------------------------
 # Typematic Inspection & Configuration
 # ---------------------------------------------------------------------------
@@ -339,12 +759,13 @@ def configure_typematic_interactive() -> None:
     )
 
     ex_in = input(
-        f"Excluded keys comma-separated (current: {s.typematic_excluded_keys or ''}): "
+        f"Excluded keys comma-separated (supports +wasd, +arrows, or 'clear'; current: {s.typematic_excluded_keys or ''}): "
     ).strip()
-    excludes = s.typematic_excluded_keys if not ex_in else ex_in
-
-    if excludes:
-        excludes = ",".join(k.strip().lower() for k in excludes.split(",") if k.strip())
+    excludes = (
+        s.typematic_excluded_keys
+        if not ex_in
+        else _normalize_excluded_keys(ex_in, s.typematic_excluded_keys)
+    )
 
     store.settings.update(
         typematic_enabled=enabled,
@@ -463,6 +884,35 @@ def export_profile_json(
         return None
 
 
+def export_profile_toml(
+    layout_id: Optional[int] = None, output_path: Path | None = None
+) -> Optional[Path]:
+    """Exports app_settings to TOML; if layout_id is given, also exports & links its JSON like Layout Studio."""
+    try:
+        if layout_id is not None:
+            layout = store.layouts.get(layout_id)
+            if not layout:
+                print(f"Error: Layout ID {layout_id} not found.")
+                return None
+            JSONS_FOLDER.mkdir(parents=True, exist_ok=True)
+            json_path = JSONS_FOLDER / f"{safe_filename(layout.name)}.json"
+            export_layout_json(layout_id, json_path)
+            target_out = output_path or (
+                PROFILES_FOLDER / f"{safe_filename(layout.name)}.toml"
+            )
+            out_file = export_settings_toml(
+                target_out, linked_json_path=json_path, layout=layout
+            )
+        else:
+            out_file = export_settings_toml(output_path or TOML_PATH)
+
+        print(f"Settings exported successfully to: {out_file}")
+        return out_file
+    except Exception as exc:
+        print(f"TOML export failed: {exc}")
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Interactive Terminal Menu
 # ---------------------------------------------------------------------------
@@ -470,13 +920,25 @@ def export_profile_json(
 
 def interactive_menu() -> None:
     """Terminal CLI UI loop."""
+    search_filter = ""
     while True:
-        list_profiles()
-        print("\n\nCommands:")
+        list_profiles(search_filter)
+        print("\nCommands:")
         print("  [s]    Select / Switch Active Profile")
+        print("  [n]    Create New Blank Profile")
+        print("  [so]   Set Profile Sort Order")
+        print("  [fl]   Filter Profiles by Name")
         print("  [si]   Set Profile Background Image")
         print("  [lh]   View / Configure Left-Handed Mode")
+        print("  [ic]   View / Configure Touch, Input Controls & Global Keybindings")
+        print("  [ric]  Reset Input Controls to Defaults")
         print("  [lz]   List Zones / Pipelines for Profile")
+        print("  [bz]   Configure System Bezel Thickness (Top / Bottom dp)")
+        print(
+            "  [ez]   Edit Single Zone Pipeline (Priority / Sens / Deadzone / Pointer)"
+        )
+        print("  [rz1]  Reset Single Zone to AppSettings")
+        print("  [dz]   Delete Single Zone by ID")
         print("  [cp]   Duplicate Profile")
         print("  [rn]   Rename Profile")
         print("  [cz]   Clear Zones for Profile")
@@ -488,11 +950,12 @@ def interactive_menu() -> None:
         print("  [rss]  Reset two finger tap and Bezel Toggle Settings to Defaults")
         print("  [i]    Import Layout from JSON")
         print("  [e]    Export Profile to JSON")
-        print("  [st]   Export App Settings to settings.toml")
+        print("  [st]   Export App Settings to TOML (Standalone or Linked to Profile)")
         print("  [lt]   Import App Settings from settings.toml")
         print("  [eb]   Export Full Bundle to data/profiles/")
         print("  [ib]   Import Any Config (.toml, .json, or Bundle Directory)")
         print("  [r]    Reset All App Settings to Defaults")
+        print("  [w]    Wipe Database (Factory Reset)")
         print("  [q]    Quit")
 
         choice = input("\nEnter command: ").strip().lower()
@@ -504,6 +967,37 @@ def interactive_menu() -> None:
             raw_id = input("Enter Layout ID to activate: ").strip()
             if raw_id.isdigit():
                 set_active_profile(int(raw_id))
+
+        elif choice == "n":
+            name = input("Enter new profile name: ").strip()
+            if name:
+                s = store.settings.get()
+                w = _prompt_int(
+                    f"Canvas width (blank for {s.json_dev_width}): ", s.json_dev_width
+                )
+                h = _prompt_int(
+                    f"Canvas height (blank for {s.json_dev_height}): ",
+                    s.json_dev_height,
+                )
+                d = _prompt_int(
+                    f"Canvas DPI (blank for {s.json_dev_dpi}): ", s.json_dev_dpi
+                )
+                create_new_profile(name, w, h, d)
+
+        elif choice == "so":
+            print("Available sort orders:")
+            for idx, mode in enumerate(VALID_SORT_ORDERS, start=1):
+                print(f"  [{idx}] {mode}")
+            sel = input("Select sort order (1-3 or name): ").strip()
+            if sel in ("1", "2", "3"):
+                set_profile_sort_order(VALID_SORT_ORDERS[int(sel) - 1])
+            elif sel:
+                set_profile_sort_order(sel)
+
+        elif choice == "fl":
+            search_filter = input(
+                "Enter search filter (leave blank to show all): "
+            ).strip()
 
         elif choice == "si":
             raw_id = input("Enter Layout ID: ").strip()
@@ -518,10 +1012,106 @@ def interactive_menu() -> None:
         elif choice == "lh":
             configure_left_handed_interactive()
 
+        elif choice == "ic":
+            configure_input_controls_interactive()
+
+        elif choice == "ric":
+            confirm = (
+                input("Reset input controls to factory defaults? (y/N): ")
+                .strip()
+                .lower()
+            )
+            if confirm == "y":
+                reset_input_controls_defaults()
+
         elif choice == "lz":
             raw_id = input("Enter Layout ID to view zones: ").strip()
             if raw_id.isdigit():
                 list_layout_zones(int(raw_id))
+
+        elif choice == "bz":
+            raw_id = input("Enter Layout ID (leave blank for active): ").strip()
+
+            if raw_id.isdigit():
+                target_id = int(raw_id)
+            else:
+                layout = store.get_active_layout()
+                if layout:
+                    target = layout.id
+                else:
+                    target_id = None
+
+            if target_id is not None:
+                top_in = input(
+                    f"Top bezel dp ({MIN_BEZEL_DP}-{MAX_BEZEL_DP}, blank to keep): "
+                ).strip()
+                bot_in = input(
+                    f"Bottom bezel dp ({MIN_BEZEL_DP}-{MAX_BEZEL_DP}, blank to keep): "
+                ).strip()
+                top_val = float(top_in) if top_in else None
+                bot_val = float(bot_in) if bot_in else None
+                set_bezel_thickness(target_id, top_val, bot_val)
+            else:
+                print("No valid layout selected.")
+
+        elif choice == "ez":
+            raw_zid = input("Enter Zone ID to edit: ").strip()
+            if raw_zid.isdigit():
+                zid = int(raw_zid)
+                zone = store.zones.get(zid)
+                if not zone or zone.zone_type == BEZEL:
+                    print(f"Error: Non-bezel Zone ID {zid} not found.")
+                else:
+                    zone.set_parsed_config_from_json()
+                    _, _, sx, sy, dz, hys = zone.CONFIG_HELPER.get_transform_config()
+                    prio = _prompt_int(
+                        f"Priority ({MIN_PRIORITY}-{MAX_PRIORITY}, current: {zone.priority}): ",
+                        zone.priority,
+                    )
+                    ign_in = (
+                        input(
+                            f"Ignore global AppSettings? (y/n, current: {'y' if zone.ignore_app_settings else 'n'}): "
+                        )
+                        .strip()
+                        .lower()
+                    )
+                    ign = (
+                        zone.ignore_app_settings
+                        if ign_in not in ("y", "n")
+                        else (ign_in == "y")
+                    )
+                    ptr_in = (
+                        input(
+                            f"Output is Pointer Button? (y/n, current: {'y' if zone.pointer else 'n'}): "
+                        )
+                        .strip()
+                        .lower()
+                    )
+                    ptr = zone.pointer if ptr_in not in ("y", "n") else (ptr_in == "y")
+                    new_sx = _prompt_float(f"Sensitivity X (current: {sx:.2f}): ", sx)
+                    new_sy = _prompt_float(f"Sensitivity Y (current: {sy:.2f}): ", sy)
+                    new_dz = _prompt_float(f"Deadzone (current: {dz:.2f}): ", dz)
+                    new_hys = _prompt_float(f"Hysteresis (current: {hys:.1f}): ", hys)
+                    edit_single_zone(
+                        zid,
+                        priority=prio,
+                        ignore_app_settings=ign,
+                        pointer=ptr,
+                        sens_x=new_sx,
+                        sens_y=new_sy,
+                        deadzone=new_dz,
+                        hysteresis=new_hys,
+                    )
+
+        elif choice == "rz1":
+            raw_zid = input("Enter Zone ID to reset to AppSettings: ").strip()
+            if raw_zid.isdigit():
+                reset_single_zone_to_app_settings(int(raw_zid))
+
+        elif choice == "dz":
+            raw_zid = input("Enter Zone ID to delete: ").strip()
+            if raw_zid.isdigit():
+                delete_single_zone(int(raw_zid))
 
         elif choice == "cp":
             raw_id = input("Enter Layout ID to duplicate: ").strip()
@@ -629,8 +1219,11 @@ def interactive_menu() -> None:
                 export_profile_json(int(raw_id))
 
         elif choice == "st":
-            path = export_settings_toml()
-            print(f"Settings exported successfully to: {path}")
+            raw_id = input(
+                "Enter Layout ID to link with TOML (Leave blank for standalone settings.toml): "
+            ).strip()
+            linked_id = int(raw_id) if raw_id.isdigit() else None
+            export_profile_toml(layout_id=linked_id)
 
         elif choice == "lt":
             if migrate_toml_config():
@@ -682,6 +1275,15 @@ def interactive_menu() -> None:
                 store.settings.reset_to_defaults()
                 print("Application settings reset to defaults.")
 
+        elif choice == "w":
+            confirm = (
+                input("WARNING: Wipe ALL layouts, zones, and reset settings? (y/N): ")
+                .strip()
+                .lower()
+            )
+            if confirm == "y":
+                wipe_database()
+
         print("-" * 40)
 
 
@@ -696,6 +1298,32 @@ def run() -> None:
         "-l", "--list", action="store_true", help="List all saved profiles"
     )
     parser.add_argument(
+        "--filter",
+        type=str,
+        default="",
+        metavar="QUERY",
+        help="Filter listed profiles by name substring",
+    )
+    parser.add_argument(
+        "--sort",
+        type=str,
+        choices=VALID_SORT_ORDERS,
+        help="Set and persist profile sort order",
+    )
+    parser.add_argument(
+        "--new",
+        type=str,
+        metavar="NAME",
+        help="Create and activate a new blank profile",
+    )
+    parser.add_argument(
+        "--dims",
+        type=int,
+        nargs=3,
+        metavar=("WIDTH", "HEIGHT", "DPI"),
+        help="Optional canvas dimensions (WIDTH HEIGHT DPI) when using --new",
+    )
+    parser.add_argument(
         "-s", "--set-active", type=int, metavar="ID", help="Set active layout by ID"
     )
     parser.add_argument(
@@ -704,6 +1332,8 @@ def run() -> None:
         metavar=("LAYOUT_ID", "IMAGE_PATH"),
         help="Set background image path for a specific layout by its ID",
     )
+
+    # Input Controls & Global Keybindings CLI flags
     parser.add_argument(
         "--show-left-handed",
         action="store_true",
@@ -715,10 +1345,133 @@ def run() -> None:
         help="Enable or disable left-handed mode",
     )
     parser.add_argument(
+        "--show-input",
+        action="store_true",
+        help="Display touch, joystick, sensitivity, deadzone, hysteresis, and keybinding settings",
+    )
+    parser.add_argument(
+        "--set-floating-joystick",
+        choices=["on", "off"],
+        help="Enable or disable floating joystick",
+    )
+    parser.add_argument(
+        "--set-anchored-joystick",
+        choices=["on", "off"],
+        help="Enable or disable anchored joystick",
+    )
+    parser.add_argument(
+        "--sensitivity-x",
+        type=float,
+        metavar="VAL",
+        help="Set global X sensitivity",
+    )
+    parser.add_argument(
+        "--sensitivity-y",
+        type=float,
+        metavar="VAL",
+        help="Set global Y sensitivity",
+    )
+    parser.add_argument(
+        "--deadzone",
+        type=float,
+        metavar="VAL",
+        help="Set global joystick deadzone",
+    )
+    parser.add_argument(
+        "--hysteresis",
+        type=float,
+        metavar="DEG",
+        help="Set global directional hysteresis in degrees",
+    )
+    parser.add_argument(
+        "--toggle-key",
+        type=str,
+        metavar="KEY",
+        help="Set global toggle key (or 'none' to clear)",
+    )
+    parser.add_argument(
+        "--sprint-key",
+        type=str,
+        metavar="KEY",
+        help="Set global sprint key (or 'none' to clear)",
+    )
+    parser.add_argument(
+        "--reset-input",
+        action="store_true",
+        help="Reset touch and input controls to factory defaults",
+    )
+
+    # Zone & Bezel CLI flags
+    parser.add_argument(
         "--list-zones",
         type=int,
         metavar="ID",
         help="List all zones/pipelines for layout by ID",
+    )
+    parser.add_argument(
+        "--set-bezels",
+        type=float,
+        nargs=3,
+        metavar=("LAYOUT_ID", "TOP_DP", "BOTTOM_DP"),
+        help="Set top and bottom system bezel thickness in dp for a layout",
+    )
+    parser.add_argument(
+        "--edit-zone",
+        type=int,
+        metavar="ZONE_ID",
+        help="Edit a single non-bezel zone by ID (combine with --zone-* flags)",
+    )
+    parser.add_argument(
+        "--zone-priority",
+        type=int,
+        metavar="PRIO",
+        help="Zone priority value for --edit-zone",
+    )
+    parser.add_argument(
+        "--zone-ignore-app-settings",
+        choices=["on", "off"],
+        help="Toggle ignore_app_settings for --edit-zone",
+    )
+    parser.add_argument(
+        "--zone-pointer",
+        choices=["on", "off"],
+        help="Toggle pointer button semantics for --edit-zone",
+    )
+    parser.add_argument(
+        "--zone-sens-x",
+        type=float,
+        metavar="VAL",
+        help="Zone X sensitivity for --edit-zone",
+    )
+    parser.add_argument(
+        "--zone-sens-y",
+        type=float,
+        metavar="VAL",
+        help="Zone Y sensitivity for --edit-zone",
+    )
+    parser.add_argument(
+        "--zone-deadzone",
+        type=float,
+        metavar="VAL",
+        help="Zone deadzone for --edit-zone",
+    )
+    parser.add_argument(
+        "--zone-hysteresis",
+        type=float,
+        metavar="DEG",
+        help="Zone hysteresis for --edit-zone",
+    )
+    parser.add_argument(
+        "--reset-zone",
+        type=int,
+        metavar="ZONE_ID",
+        help="Reset a single zone by ID to global AppSettings",
+    )
+    parser.add_argument(
+        "--delete-zone",
+        type=int,
+        metavar="ZONE_ID",
+        help="Delete a single non-bezel zone by ID",
     )
     parser.add_argument(
         "--duplicate",
@@ -774,7 +1527,7 @@ def run() -> None:
         "--typematic-excludes",
         type=str,
         metavar="KEYS",
-        help="Set comma-separated excluded keys (e.g. 'lshift, lctrl, lalt')",
+        help="Set comma-separated excluded keys (supports '+wasd', '+arrows', or 'clear')",
     )
     parser.add_argument(
         "--reset-typematic",
@@ -804,6 +1557,7 @@ def run() -> None:
         help="Reset system settings to factory defaults",
     )
 
+    # Import / Export & Reset flags
     parser.add_argument(
         "-i",
         "--import-json",
@@ -823,9 +1577,8 @@ def run() -> None:
         "--output",
         type=Path,
         metavar="OUT_PATH",
-        help="Custom output path for JSON export",
+        help="Custom output path for JSON or TOML export",
     )
-
     parser.add_argument(
         "--export-toml",
         type=Path,
@@ -835,6 +1588,12 @@ def run() -> None:
         help="Export app_settings to TOML",
     )
     parser.add_argument(
+        "--export-toml-layout",
+        type=int,
+        metavar="LAYOUT_ID",
+        help="Export app_settings to TOML linked to a specific layout ID",
+    )
+    parser.add_argument(
         "--import-toml",
         type=Path,
         nargs="?",
@@ -842,14 +1601,19 @@ def run() -> None:
         metavar="IN_PATH",
         help="Import app_settings from TOML",
     )
-
     parser.add_argument(
         "--export-bundle",
         type=Path,
         nargs="?",
         const=PROFILES_FOLDER,
         metavar="OUT_DIR",
-        help="Export profile bundle (.toml + .json) into data/profiles/",
+        help="Export profile bundle (.toml + .json) into target directory",
+    )
+    parser.add_argument(
+        "--bundle-layout-id",
+        type=int,
+        metavar="LAYOUT_ID",
+        help="Optional layout ID to bundle when using --export-bundle",
     )
     parser.add_argument(
         "--import-bundle",
@@ -868,6 +1632,11 @@ def run() -> None:
         action="store_true",
         help="Reset all app settings to defaults",
     )
+    parser.add_argument(
+        "--wipe-database",
+        action="store_true",
+        help="Delete all layouts/zones and reset settings to factory defaults",
+    )
 
     args = parser.parse_args()
 
@@ -880,6 +1649,49 @@ def run() -> None:
 
         if args.show_left_handed:
             show_left_handed()
+            return
+
+        input_updates = {}
+        if args.set_floating_joystick is not None:
+            input_updates["floating_joystick"] = args.set_floating_joystick == "on"
+        if args.set_anchored_joystick is not None:
+            input_updates["anchored_joystick"] = args.set_anchored_joystick == "on"
+        if args.sensitivity_x is not None:
+            input_updates["sensitivity_x"] = clamp(
+                args.sensitivity_x, SENSITIVITY_MIN, SENSITIVITY_MAX
+            )
+        if args.sensitivity_y is not None:
+            input_updates["sensitivity_y"] = clamp(
+                args.sensitivity_y, SENSITIVITY_MIN, SENSITIVITY_MAX
+            )
+        if args.deadzone is not None:
+            input_updates["deadzone"] = clamp(args.deadzone, DEADZONE_MIN, DEADZONE_MAX)
+        if args.hysteresis is not None:
+            input_updates["hysteresis"] = clamp(
+                args.hysteresis, HYSTERESIS_MIN, HYSTERESIS_MAX
+            )
+        if args.toggle_key is not None:
+            ok, val = _validate_key_or_none(args.toggle_key)
+            if not ok:
+                return
+            input_updates["toggle_key"] = val
+        if args.sprint_key is not None:
+            ok, val = _validate_key_or_none(args.sprint_key)
+            if not ok:
+                return
+            input_updates["sprint_key"] = val
+
+        if input_updates:
+            store.settings.update(**input_updates)
+            print("Input controls and keybindings updated successfully.")
+            show_input_controls()
+            return
+
+        if args.reset_input:
+            reset_input_controls_defaults()
+            return
+        elif args.show_input:
+            show_input_controls()
             return
 
         typematic_updates = {}
@@ -896,10 +1708,9 @@ def run() -> None:
                 args.typematic_rate, TYPEMATIC_RATE_MIN_HZ, TYPEMATIC_RATE_MAX_HZ
             )
         if args.typematic_excludes is not None:
-            typematic_updates["typematic_excluded_keys"] = ",".join(
-                k.strip().lower()
-                for k in args.typematic_excludes.split(",")
-                if k.strip()
+            current_ex = store.settings.get().typematic_excluded_keys
+            typematic_updates["typematic_excluded_keys"] = _normalize_excluded_keys(
+                args.typematic_excludes, current_ex
             )
 
         if typematic_updates:
@@ -938,14 +1749,47 @@ def run() -> None:
             show_system()
             return
 
-        if args.list:
-            list_profiles()
+        if args.sort is not None:
+            set_profile_sort_order(args.sort)
+            if not args.list:
+                return
+
+        if args.list or args.filter:
+            list_profiles(args.filter)
+        elif args.new is not None:
+            w, h, d = args.dims if args.dims else (None, None, None)
+            create_new_profile(args.new, w, h, d)
         elif args.set_image is not None:
             set_profile_image(int(args.set_image[0]), args.set_image[1])
         elif args.set_active is not None:
             set_active_profile(args.set_active)
         elif args.list_zones is not None:
             list_layout_zones(args.list_zones)
+        elif args.set_bezels is not None:
+            set_bezel_thickness(
+                int(args.set_bezels[0]), args.set_bezels[1], args.set_bezels[2]
+            )
+        elif args.edit_zone is not None:
+            edit_single_zone(
+                args.edit_zone,
+                priority=args.zone_priority,
+                ignore_app_settings=(
+                    None
+                    if args.zone_ignore_app_settings is None
+                    else (args.zone_ignore_app_settings == "on")
+                ),
+                pointer=(
+                    None if args.zone_pointer is None else (args.zone_pointer == "on")
+                ),
+                sens_x=args.zone_sens_x,
+                sens_y=args.zone_sens_y,
+                deadzone=args.zone_deadzone,
+                hysteresis=args.zone_hysteresis,
+            )
+        elif args.reset_zone is not None:
+            reset_single_zone_to_app_settings(args.reset_zone)
+        elif args.delete_zone is not None:
+            delete_single_zone(args.delete_zone)
         elif args.duplicate is not None:
             duplicate_profile(int(args.duplicate[0]), args.duplicate[1])
         elif args.rename is not None:
@@ -968,16 +1812,28 @@ def run() -> None:
             import_profile_json(args.import_json)
         elif args.export_json is not None:
             export_profile_json(args.export_json, args.output)
+        elif args.export_toml_layout is not None:
+            export_profile_toml(args.export_toml_layout, args.output)
         elif args.export_toml is not None:
-            path = export_settings_toml(args.export_toml)
-            print(f"Settings exported to: {path}")
+            export_profile_toml(None, args.export_toml)
         elif args.import_toml is not None:
             if migrate_toml_config(args.import_toml):
                 print(f"Settings imported from: {args.import_toml}")
             else:
                 print(f"Failed to import settings from: {args.import_toml}")
         elif args.export_bundle is not None:
-            t_path, j_path = export_bundle(args.export_bundle)
+            if args.bundle_layout_id is not None:
+                target = store.layouts.get(args.bundle_layout_id)
+                if not target:
+                    print(f"Error: Layout ID {args.bundle_layout_id} not found.")
+                    return
+                t_path, j_path = export_bundle(
+                    args.export_bundle,
+                    profile_name=target.name,
+                    layout_id=target.id,
+                )
+            else:
+                t_path, j_path = export_bundle(args.export_bundle)
             print(f"Bundle exported:\n  - TOML: {t_path}\n  - JSON: {j_path}")
         elif args.import_bundle is not None:
             if import_any(args.import_bundle):
@@ -992,6 +1848,8 @@ def run() -> None:
         elif args.reset_settings:
             store.settings.reset_to_defaults()
             print("Application settings reset to defaults.")
+        elif args.wipe_database:
+            wipe_database()
         else:
             interactive_menu()
     finally:

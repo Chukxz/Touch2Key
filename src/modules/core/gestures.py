@@ -202,16 +202,3 @@ class TwoFingerTapTracker:
             return GestureDecision(GestureStatus.PENDING)
 
         return GestureDecision(GestureStatus.PENDING)
-
-    def process(self, event: TouchEvent) -> bool:
-        """Compatibility wrapper; use ``observe`` when rejected events matter."""
-        return self.observe(event).status is GestureStatus.RECOGNIZED
-
-    def is_deferred(self, cid: int, current_time: float) -> bool:
-        """Compatibility helper for callers using the previous tracker API."""
-        return (
-            self.is_pending
-            and cid in self._candidate_ids
-            and self._pending_since is not None
-            and current_time - self._pending_since <= self.sync_window_s
-        )

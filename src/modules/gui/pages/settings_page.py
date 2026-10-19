@@ -37,6 +37,7 @@ from modules.utils import (
     ADB_RATE_CAP_MIN,
     DEADZONE_MAX,
     DEADZONE_MIN,
+    EXCLUDED_KEYS,
     HYSTERESIS_MAX,
     HYSTERESIS_MIN,
     MapperEvent,
@@ -332,16 +333,22 @@ class SettingsPage(QWidget):
 
         self.toggle_key_label = QLabel("Not set")
         self.toggle_key_btn = QPushButton("Capture")
+        self.toggle_key_clear_btn = QPushButton("Clear")
         kb_form.addRow(
             "Toggle Key (Menu Mode):",
-            self._paired_row(self.toggle_key_label, self.toggle_key_btn),
+            self._paired_row(
+                self.toggle_key_label, self.toggle_key_btn, self.toggle_key_clear_btn
+            ),
         )
 
         self.sprint_key_label = QLabel("Not set")
         self.sprint_key_btn = QPushButton("Capture")
+        self.sprint_key_clear_btn = QPushButton("Clear")
         kb_form.addRow(
             "Sprint Key:",
-            self._paired_row(self.sprint_key_label, self.sprint_key_btn),
+            self._paired_row(
+                self.sprint_key_label, self.sprint_key_btn, self.sprint_key_clear_btn
+            ),
         )
 
         scroll_layout.addWidget(kb_group)
@@ -385,6 +392,12 @@ class SettingsPage(QWidget):
         self.hysteresis_spin.setSuffix("°")
         input_form.addRow("Hysteresis:", self.hysteresis_spin)
         input_layout.addLayout(input_form)
+
+        input_reset_row = QHBoxLayout()
+        self.reset_input_btn = QPushButton("Reset Input Controls to Defaults")
+        input_reset_row.addWidget(self.reset_input_btn)
+        input_reset_row.addStretch()
+        input_layout.addLayout(input_reset_row)
 
         scroll_layout.addWidget(input_group)
 
@@ -438,6 +451,12 @@ class SettingsPage(QWidget):
         typematic_excluded_keys_scroll_area.setWidgetResizable(True)
         typematic_form.addRow("Excluded Keys:", typematic_excluded_keys_scroll_area)
 
+        typematic_reset_row = QHBoxLayout()
+        self.reset_typematic_btn = QPushButton("Reset Typematic to Defaults")
+        typematic_reset_row.addWidget(self.reset_typematic_btn)
+        typematic_reset_row.addStretch()
+        typematic_form.addRow("", typematic_reset_row)
+
         scroll_layout.addWidget(typematic_group)
 
         # 6. System Group
@@ -451,6 +470,12 @@ class SettingsPage(QWidget):
 
         self.bezel_toggle_enabled_check = QCheckBox()
         system_form.addRow("Enable Bezel Toggles:", self.bezel_toggle_enabled_check)
+
+        system_reset_row = QHBoxLayout()
+        self.reset_system_btn = QPushButton("Reset System Toggles to Defaults")
+        system_reset_row.addWidget(self.reset_system_btn)
+        system_reset_row.addStretch()
+        system_form.addRow("", system_reset_row)
 
         scroll_layout.addWidget(system_group)
 
@@ -511,8 +536,14 @@ class SettingsPage(QWidget):
         self.toggle_key_btn.clicked.connect(
             lambda: self._begin_single_key_capture("toggle_key")
         )
+        self.toggle_key_clear_btn.clicked.connect(
+            lambda: self._on_clear_key("toggle_key")
+        )
         self.sprint_key_btn.clicked.connect(
             lambda: self._begin_single_key_capture("sprint_key")
+        )
+        self.sprint_key_clear_btn.clicked.connect(
+            lambda: self._on_clear_key("sprint_key")
         )
 
         self.left_handed_check.toggled.connect(self._on_left_handed_changed)
@@ -522,18 +553,23 @@ class SettingsPage(QWidget):
         self.sensitivity_spin_y.valueChanged.connect(self._on_sensitivity_y_changed)
         self.deadzone_spin.valueChanged.connect(self._on_deadzone_changed)
         self.hysteresis_spin.valueChanged.connect(self._on_hysteresis_changed)
+        self.reset_input_btn.clicked.connect(self._on_reset_input_defaults)
+
         self.rate_cap_spin.valueChanged.connect(self._on_rate_cap_changed)
         self.pps_alert_spin.valueChanged.connect(self._on_pps_alert_changed)
 
         self.typematic_enabled_check.toggled.connect(self._on_typematic_enabled_changed)
         self.typematic_delay_spin.valueChanged.connect(self._on_typematic_delay_changed)
         self.typematic_rate_spin.valueChanged.connect(self._on_typematic_rate_changed)
+        self.reset_typematic_btn.clicked.connect(self._on_reset_typematic_defaults)
+
         self.two_finger_tap_enabled_check.toggled.connect(
             self._on_two_finger_tap_enabled_changed
         )
         self.bezel_toggle_enabled_check.toggled.connect(
             self._on_bezel_toggle_enabled_changed
         )
+        self.reset_system_btn.clicked.connect(self._on_reset_system_defaults)
 
         self.export_toml_btn.clicked.connect(self._on_export_toml)
         self.import_toml_btn.clicked.connect(self._on_import_toml)
@@ -542,24 +578,18 @@ class SettingsPage(QWidget):
         self.delete_all_btn.clicked.connect(self._on_delete_all)
 
     def _refresh_hw_ui(self) -> None:
-        w_id = self.w_id if self.w_id is not None else 'Unassigned'
+        w_id = self.w_id if self.w_id is not None else "Unassigned"
         w_title = self.w_title if self.w_title is not None else ""
 
-        self.w_label.setText(
-            f"Target Window ID:       {w_id} ({w_title})"
-        )
+        self.w_label.setText(f"Target Window ID:       {w_id} ({w_title})")
         self.select_window_btn.setEnabled(True)
 
         if sys.platform == "win32":
-            k_id = self.k_id if self.k_id is not None else 'Unassigned'
-            m_id = self.m_id if self.m_id is not None else 'Unassigned'
+            k_id = self.k_id if self.k_id is not None else "Unassigned"
+            m_id = self.m_id if self.m_id is not None else "Unassigned"
 
-            self.k_label.setText(
-                f"Configured Keyboard ID: {k_id}"
-            )
-            self.m_label.setText(
-                f"Configured Mouse ID:    {m_id}"
-            )
+            self.k_label.setText(f"Configured Keyboard ID: {k_id}")
+            self.m_label.setText(f"Configured Mouse ID:    {m_id}")
             self.rebind_hw_btn.setEnabled(True)
         else:
             self.k_label.setText(
@@ -630,12 +660,13 @@ class SettingsPage(QWidget):
         )
 
     @staticmethod
-    def _paired_row(label: QLabel, button: QPushButton) -> QWidget:
+    def _paired_row(label: QLabel, *buttons: QPushButton) -> QWidget:
         wrapper = QWidget()
         row = QHBoxLayout(wrapper)
         row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(label)
-        row.addWidget(button)
+        for button in buttons:
+            row.addWidget(button)
         row.addStretch()
         return wrapper
 
@@ -687,6 +718,11 @@ class SettingsPage(QWidget):
         self._app().installEventFilter(self._single_key_filter)
         self.setFocus()
 
+    def _on_clear_key(self, target_field: str) -> None:
+        self._cancel_captures()
+        self.persist_binding(target_field, None)
+        self.load_settings()
+
     def begin_sequence_capture(self, row: KeySequenceRow) -> None:
         if self._active_seq_row is not None and self._active_seq_row is not row:
             self._active_seq_row.stop_recording()
@@ -714,7 +750,7 @@ class SettingsPage(QWidget):
         if self._active_seq_row is not None:
             self._active_seq_row.add_key(db_key)
 
-    def persist_binding(self, target_field: str, serialized_val: str) -> None:
+    def persist_binding(self, target_field: str, serialized_val: str | None) -> None:
         try:
             store.settings.update(**{target_field: serialized_val})
             self._notify_reload()
@@ -729,6 +765,8 @@ class SettingsPage(QWidget):
 
             self.toggle_key_label.setText(settings.toggle_key or "Not set")
             self.sprint_key_label.setText(settings.sprint_key or "Not set")
+            self.toggle_key_clear_btn.setEnabled(bool(settings.toggle_key))
+            self.sprint_key_clear_btn.setEnabled(bool(settings.sprint_key))
 
             def parse_seq(val: str | None) -> list[str]:
                 if not val or not val.strip():
@@ -842,6 +880,26 @@ class SettingsPage(QWidget):
         except Exception:
             logger.exception("Failed to update hysteresis setting")
 
+    def _on_reset_input_defaults(self) -> None:
+        try:
+            store.settings.update(
+                left_handed=False,
+                floating_joystick=False,
+                anchored_joystick=False,
+                sensitivity_x=1.0,
+                sensitivity_y=1.0,
+                deadzone=0.1,
+                hysteresis=5.0,
+            )
+            self.load_settings()
+            self._notify_reload()
+            logger.info("Input controls reset to factory defaults")
+        except Exception as exc:
+            logger.exception("Failed to reset input controls")
+            QMessageBox.critical(
+                self, "Error", f"Failed to reset input controls:\n{exc}"
+            )
+
     def _on_rate_cap_changed(self, value: float) -> None:
         try:
             store.settings.update(adb_rate_cap=value)
@@ -879,6 +937,23 @@ class SettingsPage(QWidget):
         except Exception:
             logger.exception("Failed to update typematic_rate setting")
 
+    def _on_reset_typematic_defaults(self) -> None:
+        try:
+            store.settings.update(
+                typematic_enabled=True,
+                typematic_delay_ms=250.0,
+                typematic_rate_hz=30.0,
+                typematic_excluded_keys=EXCLUDED_KEYS,
+            )
+            self.load_settings()
+            self._notify_reload()
+            logger.info("Typematic settings reset to factory defaults")
+        except Exception as exc:
+            logger.exception("Failed to reset typematic settings")
+            QMessageBox.critical(
+                self, "Error", f"Failed to reset typematic settings:\n{exc}"
+            )
+
     def _on_two_finger_tap_enabled_changed(self, checked: bool) -> None:
         try:
             store.settings.update(two_finger_tap_enabled=checked)
@@ -892,6 +967,21 @@ class SettingsPage(QWidget):
             self._notify_reload()
         except Exception:
             logger.exception("Failed to update bezel_toggle enabled setting")
+
+    def _on_reset_system_defaults(self) -> None:
+        try:
+            store.settings.update(
+                two_finger_tap_enabled=True,
+                bezel_toggle_enabled=True,
+            )
+            self.load_settings()
+            self._notify_reload()
+            logger.info("System toggle settings reset to factory defaults")
+        except Exception as exc:
+            logger.exception("Failed to reset system settings")
+            QMessageBox.critical(
+                self, "Error", f"Failed to reset system settings:\n{exc}"
+            )
 
     def _on_export_toml(self) -> None:
         path_str, _ = QFileDialog.getSaveFileName(
