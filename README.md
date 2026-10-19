@@ -24,10 +24,10 @@ The first version with only CLI support and basic GUI windows can be accessed [h
   `Region` -> `Origin` -> `Constraint` -> `Transformation` -> `Semantic`
   Decoupling spatial detection, reference baselines, mechanical bounds, mathematical transforms, and driver emissions eliminates state drift and input fighting.
 
-* **Prioritized Deterministic Dispatching:** Touch contacts are routed using a strict 4-key precedence sort:
+* **Prioritized Deterministic Dispatching:** Touch contacts are routed using a strict 5-key precedence sort:
     1. **Type Precedence** (`SystemToggle: 4` > `Button: 2` > `Joystick: 1` > `Mouse: 0`)
   2. **Explicit Priority** (Custom user tier: `+200` to `-100`)
-  3. **Allow Multi Claim** (Splits a tier into allow_multi_claim `True` and `False` tiers.
+  3. **Allow Multi Claim** (Splits a tier into allow_multi_claim `True` (sorted first) and `False` (sorted last) tiers.
   4. **Hitbox Specificity** (Smaller bounding areas evaluate before broad/full-screen zones)
   5. **Creation Order** (Deterministic tie-breaker)
 
