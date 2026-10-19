@@ -544,7 +544,7 @@ class SettingsPage(QWidget):
     def _refresh_hw_ui(self) -> None:
         w_id = self.w_id if self.w_id is not None else 'Unassigned'
         w_title = self.w_title if self.w_title is not None else ""
-        
+
         self.w_label.setText(
             f"Target Window ID:       {w_id} ({w_title})"
         )
@@ -553,7 +553,7 @@ class SettingsPage(QWidget):
         if sys.platform == "win32":
             k_id = self.k_id if self.k_id is not None else 'Unassigned'
             m_id = self.m_id if self.m_id is not None else 'Unassigned'
-            
+
             self.k_label.setText(
                 f"Configured Keyboard ID: {k_id}"
             )
@@ -612,7 +612,7 @@ class SettingsPage(QWidget):
         self.k_id, self.m_id = devices
         with self.engine_controller.lock:
             self.engine_controller.k_id = self.k_id
-            self.engine_controller.m_id =  self.m_id
+            self.engine_controller.m_id = self.m_id
         self._refresh_hw_ui()
 
         if self.dispatcher:
@@ -658,7 +658,7 @@ class SettingsPage(QWidget):
     def _begin_single_key_capture(self, target_field: str) -> None:
         self._cancel_captures()
         self.load_settings()
-        
+
         btn = (
             self.toggle_key_btn if target_field == "toggle_key" else self.sprint_key_btn
         )
@@ -766,7 +766,7 @@ class SettingsPage(QWidget):
                 settings.two_finger_tap_enabled
             )
             self.bezel_toggle_enabled_check.setChecked(settings.bezel_toggle_enabled)
-            
+
             self.typematic_excluded_keys.set_sequence(
                 parse_seq(settings.typematic_excluded_keys)
             )
@@ -999,9 +999,7 @@ class SettingsPage(QWidget):
         )
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                store.layouts.delete_all()
-                store.settings.reset_to_defaults()
-                store.settings.update(active_layout_id=None)
+                store.settings.wipe_database()
 
                 self.load_settings()
                 self._notify_reload()
