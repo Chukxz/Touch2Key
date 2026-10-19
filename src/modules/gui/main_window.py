@@ -183,13 +183,17 @@ class EngineProcessController(QObject):
 
     def _check_process_alive(self) -> None:
         if self.is_running():
-            self._watchdog.stop()
-            if not self._stop_requested and self.dispatcher is not None:
-                self.dispatcher.engine_error.emit(
-                    "Engine process terminated unexpectedly"
-                )
-                self.dispatcher.engine_stopped.emit()
-            self._stop_requested = False
+            return
+
+        self._watchdog.stop()
+
+        if not self._stop_requested and self.dispatcher is not None:
+            self.dispatcher.engine_error.emit(
+                "Engine process terminated unexpectedly"
+            )
+            self.dispatcher.engine_stopped.emit()
+
+        self._stop_requested = False
 
 
 class MainWindow(QMainWindow):
