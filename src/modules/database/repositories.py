@@ -270,6 +270,29 @@ class AppSettingsRepository:
             )
         return self.get()
 
+    def wipe_database(self) -> None:
+        conn = connection_manager.get_connection()
+
+        with conn:
+            conn.execute("DELETE FROM layout_zones;")
+            conn.execute("DELETE FROM layouts;")
+            conn.execute("DELETE FROM app_settings WHERE id = 1;")
+
+            # Match the existing reset_to_defaults() defaults,
+            # but clear the active profile as part of this transaction.
+            conn.execute(
+                """
+                INSERT INTO app_settings (
+                    id,
+                    active_layout_id,
+                    typematic_excluded_keys,
+                    profile_sort_order
+                )
+                VALUES (1, NULL, ?, 'Recently Modified');
+                """,
+                (EXCLUDED_KEYS,),
+            )
+
 
 class LayoutsRepository:
     ALLOWED_FIELDS = {
@@ -498,6 +521,40 @@ class LayoutsRepository:
         conn = connection_manager.get_connection()
         with conn:
             conn.execute("DELETE FROM layouts WHERE id = ?;", (layout_id,))
+
+    def delete_profile(self, layout_id: int) -> bool:
+        conn = connection_manager.get_connection()
+
+        with conn:
+            exists = conn.execute(
+                "SELECT 1 FROM layouts WHERE id = ?;",
+                (layout_id,),
+            ).fetchone()
+
+            if exists is None:
+                return False
+
+            # Remove the active reference before deleting the layout.
+            conn.execute(
+                """
+                UPDATE app_settings
+                SET active_layout_id = NULL,
+                    updated_at = datetime('now')
+                WHERE id = 1 AND active_layout_id = ?;
+                """,
+                (layout_id,),
+            )
+
+            conn.execute(
+                "DELETE FROM layout_zones WHERE layout_id = ?;",
+                (layout_id,),
+            )
+            conn.execute(
+                "DELETE FROM layouts WHERE id = ?;",
+                (layout_id,),
+            )
+
+        return True
 
     def delete_all(self) -> None:
         conn = connection_manager.get_connection()
@@ -731,6 +788,19 @@ class LayoutZonesRepository:
         conn = connection_manager.get_connection()
         with conn:
             conn.execute("DELETE FROM layout_zones WHERE layout_id = ?;", (layout_id,))
+
+    def clear_non_bezel_zones(self, layout_id: int) -> None:
+        conn = connection_manager.get_connection()
+
+        with conn:
+            conn.execute(
+                """
+                DELETE FROM layout_zones
+                WHERE layout_id = ?
+                  AND zone_type != ?;
+                """,
+                (layout_id, BEZEL),
+            )
 
     def list_for_layout(
         self, layout_id: int, auto_heal: bool = True
