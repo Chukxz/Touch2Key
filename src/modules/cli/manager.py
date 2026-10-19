@@ -266,16 +266,10 @@ def rename_profile(layout_id: int, new_name: str) -> bool:
 def delete_profile(layout_id: int) -> bool:
     """Deletes a profile and clears active references if necessary."""
     target = store.layouts.get(layout_id)
-    if not target:
+    if not target or not store.layouts.delete_profile(layout_id):
         print(f"Error: Layout ID {layout_id} does not exist.")
         return False
 
-    active_layout = store.get_active_layout()
-    if active_layout and active_layout.id == layout_id:
-        store.settings.update(active_layout_id=None)
-
-    store.zones.delete_all_for_layout(layout_id)
-    store.layouts.delete(layout_id)
     print(f"Layout '{target.name}' (ID: {layout_id}) and all mapped zones deleted.")
     return True
 
@@ -288,9 +282,7 @@ def clear_zones(layout_id: int) -> bool:
         return False
 
     # Delete only non-bezel zones so custom bezel thickness survives.
-    for zone in store.zones.list_for_layout(layout_id, auto_heal=False):
-        if zone.zone_type != BEZEL:
-            store.zones.delete(zone.id)
+    store.zones.clear_non_bezel_zones(layout_id)
 
     print(
         f"All touch zones cleared (system bezels kept) for layout '{target.name}' (ID: {layout_id})."
