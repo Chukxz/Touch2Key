@@ -1174,9 +1174,7 @@ class LayoutStudioPage(QWidget):
             try:
                 # Keep the system bezels: deleting them would reset their thickness to the
                 # default when the layout is next auto-healed.
-                for zone in store.zones.list_for_layout(layout_id, auto_heal=False):
-                    if zone.zone_type != BEZEL:
-                        store.zones.delete(zone.id)
+                store.zones.clear_non_bezel_zones(layout_id)
 
                 self.load_profiles()
                 active = store.get_active_layout()
@@ -1211,12 +1209,10 @@ class LayoutStudioPage(QWidget):
             active_layout = store.get_active_layout()
             is_active = bool(active_layout and active_layout.id == layout_id)
 
-            # Zones are removed by ON DELETE CASCADE; the explicit call is kept for clarity.
-            store.zones.delete_all_for_layout(layout_id)
-            store.layouts.delete(layout_id)
+            if not store.layouts.delete_profile(layout_id):
+                return
 
             if is_active:
-                store.settings.update(active_layout_id=None)
                 self._reload_plotter()
                 self._notify_engine_reload()
             elif layout_id == self.plotter_widget.loaded_layout_id:
