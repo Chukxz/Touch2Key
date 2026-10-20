@@ -46,6 +46,10 @@ from modules.utils import (
 logger = logging.getLogger("modules.gui.main_window")
 
 
+def _spawn_module(module: str) -> subprocess.Popen:
+    return subprocess.Popen([sys.executable, "-m", module, "--gui", "-y"])
+
+
 class SingleInstanceServer(QObject):
     def __init__(self, window: QMainWindow, server_name: str):
         super().__init__(window)
@@ -969,13 +973,7 @@ class MainWindow(QMainWindow):
         logger.info("Spawning setup utility as an external process")
 
         try:
-            subprocess.Popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "modules.scripts.setup",
-                ]
-            )
+            _spawn_module("modules.scripts.setup")
         except Exception as exc:
             logger.exception("Failed to spawn setup subprocess")
             QMessageBox.critical(
@@ -1056,13 +1054,7 @@ class MainWindow(QMainWindow):
         logger.info("Spawning uninstaller as an external process")
 
         try:
-            subprocess.Popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "modules.scripts.uninstall",
-                ]
-            )
+            _spawn_module("modules.scripts.uninstall")
             self.close()
 
         except Exception as exc:
