@@ -23,7 +23,7 @@ def kill_adb() -> None:
     """Terminates active adb daemon instances."""
     print("[+] Checking for active ADB instances...")
     try:
-        subprocess.run(["pkill", "-f", "adb"], capture_output=True, check=False)
+        subprocess.run(["pkill", "-x", "adb"], capture_output=True, check=False)
         print("[+] ADB process cleanup complete.")
     except Exception as exc:
         print(f"[!] Warning during ADB termination: {exc}")
