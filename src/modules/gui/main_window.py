@@ -497,11 +497,11 @@ class MainWindow(QMainWindow):
         self.dashboard_page.stop_requested.connect(self._stop_engine_from_dashboard)
 
         self.pages: dict[str, QWidget] = {
-            "Dashboard": self.dashboard_page,
             "Layout Studio": LayoutStudioPage(
                 self.dispatcher,
                 self,
             ),
+            "Dashboard": self.dashboard_page,
             "Settings": SettingsPage(
                 self.engine_controller,
                 self.dispatcher,
@@ -594,7 +594,7 @@ class MainWindow(QMainWindow):
             self.custom_log_dock,
         )
 
-        self._switch_page(0, "Dashboard")
+        self._switch_page(0, "Layout Studio")
 
     def _setup_logging(self) -> None:
         handler = install_gui_logging(
