@@ -33,7 +33,7 @@ def is_admin() -> bool:
 def request_elevation() -> bool:
     """Prompts a Windows UAC elevation dialog to run the script as Admin."""
     script = Path(__file__).resolve()
-    params = shlex.join(sys.argv[1:]) if sys.argv[1:] else ""
+    params = subprocess.list2cmdline(sys.argv[1:]) if sys.argv[1:] else ""
     res = ctypes.windll.shell32.ShellExecuteW(
         None, "runas", sys.executable, f'"{script}" {params}', str(script.parent), 1
     )
