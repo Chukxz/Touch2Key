@@ -1,11 +1,17 @@
 """
 Platform setup and driver configuration bootstrap.
 Executable in both interactive CLI and GUI application modes.
+
+GUI mode: the launcher spawns `python -m modules.scripts.setup --gui -y`.
+The child owns its own QApplication, shows dialogs instead of reading stdin,
+and elevates via PolicyKit (Linux) or a UAC relaunch (Windows), so it works
+with no console/tty (desktop shortcut, pythonw.exe, Terminal=false).
 """
 
 from __future__ import annotations
 
 import argparse
+import ctypes
 import logging
 import sys
 from pathlib import Path
@@ -25,16 +31,19 @@ def create_desktop_shortcut() -> None:
     if not desktop.exists():
         return  # Headless or containerized environment without a desktop
 
+    exe = Path(sys.executable)
+
     if sys.platform == "win32":
         shortcut_path = desktop / "Touch2Key.lnk"
-        target_script = PROJECT_ROOT / "src" / "modules" / "gui" / "app.py"
+        pythonw = exe.with_name("pythonw.exe")
+        target = pythonw if pythonw.exists() else exe
         icon_path = ICONS_FOLDER / "app.ico"
 
         ps_script = f"""
         $WshShell = New-Object -ComObject WScript.Shell
         $Shortcut = $WshShell.CreateShortcut("{shortcut_path}")
-        $Shortcut.TargetPath = "pythonw.exe"
-        $Shortcut.Arguments = '"{target_script}"'
+        $Shortcut.TargetPath = "{target}"
+        $Shortcut.Arguments = "-m modules.gui.app"
         $Shortcut.WorkingDirectory = "{PROJECT_ROOT}"
         $Shortcut.IconLocation = "{icon_path}"
         $Shortcut.Save()
@@ -43,15 +52,12 @@ def create_desktop_shortcut() -> None:
 
     elif sys.platform == "linux":
         desktop_file = desktop / "touch2key.desktop"
-        exec_path = (
-            f"{sys.executable} {PROJECT_ROOT / 'src' / 'modules' / 'gui' / 'app.py'}"
-        )
         icon_path = ICONS_FOLDER / "app.png"
 
         content = f"""[Desktop Entry]
 Type=Application
 Name=Touch2Key
-Exec={exec_path}
+Exec="{exe}" -m modules.gui.app
 Path={PROJECT_ROOT}
 Icon={icon_path}
 Terminal=false
@@ -61,6 +67,24 @@ Categories=Utility;Application;
         desktop_file.chmod(0o755)
 
     logger.info("Desktop shortcuts created at %s", desktop)
+
+
+def _is_admin() -> bool:
+    """Checks for Windows Administrator privileges."""
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except Exception:
+        return False
+
+
+def _relaunch_elevated() -> bool:
+    """Relaunches this module through UAC, preserving the current CLI args
+    (including --gui), so the elevated copy also gets its own QApplication."""
+    params = subprocess.list2cmdline(["-m", "modules.scripts.setup", *sys.argv[1:]])
+    res = ctypes.windll.shell32.ShellExecuteW(
+        None, "runas", sys.executable, params, str(PROJECT_ROOT), 1
+    )
+    return res > 32
 
 
 def run(parent=None) -> bool:
@@ -79,6 +103,11 @@ def run(parent=None) -> bool:
         action="store_true",
         help="Skip system reboot prompt (Windows only, safely ignored on Linux)",
     )
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Use dialogs and graphical elevation (passed by the GUI launcher)",
+    )
 
     args = parser.parse_args()
 
@@ -94,6 +123,13 @@ def run(parent=None) -> bool:
 
         if sys.platform == "win32":
             from modules.platforms.windows import setup_windows
+
+            if is_gui and not _is_admin():
+                # setup_windows() only elevates in interactive mode, so in GUI
+                # mode relaunch ourselves through UAC and let that copy finish.
+                if _relaunch_elevated():
+                    return True
+                raise PermissionError("UAC elevation prompt was rejected.")
 
             needs_reboot = setup_windows(
                 interactive=interactive_mode, no_restart=args.no_restart
@@ -145,8 +181,21 @@ def run(parent=None) -> bool:
 
 def main() -> None:
     """Dedicated entry point for touch2key-setup script execution."""
-    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_setup")
-    run()
+    gui = "--gui" in sys.argv[1:]
+    AppLogManager.setup_logging(is_gui=gui, log_prefix="touch2key_setup")
+
+    # run() infers GUI mode from QApplication.instance(), so a --gui child
+    # must create the QApplication before calling it.
+    app = (
+        QApplication(sys.argv[:1])
+        if gui and QApplication.instance() is None
+        else None
+    )
+    try:
+        run()
+    finally:
+        if app is not None:
+            app.quit()
 
 
 # Allows running directly
