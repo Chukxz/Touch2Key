@@ -377,7 +377,7 @@ def create_pipeline_from_zone(
             semantics.append(ToggleSemantic(output=scancode))
             type_precedence = 4
             is_system = True
-        
+
         else:
             return None
 

@@ -420,6 +420,7 @@ _ROUTE_SRC_RE = re.compile(
 
 _PHYSICAL_SIZE_RE = re.compile(r"Physical size:\s*(\d+)x(\d+)")
 
+
 class InvalidFieldError(ValueError):
     """Raised when update()/create()/create_pipeline_from_zone() receives a field name outside ALLOWED_FIELDS."""
 
@@ -533,7 +534,7 @@ class MapperEventDispatcher:
 
         except Exception as exc:
             callback_name = getattr(callback, "__name__", repr(callback))
-            
+
             logger.debug(
                 "[!] Error registering callback %s for event %s: %s",
                 callback_name,
@@ -570,7 +571,7 @@ class MapperEventDispatcher:
 
         except Exception as exc:
             callback_name = getattr(callback, "__name__", repr(callback))
-            
+
             logger.error(
                 f"[!] Error unregistering callback {callback_name} for event {event_type}: {exc}",
                 exc_info=True,

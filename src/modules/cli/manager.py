@@ -30,6 +30,7 @@ from modules.database.legacy_migration import (
     migrate_toml_config,
 )
 from modules.database.repositories import DuplicateNameError
+from modules.cli.key_capture import capture_keys_cli, capture_performance_settings_cli
 from modules.utils import (
     BEZEL,
     BOTTOM_BEZEL_ID,
@@ -90,17 +91,6 @@ def _prompt_int(prompt: str, current: int) -> int:
     except ValueError:
         print(f"Invalid integer '{raw}'; keeping {current}.")
         return current
-
-
-def _validate_key_or_none(raw_key: str) -> tuple[bool, Optional[str]]:
-    """Validates a single key name against scancode mappings. 'none'/'clear' unsets it."""
-    clean = raw_key.strip().lower()
-    if clean in ("none", "clear", "null"):
-        return True, None
-    if get_scancode_from_key(clean) is None:
-        print(f"Error: '{raw_key}' cannot be mapped to a valid scancode.")
-        return False, None
-    return True, clean
 
 
 def _normalize_excluded_keys(raw_csv: str, current_csv: Optional[str] = None) -> str:
@@ -226,8 +216,6 @@ def show_input_controls() -> None:
     print(f"  Sensitivity X / Y: {s.sensitivity_x:.2f} / {s.sensitivity_y:.2f}")
     print(f"  Deadzone:          {s.deadzone:.2f}")
     print(f"  Hysteresis:        {s.hysteresis:.1f}°")
-    print(f"  Toggle Key:        {s.toggle_key or 'Not set'}")
-    print(f"  Sprint Key:        {s.sprint_key or 'Not set'}\n")
 
 
 def configure_input_controls_interactive() -> None:
@@ -301,22 +289,6 @@ def configure_input_controls_interactive() -> None:
         "deadzone": dz,
         "hysteresis": hys,
     }
-
-    tk_in = input(
-        f"Toggle key ('none' to clear, blank to keep '{s.toggle_key or 'Not set'}'): "
-    ).strip()
-    if tk_in:
-        ok, val = _validate_key_or_none(tk_in)
-        if ok:
-            updates["toggle_key"] = val
-
-    sk_in = input(
-        f"Sprint key ('none' to clear, blank to keep '{s.sprint_key or 'Not set'}'): "
-    ).strip()
-    if sk_in:
-        ok, val = _validate_key_or_none(sk_in)
-        if ok:
-            updates["sprint_key"] = val
 
     store.settings.update(**updates)
     print("Input controls and global keybindings updated successfully.")
@@ -932,6 +904,8 @@ def interactive_menu() -> None:
         print("  [lh]   View / Configure Left-Handed Mode")
         print("  [ic]   View / Configure Touch, Input Controls & Global Keybindings")
         print("  [ric]  Reset Input Controls to Defaults")
+        print("  [ck]   Capture Global Keybindings (Toggle & Sprint)")
+        print("  [pf]   Configure ADB Rate Cap & PPS Alert Threshold")
         print("  [lz]   List Zones / Pipelines for Profile")
         print("  [bz]   Configure System Bezel Thickness (Top / Bottom dp)")
         print(
@@ -1023,6 +997,12 @@ def interactive_menu() -> None:
             )
             if confirm == "y":
                 reset_input_controls_defaults()
+
+        elif choice == "ck":
+            capture_keys_cli()
+
+        elif choice == "pf":
+            capture_performance_settings_cli()
 
         elif choice == "lz":
             raw_id = input("Enter Layout ID to view zones: ").strip()
@@ -1384,18 +1364,6 @@ def run() -> None:
         help="Set global directional hysteresis in degrees",
     )
     parser.add_argument(
-        "--toggle-key",
-        type=str,
-        metavar="KEY",
-        help="Set global toggle key (or 'none' to clear)",
-    )
-    parser.add_argument(
-        "--sprint-key",
-        type=str,
-        metavar="KEY",
-        help="Set global sprint key (or 'none' to clear)",
-    )
-    parser.add_argument(
         "--reset-input",
         action="store_true",
         help="Reset touch and input controls to factory defaults",
@@ -1670,16 +1638,6 @@ def run() -> None:
             input_updates["hysteresis"] = clamp(
                 args.hysteresis, HYSTERESIS_MIN, HYSTERESIS_MAX
             )
-        if args.toggle_key is not None:
-            ok, val = _validate_key_or_none(args.toggle_key)
-            if not ok:
-                return
-            input_updates["toggle_key"] = val
-        if args.sprint_key is not None:
-            ok, val = _validate_key_or_none(args.sprint_key)
-            if not ok:
-                return
-            input_updates["sprint_key"] = val
 
         if input_updates:
             store.settings.update(**input_updates)

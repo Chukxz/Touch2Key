@@ -83,6 +83,7 @@ DEFAULT_EDGE_TOLERANCE = 5
 DEFAULT_VERTEX_TOLERANCE = 10
 DEFAULT_SPEC_MAX_RATIO = 0.3
 
+
 def calculate_raw_rectangle(values: tuple[tuple[float, float], tuple[float, float]]):
     if len(values) < 2:
         return None, None, None, None

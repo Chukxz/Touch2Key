@@ -104,32 +104,67 @@ class Engine:
             try:
                 import keyboard
 
-                self._terminal_window_handle = self.window_manager.get_foreground_window()
+                self._terminal_window_handle = (
+                    self.window_manager.get_foreground_window()
+                )
 
                 def _guard_hotkey(callback):
                     try:
-                        if self.window_manager.get_foreground_window() == self._terminal_window_handle:
+                        if (
+                            self.window_manager.get_foreground_window()
+                            == self._terminal_window_handle
+                        ):
                             callback()
                     except Exception as exc:
-                        logger.debug("Foreground verification failed for hotkey: %s", exc, exc_info=True)
+                        logger.debug(
+                            "Foreground verification failed for hotkey: %s",
+                            exc,
+                            exc_info=True,
+                        )
 
                 keyboard.add_hotkey("esc", lambda: _guard_hotkey(self._shutdown))
-                keyboard.add_hotkey("f5", lambda: _guard_hotkey(self._toggle_handedness_cli))
-                keyboard.add_hotkey("f6", lambda: _guard_hotkey(self._reload_layout_cli))
-                keyboard.add_hotkey("f7", lambda: _guard_hotkey(self._reload_config_cli))
-                keyboard.add_hotkey("left", lambda: _guard_hotkey(lambda: self._adjust_rate_cap_cli(-10.0)), suppress=False)
-                keyboard.add_hotkey("right", lambda: _guard_hotkey(lambda: self._adjust_rate_cap_cli(10.0)), suppress=False)
-                keyboard.add_hotkey("down", lambda: _guard_hotkey(lambda: self._adjust_pps_cli(-5.0)), suppress=False)
-                keyboard.add_hotkey("up", lambda: _guard_hotkey(lambda: self._adjust_pps_cli(5.0)), suppress=False)
+                keyboard.add_hotkey(
+                    "f5", lambda: _guard_hotkey(self._toggle_handedness_cli)
+                )
+                keyboard.add_hotkey(
+                    "f6", lambda: _guard_hotkey(self._reload_layout_cli)
+                )
+                keyboard.add_hotkey(
+                    "f7", lambda: _guard_hotkey(self._reload_config_cli)
+                )
+                keyboard.add_hotkey(
+                    "left",
+                    lambda: _guard_hotkey(lambda: self._adjust_rate_cap_cli(-10.0)),
+                    suppress=False,
+                )
+                keyboard.add_hotkey(
+                    "right",
+                    lambda: _guard_hotkey(lambda: self._adjust_rate_cap_cli(10.0)),
+                    suppress=False,
+                )
+                keyboard.add_hotkey(
+                    "down",
+                    lambda: _guard_hotkey(lambda: self._adjust_pps_cli(-5.0)),
+                    suppress=False,
+                )
+                keyboard.add_hotkey(
+                    "up",
+                    lambda: _guard_hotkey(lambda: self._adjust_pps_cli(5.0)),
+                    suppress=False,
+                )
                 logger.info(
                     "[CLI Interactive Launch] Active Hotkeys: [Esc] Exit | [F5] Handedness | "
                     "[F6] Reload Layout | [F7] Reload Config | [Left/Right] Rate Cap (-/+ 10) | "
                     "[Down/Up] PPS (-/+ 5)"
                 )
             except Exception as exc:
-                logger.debug("Failed to register CLI global hotkeys: %s", exc, exc_info=True)
+                logger.debug(
+                    "Failed to register CLI global hotkeys: %s", exc, exc_info=True
+                )
         else:
-            logger.info("[Headless / GUI Worker Launch] Background engine active (terminal hotkeys bypassed).")
+            logger.info(
+                "[Headless / GUI Worker Launch] Background engine active (terminal hotkeys bypassed)."
+            )
 
     def _check_debounce(self) -> bool:
         now = time.perf_counter()
@@ -148,7 +183,9 @@ class Engine:
         try:
             store.settings.update(adb_rate_cap=new_rate)
             logger.info("CLI Hotkey: Rate Cap set to %.1f Hz (DB synced)", new_rate)
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+            self.mapper_event_dispatcher.dispatch(
+                MapperEvent(action="ON_CONFIG_RELOAD")
+            )
         except Exception as exc:
             logger.error("Failed to commit rate cap update to DB: %s", exc)
 
@@ -161,8 +198,12 @@ class Engine:
         self.pps = new_pps
         try:
             store.settings.update(pps_alert_threshold=new_pps)
-            logger.info("CLI Hotkey: PPS Alert Threshold set to %.1f PPS (DB synced)", new_pps)
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+            logger.info(
+                "CLI Hotkey: PPS Alert Threshold set to %.1f PPS (DB synced)", new_pps
+            )
+            self.mapper_event_dispatcher.dispatch(
+                MapperEvent(action="ON_CONFIG_RELOAD")
+            )
         except Exception as exc:
             logger.error("Failed to commit PPS update to DB: %s", exc)
 
@@ -174,23 +215,35 @@ class Engine:
             new_val = not settings.left_handed
             store.settings.update(left_handed=new_val)
             logger.info("CLI Triggered [F5]: Left-Handed mode set to %s", new_val)
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+            self.mapper_event_dispatcher.dispatch(
+                MapperEvent(action="ON_CONFIG_RELOAD")
+            )
         except Exception as exc:
-            logger.error("Failed to toggle handedness via hotkey: %s", exc, exc_info=True)
+            logger.error(
+                "Failed to toggle handedness via hotkey: %s", exc, exc_info=True
+            )
 
     def _reload_layout_cli(self) -> None:
         if self._check_debounce():
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+            self.mapper_event_dispatcher.dispatch(
+                MapperEvent(action="ON_LAYOUT_RELOAD")
+            )
             logger.info("CLI Triggered [F6]: Layout reload event dispatched.")
 
     def _reload_config_cli(self) -> None:
         if self._check_debounce():
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+            self.mapper_event_dispatcher.dispatch(
+                MapperEvent(action="ON_CONFIG_RELOAD")
+            )
             logger.info("CLI Triggered [F7]: Configuration reload event dispatched.")
 
     def _on_devices_change(
-        self, k_id: int | None = None, m_id: int | None = None,
-        *, keyboard_device_id: int | None = None, mouse_device_id: int | None = None,
+        self,
+        k_id: int | None = None,
+        m_id: int | None = None,
+        *,
+        keyboard_device_id: int | None = None,
+        mouse_device_id: int | None = None,
         **kwargs: Any,
     ) -> None:
         if not self.bridge or self.bridge.k_proc is None:
@@ -212,7 +265,9 @@ class Engine:
                     try:
                         pipeline.reset(self.output_sink)
                     except Exception:
-                        logger.exception("Failed to reset pipeline during state transition")
+                        logger.exception(
+                            "Failed to reset pipeline during state transition"
+                        )
         # These mapper-level release methods cover outputs not represented by
         # a currently active pipeline. Do not call them when the sink is absent.
         if self.output_sink:
@@ -247,7 +302,9 @@ class Engine:
         except Exception:
             logger.debug("Bridge health check failed during mode switch", exc_info=True)
 
-    def _set_is_visible(self, is_visible: bool | MapperEvent = True, **kwargs: Any) -> None:
+    def _set_is_visible(
+        self, is_visible: bool | MapperEvent = True, **kwargs: Any
+    ) -> None:
         if isinstance(is_visible, MapperEvent):
             visible = getattr(is_visible, "is_visible", True)
         elif "is_visible" in kwargs:
@@ -263,7 +320,9 @@ class Engine:
                 self._release_active_inputs()
                 if self.key_mapper and hasattr(self.key_mapper, "rebuild_pipelines"):
                     self.key_mapper.rebuild_pipelines()
-                if self.bezel_mapper and hasattr(self.bezel_mapper, "rebuild_pipelines"):
+                if self.bezel_mapper and hasattr(
+                    self.bezel_mapper, "rebuild_pipelines"
+                ):
                     self.bezel_mapper.rebuild_pipelines()
                 if self.wheel_mapper and hasattr(self.wheel_mapper, "rebuild_pipeline"):
                     self.wheel_mapper.rebuild_pipeline()
@@ -278,12 +337,22 @@ class Engine:
         settings = store.settings.get()
         self.two_finger_tap_enabled = settings.two_finger_tap_enabled
         self.bezel_toggle_enabled = settings.bezel_toggle_enabled
-        self.rate_cap = max(ADB_RATE_CAP_MIN, min(ADB_RATE_CAP_MAX, float(settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP)))
-        self.pps = max(PPS_ALERT_MIN, min(PPS_ALERT_MAX, float(settings.pps_alert_threshold or DEFAULT_PPS)))
+        self.rate_cap = max(
+            ADB_RATE_CAP_MIN,
+            min(ADB_RATE_CAP_MAX, float(settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP)),
+        )
+        self.pps = max(
+            PPS_ALERT_MIN,
+            min(PPS_ALERT_MAX, float(settings.pps_alert_threshold or DEFAULT_PPS)),
+        )
         with self.lock:
             self._release_active_inputs()
             self._tiers = self._build_pipeline_tiers()
-        logger.info("Engine config reloaded: Rate Cap=%.1f Hz, PPS Threshold=%.1f PPS", self.rate_cap, self.pps)
+        logger.info(
+            "Engine config reloaded: Rate Cap=%.1f Hz, PPS Threshold=%.1f PPS",
+            self.rate_cap,
+            self.pps,
+        )
 
     @staticmethod
     def _pipeline_precedence(pipeline: Pipeline) -> int:
@@ -306,13 +375,15 @@ class Engine:
 
         # Type precedence is absolute: SystemToggle > Button > Joystick > Pointer.
         # Priority only orders pipelines within a type.
-        all_pipelines.sort(key=lambda p: (
-            -self._pipeline_precedence(p),
-            -p.priority,
-            -int(getattr(p, "allow_multi_claim", False)),
-            getattr(getattr(p, "region", None), "area", 0.0),
-            getattr(p, "creation_id", 0),
-        ))
+        all_pipelines.sort(
+            key=lambda p: (
+                -self._pipeline_precedence(p),
+                -p.priority,
+                -int(getattr(p, "allow_multi_claim", False)),
+                getattr(getattr(p, "region", None), "area", 0.0),
+                getattr(p, "creation_id", 0),
+            )
+        )
 
         tiers: list[list[Pipeline]] = []
         for pipeline in all_pipelines:
@@ -338,7 +409,10 @@ class Engine:
         while not self._stop_event.is_set():
             if self.output_sink:
                 self.output_sink.flush_mouse_move()
-                if self.touch_reader and getattr(self.touch_reader, "active_touches", 1) == 0:
+                if (
+                    self.touch_reader
+                    and getattr(self.touch_reader, "active_touches", 1) == 0
+                ):
                     self.output_sink.reset_mouse_accumulators()
             interval = 1.0 / max(float(self.rate_cap), float(ADB_RATE_CAP_MIN))
             if self._stop_event.wait(interval):
@@ -390,7 +464,10 @@ class Engine:
                 allow_multi = bool(getattr(tier[0], "allow_multi_claim", False))
 
                 for pipeline in tier:
-                    if getattr(pipeline, "is_system", False) and not self.bezel_toggle_enabled:
+                    if (
+                        getattr(pipeline, "is_system", False)
+                        and not self.bezel_toggle_enabled
+                    ):
                         continue
                     if not pipeline.claims(event):
                         continue
@@ -417,7 +494,16 @@ class Engine:
     def _process_touch_event(self, touch_event: TouchEvent) -> None:
         if self.is_shutting_down:
             return
-        if not all((self.mouse_mapper, self.key_mapper, self.wheel_mapper, self.bezel_mapper, self.mapper, self.output_sink)):
+        if not all(
+            (
+                self.mouse_mapper,
+                self.key_mapper,
+                self.wheel_mapper,
+                self.bezel_mapper,
+                self.mapper,
+                self.output_sink,
+            )
+        ):
             return
 
         if self.is_visible and self.two_finger_tap_enabled:
@@ -445,8 +531,10 @@ class Engine:
                 except Exception:
                     break
             self.vkb_process = multiprocessing.Process(
-                target=virtual_keyboard_worker, name="Virtual Keyboard",
-                args=(self.vkb_writer,), daemon=True,
+                target=virtual_keyboard_worker,
+                name="Virtual Keyboard",
+                args=(self.vkb_writer,),
+                daemon=True,
             )
             self.vkb_process.start()
 
@@ -480,25 +568,71 @@ class Engine:
         settings = store.settings.get()
         toggle_key = toggle_key or settings.toggle_key
         sprint_key = sprint_key or settings.sprint_key
-        self.rate_cap = max(ADB_RATE_CAP_MIN, min(ADB_RATE_CAP_MAX, float(rate_cap or settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP)))
-        self.pps = max(PPS_ALERT_MIN, min(PPS_ALERT_MAX, float(pps or settings.pps_alert_threshold or DEFAULT_PPS)))
+        self.rate_cap = max(
+            ADB_RATE_CAP_MIN,
+            min(
+                ADB_RATE_CAP_MAX,
+                float(rate_cap or settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP),
+            ),
+        )
+        self.pps = max(
+            PPS_ALERT_MIN,
+            min(
+                PPS_ALERT_MAX, float(pps or settings.pps_alert_threshold or DEFAULT_PPS)
+            ),
+        )
 
         if window_id is None:
-            logger.warning("No window ID provided. Engine will run without a target window.")
-        logger.info("Headless: %s, Window ID: %s, Rate Cap: %s, PPS: %s, Toggle Key: %s, Sprint Key: %s", self.headless, window_id, self.rate_cap, self.pps, toggle_key, sprint_key)
-        logger.info("Typematic Enabled: %s, Delay (ms): %s, Rate (Hz): %s, Excluded: %s", settings.typematic_enabled, settings.typematic_delay_ms, settings.typematic_rate_hz, settings.typematic_excluded_keys)
-        logger.info("Keyboard Handle: %s, Mouse Handle: %s", k_device_handle, m_device_handle)
+            logger.warning(
+                "No window ID provided. Engine will run without a target window."
+            )
+        logger.info(
+            "Headless: %s, Window ID: %s, Rate Cap: %s, PPS: %s, Toggle Key: %s, Sprint Key: %s",
+            self.headless,
+            window_id,
+            self.rate_cap,
+            self.pps,
+            toggle_key,
+            sprint_key,
+        )
+        logger.info(
+            "Typematic Enabled: %s, Delay (ms): %s, Rate (Hz): %s, Excluded: %s",
+            settings.typematic_enabled,
+            settings.typematic_delay_ms,
+            settings.typematic_rate_hz,
+            settings.typematic_excluded_keys,
+        )
+        logger.info(
+            "Keyboard Handle: %s, Mouse Handle: %s", k_device_handle, m_device_handle
+        )
 
         self.two_finger_tap_enabled = settings.two_finger_tap_enabled
         self.bezel_toggle_enabled = settings.bezel_toggle_enabled
-        self.layout_loader = LayoutLoader(self.mapper_event_dispatcher, foreground_window=self.foreground_window, toggle_mode_callback=self.toggle_mode)
+        self.layout_loader = LayoutLoader(
+            self.mapper_event_dispatcher,
+            foreground_window=self.foreground_window,
+            toggle_mode_callback=self.toggle_mode,
+        )
         self.touch_reader = TouchReader(self.mapper_event_dispatcher, self.rate_cap)
-        self.mapper = Mapper(self.layout_loader, self.touch_reader, self.bridge, self.pps, {"toggle_key": toggle_key, "sprint_key": sprint_key}, window_id, self)
-        self.output_sink = BridgeOutputSink(bridge=self.mapper.bridge, toggle_mode=self.toggle_mode, toggle_vkb=self.toggle_virtual_keyboard)
+        self.mapper = Mapper(
+            self.layout_loader,
+            self.touch_reader,
+            self.bridge,
+            self.pps,
+            {"toggle_key": toggle_key, "sprint_key": sprint_key},
+            window_id,
+            self,
+        )
+        self.output_sink = BridgeOutputSink(
+            bridge=self.mapper.bridge,
+            toggle_mode=self.toggle_mode,
+            toggle_vkb=self.toggle_virtual_keyboard,
+        )
         self.bezel_mapper = BezelMapper(self.mapper, self.output_sink)
         self.mouse_mapper = MouseMapper(self.mapper, self.output_sink)
         self.key_mapper = KeyMapper(
-            self.mapper, self.output_sink,
+            self.mapper,
+            self.output_sink,
             typematic_enabled=settings.typematic_enabled,
             typematic_delay_ms=settings.typematic_delay_ms,
             typematic_rate_hz=settings.typematic_rate_hz,
@@ -508,19 +642,34 @@ class Engine:
         self._tiers = self._build_pipeline_tiers()
 
         self.touch_reader.bind_touch_event(self._process_touch_event)
-        self.mapper_event_dispatcher.register_callback("ON_MENU_MODE_TOGGLE", self._set_is_visible)
-        self.mapper_event_dispatcher.register_callback("ON_LAYOUT_RELOAD", self._on_layout_reload)
-        self.mapper_event_dispatcher.register_callback("ON_CONFIG_RELOAD", self._on_config_reload)
-        self.mapper_event_dispatcher.register_callback("ON_DEVICES_CHANGE", self._on_devices_change)
+        self.mapper_event_dispatcher.register_callback(
+            "ON_MENU_MODE_TOGGLE", self._set_is_visible
+        )
+        self.mapper_event_dispatcher.register_callback(
+            "ON_LAYOUT_RELOAD", self._on_layout_reload
+        )
+        self.mapper_event_dispatcher.register_callback(
+            "ON_CONFIG_RELOAD", self._on_config_reload
+        )
+        self.mapper_event_dispatcher.register_callback(
+            "ON_DEVICES_CHANGE", self._on_devices_change
+        )
 
         self.bridge.start_worker_processes(k_device_handle, m_device_handle)
-        self._mouse_flush_thread = threading.Thread(target=self._mouse_flush_loop, daemon=True, name="MouseFlushThread")
+        self._mouse_flush_thread = threading.Thread(
+            target=self._mouse_flush_loop, daemon=True, name="MouseFlushThread"
+        )
         self._mouse_flush_thread.start()
 
     def _start(self, config_str: str | None = None) -> None:
         if config_str is not None:
             config = parse_config_arg(config_str)
-            store.settings.update(adb_rate_cap=config["rate_cap"], pps_alert_threshold=config["pps"], toggle_key=config["toggle_key"], sprint_key=config["sprint_key"])
+            store.settings.update(
+                adb_rate_cap=config["rate_cap"],
+                pps_alert_threshold=config["pps"],
+                toggle_key=config["toggle_key"],
+                sprint_key=config["sprint_key"],
+            )
             self.start_headless(**config)
             if not self.headless:
                 self._stop_event.wait()
@@ -540,17 +689,28 @@ class Engine:
         rate_cap, pps = performance
         if rate_cap is None or pps is None:
             return
-        store.settings.update(adb_rate_cap=rate_cap, pps_alert_threshold=pps, toggle_key=toggle_key, sprint_key=sprint_key)
+        store.settings.update(
+            adb_rate_cap=rate_cap,
+            pps_alert_threshold=pps,
+            toggle_key=toggle_key,
+            sprint_key=sprint_key,
+        )
 
         k_device_handle = m_device_handle = None
         if sys.platform == "win32":
-            from modules.platforms.windows.query_interception_device import select_keyboard_then_mouse
+            from modules.platforms.windows.query_interception_device import (
+                select_keyboard_then_mouse,
+            )
+
             result = select_keyboard_then_mouse()
             if result:
                 k_device_handle, m_device_handle = result
         self.start_headless(
-            window_id=selected_window_id, toggle_key=toggle_key, sprint_key=sprint_key,
-            rate_cap=rate_cap, pps=pps,
+            window_id=selected_window_id,
+            toggle_key=toggle_key,
+            sprint_key=sprint_key,
+            rate_cap=rate_cap,
+            pps=pps,
             k_device_handle=k_device_handle if k_device_handle is not None else 0,
             m_device_handle=m_device_handle if m_device_handle is not None else 10,
         )
@@ -569,13 +729,18 @@ class Engine:
         if not self.headless:
             try:
                 import keyboard
+
                 keyboard.unhook_all_hotkeys()
             except Exception:
                 logger.exception("Failed to unhook keyboard hotkeys", exc_info=True)
 
         try:
             thread = self._mouse_flush_thread
-            if thread is not None and thread.is_alive() and threading.current_thread() is not thread:
+            if (
+                thread is not None
+                and thread.is_alive()
+                and threading.current_thread() is not thread
+            ):
                 thread.join(timeout=2.0)
                 if thread.is_alive():
                     logger.warning("Mouse flush thread did not stop within timeout")
@@ -623,7 +788,9 @@ def run_engine_process(conn: Connection, log_queue: Queue) -> None:
     shutdown_engine_process(engine, dispatcher, conn)
 
 
-def shutdown_engine_process(engine: Engine | None, dispatcher: IpcMapperEventDispatcher, conn: Connection) -> None:
+def shutdown_engine_process(
+    engine: Engine | None, dispatcher: IpcMapperEventDispatcher, conn: Connection
+) -> None:
     try:
         if engine is not None:
             engine._shutdown()
@@ -656,7 +823,9 @@ def parse_config_arg(config_str: str) -> dict:
     window_id = parse_value(parts[0], int, None)
     toggle_key = parse_value(parts[1], str, settings.toggle_key or "")
     sprint_key = parse_value(parts[2], str, settings.sprint_key or "")
-    raw_rate = parse_value(parts[3], float, settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP)
+    raw_rate = parse_value(
+        parts[3], float, settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP
+    )
     rate_cap = max(ADB_RATE_CAP_MIN, min(ADB_RATE_CAP_MAX, raw_rate))
     raw_pps = parse_value(parts[4], float, settings.pps_alert_threshold or DEFAULT_PPS)
     pps = max(PPS_ALERT_MIN, min(PPS_ALERT_MAX, raw_pps))
@@ -664,10 +833,20 @@ def parse_config_arg(config_str: str) -> dict:
     m_device_handle = parse_value(parts[6], int, 10)
     logger.info(
         "Parsed config: window_id=%s, toggle_key=%s, sprint_key=%s, rate_cap=%.1f, pps=%.1f, k_device_handle=%s, m_device_handle=%s",
-        window_id, toggle_key, sprint_key, rate_cap, pps, k_device_handle, m_device_handle,
+        window_id,
+        toggle_key,
+        sprint_key,
+        rate_cap,
+        pps,
+        k_device_handle,
+        m_device_handle,
     )
     return {
-        "window_id": window_id, "toggle_key": toggle_key, "sprint_key": sprint_key,
-        "rate_cap": rate_cap, "pps": pps,
-        "k_device_handle": k_device_handle, "m_device_handle": m_device_handle,
+        "window_id": window_id,
+        "toggle_key": toggle_key,
+        "sprint_key": sprint_key,
+        "rate_cap": rate_cap,
+        "pps": pps,
+        "k_device_handle": k_device_handle,
+        "m_device_handle": m_device_handle,
     }

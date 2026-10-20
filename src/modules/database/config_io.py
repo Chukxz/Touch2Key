@@ -163,7 +163,11 @@ def export_bundle(
 
     `layout_id` selects the layout to bundle; it defaults to the active layout.
     """
-    layout = store.layouts.get(layout_id) if layout_id is not None else store.get_active_layout()
+    layout = (
+        store.layouts.get(layout_id)
+        if layout_id is not None
+        else store.get_active_layout()
+    )
     if not layout:
         raise ValueError("No layout available to bundle.")
 

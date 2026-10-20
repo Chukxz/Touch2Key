@@ -97,12 +97,18 @@ class DashboardPage(QWidget):
 
     def _refresh_target_label(self) -> None:
         if self.engine_controller.window_title:
-            id_str = f" (ID: {self.engine_controller.window_id})" if self.engine_controller.window_id is not None else ""
+            id_str = (
+                f" (ID: {self.engine_controller.window_id})"
+                if self.engine_controller.window_id is not None
+                else ""
+            )
             self.target_window_label.setText(
                 f"Target Window: {self.engine_controller.window_title}{id_str}"
             )
         elif self.engine_controller.window_id is not None:
-            self.target_window_label.setText(f"Target Window: HWND {self.engine_controller.window_id}")
+            self.target_window_label.setText(
+                f"Target Window: HWND {self.engine_controller.window_id}"
+            )
         else:
             self.target_window_label.setText(
                 "Target Window: None (Foreground Active Window)"
