@@ -8,7 +8,7 @@ import subprocess
 import sys
 import threading
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, QSize, Signal
 from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtNetwork import QLocalServer
 from PySide6.QtWidgets import (
@@ -91,6 +91,25 @@ class SingleInstanceServer(QObject):
             client.disconnectFromServer()
             client.deleteLater()
 
+
+class CurrentPageStack(QStackedWidget):
+    """Sizes itself from the visible page only. QStackedLayout uses the max
+    minimum size over ALL pages, so one tall hidden page pins the window's
+    minimum height and stops the log dock from growing."""
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.currentChanged.connect(lambda _i: self.updateGeometry())
+
+    def sizeHint(self) -> QSize:
+        page = self.currentWidget()
+        return page.sizeHint() if page is not None else super().sizeHint()
+
+    def minimumSizeHint(self) -> QSize:
+        page = self.currentWidget()
+        if page is None:
+            return super().minimumSizeHint()
+        return page.minimumSizeHint().expandedTo(page.minimumSize())
 
 class CustomDockWidget(QDockWidget):
     signal_closed = Signal()
@@ -509,7 +528,7 @@ class MainWindow(QMainWindow):
             ),
         }
 
-        self.stack = QStackedWidget()
+        self.stack = CurrentPageStack()
 
         for index, (title, widget) in enumerate(self.pages.items()):
             button = QPushButton(title)
