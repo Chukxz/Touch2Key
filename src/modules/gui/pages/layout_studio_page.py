@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QInputDialog,
@@ -212,6 +213,18 @@ class LayoutStudioPage(QWidget):
     # ------------------------------------------------------------------
     # UI construction
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_scrollable(content: QWidget) -> QScrollArea:
+        """Panels scroll instead of pinning the window's minimum height."""
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setFrameShape(QFrame.Shape.NoFrame)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        area.setMinimumWidth(content.minimumWidth() + 20)  # room for the v-scrollbar
+        area.setWidget(content)
+        return area
+
     def _setup_left_sidebar(self) -> None:
         self.sidebar_widget = QWidget()
         self.sidebar_widget.setMinimumWidth(200)
@@ -302,7 +315,8 @@ class LayoutStudioPage(QWidget):
         maintenance_layout.addWidget(self.delete_btn)
         sidebar_layout.addWidget(maintenance_group)
 
-        self.splitter.addWidget(self.sidebar_widget)
+        self.sidebar_scroll = self._make_scrollable(self.sidebar_widget)
+        self.splitter.addWidget(self.sidebar_scroll)
 
     def _setup_center_canvas(self) -> None:
         self.canvas_widget = QWidget()
@@ -493,7 +507,8 @@ class LayoutStudioPage(QWidget):
         self.inspector_stack.addWidget(page_zone_settings)
         inspector_layout.addWidget(self.inspector_stack)
 
-        self.splitter.addWidget(self.inspector_widget)
+        self.inspector_scroll = self._make_scrollable(self.inspector_widget)
+        self.splitter.addWidget(self.inspector_scroll)
 
     # ------------------------------------------------------------------
     # Page lifecycle
@@ -616,13 +631,13 @@ class LayoutStudioPage(QWidget):
             if sizes[0] > 0:
                 self._profiles_width = sizes[0]
 
-            self.sidebar_widget.hide()
+            self.sidebar_scroll.hide()
             self.profiles_toggle_btn.setText("▶ Profiles")
 
             # Give the available space to the canvas.
             self.splitter.setSizes([0, max(1, sizes[1] + sizes[0]), sizes[2]])
         else:
-            self.sidebar_widget.show()
+            self.sidebar_scroll.show()
             self.profiles_toggle_btn.setText("◀ Profiles")
 
             width = self._profiles_width
@@ -635,12 +650,12 @@ class LayoutStudioPage(QWidget):
             if sizes[2] > 0:
                 self._inspector_width = sizes[2]
 
-            self.inspector_widget.hide()
+            self.inspector_scroll.hide()
             self.inspector_toggle_btn.setText("Inspector ◀")
 
             self.splitter.setSizes([sizes[0], max(1, sizes[1] + sizes[2]), 0])
         else:
-            self.inspector_widget.show()
+            self.inspector_scroll.show()
             self.inspector_toggle_btn.setText("Inspector ▶")
 
             width = self._inspector_width
