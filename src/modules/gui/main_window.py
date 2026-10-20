@@ -624,9 +624,7 @@ class MainWindow(QMainWindow):
             logger_name="",
             level=logging.INFO,
         )
-        handler.emitter.message.connect(
-            lambda msg, level: self.log_console.appendPlainText(msg)
-        )
+        handler.emitter.message.connect(self.log_console.appendPlainText)
         self.log_message.connect(self.log_console.appendPlainText)
 
     def _wire_engine_signals(self) -> None:
