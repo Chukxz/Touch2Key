@@ -1,6 +1,11 @@
 """
 Driver, Rules, and Data Uninstaller (GUI & CLI compatible).
 Supports Windows (Interception driver) and Linux (udev rules with pkexec/sudo fallback).
+
+GUI mode: the launcher spawns `python -m modules.scripts.uninstall --gui -y`.
+The child owns its own QApplication, shows dialogs instead of reading stdin,
+and elevates via PolicyKit (Linux) or a UAC relaunch (Windows), so it works
+with no console/tty (desktop shortcut, pythonw.exe, Terminal=false).
 """
 
 from __future__ import annotations
@@ -40,13 +45,16 @@ def _is_admin() -> bool:
     return os.geteuid() == 0
 
 
-def _request_windows_elevation() -> None:
-    """Triggers Windows UAC prompt to relaunch uninstaller as Administrator."""
-    script = Path(__file__).resolve()
-    params = " ".join(sys.argv[1:])
-    ctypes.windll.shell32.ShellExecuteW(
-        None, "runas", sys.executable, f'"{script}" {params}', os.getcwd(), 1
+def _request_windows_elevation() -> bool:
+    """Relaunches this module through UAC (as Administrator), preserving the
+    current CLI args (including --gui). Returns True if the prompt was accepted."""
+    params = subprocess.list2cmdline(
+        ["-m", "modules.scripts.uninstall", *sys.argv[1:]]
     )
+    res = ctypes.windll.shell32.ShellExecuteW(
+        None, "runas", sys.executable, params, str(PROJECT_ROOT), 1
+    )
+    return res > 32
 
 
 def _kill_adb() -> None:
@@ -54,7 +62,7 @@ def _kill_adb() -> None:
     cmd = (
         ["taskkill", "/F", "/IM", "adb.exe", "/T"]
         if sys.platform == "win32"
-        else ["pkill", "-f", "adb"]
+        else ["pkill", "-x", "adb"]
     )
     try:
         subprocess.run(cmd, capture_output=True, check=False)
@@ -113,7 +121,7 @@ def purge_data() -> None:
     """Deletes entire data directory (database, profiles, images, jsons, settings.toml)."""
     if DATA_FOLDER.exists():
         shutil.rmtree(DATA_FOLDER, ignore_errors=True)
-    logger.info("Purged data directory: %s", DATA_FOLDER)
+        logger.info("Purged data directory: %s", DATA_FOLDER)
 
 
 def purge_diagnostics() -> None:
@@ -181,16 +189,24 @@ def run(parent=None) -> bool:
         action="store_true",
         help="Skip system reboot prompt (Windows only, safely ignored on Linux)",
     )
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Use dialogs and graphical elevation (passed by the GUI launcher)",
+    )
 
     args = parser.parse_args()
 
     if sys.platform == "win32" and not _is_admin():
+        # Relaunch elevated in both CLI and GUI mode; the elevated copy
+        # (same args, so same mode) performs the uninstall.
+        if _request_windows_elevation():
+            return True
+
         msg = "Administrator privileges are required to uninstall the Interception driver."
         logger.error(msg)
         if is_gui:
             QMessageBox.critical(parent, "Elevation Required", msg)
-        else:
-            _request_windows_elevation()
         return False
 
     if not args.yes:
@@ -311,8 +327,21 @@ def run(parent=None) -> bool:
 
 def main() -> None:
     """Dedicated entry point for touch2key-uninstall script execution."""
-    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_uninstall")
-    run()
+    gui = "--gui" in sys.argv[1:]
+    AppLogManager.setup_logging(is_gui=gui, log_prefix="touch2key_uninstall")
+
+    # run() infers GUI mode from QApplication.instance(), so a --gui child
+    # must create the QApplication before calling it.
+    app = (
+        QApplication(sys.argv[:1])
+        if gui and QApplication.instance() is None
+        else None
+    )
+    try:
+        run()
+    finally:
+        if app is not None:
+            app.quit()
 
 
 if __name__ == "__main__":
