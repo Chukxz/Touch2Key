@@ -84,24 +84,28 @@ class AppLogManager:
 
             cls._memory_handler = MemoryHandler(
                 capacity=100_000,
-                flushLevel=logging.CRITICAL + 1,
+                flushLevel=logging.ERROR,
                 target=cls._target_file_handler,
             )
             root_logger.addHandler(cls._memory_handler)
 
             if not is_gui:
-                stdout_handler = logging.StreamHandler(cls._orig_stdout)
-                stdout_handler.setFormatter(formatter)
-                stdout_handler.setLevel(level)
-                stdout_handler.addFilter(
-                    lambda record: level <= record.levelno < logging.WARNING
-                )
-                root_logger.addHandler(stdout_handler)
+                # No-console launches (pythonw.exe) have None streams;
+                # StreamHandler(None) falls back to None and recurses.
+                if cls._orig_stdout is not None:
+                    stdout_handler = logging.StreamHandler(cls._orig_stdout)
+                    stdout_handler.setFormatter(formatter)
+                    stdout_handler.setLevel(level)
+                    stdout_handler.addFilter(
+                        lambda record: level <= record.levelno < logging.WARNING
+                    )
+                    root_logger.addHandler(stdout_handler)
 
-                stderr_handler = logging.StreamHandler(cls._orig_stderr)
-                stderr_handler.setFormatter(formatter)
-                stderr_handler.setLevel(logging.WARNING)
-                root_logger.addHandler(stderr_handler)
+                if cls._orig_stderr is not None:
+                    stderr_handler = logging.StreamHandler(cls._orig_stderr)
+                    stderr_handler.setFormatter(formatter)
+                    stderr_handler.setLevel(logging.WARNING)
+                    root_logger.addHandler(stderr_handler)
 
             atexit.register(cls.flush_and_close)
 
