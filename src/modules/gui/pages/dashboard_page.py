@@ -389,7 +389,7 @@ class DashboardPage(QWidget):
             f"Mode: {'menu' if snap.get('menu_mode') else 'game'}",
             f"Worker respawns: keyboard {resp.get('keyboard', 0)}, "
             f"mouse {resp.get('mouse', 0)}",
-            f"virtual kbd {'Not Active' if vkb_pid is  None else 'Active'}",
+            f"virtual kbd {'Not Active' if vkb_pid is None else 'Active'}",
             f"visualizer {'Not Active' if visualizer_pid is None else 'Active'}",
         ]
         if snap.get("window_lost"):
