@@ -53,16 +53,16 @@ def _summary_line(snap: dict[str, Any]) -> str:
     rate = snap.get("rate_hz")
     rate_txt = "--" if rate is None else f"{rate:.1f} Hz"
     resp = snap.get("respawns") or {}
-    vkb_pid = snap.get("workers", {}).get("vkb", 0)
-    visualizer_pid = snap.get("workers", {}).get("visualizer", 0)
+    vkb_pid = snap.get("workers", {}).get("vkb")
+    visualizer_pid = snap.get("workers", {}).get("visualizer")
     parts = [
         f"rate {rate_txt} {snap.get('rate_status') or 'n/a'}",
         f"alert<{_num(snap.get('pps_threshold'))} PPS",
         f"cap {_num(snap.get('rate_cap_hz'))} Hz",
         f"mode {'menu' if snap.get('menu_mode') else 'game'}",
         f"respawns kbd {resp.get('keyboard', 0)} / mouse {resp.get('mouse', 0)}",
-        f"virtual kbd { 'Active' if vkb_pid > 0 else 'Not Active'}",
-        f"visualizer {'Active' if visualizer_pid > 0 else 'Not Active'}",
+        f"virtual kbd {'Not Active' if vkb_pid is  None else 'Active'}",
+        f"visualizer {'Not Active' if visualizer_pid is None else 'Active'}",
     ]
     if snap.get("window_lost"):
         parts.append("NO TARGET WINDOW")
