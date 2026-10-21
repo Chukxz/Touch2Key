@@ -191,8 +191,8 @@ class DashboardPage(QWidget):
     def _register_dispatcher_events(self) -> None:
         if not self.dispatcher:
             return
-        self.dispatcher.register_callback("ON_LAYOUT_RELOAD", self._on_layout_reload)
-        self.dispatcher.register_callback("ON_CONFIG_RELOAD", self._on_layout_reload)
+        self.dispatcher.register_callback("ON_CONFIG_RELOAD", self._on_update_reload)
+        self.dispatcher.register_callback("ON_LAYOUT_RELOAD", self._on_update_reload)
         self.dispatcher.register_callback(
             "ON_TARGET_WINDOW_CHANGE", self._on_target_window_change
         )
@@ -265,13 +265,11 @@ class DashboardPage(QWidget):
                 f"{self.engine_controller.window_title}{id_str}"
             )
         elif self.engine_controller.window_id is not None:
-            self.target_window_label.setText(
-                f"HWND {self.engine_controller.window_id}"
-            )
+            self.target_window_label.setText(f"HWND {self.engine_controller.window_id}")
         else:
             self.target_window_label.setText("None (Foreground Active Window)")
 
-    def _on_layout_reload(self, *args: Any, **kwargs: Any) -> None:
+    def _on_update_reload(self, *args: Any, **kwargs: Any) -> None:
         self.refresh_state()
 
     def _on_target_window_change(self, *args: Any, **kwargs: Any) -> None:
@@ -330,10 +328,13 @@ class DashboardPage(QWidget):
         if first:
             self._procs[proc.pid] = cached = proc
         try:
-            with cached.oneshot():
-                cpu = cached.cpu_percent(interval=None)
-                rss_mb = cached.memory_info().rss / _MB
-                threads = cached.num_threads()
+            if cached is not None:
+                with cached.oneshot():
+                    cpu = cached.cpu_percent(interval=None)
+                    rss_mb = cached.memory_info().rss / _MB
+                    threads = cached.num_threads()
+            else:
+                return None
         except psutil.Error:
             return None
         return (None if first else cpu), rss_mb, threads
@@ -363,7 +364,9 @@ class DashboardPage(QWidget):
             cfg_cap = float(settings.adb_rate_cap or 0)
             cfg_pps = float(settings.pps_alert_threshold or 0)
             if cap is not None and abs(cfg_cap - cap) > 0.5:
-                cap_note = f" <span style='color:{_WARN}'>(settings: {cfg_cap:g})</span>"
+                cap_note = (
+                    f" <span style='color:{_WARN}'>(settings: {cfg_cap:g})</span>"
+                )
             if threshold is not None and abs(cfg_pps - threshold) > 0.5:
                 threshold_note = (
                     f" <span style='color:{_WARN}'>(settings: {cfg_pps:g})</span>"
@@ -376,7 +379,8 @@ class DashboardPage(QWidget):
         status = snap.get("rate_status") or "n/a"
         color = _STATUS_COLORS.get(status, _DOT_STOPPED)
         resp = snap.get("respawns") or {}
-
+        vkb_pid = snap.get("workers", {}).get("vkb", 0)
+        visualizer_pid = snap.get("workers", {}).get("visualizer", 0)
         lines = [
             f"Rate (5 s avg): <b>{rate_txt}</b> "
             f"<span style='color:{color}'>{status}</span> "
@@ -385,6 +389,8 @@ class DashboardPage(QWidget):
             f"Mode: {'menu' if snap.get('menu_mode') else 'game'}",
             f"Worker respawns: keyboard {resp.get('keyboard', 0)}, "
             f"mouse {resp.get('mouse', 0)}",
+            f"virtual kbd { 'Active' if vkb_pid > 0 else 'Not Active'}",
+            f"visualizer {'Active' if visualizer_pid > 0 else 'Not Active'}",
         ]
         if snap.get("window_lost"):
             lines.append(f"<span style='color:{_WARN}'>No target window found</span>")

@@ -7,12 +7,13 @@ import cProfile
 import datetime
 from typing import TYPE_CHECKING, cast
 
-from modules.engine import Engine
+from modules.engine import Engine, shutdown_engine_process
 from modules.platforms import check_single_instance
 from modules.scripts.preflight import run as run_preflight
 from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER, ICONS_FOLDER
 from modules.log_manager import AppLogManager
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 
@@ -93,6 +94,11 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         if app_icon_path.exists():
             app.setWindowIcon(QIcon(str(app_icon_path)))
 
+        # Allow Python signals to be processed periodically by running a dummy timer
+        timer = QTimer()
+        timer.start(500)
+        timer.timeout.connect(lambda: None)  # Kickstarts the Python interpreter loop
+
     if not run_preflight():
         profiler_cleanup(cli_profiler)
         sys.exit(1)
@@ -119,6 +125,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         else:
             engine._start()
     except KeyboardInterrupt:
+        # print("Engine received shutdown signal, exiting cleanly.")
         pass
     finally:
         engine._shutdown()

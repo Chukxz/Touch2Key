@@ -15,7 +15,6 @@ from modules.utils import (
     M_LEFT,
     M_MIDDLE,
     M_RIGHT,
-    SCANCODES,
     TOP_BEZEL_ID,
     VKB_SLEEP_TIME,
     VKB_STRUCT,
@@ -32,6 +31,8 @@ if TYPE_CHECKING:
     from .touch_reader import TouchReader
 
 logger = logging.getLogger("modules.core.mapper")
+
+_PULSE_INTERVAL = 5.0
 
 
 class Mapper:
@@ -52,7 +53,10 @@ class Mapper:
         self.emulator = emulator
         self.pps = pps
         self.event_count = 0
+        self.last_rate = 0.0
+        self.last_status = "STARTING"
         self.last_pulse_time = time.perf_counter()
+        self._pulse_lock = threading.Lock()
         self.engine_ref = ref
 
         self.window_manager = get_platform().WindowManager()
@@ -310,17 +314,20 @@ class Mapper:
         return target_x, target_y
 
     def _pulse_status(self) -> None:
-        now = time.perf_counter()
-        elapsed = now - self.last_pulse_time
-        if elapsed >= 5.0:
-            current_count = self.event_count
-            self.event_count = 0
-            self.last_pulse_time = now
-            pps = current_count / elapsed
-            status = (
-                "HEALTHY" if pps >= self.pps else ("IDLE" if pps == 0 else "LOW RATE")
-            )
-            logger.info("Rate: %5.1f Hz | Status: %s", pps, status)
+        with self._pulse_lock:
+            now = time.perf_counter()
+            elapsed = now - self.last_pulse_time
+            if elapsed >= _PULSE_INTERVAL:
+                current_count = self.event_count
+                self.event_count = 0
+                self.last_pulse_time = now
+                pps = current_count / elapsed
+                status = (
+                    "HEALTHY" if pps >= self.pps else ("IDLE" if pps == 0 else "LOW RATE")
+                )
+                self.last_rate = pps
+                self.last_status = status
+                logger.info("Rate: %5.1f Hz | Status: %s", pps, status)
 
     def _virtual_keyboard_listener(self) -> None:
         reader = getattr(self.engine_ref, "vkb_reader", None)

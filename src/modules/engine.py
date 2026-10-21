@@ -35,6 +35,8 @@ from modules.utils import (
     IPC_CMD_START,
     PPS_ALERT_MAX,
     PPS_ALERT_MIN,
+    READ_ATTEMPTS,
+    VISUALIZER_RUNTIME_FILE,
     IpcMapperEventDispatcher,
     MapperEvent,
     MapperEventDispatcher,
@@ -42,6 +44,7 @@ from modules.utils import (
     TouchPhase,
     unpack_ipc_start_cmd,
 )
+from modules.runtime_info import TelemetryPublisher
 
 logger = logging.getLogger("modules.engine")
 
@@ -66,6 +69,9 @@ class Engine:
         self.window_manager = platform_mod.WindowManager()
         self.foreground_window = self.window_manager.get_foreground_window()
         self.bridge = platform_mod.Bridge(self.window_manager, self.system_config)
+
+        self._publisher: TelemetryPublisher | None = None
+        self._respawns: dict[str, int] = {"keyboard": 0, "mouse": 0}
 
         self.touch_reader: TouchReader | None = None
         self.layout_loader: LayoutLoader | None = None
@@ -506,6 +512,9 @@ class Engine:
         ):
             return
 
+        if self.mapper is not None:
+            self.mapper.event_count += 1
+
         if self.is_visible and self.two_finger_tap_enabled:
             decision = self.two_finger_tap_tracker.observe(touch_event)
             if decision.status is GestureStatus.RECOGNIZED:
@@ -654,12 +663,21 @@ class Engine:
         self.mapper_event_dispatcher.register_callback(
             "ON_DEVICES_CHANGE", self._on_devices_change
         )
+        self.mapper_event_dispatcher.register_callback(
+            "ON_WORKER_RESPAWN", self._count_respawn
+        )
 
         self.bridge.start_worker_processes(k_device_handle, m_device_handle)
         self._mouse_flush_thread = threading.Thread(
             target=self._mouse_flush_loop, daemon=True, name="MouseFlushThread"
         )
         self._mouse_flush_thread.start()
+
+        try:
+            self._publisher = TelemetryPublisher(self._telemetry_snapshots)
+            self._publisher.start()
+        except Exception:
+            logger.exception("Telemetry publisher failed to start.")
 
     def _start(self, config_str: str | None = None) -> None:
         if config_str is not None:
@@ -735,6 +753,9 @@ class Engine:
                 logger.exception("Failed to unhook keyboard hotkeys", exc_info=True)
 
         try:
+            if self._publisher is not None:
+                self._publisher.stop()
+
             thread = self._mouse_flush_thread
             if (
                 thread is not None
@@ -761,6 +782,50 @@ class Engine:
             logger.exception("Exception during engine teardown: %s", exc, exc_info=True)
         finally:
             store.close()
+
+    def _count_respawn(self, worker_type: str | None = None) -> None:
+        if worker_type:
+            self._respawns[worker_type] = self._respawns.get(worker_type, 0) + 1
+
+    def _telemetry_snapshots(self) -> dict[str, Any]:
+        mapper = self.mapper
+        if mapper is not None:
+            mapper._pulse_status()  # keep the rate fresh when window tracking is idle
+
+        def alive_pid(proc) -> int | None:
+            try:
+                return proc.pid if proc is not None and proc.is_alive() else None
+            except (ValueError, OSError):
+                return None
+
+        bridge = self.bridge
+        return {
+            "rate_cap_hz": self.rate_cap,
+            "pps_threshold": self.pps,
+            "rate_hz": getattr(mapper, "last_rate", None),
+            "rate_status": getattr(mapper, "last_status", None),
+            "menu_mode": self.is_visible,
+            "window_lost": getattr(mapper, "window_lost", None),
+            "workers": {
+                "keyboard": alive_pid(getattr(bridge, "k_proc", None)),
+                "mouse": alive_pid(getattr(bridge, "m_proc", None)),
+                "vkb": alive_pid(self.vkb_process),
+                "visualizer": _read_visualizer(),
+            },
+            "respawns": dict(self._respawns),
+        }
+
+
+def _read_visualizer() -> int | None:
+    for _ in range(READ_ATTEMPTS):
+        try:
+            data = VISUALIZER_RUNTIME_FILE.read_text(encoding="utf-8")
+            return int(data) if data.isnumeric() and int(data) > 0 else None
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            time.sleep(0.01)  # writer is mid-replace; retry
+    return None
 
 
 def run_engine_process(conn: Connection, log_queue: Queue) -> None:

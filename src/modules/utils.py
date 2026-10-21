@@ -107,13 +107,17 @@ UDEV_RULE_PATH = Path("/etc/udev/rules.d/99-touch2key.rules")
 # Constants
 # ---------------------------------------------------------------------------
 
+VISUALIZER_RUNTIME_FILE = DATA_FOLDER / "visualizer_runtime.json"
+RUNTIME_FILE = DATA_FOLDER / "engine_runtime.json"
+READ_ATTEMPTS = 3
+
+
 BASELINE_DPI = 160
 BASELINE_WIDTH = 800
 BASELINE_HEIGHT = 360
 DOWN = "DOWN"
 UP = "UP"
 PRESSED = "PRESSED"
-IDLE = "IDLE"
 
 CIRCLE = "CIRCLE"
 RECTANGLE = "RECTANGLE"
@@ -660,6 +664,22 @@ class MapperEventDispatcher:
             )
 
         return ()
+
+
+class EventCount():
+    def __init__(self):
+        self.event_count_down = 0
+        self.event_count_move = 0
+        self.event_count_up = 0
+        
+    def record(self, touch_event: TouchEvent):
+        if touch_event.phase is TouchPhase.MOVE:
+            self.event_count_move += 1
+        elif touch_event.phase is TouchPhase.DOWN:
+            self.event_count_down += 1
+        elif touch_event.phase is TouchPhase.UP:
+            self.event_count_up += 1           
+        
 
 
 # ---------------------------------------------------------------------------

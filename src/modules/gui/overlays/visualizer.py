@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import atexit
 import sys
+import os
 import time
 import ctypes
 import logging
@@ -26,6 +28,7 @@ from PySide6.QtGui import (
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 
 from modules import AppLogManager
+from modules.utils import READ_ATTEMPTS, VISUALIZER_RUNTIME_FILE
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QGraphicsItem
@@ -378,12 +381,27 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
+def _final_write():
+    _write(-1)
+
+
+def _write(payload: int) -> None:
+    tmp = VISUALIZER_RUNTIME_FILE.with_suffix(".tmp")
+    tmp.write_text(str(payload), encoding="utf-8")
+    os.replace(tmp, VISUALIZER_RUNTIME_FILE)  # atomic: readers never see a torn file
+
+
 def run(
     toggle_key_scancode: int | None = None,
 ) -> None:
     success, _ = check_single_instance(VISUALIZER_NAME)
     if not success:
         sys.exit(0)
+
+    pid = os.getpid()
+    _write(pid)
+
+    atexit.register(_final_write)
 
     app = QApplication(sys.argv)
     app_icon_path = ICONS_FOLDER / "app.png"

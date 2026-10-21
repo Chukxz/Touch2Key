@@ -1,20 +1,5 @@
 """
 Runtime registry and telemetry snapshot for the running engine.
-
-The process that owns the worker processes (the engine subprocess when started
-from the GUI, the CLI process otherwise) runs a TelemetryPublisher. About once a
-second it atomically rewrites one small JSON file holding the engine's identity
-(pid + create_time) and a snapshot of its EFFECTIVE state: ADB rate cap, PPS
-alert threshold, measured rate, worker PIDs by role, respawn counts.
-
-Readers (touch2key-stats, the dashboard) use it to find the engine and show live
-numbers. Effective values come from the engine, not the database: a separate CLI
-script can change the database without notifying the running engine, and the
-engine clamps what it reads.
-
-Workers are never recorded as a PID list on their own: the set of live children
-is always derived from the engine process, so respawned workers are picked up;
-the snapshot only supplies their role names.
 """
 
 from __future__ import annotations
@@ -28,18 +13,16 @@ from typing import Any, Callable
 
 import psutil
 
-from modules.utils import DATA_FOLDER
+from modules.utils import READ_ATTEMPTS, RUNTIME_FILE
 
 logger = logging.getLogger("modules.runtime_info")
 
-RUNTIME_FILE = DATA_FOLDER / "engine_runtime.json"
 PUBLISH_INTERVAL_S = 1.0
 STALE_AFTER_S = 5.0  # no update for this long: the publisher (engine) is stuck
 
 # create_time() comes from the same psutil source on both sides, so this only
 # has to absorb float rounding; a reused PID differs by far more.
 _CREATE_TIME_TOLERANCE_S = 1.0
-_READ_ATTEMPTS = 3
 
 
 # ---------------------------------------------------------------------------
@@ -52,14 +35,14 @@ def _write(payload: dict[str, Any]) -> None:
 
 
 def _read() -> dict[str, Any] | None:
-    for _ in range(_READ_ATTEMPTS):
+    for _ in range(READ_ATTEMPTS):
         try:
             data = json.loads(RUNTIME_FILE.read_text(encoding="utf-8"))
             return data if isinstance(data, dict) else None
         except FileNotFoundError:
             return None
         except (OSError, ValueError):
-            time.sleep(0.01)  # writer is mid-replace (Windows); retry
+            time.sleep(0.01)  # writer is mid-replace; retry
     return None
 
 
@@ -124,13 +107,13 @@ class TelemetryPublisher:
         try:
             snapshot = self._snapshot_fn()
         except Exception:
-            logger.debug("Telemetry snapshot failed", exc_info=True)
+            logger.debug("Telemetry snapshot failed.", exc_info=True)
             snapshot = {}
         payload = {**self._identity, "updated_at": time.time(), **snapshot}
         try:
             _write(payload)
         except OSError:
-            logger.debug("Could not write telemetry snapshot", exc_info=True)
+            logger.debug("Could not write telemetry snapshot.", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +127,10 @@ def attach() -> tuple[psutil.Process, dict[str, Any]] | None:
         return None
     try:
         proc = psutil.Process(int(data["pid"]))
-        if abs(proc.create_time() - float(data["create_time"])) > _CREATE_TIME_TOLERANCE_S:
+        if (
+            abs(proc.create_time() - float(data["create_time"]))
+            > _CREATE_TIME_TOLERANCE_S
+        ):
             return None
         if not proc.is_running() or proc.status() == psutil.STATUS_ZOMBIE:
             return None

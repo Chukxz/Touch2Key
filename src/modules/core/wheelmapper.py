@@ -44,7 +44,7 @@ class WheelMapper:
             "ON_LAYOUT_RELOAD", self.rebuild_pipeline
         )
         self.mapper_event_dispatcher.register_callback(
-            "ON_WORKER_RESPAWN", self._on_respawn_wheel
+            "ON_WORKER_RESPAWN", self._on_worker_respawn_wheel
         )
 
     def rebuild_pipeline(self) -> None:
@@ -180,6 +180,6 @@ class WheelMapper:
             if self.pipeline is not None:
                 self.pipeline.reset(self.output_sink)
 
-    def _on_respawn_wheel(self, worker_type: str) -> None:
+    def _on_worker_respawn_wheel(self, worker_type: str) -> None:
         if worker_type == "keyboard":
             self.touch_up()

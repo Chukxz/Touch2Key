@@ -48,9 +48,7 @@ def _is_admin() -> bool:
 def _request_windows_elevation() -> bool:
     """Relaunches this module through UAC (as Administrator), preserving the
     current CLI args (including --gui). Returns True if the prompt was accepted."""
-    params = subprocess.list2cmdline(
-        ["-m", "modules.scripts.uninstall", *sys.argv[1:]]
-    )
+    params = subprocess.list2cmdline(["-m", "modules.scripts.uninstall", *sys.argv[1:]])
     res = ctypes.windll.shell32.ShellExecuteW(
         None, "runas", sys.executable, params, str(PROJECT_ROOT), 1
     )
@@ -210,7 +208,7 @@ def run(parent=None) -> bool:
         return False
 
     if not args.yes:
-        confirm_text = "Are you sure you want to remove the driver/rules/shortcuts and clean binaries?"
+        confirm_text = "Are you sure you want to remove the driver/rules/shortcuts, clean binaries and more?"
         if is_gui:
             res = QMessageBox.question(
                 parent,
@@ -333,9 +331,7 @@ def main() -> None:
     # run() infers GUI mode from QApplication.instance(), so a --gui child
     # must create the QApplication before calling it.
     app = (
-        QApplication(sys.argv[:1])
-        if gui and QApplication.instance() is None
-        else None
+        QApplication(sys.argv[:1]) if gui and QApplication.instance() is None else None
     )
     try:
         run()

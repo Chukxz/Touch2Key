@@ -2,19 +2,6 @@
 touch2key-stats: attach to the running engine (started by the GUI or the CLI)
 and print its live state: measured touch rate, ADB rate cap, PPS alert
 threshold, and CPU / memory / threads for the engine and each worker.
-
-Usage:
-    touch2key-stats                  # sample every second until Ctrl+C
-    touch2key-stats -i 5             # every 5 seconds
-    touch2key-stats --once           # one sample; exit code 1 if no engine
-    touch2key-stats --json >> t.log  # JSON Lines, one object per sample
-
-The rate cap and PPS threshold shown are the engine's EFFECTIVE values (what it
-is running with now), not what the database says; they differ after a database
-edit that the engine has not reloaded yet.
-
-If the engine runs elevated (Windows), run this from an elevated terminal too,
-otherwise some per-process fields are access-denied.
 """
 
 from __future__ import annotations
@@ -66,12 +53,16 @@ def _summary_line(snap: dict[str, Any]) -> str:
     rate = snap.get("rate_hz")
     rate_txt = "--" if rate is None else f"{rate:.1f} Hz"
     resp = snap.get("respawns") or {}
+    vkb_pid = snap.get("workers", {}).get("vkb", 0)
+    visualizer_pid = snap.get("workers", {}).get("visualizer", 0)
     parts = [
         f"rate {rate_txt} {snap.get('rate_status') or 'n/a'}",
         f"alert<{_num(snap.get('pps_threshold'))} PPS",
         f"cap {_num(snap.get('rate_cap_hz'))} Hz",
         f"mode {'menu' if snap.get('menu_mode') else 'game'}",
         f"respawns kbd {resp.get('keyboard', 0)} / mouse {resp.get('mouse', 0)}",
+        f"virtual kbd { 'Active' if vkb_pid > 0 else 'Not Active'}",
+        f"visualizer {'Active' if visualizer_pid > 0 else 'Not Active'}",
     ]
     if snap.get("window_lost"):
         parts.append("NO TARGET WINDOW")

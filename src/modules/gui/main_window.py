@@ -115,6 +115,7 @@ class CurrentPageStack(QStackedWidget):
             return super().minimumSizeHint()
         return page.minimumSizeHint().expandedTo(page.minimumSize())
 
+
 class CustomDockWidget(QDockWidget):
     signal_closed = Signal()
 
@@ -518,13 +519,14 @@ class MainWindow(QMainWindow):
         )
         self.dashboard_page.start_requested.connect(self._start_engine_from_dashboard)
         self.dashboard_page.stop_requested.connect(self._stop_engine_from_dashboard)
+        self.dashboard_page.navigate_requested.connect(self._navigate_to_page)
 
         self.pages: dict[str, QWidget] = {
+            "Dashboard": self.dashboard_page,
             "Layout Studio": LayoutStudioPage(
                 self.dispatcher,
                 self,
             ),
-            "Dashboard": self.dashboard_page,
             "Settings": SettingsPage(
                 self.engine_controller,
                 self.dispatcher,
@@ -617,7 +619,22 @@ class MainWindow(QMainWindow):
             self.custom_log_dock,
         )
 
-        self._switch_page(0, "Layout Studio")
+        self._switch_page(0, "Dashboard")
+        
+    def _navigate_to_page(self, page_title: str):
+        index = -1
+        title = page_title.strip()        
+        
+        for cur_index, (cur_title, _) in enumerate(self.pages.items()):
+            if cur_title.strip() == title:
+                index = cur_index
+                break
+            
+        if index > 0:
+            self._switch_page(index, title)
+        else:
+            logger.info("Could not find a page with title '%s'.", title)                 
+
 
     def _setup_logging(self) -> None:
         handler = install_gui_logging(

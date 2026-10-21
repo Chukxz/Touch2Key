@@ -53,13 +53,13 @@ class KeyMapper:
         self._sync_typematic_to_bridge()
 
         self.mapper_event_dispatcher.register_callback(
+            "ON_CONFIG_RELOAD", self._on_config_reload_key
+        )
+        self.mapper_event_dispatcher.register_callback(
             "ON_LAYOUT_RELOAD", self.rebuild_pipelines
         )
         self.mapper_event_dispatcher.register_callback(
             "ON_WORKER_RESPAWN", self._on_worker_respawn_key
-        )
-        self.mapper_event_dispatcher.register_callback(
-            "ON_CONFIG_RELOAD", self._on_config_reload_key
         )
 
     def _resolve_scancode_set(self, raw_tokens: str | None) -> set[int]:

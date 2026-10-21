@@ -1022,8 +1022,8 @@ class LayoutStudioPage(QWidget):
 
     def _notify_engine_reload(self) -> None:
         if self.dispatcher is not None:
-            self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
             self.dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+            self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
 
     # ------------------------------------------------------------------
     # Profile actions

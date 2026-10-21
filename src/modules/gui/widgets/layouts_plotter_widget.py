@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from PIL import Image
 from typing import TYPE_CHECKING, Optional, Any
+from enum import Enum, auto
 
 from modules.platforms import get_platform, get_specific_mt_key
 from modules.database import store
@@ -59,12 +60,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("modules.gui.layouts_plotter_widget")
 
-COLLECTING = "COLLECTING"
-WAITING_FOR_KEY = "WAITING_FOR_KEY"
-WAITING_FOR_WHEEL_INDICATOR = "WAITING_FOR_WHEEL_INDICATOR"
-DELETING = "DELETING"
-CONFIRM_DELETE_ALL = "CONFIRM_DELETE_ALL"
-CONFIRM_EXIT = "CONFIRM_EXIT"
+class PlotterState(Enum):
+    COLLECTING = auto()
+
+    COLLECTING = "COLLECTING"
+    WAITING_FOR_KEY = "WAITING_FOR_KEY"
+    WAITING_FOR_WHEEL_INDICATOR = "WAITING_FOR_WHEEL_INDICATOR"
+    DELETING = "DELETING"
+    CONFIRM_DELETE_ALL = "CONFIRM_DELETE_ALL"
+    CONFIRM_EXIT = "CONFIRM_EXIT"
 
 INDICATED_EDGE_COLOR = (0.85, 0.88, 0.92)
 ACTIVE_EDGE_COLOR = (0.7, 0.7, 0.7, 0.8)

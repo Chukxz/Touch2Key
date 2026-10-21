@@ -151,8 +151,8 @@ Because Touch2Key installs system-level drivers and kernel rules, **simply runni
 | Action | Command | Description |
 | :--- | :--- | :--- |
 | **Standard** | `touch2key-uninstall` | Removes drivers/rules/binaries/shortcuts; preserves all user data. |
-| **Purge** | `touch2key-uninstall --purge` | Removes drivers/rules/binaries/shortcuts **AND** deletes all user data — all saved jsons/images/profiles (bundles) files, settings toml file, and database files. |
-| **Purge-All** | `touch2key-uninstall --purge-all` | Removes drivers/rules/binaries/shortcuts **AND** deletes all user and diagnostic data — all saved jsons/images/profiles (bundles) files, settings toml file, database files, **AND** the diagnostics (profiling — .prof) and log files. |
+| **Purge** | `touch2key-uninstall --purge` | Removes drivers/rules/binaries/shortcuts **AND** deletes all user data — all saved jsons/images/profiles (bundles) files, settings toml file, runtime files, and database files. |
+| **Purge-All** | `touch2key-uninstall --purge-all` | Removes drivers/rules/binaries/shortcuts **AND** deletes all user and diagnostic data — all saved jsons/images/profiles (bundles) files, settings toml file, runtime files, database files, **AND** the diagnostics (profiling — .prof) and log files. |
 | **Skip Confirmation** | `touch2key-uninstall [--yes, -y]` | Skip confirmation prompt. |
 | **Skip Reboot** | `touch2key-uninstall --no-restart` | Skip reboot prompt (Windows). |
 
@@ -192,6 +192,7 @@ When running the engine in CLI mode, the following hotkeys are active to control
 | `touch2key-plot` | Mapping visualizer. |
 | `touch2key-preflight` | Diagnostic checks. |
 | `touch2key-setup` | Runs the OS configuration wizard and installs drivers/rules/binaries and shortcuts. |
+| `touch2key-stats` | Runtime registry and telemetry snapshot for the running engine. |
 | `touch2key-uninstall` | Safely removes drivers, rules, binaries, and shortcuts. |
 | `touch2key-wireless` | Forces ADB wireless connection. |
 | `touch2key-keyboard` | Test the virtual keyboard program output in standalone mode. |
@@ -212,6 +213,14 @@ touch2key-manage --set-image <layout_id> path/to/hud_screenshot.png  # e.g., --s
 touch2key-manage --set-left-handed on
 ```
 See all commands by running `touch2key-manage [-h|--h|-help|--help]`
+
+### Telemetry Commands
+```bash
+touch2key-stats                  # sample every second until Ctrl+C
+touch2key-stats -i 5             # every 5 seconds
+touch2key-stats --once           # one sample; exit code 1 if no engine
+touch2key-stats --json >> t.log  # JSON Lines, one object per sample
+```
 
 ---
 
