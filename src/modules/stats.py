@@ -61,7 +61,7 @@ def _summary_line(snap: dict[str, Any]) -> str:
         f"cap {_num(snap.get('rate_cap_hz'))} Hz",
         f"mode {'menu' if snap.get('menu_mode') else 'game'}",
         f"respawns kbd {resp.get('keyboard', 0)} / mouse {resp.get('mouse', 0)}",
-        f"virtual kbd {'Not Active' if vkb_pid is  None else 'Active'}",
+        f"virtual kbd {'Not Active' if vkb_pid is None else 'Active'}",
         f"visualizer {'Not Active' if visualizer_pid is None else 'Active'}",
     ]
     if snap.get("window_lost"):
