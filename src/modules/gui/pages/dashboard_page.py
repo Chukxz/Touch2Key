@@ -379,8 +379,8 @@ class DashboardPage(QWidget):
         status = snap.get("rate_status") or "n/a"
         color = _STATUS_COLORS.get(status, _DOT_STOPPED)
         resp = snap.get("respawns") or {}
-        vkb_pid = snap.get("workers", {}).get("vkb", 0)
-        visualizer_pid = snap.get("workers", {}).get("visualizer", 0)
+        vkb_pid = snap.get("workers", {}).get("vkb")
+        visualizer_pid = snap.get("workers", {}).get("visualizer")
         lines = [
             f"Rate (5 s avg): <b>{rate_txt}</b> "
             f"<span style='color:{color}'>{status}</span> "
@@ -389,8 +389,8 @@ class DashboardPage(QWidget):
             f"Mode: {'menu' if snap.get('menu_mode') else 'game'}",
             f"Worker respawns: keyboard {resp.get('keyboard', 0)}, "
             f"mouse {resp.get('mouse', 0)}",
-            f"virtual kbd { 'Active' if vkb_pid > 0 else 'Not Active'}",
-            f"visualizer {'Active' if visualizer_pid > 0 else 'Not Active'}",
+            f"virtual kbd {'Not Active' if vkb_pid is  None else 'Active'}",
+            f"visualizer {'Not Active' if visualizer_pid is None else 'Active'}",
         ]
         if snap.get("window_lost"):
             lines.append(f"<span style='color:{_WARN}'>No target window found</span>")
