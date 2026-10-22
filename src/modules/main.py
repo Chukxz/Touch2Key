@@ -11,7 +11,7 @@ from modules.engine import Engine, shutdown_engine_process
 from modules.platforms import check_single_instance
 from modules.scripts.preflight import run as run_preflight
 from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER, ICONS_FOLDER
-from modules.log_manager import AppLogManager
+from modules.log_manager import AppLogManager, initialize_cleanup
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
@@ -51,7 +51,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         sys.exit(1)
 
     # -----------------------------------------------------------------------
-    # 1. CLI Argument Parsing
+    # CLI Argument Parsing
     # -----------------------------------------------------------------------
     if parser is None:
         parser = argparse.ArgumentParser(description="Touch2Key CLI Application")
@@ -84,7 +84,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         print(f"[+] Profiling started.")
 
     # -----------------------------------------------------------------------
-    # 2. Boot Sequence
+    # Boot Sequence
     # -----------------------------------------------------------------------
     if args.use_gui:
         app = cast(QApplication, QApplication.instance() or QApplication(sys.argv))
@@ -113,8 +113,10 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         profiler_cleanup(cli_profiler)
         sys.exit(0)
 
+    initialize_cleanup()
+
     # -----------------------------------------------------------------------
-    # 3. Application Execution
+    # Application Execution
     # -----------------------------------------------------------------------
     # headless explicitly kept false
     engine = Engine(headless=False)
