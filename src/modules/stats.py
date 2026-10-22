@@ -6,6 +6,7 @@ threshold, and CPU / memory / threads for the engine and each worker.
 
 from __future__ import annotations
 
+import os
 import argparse
 import json
 import sys
@@ -94,6 +95,12 @@ def main() -> None:
         action="store_true",
         help="Emit one JSON object per sample (JSON Lines) instead of text",
     )
+    parser.add_argument(
+        "-c",
+        "--clear",
+        action="store_true",
+        help="Wipes the previous terminal output (if json flag is not set)",
+    )
     args = parser.parse_args()
 
     # Reused Process objects: cpu_percent() needs a previous call as baseline.
@@ -139,6 +146,9 @@ def main() -> None:
                     flush=True,
                 )
             else:
+                if args.clear:
+                    os.system("cls" if sys.platform == "win32" else "clear")
+
                 stamp = time.strftime("%H:%M:%S")
                 print(f"{stamp}  {_summary_line(snap)}", flush=True)
                 for row in rows:
@@ -146,6 +156,7 @@ def main() -> None:
 
             if args.once:
                 return
+
     except KeyboardInterrupt:
         pass
 

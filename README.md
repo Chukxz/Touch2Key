@@ -220,6 +220,7 @@ touch2key-stats                  # sample every second until Ctrl+C
 touch2key-stats -i 5             # every 5 seconds
 touch2key-stats --once           # one sample; exit code 1 if no engine
 touch2key-stats --json >> t.log  # JSON Lines, one object per sample
+touch2key-stats -c, --clear      # Wipes previous terminal output (if json flag is not set)
 ```
 
 ---

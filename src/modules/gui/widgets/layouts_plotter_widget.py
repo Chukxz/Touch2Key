@@ -21,7 +21,6 @@ from modules.utils import (
     BEZEL_DP_THICKNESS,
     BOTTOM_BEZEL_ID,
     CIRCLE,
-    IDLE,
     IMAGES_FOLDER,
     MAX_BEZEL_DP,
     MAX_PRIORITY,
@@ -59,16 +58,6 @@ if TYPE_CHECKING:
     from modules.database import Layout
 
 logger = logging.getLogger("modules.gui.layouts_plotter_widget")
-
-class PlotterState(Enum):
-    COLLECTING = auto()
-
-    COLLECTING = "COLLECTING"
-    WAITING_FOR_KEY = "WAITING_FOR_KEY"
-    WAITING_FOR_WHEEL_INDICATOR = "WAITING_FOR_WHEEL_INDICATOR"
-    DELETING = "DELETING"
-    CONFIRM_DELETE_ALL = "CONFIRM_DELETE_ALL"
-    CONFIRM_EXIT = "CONFIRM_EXIT"
 
 INDICATED_EDGE_COLOR = (0.85, 0.88, 0.92)
 ACTIVE_EDGE_COLOR = (0.7, 0.7, 0.7, 0.8)
@@ -111,20 +100,30 @@ def _parse_artist_id(artist_id: Optional[str]) -> Optional[int]:
         return None
 
 
+class PlotterState(Enum):
+    IDLE = auto()
+    COLLECTING = auto()
+    WAITING_FOR_KEY = auto()
+    WAITING_FOR_WHEEL_INDICATOR = auto()
+    DELETING = auto()
+    CONFIRM_DELETE_ALL = auto()
+    CONFIRM_EXIT = auto()
+
+
 class _CursorManager:
     def __init__(self, canvas: FigureCanvasQTAgg):
         self.canvas = canvas
         self.state_map = {
-            IDLE: Qt.CursorShape.ArrowCursor,
-            COLLECTING: Qt.CursorShape.CrossCursor,
-            WAITING_FOR_KEY: Qt.CursorShape.PointingHandCursor,
-            WAITING_FOR_WHEEL_INDICATOR: Qt.CursorShape.PointingHandCursor,
-            DELETING: Qt.CursorShape.ForbiddenCursor,
-            CONFIRM_DELETE_ALL: Qt.CursorShape.WaitCursor,
-            CONFIRM_EXIT: Qt.CursorShape.WaitCursor,
+            PlotterState.IDLE: Qt.CursorShape.ArrowCursor,
+            PlotterState.COLLECTING: Qt.CursorShape.CrossCursor,
+            PlotterState.WAITING_FOR_KEY: Qt.CursorShape.PointingHandCursor,
+            PlotterState.WAITING_FOR_WHEEL_INDICATOR: Qt.CursorShape.PointingHandCursor,
+            PlotterState.DELETING: Qt.CursorShape.ForbiddenCursor,
+            PlotterState.CONFIRM_DELETE_ALL: Qt.CursorShape.WaitCursor,
+            PlotterState.CONFIRM_EXIT: Qt.CursorShape.WaitCursor,
         }
 
-    def set_state_cursor(self, state: str):
+    def set_state_cursor(self, state: PlotterState):
         self.canvas.setCursor(self.state_map.get(state, Qt.CursorShape.ArrowCursor))
 
     def set_custom_cursor(self, shape: Qt.CursorShape):
@@ -221,7 +220,7 @@ class _DraggableLabel(_Draggable):
     def _on_press(self, event):
         if (
             self.plotter.is_fatal_state
-            or self.plotter.state != IDLE
+            or self.plotter.state is not PlotterState.IDLE
             or self.label_artist.axes is None
         ):
             return
@@ -350,7 +349,7 @@ class _DraggableShape(_Draggable):
     def _on_press(self, event):
         if (
             self.plotter.is_fatal_state
-            or self.plotter.state != IDLE
+            or self.plotter.state is not PlotterState.IDLE
             or self.shape_artist.axes is None
         ):
             return
@@ -862,7 +861,7 @@ class _MouseWheelDragManager:
     def _on_press(self, event):
         if (
             self.plotter.is_fatal_state
-            or self.plotter.state != IDLE
+            or self.plotter.state is not PlotterState.IDLE
             or not self.plotter.saved_mouse_wheel
             or not self.plotter.show_overlays
             or event.inaxes != self.plotter.ax
@@ -883,7 +882,7 @@ class _MouseWheelDragManager:
         self.plotter.fire_on_motion = False
         self.plotter.draggables_ids.clear()
 
-        self.plotter.state = WAITING_FOR_WHEEL_INDICATOR
+        self.plotter.state = PlotterState.WAITING_FOR_WHEEL_INDICATOR
         indicators.current_mouse_wheel_indicator = self.entry_id
         self.plotter.mouse_wheel_indicators.highlight_mouse_wheel_indicator(
             self.entry_id
@@ -1254,9 +1253,9 @@ class LayoutsPlotterWidget(QWidget):
         self.points = []
         self.point_artists = []
         self.mode = None
-        self.state = IDLE
+        self.state = PlotterState.IDLE
         self.input_buffer = ""
-
+        
         self.buffer_default = True
         self.shapes: dict[int, Any] = {}
         self.count = 0
@@ -1604,18 +1603,18 @@ class LayoutsPlotterWidget(QWidget):
             return
 
         self._clear_visuals()
-        self.state, self.mode, self.points = IDLE, None, []
+        self.state, self.mode, self.points = PlotterState.IDLE, None, []
         self.input_buffer, self.buffer_default = "", True
         self._overlay_title(False)
         if self.ax.bbox.width > 0 and self.ax.bbox.height > 0:
             self.bg_cache = self.canvas.copy_from_bbox(self.ax.bbox)
 
     def start_mode(self, mode: str, num_points: int):
-        if self.is_fatal_state or self.state != IDLE:
+        if self.is_fatal_state or self.state is not PlotterState.IDLE:
             return
 
         self.reset_state()
-        self.mode, self.artists_points, self.state = mode, num_points, COLLECTING
+        self.mode, self.artists_points, self.state = mode, num_points, PlotterState.COLLECTING
         self.update_title(f"MODE: {mode}. Click {num_points} points on the image.")
 
     def _load_active_layout_zones(self) -> None:
@@ -1689,7 +1688,7 @@ class LayoutsPlotterWidget(QWidget):
     def toggle_visibility(self):
         if self.is_fatal_state:
             return
-        if self.state != IDLE:
+        if self.state is not PlotterState.IDLE:
             return
 
         self.show_overlays = not self.show_overlays
@@ -1820,7 +1819,7 @@ class LayoutsPlotterWidget(QWidget):
                 self.canvas.draw_idle()
 
         if (
-            self.state == IDLE
+            self.state is PlotterState.IDLE
             and not self.captured
             and self.current_draggable_id is not None
         ):
@@ -1855,7 +1854,7 @@ class LayoutsPlotterWidget(QWidget):
         if self.is_fatal_state:
             return
 
-        if self.state == COLLECTING and event.inaxes == self.ax:
+        if self.state is PlotterState.COLLECTING and event.inaxes == self.ax:
             x, y = int(round(event.xdata)), int(round(event.ydata))
             if (
                 self.bg_cache is None
@@ -1888,7 +1887,7 @@ class LayoutsPlotterWidget(QWidget):
                 self.fig.canvas.draw_idle()
 
         if (
-            self.state == IDLE
+            self.state is PlotterState.IDLE
             and not self.captured
             and event.button is None
             and event.inaxes == self.ax
@@ -1949,7 +1948,7 @@ class LayoutsPlotterWidget(QWidget):
         return out
 
     def _on_press_all(self, event):
-        if self.is_fatal_state or self.state != IDLE:
+        if self.is_fatal_state or self.state is not PlotterState.IDLE:
             return
         for mgr in self._iter_drag_managers():
             mgr._on_press(event)
@@ -1966,7 +1965,7 @@ class LayoutsPlotterWidget(QWidget):
             mgr._on_motion(event)
 
     def _on_release_all(self, event=None):
-        if self.is_fatal_state or self.state != IDLE:
+        if self.is_fatal_state or self.state is not PlotterState.IDLE:
             return
 
         managers = self._iter_drag_managers()
@@ -2088,9 +2087,9 @@ class LayoutsPlotterWidget(QWidget):
         if self.is_fatal_state:
             return
 
-        if self.state == IDLE:
+        if self.state is PlotterState.IDLE:
             self.ignore_current_draggable_id_n = 0
-        if self.state == WAITING_FOR_KEY:
+        if self.state is PlotterState.WAITING_FOR_KEY:
             btn_map = {
                 1: "mouse_left",
                 2: "mouse_middle",
@@ -2102,7 +2101,7 @@ class LayoutsPlotterWidget(QWidget):
                 self.calculate_shape(btn)
             return
 
-        if self.state == WAITING_FOR_WHEEL_INDICATOR:
+        if self.state is PlotterState.WAITING_FOR_WHEEL_INDICATOR:
             current_indicator = (
                 self.mouse_wheel_indicators.current_mouse_wheel_indicator
             )
@@ -2114,7 +2113,7 @@ class LayoutsPlotterWidget(QWidget):
             return
 
         if (
-            self.state != COLLECTING
+            self.state is not PlotterState.COLLECTING
             or event.button != 1
             or event.xdata is None
             or event.ydata is None
@@ -2132,7 +2131,7 @@ class LayoutsPlotterWidget(QWidget):
                 f"MODE: {self.mode}. {rem} points remaining (Esc to Cancel)."
             )
         else:
-            self.state = WAITING_FOR_KEY
+            self.state = PlotterState.WAITING_FOR_KEY
             self.update_title("Shape Defined! Press KEY or CLICK MOUSE to bind.")
 
     def _on_key_press(self, event):
@@ -2143,37 +2142,37 @@ class LayoutsPlotterWidget(QWidget):
         if key is None:
             return
 
-        if self.state == DELETING:
+        if self.state is PlotterState.DELETING:
             self._handle_deleting_input(key)
             return
 
-        if self.state == CONFIRM_DELETE_ALL:
+        if self.state is PlotterState.CONFIRM_DELETE_ALL:
             if key == "enter":
                 self._delete_all_shapes()
             else:
                 self.reset_state()
             return
-        if self.state in (CONFIRM_EXIT, COLLECTING):
+        if self.state is PlotterState.CONFIRM_EXIT or self.state is PlotterState.COLLECTING:
             if key == "escape":
                 self.reset_state()
             return
-        if self.state == WAITING_FOR_KEY:
+        if self.state is PlotterState.WAITING_FOR_KEY:
             self.calculate_shape(get_specific_mt_key(event))
             return
-        if self.state == WAITING_FOR_WHEEL_INDICATOR:
+        if self.state is PlotterState.WAITING_FOR_WHEEL_INDICATOR:
             self.mouse_wheel_indicators.update_mouse_wheel_indicator_from_key(
                 get_specific_mt_key(event)
             )
             return
 
-        if self.state == IDLE:
+        if self.state is PlotterState.IDLE:
             if key == "f1":
                 self.reset_state()
             elif key == "f2":
                 if not self.shapes:
                     self.update_title("List empty. Nothing to delete.")
                     return
-                self.state = CONFIRM_DELETE_ALL
+                self.state = PlotterState.CONFIRM_DELETE_ALL
                 self.update_title(
                     "[DELETE ALL?] Press ENTER to Confirm or Any other key to Cancel."
                 )
@@ -2219,13 +2218,13 @@ class LayoutsPlotterWidget(QWidget):
                     self.current_draggable._move(*dirs[clean_key])
 
     def _enter_deleting_mode(self):
-        if self.state != IDLE:
+        if self.state is not PlotterState.IDLE:
             return
 
         if not self.shapes:
             self.update_title("List empty. Nothing to delete")
             return
-        self.state, self.input_buffer = DELETING, ""
+        self.state, self.input_buffer = PlotterState.DELETING, ""
         self.update_title("DELETE MODE: Type ID... (Enter to Confirm | Esc to Cancel)")
 
     def _delete_all_shapes(self):
@@ -2754,7 +2753,7 @@ class LayoutsPlotterWidget(QWidget):
         return True, uid
 
     def _print_data(self):
-        if self.state != IDLE:
+        if self.state is not PlotterState.IDLE:
             return
 
         if not self.shapes:
