@@ -39,7 +39,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_cli")
 
     # -----------------------------------------------------------------------
-    # 0. OS & Environment Validation
+    # OS & Environment Validation
     # -----------------------------------------------------------------------
     if sys.platform == "linux":
         from modules.platforms.linux import check_display_protocol
