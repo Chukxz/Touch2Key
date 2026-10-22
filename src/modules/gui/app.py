@@ -76,7 +76,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         print(f"[+] Profiling started.")
 
     # -----------------------------------------------------------------------
-    # 2. Boot Sequence (Initialize Qt Application Early)
+    # Boot Sequence (Initialize Qt Application Early)
     # -----------------------------------------------------------------------
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
