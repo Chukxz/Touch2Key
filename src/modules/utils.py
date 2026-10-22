@@ -1216,12 +1216,17 @@ def prune_directory(
                 pass  # Skip locked or inaccessible files
 
     # 2. Prune by count (keep only the newest max_count files)
-    files = sorted(
-        [f for f in target_dir.glob("*") if f.is_file()],
-        key=lambda f: f.stat().st_mtime,
-    )
+    files: list[tuple[float, Path]] = []
+    for f in target_dir.glob("*"):
+        try:
+            if f.is_file():
+                files.append((f.stat().st_mtime, f))
+        except OSError:
+            continue  # deleted or locked by another process
+    files.sort(key=lambda item: item[0])
+
     while len(files) > max_count:
-        oldest_file = files.pop(0)
+        _, oldest_file = files.pop(0)
         try:
             oldest_file.unlink(missing_ok=True)
         except Exception:
