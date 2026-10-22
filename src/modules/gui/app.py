@@ -20,7 +20,7 @@ from modules.database import store
 from modules.gui.main_window import MainWindow
 from modules.platforms import check_single_instance, notify_existing_instance
 from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER, ICONS_FOLDER
-from modules.log_manager import AppLogManager
+from modules.log_manager import AppLogManager, initialize_cleanup
 
 if TYPE_CHECKING:
     from cProfile import Profile
@@ -44,7 +44,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     AppLogManager.setup_logging(is_gui=True, log_prefix="touch2key_gui")
 
     # -----------------------------------------------------------------------
-    # 0. OS & Environment Validation
+    # OS & Environment Validation
     # -----------------------------------------------------------------------
     if sys.platform == "linux":
         from modules.platforms.linux import check_display_protocol
@@ -56,7 +56,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         sys.exit(1)
 
     # -----------------------------------------------------------------------
-    # 1. GUI Argument Parsing
+    # GUI Argument Parsing
     # -----------------------------------------------------------------------
     if parser is None:
         parser = argparse.ArgumentParser(description="Touch2Key GUI Application")
@@ -109,8 +109,10 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         profiler_cleanup(gui_profiler)
         sys.exit(0)
 
+    initialize_cleanup()
+
     # -----------------------------------------------------------------------
-    # 3. Application Execution
+    # Application Execution
     # -----------------------------------------------------------------------
     window = MainWindow()
     window.showMaximized()
