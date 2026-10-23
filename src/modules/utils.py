@@ -648,15 +648,16 @@ class MapperEventDispatcher:
     def dispatch(
         self,
         event: MapperEvent,
-    ) -> None:
+    ) -> bool:
         if not self._check_debounce(event):
-            return
+            return False
 
         # Immediate dispatch supersedes a pending event of this action.
         with self._debounce_lock:
             self._debounce_cache.pop(event.action, None)
 
         self._deliver(event)
+        return True
 
     def _deliver(self, event: MapperEvent) -> None:
         """Invoke a snapshot of callbacks without holding registry locks."""
