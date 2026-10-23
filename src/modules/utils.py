@@ -638,14 +638,14 @@ class MapperEventDispatcher:
             logger.debug("[+] Unregistered all callbacks for all events")
 
     def dispatch(self, event: MapperEvent, should_debounce = True) -> None:
-        with self._lock:
-            callbacks = self.callback_registry.get(event.action, []).copy()
-
         if should_debounce and not self._check_debounce(event):
             return
        
         with self._debounce_lock:
             self._debounce_cache[event.action] = None
+
+        with self._lock:
+            callbacks = self.callback_registry.get(event.action, []).copy()
 
         args = self._get_callback_args(event)
 
