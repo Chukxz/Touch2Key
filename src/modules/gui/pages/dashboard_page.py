@@ -383,10 +383,10 @@ class DashboardPage(QWidget):
             f"&nbsp;(alert below {_num(threshold)} PPS{threshold_note})",
             f"ADB rate cap: <b>{_num(cap)} Hz</b>{cap_note} &nbsp;|&nbsp; "
             f"Cursor: {'Visible' if snap.get('menu_mode') else 'Not Visible'}",
-            f"Touch Events Count:"
-            f"    DOWN {snap.get("downs", 0)}"
-            f"    MOVE {snap.get("moves", 0)}"
-            f"    UP {snap.get("ups", 0)}"
+            f"Touch Events Count:",
+            f"    DOWN {snap.get("downs", 0)}",
+            f"    MOVE {snap.get("moves", 0)}",
+            f"    UP {snap.get("ups", 0)}",
             f"    ALL {snap.get("all", 0)}",
             f"Worker respawns: Keyboard {resp.get('keyboard', 0)}, "
             f"Mouse {resp.get('mouse', 0)}",
