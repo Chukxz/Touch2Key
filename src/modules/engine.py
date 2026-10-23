@@ -117,6 +117,8 @@ class Engine:
         self._adjust_lock = threading.Lock()
         self._settings_dirty = False
         self._last_commit_time = 0.0
+        self._live_active = False
+        self._live_text = ""
 
         # One-shot (non-typematic) keys: shared 350 ms cooldown.
         self._last_hotkey_time = 0.0
@@ -216,6 +218,22 @@ class Engine:
                 if self._adjust_actions[key]():
                     self._settings_dirty = True
 
+        # Live status line: suspend console logs while an adjust key is held.
+        adjusting = any(pressed[k] for k in self._adjust_curves)
+        if adjusting:
+            if not self._live_active:
+                AppLogManager.suspend_console()
+                self._live_active = True
+                self._live_text = ""
+            text = f"Rate Cap {self.rate_cap:.1f} Hz | PPS {self.pps:.1f}"
+            if text != self._live_text:  # redraw only on change
+                self._live_text = text
+                AppLogManager.live_line(text)
+        elif self._live_active:
+            self._live_active = False
+            AppLogManager.end_live_line()
+            AppLogManager.resume_console()  # replays held logs
+
         # Non-typematic: act on rising edge only, 350 ms cooldown.
         for key, action in self._oneshot_actions.items():
             down = pressed[key]
@@ -268,12 +286,9 @@ class Engine:
             logger.error("Failed to commit rate/PPS update to DB: %s", exc)
             self._settings_dirty = True  # retry after next interval
             return
-        msg = (
-            f"CLI Hotkey: Rate Cap {rate:.1f} Hz | PPS Alert Threshold {pps:.1f} PPS, "
-            "reload event dispatched."
-        )
+        logger.debug("Committed rate cap %.1f Hz, PPS %.1f; reload dispatched.", rate, pps)
         self.mapper_event_dispatcher.dispatch(
-            MapperEvent(action="ON_RELOAD", cooldown=1.0, dispatch_msg=msg)
+            MapperEvent(action="ON_RELOAD", cooldown=1.0)
         )
 
     # ------------------------------------------------------------------
