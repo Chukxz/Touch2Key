@@ -46,10 +46,10 @@ def _proc_stats(role: str, proc: psutil.Process) -> dict[str, Any]:
         return {"role": role, "pid": proc.pid, "error": "exited"}
 
 
-def _summary_lines(snap: dict[str, Any]) -> tuple[str, str]:
+def _summary_lines(snap: dict[str, Any]) -> tuple[str, ...]:
     age = snapshot_age(snap)
     if age > STALE_AFTER_S:
-        return f"telemetry stale ({age:.0f}s since last update; engine may be hung)", ""
+        return f"telemetry stale ({age:.0f}s since last update; engine may be hung)"
 
     rate = snap.get("rate_hz")
     rate_txt = "--" if rate is None else f"{rate:.1f} Hz"
@@ -64,13 +64,17 @@ def _summary_lines(snap: dict[str, Any]) -> tuple[str, str]:
     ]
 
     parts_2 = [
+        f"Touch Events Count: DOWN {snap.get("downs", 0)}, MOVE {snap.get("moves", 0)}, UP {snap.get("ups", 0)}, ALL {snap.get("all", 0)},
+    ]
+
+    parts_3 = [
         f"Respawns: Keyboard {resp.get('keyboard', 0)} / Mouse {resp.get('mouse', 0)}",
         f"Virtual Kbd {'Not Active' if vkb_pid is None else 'Active'}",
         f"Visualizer {'Not Active' if visualizer_pid is None else 'Active'}",
     ]
     if snap.get("window_lost"):
-        parts_2.append("NO TARGET WINDOW")
-    return "  ".join(parts_1), "  ".join(parts_2)
+        parts_3.append("NO TARGET WINDOW")
+    return "  ".join(parts_1), "  ".join(parts_2), "  ".join(parts_3) 
 
 
 def _row_text(row: dict[str, Any]) -> str:
