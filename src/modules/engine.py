@@ -37,7 +37,9 @@ from modules.utils import (
     PPS_ALERT_MIN,
     READ_ATTEMPTS,
     VISUALIZER_RUNTIME_FILE,
+    CurveType,
     IpcMapperEventDispatcher,
+    InputCurve,
     MapperEvent,
     MapperEventDispatcher,
     TouchEvent,
@@ -53,6 +55,10 @@ logger = logging.getLogger("modules.engine")
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection
     from multiprocessing.queues import Queue
+ 
+_HOTKEY_POLL_INTERVAL = 0.005    # 5 ms key-state polling
+_ADJUST_COMMIT_INTERVAL = 0.25   # coalesce DB write + reload while held
+_ONESHOT_COOLDOWN = 0.35         # F5 / F6 cooldown
 
 
 class Engine:
@@ -71,7 +77,7 @@ class Engine:
         self.window_manager = platform_mod.WindowManager()
         self.foreground_window = self.window_manager.get_foreground_window()
         self.bridge = platform_mod.Bridge(self.window_manager, self.system_config)
-        
+
         self.touch_event_counter = TouchEventCount()
         self._publisher: TelemetryPublisher | None = None
         self._respawns: dict[str, int] = {"keyboard": 0, "mouse": 0}
@@ -103,13 +109,38 @@ class Engine:
 
         self.two_finger_tap_enabled = True
         self.bezel_toggle_enabled = True
+        self._mouse_flush_thread: threading.Thread | None = None
+
+        # --- CLI hotkey state ---
         self.rate_cap: float = ADB_RATE_CAP_MIN
         self.pps: float = PPS_ALERT_MIN
+        self._adjust_lock = threading.Lock()
+        self._settings_dirty = False
+        self._last_commit_time = 0.0
+
+        # One-shot (non-typematic) keys: shared 350 ms cooldown.
         self._last_hotkey_time = 0.0
-        self._initial_delay = 0.25
-        self._long_hotkey_cooldown = 0.35
-        self._short_hotkey_cooldown = 0.06
-        self._mouse_flush_thread: threading.Thread | None = None
+        self._hotkey_cooldown = _ONESHOT_COOLDOWN
+        self._oneshot_prev: dict[str, bool] = {"f5": False, "f6": False}
+        self._oneshot_actions = {
+            "f5": self._toggle_handedness_cli,
+            "f6": self._reload_cli,
+        }
+
+        # Typematic keys: one cubic InputCurve per key.
+        self._adjust_curves: dict[str, InputCurve] = {
+            key: InputCurve(CurveType.CUBIC)
+            for key in ("left", "right", "down", "up")
+        }
+        self._adjust_actions = {
+            "left": lambda: self._adjust_rate_cap_cli(-10.0),
+            "right": lambda: self._adjust_rate_cap_cli(10.0),
+            "down": lambda: self._adjust_pps_cli(-5.0),
+            "up": lambda: self._adjust_pps_cli(5.0),
+        }
+
+        self._terminal_window_handle = None
+        self._hotkey_thread: threading.Thread | None = None
 
         if not self.headless:
             try:
@@ -119,45 +150,19 @@ class Engine:
                     self.window_manager.get_foreground_window()
                 )
 
-                def _guard_hotkey(callback):
-                    try:
-                        if (
-                            self.window_manager.get_foreground_window()
-                            == self._terminal_window_handle
-                        ):
-                            callback()
-                    except Exception as exc:
-                        logger.debug(
-                            "Foreground verification failed for hotkey: %s",
-                            exc,
-                            exc_info=True,
-                        )
+                def _guarded_shutdown():
+                    if self._is_terminal_focused():
+                        self._shutdown()
 
-                keyboard.add_hotkey("esc", lambda: _guard_hotkey(self._shutdown))
-                keyboard.add_hotkey(
-                    "f5", lambda: _guard_hotkey(self._toggle_handedness_cli)
+                keyboard.add_hotkey("esc", _guarded_shutdown)
+
+                self._hotkey_thread = threading.Thread(
+                    target=self._hotkey_loop,
+                    daemon=True,
+                    name="CLIHotkeyPoller",
                 )
-                keyboard.add_hotkey("f6", lambda: _guard_hotkey(self._reload_cli))
-                keyboard.add_hotkey(
-                    "left",
-                    lambda: _guard_hotkey(lambda: self._adjust_rate_cap_cli(-10.0)),
-                    suppress=False,
-                )
-                keyboard.add_hotkey(
-                    "right",
-                    lambda: _guard_hotkey(lambda: self._adjust_rate_cap_cli(10.0)),
-                    suppress=False,
-                )
-                keyboard.add_hotkey(
-                    "down",
-                    lambda: _guard_hotkey(lambda: self._adjust_pps_cli(-5.0)),
-                    suppress=False,
-                )
-                keyboard.add_hotkey(
-                    "up",
-                    lambda: _guard_hotkey(lambda: self._adjust_pps_cli(5.0)),
-                    suppress=False,
-                )
+                self._hotkey_thread.start()
+
                 logger.info(
                     "[CLI Interactive Launch] Active Hotkeys: [Esc] Exit | [F5] Handedness | "
                     "[F6] Reload | [Left/Right] Rate Cap (-/+ 10) | [Down/Up] PPS (-/+ 5)"
@@ -171,48 +176,109 @@ class Engine:
                 "[Headless / GUI Worker Launch] Background engine active (terminal hotkeys bypassed)."
             )
 
-    def _check_debounce(self, is_long_cooldown=True) -> bool:
+    # ------------------------------------------------------------------
+    # Hotkey infrastructure
+    # ------------------------------------------------------------------
+    def _is_terminal_focused(self) -> bool:
+        try:
+            return (
+                self.window_manager.get_foreground_window()
+                == self._terminal_window_handle
+            )
+        except Exception as exc:
+            logger.debug(
+                "Foreground verification failed for hotkey: %s", exc, exc_info=True
+            )
+            return False
+
+    def _hotkey_loop(self) -> None:
+        import keyboard
+  
+        while not (self._stop_event.is_set() or self.is_shutting_down):
+            try:
+                self._poll_hotkeys(keyboard)
+            except Exception:
+                logger.debug("Hotkey poll failed", exc_info=True)
+            self._stop_event.wait(_HOTKEY_POLL_INTERVAL)
+
+    def _poll_hotkeys(self, keyboard) -> None:
         now = time.perf_counter()
-        _hotkey_cooldown = (
-            self._long_hotkey_cooldown
-            if is_long_cooldown
-            else self._short_hotkey_cooldown
-        )
-        if now - self._last_hotkey_time < _hotkey_cooldown:
+        keys = (*self._adjust_curves, *self._oneshot_actions)
+        pressed = {k: keyboard.is_pressed(k) for k in keys}
+
+        # Losing terminal focus counts as release: resets curves and edges.
+        if any(pressed.values()) and not self._is_terminal_focused():
+            pressed = dict.fromkeys(keys, False)
+
+        # Typematic: cubic curve drives repeat timing (OS auto-repeat ignored).
+        for key, curve in self._adjust_curves.items():
+            if curve.check_input(now, pressed[key]):
+                if self._adjust_actions[key]():
+                    self._settings_dirty = True
+
+        # Non-typematic: act on rising edge only, 350 ms cooldown.
+        for key, action in self._oneshot_actions.items():
+            down = pressed[key]
+            if down and not self._oneshot_prev[key]:
+                action()
+            self._oneshot_prev[key] = down
+
+        # Coalesced persistence for rate/PPS (trailing, also fires after release).
+        if (
+            self._settings_dirty
+            and now - self._last_commit_time >= _ADJUST_COMMIT_INTERVAL
+        ):
+            self._commit_adjustments(now)
+
+    def _check_debounce(self) -> bool:
+        """350 ms cooldown for one-shot hotkeys (F5 / F6)."""
+        now = time.perf_counter()
+        if now - self._last_hotkey_time < self._hotkey_cooldown:
             return False
         self._last_hotkey_time = now
         return True
 
-    def _adjust_rate_cap_cli(self, delta: float) -> None:
-        if not self._check_debounce(False):
-            return
-        new_rate = clamp(self.rate_cap + delta, ADB_RATE_CAP_MIN, ADB_RATE_CAP_MAX)
-        if new_rate == self.rate_cap:
-            return
-        self.rate_cap = new_rate
+    # ------------------------------------------------------------------
+    # Typematic: rate cap / PPS (in-memory per tick, persisted coalesced)
+    # ------------------------------------------------------------------
+    def _adjust_rate_cap_cli(self, delta: float) -> bool:
+        with self._adjust_lock:
+            new_rate = clamp(self.rate_cap + delta, ADB_RATE_CAP_MIN, ADB_RATE_CAP_MAX)
+            if new_rate == self.rate_cap:
+                return False
+            self.rate_cap = new_rate
+            return True
+
+    def _adjust_pps_cli(self, delta: float) -> bool:
+        with self._adjust_lock:
+            new_pps = clamp(self.pps + delta, PPS_ALERT_MIN, PPS_ALERT_MAX)
+            if new_pps == self.pps:
+                return False
+            self.pps = new_pps
+            return True
+
+    def _commit_adjustments(self, now: float) -> None:
+        with self._adjust_lock:
+            rate, pps = self.rate_cap, self.pps
+            self._settings_dirty = False
+        self._last_commit_time = now
         try:
-            store.settings.update(adb_rate_cap=new_rate)
-            msg = f"CLI Hotkey: Rate Cap set to {new_rate:.1f} Hz, reload event dispatched."
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD", cooldown=1.0, dispatch_msg=msg))
-
+            store.settings.update(adb_rate_cap=rate, pps_alert_threshold=pps)
         except Exception as exc:
-            logger.error("Failed to commit rate cap update to DB: %s", exc)
-
-    def _adjust_pps_cli(self, delta: float) -> None:
-        if not self._check_debounce(False):
+            logger.error("Failed to commit rate/PPS update to DB: %s", exc)
+            self._settings_dirty = True  # retry after next interval
             return
-        new_pps = clamp(self.pps + delta, PPS_ALERT_MIN, PPS_ALERT_MAX)
-        if new_pps == self.pps:
-            return
-        self.pps = new_pps
-        try:
-            store.settings.update(pps_alert_threshold=new_pps)
-            msg = f"CLI Hotkey: PPS Alert Threshold set to {new_pps:.1f} PPS, reload event dispatched."
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD", cooldown=1.0, dispatch_msg=msg))
+        msg = (
+            f"CLI Hotkey: Rate Cap {rate:.1f} Hz | PPS Alert Threshold {pps:.1f} PPS, "
+            "reload event dispatched."
+        )
+        self.mapper_event_dispatcher.dispatch(
+            MapperEvent(action="ON_RELOAD", cooldown=1.0, dispatch_msg=msg)
+        )
 
-        except Exception as exc:
-            logger.error("Failed to commit PPS update to DB: %s", exc))
-
+    # ------------------------------------------------------------------
+    # One-shot: handedness / reload (350 ms, non-typematic)
+    # ------------------------------------------------------------------
     def _toggle_handedness_cli(self) -> None:
         if not self._check_debounce():
             return
@@ -220,7 +286,10 @@ class Engine:
             settings = store.settings.get()
             new_val = not settings.left_handed
             store.settings.update(left_handed=new_val)
-            logger.info("CLI Triggered [F5]: Left-Handed mode set to %s, reload event dispatched.", new_val)
+            logger.info(
+                "CLI Triggered [F5]: Left-Handed mode set to %s, reload event dispatched.",
+                new_val,
+            )
             self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD"))
         except Exception as exc:
             logger.error(
@@ -228,9 +297,10 @@ class Engine:
             )
 
     def _reload_cli(self) -> None:
-        if self._check_debounce():
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD"))
-            logger.info("CLI Triggered [F6]: Reload event dispatched.")
+        if not self._check_debounce():
+            return
+        self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD"))
+        logger.info("CLI Triggered [F6]: Reload event dispatched.")
 
     def _on_devices_change(
         self,
