@@ -744,7 +744,7 @@ class TouchEventCount():
         
         self.event_count += 1
 
-    def reset():
+    def reset(self):
         self.event_count_down = 0
         self.event_count_move = 0
         self.event_count_up = 0
