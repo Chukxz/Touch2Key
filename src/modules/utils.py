@@ -498,6 +498,7 @@ class MapperEventDispatcher:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._last_hotkey_time = 0.0
         self._cooldown = 0.5
 
         self.callback_registry: dict[EVENT_TYPE, list[Callback]] = {
@@ -509,7 +510,7 @@ class MapperEventDispatcher:
             "ON_DEVICES_CHANGE": [],
         }
         
-    def _check_debounce(self, ) -> bool:
+    def _check_debounce(self) -> bool:
         now = time.perf_counter()
         if now - self._last_hotkey_time < self._cooldown:
             return False
@@ -621,6 +622,9 @@ class MapperEventDispatcher:
             callbacks = self.callback_registry.get(event.action, []).copy()
 
         args = self._get_callback_args(event)
+        # Skip excessive events with action type in '_NO_ARGS' (e.g. "ON_RELOAD")
+        if not args and not self._check_debounce():
+            return
 
         for callback in callbacks:
             callback_name = getattr(callback, "__name__", repr(callback))
