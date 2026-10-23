@@ -192,7 +192,17 @@ class Engine:
         try:
             store.settings.update(adb_rate_cap=new_rate)
             logger.info("CLI Hotkey: Rate Cap set to %.1f Hz (DB synced)", new_rate)
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD", cooldown=1.0))
+            was_dispatch_immediate = self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD", cooldown=1.0))
+
+            if was_dispatch_immediate:
+                logger.info(
+                    "CLI Hotkey: Rate Cap set to %.1f Hz (event dispatched immediately, further events may be coalesced but the DB would always be synced) ", new_pps
+                )
+            else:
+                logger.debug(
+                    "CLI Hotkey: Rate Cap set to %.1f Hz (DB synced) (event dispatch coalesced)", new_rate
+                )
+
         except Exception as exc:
             logger.error("Failed to commit rate cap update to DB: %s", exc)
 
@@ -205,10 +215,17 @@ class Engine:
         self.pps = new_pps
         try:
             store.settings.update(pps_alert_threshold=new_pps)
-            logger.info(
-                "CLI Hotkey: PPS Alert Threshold set to %.1f PPS (DB synced)", new_pps
-            )
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD", cooldown=1.0))
+            was_dispatch_immediate = self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD", cooldown=1.0))
+
+            if was_dispatch_immediate:
+                logger.info(
+                    "CLI Hotkey: PPS Alert Threshold set to %.1f PPS (event dispatched immediately, further events may be coalesced but the DB would always be synced) ", new_pps
+                )
+            else:
+                logger.debug(
+                    "CLI Hotkey: PPS Alert Threshold set to %.1f PPS (DB synced) (event dispatch coalesced)", new_pps
+                )
+
         except Exception as exc:
             logger.error("Failed to commit PPS update to DB: %s", exc)
 
