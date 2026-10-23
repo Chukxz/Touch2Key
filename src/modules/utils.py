@@ -499,10 +499,12 @@ class MapperEventDispatcher:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._cooldown = 0.5
+        self.stop_event = threading.Event()
         self._last_debounce_times: dict[EVENT_TYPE, float] = {}
         self._debounce_cache: dict[EVENT_TYPE, MapperEvent] = {}
         self._debounce_lock = threading.Lock()
         self._debounce_thread = threading.Thread(target=self._debounce_loop, daemon=True)
+        self._debounce_thread.start()
 
         self.callback_registry: dict[EVENT_TYPE, list[Callback]] = {
             "ON_RELOAD": [],
@@ -514,13 +516,17 @@ class MapperEventDispatcher:
         }
     
     def _debounce_loop(self) -> None:
-        with self._debounce_lock:
-            tmp_debounce_cache = self._debounce_cache.copy()
+        while not self.stop_event.is_set():
+            with self._debounce_lock:
+                tmp_debounce_cache = self._debounce_cache.copy()
 
-        for action in tmp_debounce_cache:
-            event = tmp_debounce_cache.get(action)
-            if event is not None:
+            for action in tmp_debounce_cache:
+                event = tmp_debounce_cache.get(action)
+                if event is not None:
                 self.dispatch(event, False)
+        
+        if self.stop_event.wait(0.01)
+            break
                     
     def _check_debounce(self, event: MapperEvent) -> bool:
         with self._debounce_lock:
@@ -693,6 +699,10 @@ class MapperEventDispatcher:
             )
 
         return ()
+
+    def stop(self):
+        self.stop_event.set()
+        self._debounce_thread.join(timeout=2.0)
 
 
 class EventCount():
