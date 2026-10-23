@@ -10,6 +10,7 @@ import subprocess
 import time
 import threading
 import math
+from enum import Enum, auto
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
@@ -747,9 +748,76 @@ class TouchEventCount():
         self.event_count_down = 0
         self.event_count_move = 0
         self.event_count_up = 0
-        self.event_count = 0       
-        
+        self.event_count = 0
 
+
+class CurveType(Enum):
+    LINEAR = auto()
+    CUBIC = auto()
+    EXPONENTIAL = auto()
+
+class InputCurve:
+    def __init__(self, curve_type=CurveType.CUBIC):
+        # Configuration
+        self.curve_type = curve_type
+        self.initial_delay = 0.400  # 400ms wait before auto-repeat begins
+        self.start_delay = 0.200    # 5 Hz starting speed (1 / 5)
+        self.min_delay = 0.033      # 30 Hz maximum speed (1 / 30)
+        
+        # Adjust ramp duration based on curve steepness
+        if self.curve_type == CurveType.EXPONENTIAL:
+            self.ramp_duration = 1.0  # Shorter ramp for true exponential
+        else:
+            self.ramp_duration = 1.5  # Standard ramp for linear/cubic
+            
+        # State tracking
+        self.is_held = False
+        self.hold_start_time = 0.0
+        self.last_fire_time = 0.0
+
+    def check_input(self, current_time_sec, is_key_down):
+        # Reset state if the key is released
+        if not is_key_down:
+            self.is_held = False
+            return False
+
+        # Phase 1: Initial Press
+        if not self.is_held:
+            self.is_held = True
+            self.hold_start_time = current_time_sec
+            self.last_fire_time = current_time_sec
+            return True  # Trigger the very first increment
+            
+        time_held = current_time_sec - self.hold_start_time
+        
+        # Wait for the initial delay to pass
+        if time_held < self.initial_delay:
+            return False
+            
+        # Phase 2: Calculate progress (0.0 to 1.0)
+        ramp_active_time = time_held - self.initial_delay
+        progress = min(ramp_active_time / self.ramp_duration, 1.0)
+        
+        # Phase 3: Apply the selected easing function
+        if self.curve_type == CurveType.LINEAR:
+            eased_progress = progress
+            
+        elif self.curve_type == CurveType.CUBIC:
+            eased_progress = progress ** 3
+            
+        elif self.curve_type == CurveType.EXPONENTIAL:
+            # Standard Expo Ease-In: stays flat then spikes aggressively
+            eased_progress = 0.0 if progress == 0.0 else math.pow(2, 10 * (progress - 1))
+            
+        # Phase 4: Interpolate the delay and check if it's time to fire
+        current_delay = self.start_delay - (eased_progress * (self.start_delay - self.min_delay))
+        
+        if (current_time_sec - self.last_fire_time) >= current_delay:
+            self.last_fire_time = current_time_sec
+            return True
+            
+        return False  
+        
 
 # ---------------------------------------------------------------------------
 # Engine <-> GUI process IPC protocol
