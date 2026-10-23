@@ -722,7 +722,7 @@ class MapperEventDispatcher:
         return ()
 
 
-class EventCount():
+class TouchEventCount():
     def __init__(self):
         self.event_count_down = 0
         self.event_count_move = 0
@@ -737,7 +737,13 @@ class EventCount():
         elif touch_event.phase is TouchPhase.UP:
             self.event_count_up += 1
         
-        self.event_count += 1       
+        self.event_count += 1
+
+    def reset():
+        self.event_count_down = 0
+        self.event_count_move = 0
+        self.event_count_up = 0
+        self.event_count = 0       
         
 
 
