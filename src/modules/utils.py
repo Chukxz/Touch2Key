@@ -500,7 +500,7 @@ class MapperEventDispatcher:
         self._lock = threading.Lock()
         self._cooldown = 0.5
         self._last_debounce_times: dict[EVENT_TYPE, float] = {}
-        self._debounce_cache: dict[EVENT_TYPE, MapperEvent] = {}
+        self._debounce_cache: dict[EVENT_TYPE, MapperEvent | None] = {}
         self._debounce_lock = threading.Lock()
         self._debounce_thread = threading.Thread(target=self._debounce_loop, daemon=True)
         self._debounce_thread.start()
