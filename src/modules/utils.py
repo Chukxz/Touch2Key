@@ -491,23 +491,28 @@ class MapperEvent:
         self.cooldown = max(0.0, self.cooldown)
 
 
-class MapperEventDispatcher:
-    """Thread-safe event dispatcher for cross-thread engine, worker, and GUI notifications with per-event dispatch debouncing."""
 
-    _NO_ARGS: frozenset[EVENT_TYPE] = frozenset(
-        {
-            "ON_RELOAD",
-        }
-    )
+class MapperEventDispatcher:
+    """Thread-safe event dispatcher with per-action trailing-edge debouncing.
+
+    Eligible pending events are delivered by deadline, preserving collection
+    order when deadlines are equal. Callbacks are executed outside locks.
+    """
+
+    _NO_ARGS: frozenset[EVENT_TYPE] = frozenset({"ON_RELOAD"})
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._cooldown = 0.5
-        self._last_debounce_times: dict[EVENT_TYPE, float] = {}
-        self._debounce_cache: dict[EVENT_TYPE, MapperEvent | None] = {}
         self._debounce_lock = threading.Lock()
-        self._debounce_thread = threading.Thread(target=self._debounce_loop, daemon=True)
-        self._debounce_thread.start()
+
+        self._last_debounce_times: dict[EVENT_TYPE, float] = {}
+
+        # action -> (deadline, collection_sequence, event)
+        self._debounce_cache: dict[
+            EVENT_TYPE, tuple[float, int, MapperEvent]
+        ] = {}
+
+        self._next_sequence = 0
 
         self.callback_registry: dict[EVENT_TYPE, list[Callback]] = {
             "ON_RELOAD": [],
@@ -517,154 +522,171 @@ class MapperEventDispatcher:
             "ON_TARGET_WINDOW_CHANGE": [],
             "ON_DEVICES_CHANGE": [],
         }
-    
+
+        self._debounce_thread = threading.Thread(
+            target=self._debounce_loop,
+            daemon=True,
+            name="MapperEventDebouncer",
+        )
+        self._debounce_thread.start()
+
     def _debounce_loop(self) -> None:
         while True:
-            with self._debounce_lock:
-                tmp_debounce_cache = self._debounce_cache.copy()
-
-            for action in tmp_debounce_cache:
-                event = tmp_debounce_cache.get(action)
-                if event is not None:
-                self.dispatch(event, False)
-        
-            time.sleep(0.01)
-                    
-    def _check_debounce(self, event: MapperEvent) -> bool:
-        with self._debounce_lock:
             now = time.perf_counter()
-            if now - self._last_debounce_times.get(event.action, 0.0) < self._cooldown:
-                self._debounce_cache[event.action] = event
-                return False
+            ready: list[tuple[float, int, MapperEvent]] = []
 
-            self._debounce_cache[event.action] = None
-            self._last_debounce_times[event.action] = now
-            return True
+            with self._debounce_lock:
+                for action, (deadline, sequence, event) in list(
+                    self._debounce_cache.items()
+                ):
+                    if deadline <= now:
+                        del self._debounce_cache[action]
+                        self._last_debounce_times[action] = now
+                        ready.append((deadline, sequence, event))
+
+            # Deadline order, then collection order for equal deadlines.
+            ready.sort(key=lambda item: (item[0], item[1]))
+
+            for _, _, event in ready:
+                self._deliver(event)
+
+            time.sleep(0.01)
+
+    def _check_debounce(self, event: MapperEvent) -> bool:
+        """Return True when the event should be delivered immediately."""
+        action = event.action
+        now = time.perf_counter()
+
+        with self._debounce_lock:
+            if event.cooldown == 0:
+                self._debounce_cache.pop(action, None)
+                return True
+
+            last = self._last_debounce_times.get(action)
+
+            if last is None or now - last >= event.cooldown:
+                self._debounce_cache.pop(action, None)
+                self._last_debounce_times[action] = now
+                return True
+
+            self._next_sequence += 1
+            self._debounce_cache[action] = (
+                last + event.cooldown,
+                self._next_sequence,
+                event,
+            )
+            return False
 
     def register_callback(
         self,
         event_type: EVENT_TYPE,
         callback: Callback,
     ) -> None:
-        try:
-            with self._lock:
-                if event_type not in self.callback_registry:
-                    logger.warning(
-                        f"[!] Unknown event type '{event_type}' during callback registration."
-                    )
-                    return
+        with self._lock:
+            callbacks = self.callback_registry.get(event_type)
 
-                callbacks = self.callback_registry[event_type]
-                callback_name = getattr(callback, "__name__", repr(callback))
+            if callbacks is None:
+                logger.warning(
+                    "Unknown event type %r during callback registration.",
+                    event_type,
+                )
+                return
 
-                if callback not in callbacks:
-                    callbacks.append(callback)
-                    logger.debug(
-                        f"[+] Registered callback {callback_name} for event {event_type}"
-                    )
-                else:
-                    logger.debug(
-                        f"[!] Callback {callback_name} already registered for event {event_type}"
-                    )
-
-        except Exception as exc:
-            callback_name = getattr(callback, "__name__", repr(callback))
-
-            logger.debug(
-                "[!] Error registering callback %s for event %s: %s",
-                callback_name,
-                event_type,
-                exc,
-                exc_info=True,
-            )
+            if callback not in callbacks:
+                callbacks.append(callback)
+                logger.debug(
+                    "Registered callback %s for event %s",
+                    getattr(callback, "__name__", repr(callback)),
+                    event_type,
+                )
+            else:
+                logger.debug(
+                    "Callback %s already registered for event %s",
+                    getattr(callback, "__name__", repr(callback)),
+                    event_type,
+                )
 
     def unregister_callback(
         self,
         event_type: EVENT_TYPE,
         callback: Callback,
     ) -> None:
-        try:
-            with self._lock:
-                if event_type not in self.callback_registry:
-                    logger.warning(
-                        f"[!] Unknown event type '{event_type}' during callback unregistration."
-                    )
-                    return
+        with self._lock:
+            callbacks = self.callback_registry.get(event_type)
 
-                callbacks = self.callback_registry[event_type]
-                callback_name = getattr(callback, "__name__", repr(callback))
+            if callbacks is None:
+                logger.warning(
+                    "Unknown event type %r during callback unregistration.",
+                    event_type,
+                )
+                return
 
-                if callback in callbacks:
-                    callbacks.remove(callback)
-                    logger.debug(
-                        f"[+] Unregistered callback {callback_name} for event {event_type}"
-                    )
-                else:
-                    logger.debug(
-                        f"[!] Callback {callback_name} not found for event {event_type}"
-                    )
-
-        except Exception as exc:
-            callback_name = getattr(callback, "__name__", repr(callback))
-
-            logger.error(
-                f"[!] Error unregistering callback {callback_name} for event {event_type}: {exc}",
-                exc_info=True,
-            )
+            try:
+                callbacks.remove(callback)
+            except ValueError:
+                logger.debug(
+                    "Callback %s not found for event %s",
+                    getattr(callback, "__name__", repr(callback)),
+                    event_type,
+                )
 
     def unregister_by_owner(self, owner: Any) -> None:
-        """Removes all callbacks bound to a specific instance by checking func.__self__."""
-        try:
-            with self._lock:
-                for event_type, callbacks in self.callback_registry.items():
-                    self.callback_registry[event_type] = [
-                        cb
-                        for cb in callbacks
-                        if getattr(cb, "__self__", None) is not owner
-                    ]
-                    logger.debug(
-                        f"[+] Unregistered callbacks for owner {owner} in event {event_type}"
-                    )
-                logger.debug(f"[+] Unregistered all callbacks for owner {owner}")
-
-        except Exception as exc:
-            logger.error(
-                f"[!] Error unregistering callbacks for owner {owner}: {exc}",
-                exc_info=True,
-            )
+        """Remove callbacks bound to a specific instance."""
+        with self._lock:
+            for event_type, callbacks in self.callback_registry.items():
+                self.callback_registry[event_type] = [
+                    callback
+                    for callback in callbacks
+                    if getattr(callback, "__self__", None) is not owner
+                ]
 
     def unregister_all(self) -> None:
-        """Flushes every registered callback across all event categories in a single call."""
+        """Remove all registered callbacks."""
         with self._lock:
-            for event_type in self.callback_registry:
-                self.callback_registry[event_type].clear()
-                logger.debug(f"[+] Cleared all callbacks for event {event_type}")
-            logger.debug("[+] Unregistered all callbacks for all events")
+            for callbacks in self.callback_registry.values():
+                callbacks.clear()
 
-    def dispatch(self, event: MapperEvent, should_debounce = True) -> None:
-        if should_debounce and not self._check_debounce(event):
-            return
-       
-        with self._debounce_lock:
-            self._debounce_cache[event.action] = None
+    def dispatch(
+        self,
+        event: MapperEvent,
+        should_debounce: bool = True,
+    ) -> None:
+        if should_debounce:
+            if not self._check_debounce(event):
+                return
+        else:
+            # Immediate dispatch supersedes a pending event of this action.
+            with self._debounce_lock:
+                self._debounce_cache.pop(event.action, None)
 
+        self._deliver(event)
+
+    def _deliver(self, event: MapperEvent) -> None:
+        """Invoke a snapshot of callbacks without holding registry locks."""
         with self._lock:
-            callbacks = self.callback_registry.get(event.action, []).copy()
+            callbacks = self.callback_registry.get(
+                event.action, []
+            ).copy()
 
         args = self._get_callback_args(event)
 
         for callback in callbacks:
-            callback_name = getattr(callback, "__name__", repr(callback))
+            callback_name = getattr(
+                callback, "__name__", repr(callback)
+            )
 
             try:
                 callback(*args)
                 logger.debug(
-                    f"[+] Dispatched event {event.action} to callback {callback_name}"
+                    "Dispatched event %s to callback %s",
+                    event.action,
+                    callback_name,
                 )
-            except Exception as exc:
-                logger.error(
-                    f"[!] Error in callback {callback_name} for event {event.action}: {exc}",
-                    exc_info=True,
+            except Exception:
+                logger.exception(
+                    "Error in callback %s for event %s",
+                    callback_name,
+                    event.action,
                 )
 
     @staticmethod
