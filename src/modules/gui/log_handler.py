@@ -28,7 +28,6 @@ class QtLogHandler(logging.Handler):
         self._in_emit = False
 
     def emit(self, record: logging.LogRecord) -> None:
-        # Re-entrancy guard
         if self._in_emit:
             return
         self._in_emit = True
@@ -37,7 +36,10 @@ class QtLogHandler(logging.Handler):
                 line = self.format(record)
             except Exception:
                 line = record.getMessage()
-            self.emitter.message.emit(line, record.levelno)
+            try:
+                self.emitter.message.emit(line, record.levelno)
+            except RuntimeError:
+                pass  # emitter torn down during shutdown
         finally:
             self._in_emit = False
 
