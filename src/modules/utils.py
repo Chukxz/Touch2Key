@@ -648,15 +648,13 @@ class MapperEventDispatcher:
     def dispatch(
         self,
         event: MapperEvent,
-        should_debounce: bool = True,
     ) -> None:
-        if should_debounce:
-            if not self._check_debounce(event):
-                return
-        else:
-            # Immediate dispatch supersedes a pending event of this action.
-            with self._debounce_lock:
-                self._debounce_cache.pop(event.action, None)
+        if not self._check_debounce(event):
+            return
+
+        # Immediate dispatch supersedes a pending event of this action.
+        with self._debounce_lock:
+            self._debounce_cache.pop(event.action, None)
 
         self._deliver(event)
 
