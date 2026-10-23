@@ -424,8 +424,8 @@ class DashboardPage(QWidget):
             total_cpu += cpu or 0.0
             total_rss += rss_mb
             rows.append(
-                f"{role:<8} PID {proc.pid:<7} CPU {cpu_txt:>6}  "
-                f"RSS {rss_mb:7.1f} MB  THR {threads:3d}"
+                f"{role:<8} pid {proc.pid:<7} cpu {cpu_txt:>6}  "
+                f"rss {rss_mb:7.1f} MB  thr {threads:3d}"
             )
 
         try:
