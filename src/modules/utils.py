@@ -488,7 +488,7 @@ class MapperEvent:
 
 
 class MapperEventDispatcher:
-    """Thread-safe event dispatcher for cross-thread engine, worker, and GUI notifications."""
+    """Thread-safe event dispatcher for cross-thread engine, worker, and GUI notifications with per-event dispatch debouncing."""
 
     _NO_ARGS: frozenset[EVENT_TYPE] = frozenset(
         {
