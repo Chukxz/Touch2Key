@@ -41,6 +41,7 @@ from modules.utils import (
     MapperEvent,
     MapperEventDispatcher,
     TouchEvent,
+    TouchEventCount,
     TouchPhase,
     clamp,
     unpack_ipc_start_cmd,
@@ -70,7 +71,8 @@ class Engine:
         self.window_manager = platform_mod.WindowManager()
         self.foreground_window = self.window_manager.get_foreground_window()
         self.bridge = platform_mod.Bridge(self.window_manager, self.system_config)
-
+        
+        self.touch_event_counter = TouchEventCount()
         self._publisher: TelemetryPublisher | None = None
         self._respawns: dict[str, int] = {"keyboard": 0, "mouse": 0}
 
@@ -456,6 +458,8 @@ class Engine:
             )
         ):
             return
+
+        self.touch_event_counter.record(touch_event)
 
         if self.mapper is not None:
             self.mapper.event_count += 1
