@@ -191,12 +191,11 @@ class Engine:
         self.rate_cap = new_rate
         try:
             store.settings.update(adb_rate_cap=new_rate)
-            logger.info("CLI Hotkey: Rate Cap set to %.1f Hz (DB synced)", new_rate)
             was_dispatch_immediate = self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD", cooldown=1.0))
 
             if was_dispatch_immediate:
                 logger.info(
-                    "CLI Hotkey: Rate Cap set to %.1f Hz (event dispatched immediately, further events may be coalesced but the DB would always be synced) ", new_pps
+                    "CLI Hotkey: Rate Cap set to %.1f Hz (event dispatched immediately, further events may be coalesced but the DB would always be synced)", new_rate
                 )
             else:
                 logger.debug(
@@ -219,7 +218,7 @@ class Engine:
 
             if was_dispatch_immediate:
                 logger.info(
-                    "CLI Hotkey: PPS Alert Threshold set to %.1f PPS (event dispatched immediately, further events may be coalesced but the DB would always be synced) ", new_pps
+                    "CLI Hotkey: PPS Alert Threshold set to %.1f PPS (event dispatched immediately, further events may be coalesced but the DB would always be synced)", new_pps
                 )
             else:
                 logger.debug(
