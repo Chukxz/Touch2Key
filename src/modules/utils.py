@@ -727,6 +727,7 @@ class EventCount():
         self.event_count_down = 0
         self.event_count_move = 0
         self.event_count_up = 0
+        self.event_count = 0
         
     def record(self, touch_event: TouchEvent):
         if touch_event.phase is TouchPhase.MOVE:
@@ -734,7 +735,9 @@ class EventCount():
         elif touch_event.phase is TouchPhase.DOWN:
             self.event_count_down += 1
         elif touch_event.phase is TouchPhase.UP:
-            self.event_count_up += 1           
+            self.event_count_up += 1
+        
+        self.event_count += 1       
         
 
 
