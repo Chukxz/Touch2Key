@@ -620,21 +620,20 @@ class MainWindow(QMainWindow):
         )
 
         self._switch_page(0, "Dashboard")
-        
+
     def _navigate_to_page(self, page_title: str):
         index = -1
-        title = page_title.strip()        
-        
+        title = page_title.strip()
+
         for cur_index, (cur_title, _) in enumerate(self.pages.items()):
             if cur_title.strip() == title:
                 index = cur_index
                 break
-            
+
         if index > 0:
             self._switch_page(index, title)
         else:
-            logger.info("Could not find a page with title '%s'.", title)                 
-
+            logger.info("Could not find a page with title '%s'.", title)
 
     def _setup_logging(self) -> None:
         handler = install_gui_logging(
@@ -652,12 +651,8 @@ class MainWindow(QMainWindow):
         controller.stopped.connect(self._on_engine_stopped)
 
         self.dispatcher.register_callback(
-            "ON_CONFIG_RELOAD",
-            self._forward_config_reload_to_engine,
-        )
-        self.dispatcher.register_callback(
-            "ON_LAYOUT_RELOAD",
-            self._forward_layout_reload_to_engine,
+            "ON_RELOAD",
+            self._forward_reload_to_engine,
         )
         self.dispatcher.register_callback(
             "ON_DEVICES_CHANGE",
@@ -675,17 +670,11 @@ class MainWindow(QMainWindow):
         ipc_dispatcher.engine_started.connect(self._on_engine_started)
         ipc_dispatcher.engine_error.connect(self._on_engine_error)
 
-    def _forward_config_reload_to_engine(self) -> None:
+    def _forward_reload_to_engine(self) -> None:
         dispatcher = self.engine_controller.dispatcher
 
         if dispatcher is not None:
-            dispatcher.send_config_reload()
-
-    def _forward_layout_reload_to_engine(self) -> None:
-        dispatcher = self.engine_controller.dispatcher
-
-        if dispatcher is not None:
-            dispatcher.send_layout_reload()
+            dispatcher.send_reload()
 
     def _forward_devices_change_to_engine(
         self,
@@ -985,7 +974,9 @@ class MainWindow(QMainWindow):
             logger.info("Stopping engine prior to setup execution")
             self.engine_controller.shutdown()
 
-        logger.info("Spawning setup utility as an external process")
+        logger.info(
+            "Spawning setup utility as an external process, additional details can be found in 'touch2key-setup' logs."
+        )
 
         try:
             _spawn_module("modules.scripts.setup")
@@ -1066,7 +1057,9 @@ class MainWindow(QMainWindow):
             logger.info("Stopping engine prior to uninstallation")
             self.engine_controller.shutdown()
 
-        logger.info("Spawning uninstaller as an external process")
+        logger.info(
+            "Spawning uninstaller as an external process, additional details can be found in 'touch2key-uninstall' logs."
+        )
 
         try:
             _spawn_module("modules.scripts.uninstall")

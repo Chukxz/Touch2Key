@@ -22,6 +22,7 @@ from modules.utils import (
     DEFAULT_PPS,
     PPS_ALERT_MAX,
     PPS_ALERT_MIN,
+    clamp,
     get_scancode_from_key,
 )
 
@@ -93,7 +94,7 @@ def capture_performance_settings_cli() -> tuple[float | None, float | None] | No
                 logger.warning("Invalid rate cap input; falling back to default.")
                 rate_cap = default_rate
 
-        rate_cap = max(ADB_RATE_CAP_MIN, min(ADB_RATE_CAP_MAX, float(rate_cap)))
+        rate_cap = clamp(rate_cap, ADB_RATE_CAP_MIN, ADB_RATE_CAP_MAX)
 
         # --- Capture PPS Threshold ---
         print(f"\n[?] Enter the Alert Threshold (PPS) for touch event rate monitoring")
@@ -109,7 +110,7 @@ def capture_performance_settings_cli() -> tuple[float | None, float | None] | No
                 logger.warning("Invalid PPS threshold input; falling back to default.")
                 pps = default_pps
 
-        pps = max(PPS_ALERT_MIN, min(PPS_ALERT_MAX, float(pps)))
+        pps = clamp(pps, PPS_ALERT_MIN, PPS_ALERT_MAX)
 
         store.settings.update(
             adb_rate_cap=float(rate_cap),

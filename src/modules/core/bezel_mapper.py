@@ -31,7 +31,7 @@ class BezelMapper:
         self.rebuild_pipelines()
 
         self.mapper_event_dispatcher.register_callback(
-            "ON_LAYOUT_RELOAD", self.rebuild_pipelines
+            "ON_RELOAD", self.rebuild_pipelines
         )
         self.mapper_event_dispatcher.register_callback(
             "ON_WORKER_RESPAWN", self._on_worker_respawn_bezel

@@ -42,6 +42,7 @@ from modules.utils import (
     MapperEventDispatcher,
     TouchEvent,
     TouchPhase,
+    clamp,
     unpack_ipc_start_cmd,
 )
 from modules.runtime_info import TelemetryPublisher
@@ -103,7 +104,8 @@ class Engine:
         self.rate_cap: float = ADB_RATE_CAP_MIN
         self.pps: float = PPS_ALERT_MIN
         self._last_hotkey_time = 0.0
-        self._hotkey_cooldown = 0.35
+        self._long_hotkey_cooldown = 0.35
+        self._short_hotkey_cooldown = 0.1
         self._mouse_flush_thread: threading.Thread | None = None
 
         if not self.headless:
@@ -132,12 +134,7 @@ class Engine:
                 keyboard.add_hotkey(
                     "f5", lambda: _guard_hotkey(self._toggle_handedness_cli)
                 )
-                keyboard.add_hotkey(
-                    "f6", lambda: _guard_hotkey(self._reload_layout_cli)
-                )
-                keyboard.add_hotkey(
-                    "f7", lambda: _guard_hotkey(self._reload_config_cli)
-                )
+                keyboard.add_hotkey("f6", lambda: _guard_hotkey(self._reload_cli))
                 keyboard.add_hotkey(
                     "left",
                     lambda: _guard_hotkey(lambda: self._adjust_rate_cap_cli(-10.0)),
@@ -160,8 +157,7 @@ class Engine:
                 )
                 logger.info(
                     "[CLI Interactive Launch] Active Hotkeys: [Esc] Exit | [F5] Handedness | "
-                    "[F6] Reload Layout | [F7] Reload Config | [Left/Right] Rate Cap (-/+ 10) | "
-                    "[Down/Up] PPS (-/+ 5)"
+                    "[F6] Reload | [Left/Right] Rate Cap (-/+ 10) | [Down/Up] PPS (-/+ 5)"
                 )
             except Exception as exc:
                 logger.debug(
@@ -172,33 +168,36 @@ class Engine:
                 "[Headless / GUI Worker Launch] Background engine active (terminal hotkeys bypassed)."
             )
 
-    def _check_debounce(self) -> bool:
+    def _check_debounce(self, is_long_cooldown=True) -> bool:
         now = time.perf_counter()
-        if now - self._last_hotkey_time < self._hotkey_cooldown:
+        _hotkey_cooldown = (
+            self._long_hotkey_cooldown
+            if is_long_cooldown
+            else self._short_hotkey_cooldown
+        )
+        if now - self._last_hotkey_time < _hotkey_cooldown:
             return False
         self._last_hotkey_time = now
         return True
 
     def _adjust_rate_cap_cli(self, delta: float) -> None:
-        if not self._check_debounce():
+        if not self._check_debounce(False):
             return
-        new_rate = max(ADB_RATE_CAP_MIN, min(ADB_RATE_CAP_MAX, self.rate_cap + delta))
+        new_rate = clamp(self.rate_cap + delta, ADB_RATE_CAP_MIN, ADB_RATE_CAP_MAX)
         if new_rate == self.rate_cap:
             return
         self.rate_cap = new_rate
         try:
             store.settings.update(adb_rate_cap=new_rate)
             logger.info("CLI Hotkey: Rate Cap set to %.1f Hz (DB synced)", new_rate)
-            self.mapper_event_dispatcher.dispatch(
-                MapperEvent(action="ON_CONFIG_RELOAD")
-            )
+            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD"))
         except Exception as exc:
             logger.error("Failed to commit rate cap update to DB: %s", exc)
 
     def _adjust_pps_cli(self, delta: float) -> None:
-        if not self._check_debounce():
+        if not self._check_debounce(False):
             return
-        new_pps = max(PPS_ALERT_MIN, min(PPS_ALERT_MAX, self.pps + delta))
+        new_pps = clamp(self.pps + delta, PPS_ALERT_MIN, PPS_ALERT_MAX)
         if new_pps == self.pps:
             return
         self.pps = new_pps
@@ -207,9 +206,7 @@ class Engine:
             logger.info(
                 "CLI Hotkey: PPS Alert Threshold set to %.1f PPS (DB synced)", new_pps
             )
-            self.mapper_event_dispatcher.dispatch(
-                MapperEvent(action="ON_CONFIG_RELOAD")
-            )
+            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD"))
         except Exception as exc:
             logger.error("Failed to commit PPS update to DB: %s", exc)
 
@@ -221,27 +218,16 @@ class Engine:
             new_val = not settings.left_handed
             store.settings.update(left_handed=new_val)
             logger.info("CLI Triggered [F5]: Left-Handed mode set to %s", new_val)
-            self.mapper_event_dispatcher.dispatch(
-                MapperEvent(action="ON_CONFIG_RELOAD")
-            )
+            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD"))
         except Exception as exc:
             logger.error(
                 "Failed to toggle handedness via hotkey: %s", exc, exc_info=True
             )
 
-    def _reload_layout_cli(self) -> None:
+    def _reload_cli(self) -> None:
         if self._check_debounce():
-            self.mapper_event_dispatcher.dispatch(
-                MapperEvent(action="ON_LAYOUT_RELOAD")
-            )
-            logger.info("CLI Triggered [F6]: Layout reload event dispatched.")
-
-    def _reload_config_cli(self) -> None:
-        if self._check_debounce():
-            self.mapper_event_dispatcher.dispatch(
-                MapperEvent(action="ON_CONFIG_RELOAD")
-            )
-            logger.info("CLI Triggered [F7]: Configuration reload event dispatched.")
+            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD"))
+            logger.info("CLI Triggered [F6]: Reload event dispatched.")
 
     def _on_devices_change(
         self,
@@ -250,7 +236,6 @@ class Engine:
         *,
         keyboard_device_id: int | None = None,
         mouse_device_id: int | None = None,
-        **kwargs: Any,
     ) -> None:
         if not self.bridge or self.bridge.k_proc is None:
             return
@@ -265,6 +250,7 @@ class Engine:
         self._contact_owners.clear()
         self._cursor_contacts.clear()
         self.two_finger_tap_tracker.reset()
+
         if self.output_sink:
             for tier in self._tiers:
                 for pipeline in tier:
@@ -274,9 +260,7 @@ class Engine:
                         logger.exception(
                             "Failed to reset pipeline during state transition"
                         )
-        # These mapper-level release methods cover outputs not represented by
-        # a currently active pipeline. Do not call them when the sink is absent.
-        if self.output_sink:
+
             if self.bezel_mapper:
                 self.bezel_mapper.release_all()
             if self.key_mapper:
@@ -289,8 +273,6 @@ class Engine:
     def toggle_mode(self) -> None:
         with self.lock:
             new_state = not self.is_visible
-        # Apply synchronously so a toggle from inside Pipeline.process aborts
-        # the current dispatch before it can continue into another tier.
         self._apply_visibility(new_state)
         self.mapper_event_dispatcher.dispatch(
             MapperEvent(action="ON_MENU_MODE_TOGGLE", is_visible=new_state)
@@ -308,54 +290,17 @@ class Engine:
         except Exception:
             logger.debug("Bridge health check failed during mode switch", exc_info=True)
 
-    def _set_is_visible(
-        self, is_visible: bool | MapperEvent = True, **kwargs: Any
-    ) -> None:
-        if isinstance(is_visible, MapperEvent):
-            visible = getattr(is_visible, "is_visible", True)
-        elif "is_visible" in kwargs:
-            visible = kwargs["is_visible"]
-        else:
-            visible = is_visible
-        self._apply_visibility(bool(visible))
-
-    def _on_layout_reload(self) -> None:
-        logger.info("Executing layout reload across pipelines...")
-        try:
-            with self.lock:
-                self._release_active_inputs()
-                if self.key_mapper and hasattr(self.key_mapper, "rebuild_pipelines"):
-                    self.key_mapper.rebuild_pipelines()
-                if self.bezel_mapper and hasattr(
-                    self.bezel_mapper, "rebuild_pipelines"
-                ):
-                    self.bezel_mapper.rebuild_pipelines()
-                if self.wheel_mapper and hasattr(self.wheel_mapper, "rebuild_pipeline"):
-                    self.wheel_mapper.rebuild_pipeline()
-                if self.mouse_mapper and hasattr(self.mouse_mapper, "rebuild_pipeline"):
-                    self.mouse_mapper.rebuild_pipeline()
-                self._tiers = self._build_pipeline_tiers()
-            logger.info("Layout reload completed successfully.")
-        except Exception as exc:
-            logger.error("Error during layout reload: %s", exc, exc_info=True)
-
-    def _on_config_reload(self) -> None:
+    def _on_reload(self) -> None:
         settings = store.settings.get()
         self.two_finger_tap_enabled = settings.two_finger_tap_enabled
         self.bezel_toggle_enabled = settings.bezel_toggle_enabled
-        self.rate_cap = max(
-            ADB_RATE_CAP_MIN,
-            min(ADB_RATE_CAP_MAX, float(settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP)),
-        )
-        self.pps = max(
-            PPS_ALERT_MIN,
-            min(PPS_ALERT_MAX, float(settings.pps_alert_threshold or DEFAULT_PPS)),
-        )
+        self.rate_cap = settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP
+        self.pps = settings.pps_alert_threshold or DEFAULT_PPS
         with self.lock:
             self._release_active_inputs()
             self._tiers = self._build_pipeline_tiers()
         logger.info(
-            "Engine config reloaded: Rate Cap=%.1f Hz, PPS Threshold=%.1f PPS",
+            "Engine reloaded: Rate Cap=%.1f Hz, PPS Threshold=%.1f PPS",
             self.rate_cap,
             self.pps,
         )
@@ -639,27 +584,15 @@ class Engine:
         )
         self.bezel_mapper = BezelMapper(self.mapper, self.output_sink)
         self.mouse_mapper = MouseMapper(self.mapper, self.output_sink)
-        self.key_mapper = KeyMapper(
-            self.mapper,
-            self.output_sink,
-            typematic_enabled=settings.typematic_enabled,
-            typematic_delay_ms=settings.typematic_delay_ms,
-            typematic_rate_hz=settings.typematic_rate_hz,
-            typematic_excluded_keys=settings.typematic_excluded_keys,
-        )
+        self.key_mapper = KeyMapper(self.mapper, self.output_sink)
         self.wheel_mapper = WheelMapper(self.mapper, self.output_sink)
         self._tiers = self._build_pipeline_tiers()
 
         self.touch_reader.bind_touch_event(self._process_touch_event)
         self.mapper_event_dispatcher.register_callback(
-            "ON_MENU_MODE_TOGGLE", self._set_is_visible
+            "ON_MENU_MODE_TOGGLE", self._apply_visibility
         )
-        self.mapper_event_dispatcher.register_callback(
-            "ON_LAYOUT_RELOAD", self._on_layout_reload
-        )
-        self.mapper_event_dispatcher.register_callback(
-            "ON_CONFIG_RELOAD", self._on_config_reload
-        )
+        self.mapper_event_dispatcher.register_callback("ON_RELOAD", self._on_reload)
         self.mapper_event_dispatcher.register_callback(
             "ON_DEVICES_CHANGE", self._on_devices_change
         )
@@ -891,9 +824,9 @@ def parse_config_arg(config_str: str) -> dict:
     raw_rate = parse_value(
         parts[3], float, settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP
     )
-    rate_cap = max(ADB_RATE_CAP_MIN, min(ADB_RATE_CAP_MAX, raw_rate))
+    rate_cap = clamp(raw_rate, ADB_RATE_CAP_MIN, ADB_RATE_CAP_MAX)
     raw_pps = parse_value(parts[4], float, settings.pps_alert_threshold or DEFAULT_PPS)
-    pps = max(PPS_ALERT_MIN, min(PPS_ALERT_MAX, raw_pps))
+    pps = clamp(raw_pps, PPS_ALERT_MIN, PPS_ALERT_MAX)
     k_device_handle = parse_value(parts[5], int, 0)
     m_device_handle = parse_value(parts[6], int, 10)
     logger.info(

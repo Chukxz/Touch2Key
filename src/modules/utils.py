@@ -111,6 +111,7 @@ VISUALIZER_RUNTIME_FILE = DATA_FOLDER / "visualizer_runtime.json"
 RUNTIME_FILE = DATA_FOLDER / "engine_runtime.json"
 READ_ATTEMPTS = 3
 
+ABS_CONST = 0xFFFF
 
 BASELINE_DPI = 160
 BASELINE_WIDTH = 800
@@ -167,8 +168,8 @@ NT_TIMER_RES = 5000
 MAX_CLASS_NAME = 256
 
 # Fallback Performance Constants
-DEFAULT_ADB_RATE_CAP = 250
-DEFAULT_PPS = 60
+DEFAULT_ADB_RATE_CAP = 250.0
+DEFAULT_PPS = 60.0
 
 # Mouse / joystick
 SENSITIVITY_MIN, SENSITIVITY_MAX = 0.1, 10.0
@@ -209,8 +210,7 @@ PORT = "5555"
 Callback = Callable[..., None]
 
 EVENT_TYPE = Literal[
-    "ON_CONFIG_RELOAD",
-    "ON_LAYOUT_RELOAD",
+    "ON_RELOAD",
     "ON_MENU_MODE_TOGGLE",
     "ON_AGGREGATION",
     "ON_WORKER_RESPAWN",
@@ -492,23 +492,29 @@ class MapperEventDispatcher:
 
     _NO_ARGS: frozenset[EVENT_TYPE] = frozenset(
         {
-            "ON_CONFIG_RELOAD",
-            "ON_LAYOUT_RELOAD",
+            "ON_RELOAD",
         }
     )
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._cooldown = 0.5
 
         self.callback_registry: dict[EVENT_TYPE, list[Callback]] = {
-            "ON_CONFIG_RELOAD": [],
-            "ON_LAYOUT_RELOAD": [],
+            "ON_RELOAD": [],
             "ON_MENU_MODE_TOGGLE": [],
             "ON_AGGREGATION": [],
             "ON_WORKER_RESPAWN": [],
             "ON_TARGET_WINDOW_CHANGE": [],
             "ON_DEVICES_CHANGE": [],
         }
+        
+    def _check_debounce(self, ) -> bool:
+        now = time.perf_counter()
+        if now - self._last_hotkey_time < self._cooldown:
+            return False
+        self._last_hotkey_time = now
+        return True
 
     def register_callback(
         self,
@@ -687,9 +693,8 @@ class EventCount():
 # ---------------------------------------------------------------------------
 IPC_CMD_START = 0x01
 IPC_CMD_STOP = 0x02
-IPC_CMD_CONFIG_RELOAD = 0x03
-IPC_CMD_LAYOUT_RELOAD = 0x04
-IPC_CMD_DEVICES_CHANGE = 0x05
+IPC_CMD_RELOAD = 0x03
+IPC_CMD_DEVICES_CHANGE = 0x04
 IPC_CMD_TARGET_WINDOW_CHANGE = 0x86
 
 IPC_EVT_STARTED = 0x80
@@ -746,12 +751,8 @@ def pack_ipc_stop_cmd() -> bytes:
     return bytes([IPC_CMD_STOP])
 
 
-def pack_ipc_config_reload_cmd() -> bytes:
-    return bytes([IPC_CMD_CONFIG_RELOAD])
-
-
-def pack_ipc_layout_reload_cmd() -> bytes:
-    return bytes([IPC_CMD_LAYOUT_RELOAD])
+def pack_ipc_reload_cmd() -> bytes:
+    return bytes([IPC_CMD_RELOAD])
 
 
 def pack_ipc_devices_change_cmd(k_id: int | None, m_id: int | None) -> bytes:
@@ -825,10 +826,8 @@ class IpcMapperEventDispatcher(MapperEventDispatcher):
         opcode = payload[0]
         if opcode == IPC_CMD_STOP:
             return False
-        if opcode == IPC_CMD_CONFIG_RELOAD:
-            self.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
-        elif opcode == IPC_CMD_LAYOUT_RELOAD:
-            self.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+        if opcode == IPC_CMD_RELOAD:
+            self.dispatch(MapperEvent(action="ON_RELOAD"))
         elif opcode == IPC_CMD_DEVICES_CHANGE:
             k_id, m_id = unpack_ipc_devices_change_cmd(payload)
             self.dispatch(
@@ -922,11 +921,8 @@ class QtIpcMapperEventDispatcher(QObject):
     def send_stop(self) -> None:
         self._send(pack_ipc_stop_cmd())
 
-    def send_config_reload(self) -> None:
-        self._send(pack_ipc_config_reload_cmd())
-
-    def send_layout_reload(self) -> None:
-        self._send(pack_ipc_layout_reload_cmd())
+    def send_reload(self) -> None:
+        self._send(pack_ipc_reload_cmd())
 
     def send_devices_change(self, k_id: int | None, m_id: int | None) -> None:
         self._send(pack_ipc_devices_change_cmd(k_id, m_id))

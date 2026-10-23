@@ -191,8 +191,7 @@ class DashboardPage(QWidget):
     def _register_dispatcher_events(self) -> None:
         if not self.dispatcher:
             return
-        self.dispatcher.register_callback("ON_CONFIG_RELOAD", self._on_update_reload)
-        self.dispatcher.register_callback("ON_LAYOUT_RELOAD", self._on_update_reload)
+        self.dispatcher.register_callback("ON_RELOAD", self.refresh_state)
         self.dispatcher.register_callback(
             "ON_TARGET_WINDOW_CHANGE", self._on_target_window_change
         )
@@ -268,9 +267,6 @@ class DashboardPage(QWidget):
             self.target_window_label.setText(f"HWND {self.engine_controller.window_id}")
         else:
             self.target_window_label.setText("None (Foreground Active Window)")
-
-    def _on_update_reload(self, *args: Any, **kwargs: Any) -> None:
-        self.refresh_state()
 
     def _on_target_window_change(self, *args: Any, **kwargs: Any) -> None:
         self._refresh_target_label()

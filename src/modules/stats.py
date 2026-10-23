@@ -46,28 +46,31 @@ def _proc_stats(role: str, proc: psutil.Process) -> dict[str, Any]:
         return {"role": role, "pid": proc.pid, "error": "exited"}
 
 
-def _summary_line(snap: dict[str, Any]) -> str:
+def _summary_lines(snap: dict[str, Any]) -> tuple[str, str]:
     age = snapshot_age(snap)
     if age > STALE_AFTER_S:
-        return f"telemetry stale ({age:.0f}s since last update; engine may be hung)"
+        return f"telemetry stale ({age:.0f}s since last update; engine may be hung)", ""
 
     rate = snap.get("rate_hz")
     rate_txt = "--" if rate is None else f"{rate:.1f} Hz"
     resp = snap.get("respawns") or {}
     vkb_pid = snap.get("workers", {}).get("vkb")
     visualizer_pid = snap.get("workers", {}).get("visualizer")
-    parts = [
+    parts_1 = [
         f"rate {rate_txt} {snap.get('rate_status') or 'n/a'}",
-        f"alert<{_num(snap.get('pps_threshold'))} PPS",
+        f"alert <{_num(snap.get('pps_threshold'))} PPS",
         f"cap {_num(snap.get('rate_cap_hz'))} Hz",
         f"mode {'menu' if snap.get('menu_mode') else 'game'}",
+    ]
+
+    parts_2 = [
         f"respawns kbd {resp.get('keyboard', 0)} / mouse {resp.get('mouse', 0)}",
         f"virtual kbd {'Not Active' if vkb_pid is None else 'Active'}",
         f"visualizer {'Not Active' if visualizer_pid is None else 'Active'}",
     ]
     if snap.get("window_lost"):
-        parts.append("NO TARGET WINDOW")
-    return "  ".join(parts)
+        parts_2.append("NO TARGET WINDOW")
+    return "  ".join(parts_1), "  ".join(parts_2)
 
 
 def _row_text(row: dict[str, Any]) -> str:
@@ -150,7 +153,9 @@ def main() -> None:
                     os.system("cls" if sys.platform == "win32" else "clear")
 
                 stamp = time.strftime("%H:%M:%S")
-                print(f"{stamp}  {_summary_line(snap)}", flush=True)
+                summaries = _summary_lines(snap)
+                for summary in summaries:
+                    print(f"{stamp}  {summary}", flush=True)
                 for row in rows:
                     print(f"{stamp}  {_row_text(row)}", flush=True)
 

@@ -7,6 +7,7 @@ import threading
 from datetime import datetime as _datetime
 
 from modules.utils import (
+    ABS_CONST,
     BUTTON_4_DOWN,
     BUTTON_4_UP,
     BUTTON_5_DOWN,
@@ -33,6 +34,7 @@ from modules.utils import (
     TASK_BUTTON,
     TASK_REL,
     TASK_WHEEL,
+    clamp,
 )
 from ..base import AbstractBridge
 from .workers import keyboard_worker, mouse_worker
@@ -207,8 +209,8 @@ class UInputBridge(AbstractBridge):
             pass
 
     def mouse_move_abs(self, x: int, y: int) -> None:
-        abs_x = max(0, min(65535, int((x / self.screen_w) * 65535)))
-        abs_y = max(0, min(65535, int((y / self.screen_h) * 65535)))
+        abs_x = clamp(int((x / self.screen_w) * ABS_CONST), 0, ABS_CONST)
+        abs_y = clamp(int((y / self.screen_h) * ABS_CONST), 0, ABS_CONST)
         try:
             self.m_pipe_write.send_bytes(
                 PACK_ABS_STRUCT.pack(TASK_ABS, int(abs_x), int(abs_y))

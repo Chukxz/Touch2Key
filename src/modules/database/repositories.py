@@ -29,6 +29,7 @@ from modules.utils import (
     TOP_BEZEL_NAME,
     MOUSE_WHEEL_SIMULATOR_CODE,
     calculate_rect,
+    clamp,
     dp_to_px,
 )
 from modules.core.pipeline import PipelineConfig
@@ -661,8 +662,8 @@ class LayoutZonesRepository:
         except (TypeError, ValueError):
             return pipeline_json
 
-        new_dp = max(MIN_BEZEL_DP, min(MAX_BEZEL_DP, dp))
-        new_prio = max(MIN_PRIORITY, min(MAX_PRIORITY, prio))
+        new_dp = clamp(dp, MIN_BEZEL_DP, MAX_BEZEL_DP)
+        new_prio = clamp(prio, MIN_PRIORITY, MAX_PRIORITY)
         if new_dp == dp and new_prio == prio:
             return pipeline_json
 
@@ -884,7 +885,7 @@ class LayoutZonesRepository:
             dp_thickness = BEZEL_DP_THICKNESS
 
         # Clamp the dp value itself so the stored dp and the computed px always agree.
-        dp_thickness = max(MIN_BEZEL_DP, min(MAX_BEZEL_DP, int(dp_thickness)))
+        dp_thickness = clamp(dp_thickness, MIN_BEZEL_DP, MAX_BEZEL_DP)
 
         thickness_px = float(dp_to_px(dp_thickness, layout.dpi))
         y1 = 0.0 if is_top else layout.height - thickness_px

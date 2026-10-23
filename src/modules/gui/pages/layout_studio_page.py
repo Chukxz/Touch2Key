@@ -1022,8 +1022,7 @@ class LayoutStudioPage(QWidget):
 
     def _notify_engine_reload(self) -> None:
         if self.dispatcher is not None:
-            self.dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
-            self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
+            self.dispatcher.dispatch(MapperEvent(action="ON_RELOAD"))
 
     # ------------------------------------------------------------------
     # Profile actions
@@ -1118,7 +1117,7 @@ class LayoutStudioPage(QWidget):
                 self.plotter_widget.active_layout = store.layouts.get(layout_id)
 
             self.load_profiles()
-            self._notify_engine_reload()
+            # self._notify_engine_reload()
 
             logger.info("Renamed profile ID %s to '%s'", layout_id, target_name)
         except DuplicateNameError:

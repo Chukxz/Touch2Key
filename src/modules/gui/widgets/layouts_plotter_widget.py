@@ -9,6 +9,7 @@ from PIL import Image
 from typing import TYPE_CHECKING, Optional, Any
 from enum import Enum, auto
 
+from modules.utils import clamp
 from modules.platforms import get_platform, get_specific_mt_key
 from modules.database import store
 from modules.database.repositories import DuplicateNameError
@@ -1471,7 +1472,7 @@ class LayoutsPlotterWidget(QWidget):
         """Edits a bezel thickness in memory (saved with the layout, like every other edit)."""
         if self.is_fatal_state:
             return
-        value = max(MIN_BEZEL_DP, min(MAX_BEZEL_DP, int(round(dp))))
+        value = clamp(int(round(dp)), MIN_BEZEL_DP, MAX_BEZEL_DP)
         current = self.top_bezel_dp if is_top else self.bottom_bezel_dp
         if value == current:
             return
@@ -1638,7 +1639,7 @@ class LayoutsPlotterWidget(QWidget):
             if zone.zone_type == BEZEL:
                 zone.set_parsed_config_from_json()
                 _, _, dp, _ = zone.CONFIG_HELPER.get_region_config()
-                dp = max(MIN_BEZEL_DP, min(MAX_BEZEL_DP, int(dp)))
+                dp = clamp(int(round(dp)), MIN_BEZEL_DP, MAX_BEZEL_DP)
                 if zone.scancode == TOP_BEZEL_ID:
                     self.top_bezel_id = zone.id
                     self.top_bezel_dp = dp
@@ -2195,10 +2196,7 @@ class LayoutsPlotterWidget(QWidget):
                 eid = self.current_draggable.entry_id
                 if eid in self.shapes:
                     delta = 1 if key == "p" else -1
-                    self.shapes[eid]["priority"] = max(
-                        MIN_PRIORITY,
-                        min(MAX_PRIORITY, self.shapes[eid]["priority"] + delta),
-                    )
+                    self.shapes[eid]["priority"] = clamp(self.shapes[eid]["priority"] + delta, MIN_PRIORITY, MAX_PRIORITY)
                     self.mark_dirty()
                     self.update_title(
                         f"Priority {'increased' if key == 'p' else 'decreased'}: {self.shapes[eid]['priority']} (ID: {eid})",
@@ -2393,9 +2391,9 @@ class LayoutsPlotterWidget(QWidget):
                         * ((self.img_width + self.img_height) / 2)
                     )
                 )
-                r = min(r, max(DEFAULT_MIN_CIRCLE_R, max_r))
+                r = clamp(max_r, DEFAULT_MIN_CIRCLE_R, r)
             elif scancode == SPRINT_DISTANCE_CODE and self.saved_mouse_wheel:
-                r = max(DEFAULT_MIN_CIRCLE_R, min(r, int(self.mouse_wheel_radius)))
+                r = clamp(r, DEFAULT_MIN_CIRCLE_R, int(self.mouse_wheel_radius))
         elif self.mode == RECTANGLE:
             if bb is None:
                 return False
@@ -2852,7 +2850,7 @@ class LayoutsPlotterWidget(QWidget):
                             valid.append((ix, y1))
 
         if not valid:
-            return max(x_min, min(cx, x_max)), max(y_min, min(cy, y_max))
+            return clamp(cx, x_min, x_max), clamp(cy, y_min, y_max)
         candidates = []
         for ix, iy in valid:
             ta = math.atan2(iy - py, ix - px)

@@ -527,7 +527,7 @@ class SettingsPage(QWidget):
 
     def _notify_reload(self) -> None:
         if self.dispatcher:
-            self.dispatcher.dispatch(MapperEvent(action="ON_CONFIG_RELOAD"))
+            self.dispatcher.dispatch(MapperEvent(action="ON_RELOAD"))
 
     def _wire_signals(self) -> None:
         self.select_window_btn.clicked.connect(self._handle_window_selection)
@@ -1018,8 +1018,6 @@ class SettingsPage(QWidget):
             if import_any(Path(path_str)):
                 self.load_settings()
                 self._notify_reload()
-                if self.dispatcher:
-                    self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
                 logger.info("Imported configuration from '%s'", path_str)
                 QMessageBox.information(
                     self,
@@ -1093,9 +1091,6 @@ class SettingsPage(QWidget):
 
                 self.load_settings()
                 self._notify_reload()
-                if self.dispatcher:
-                    self.dispatcher.dispatch(MapperEvent(action="ON_LAYOUT_RELOAD"))
-
                 logger.info("Database wiped and reset to factory defaults")
                 QMessageBox.information(
                     self, "Wiped", "All layouts and settings cleared."

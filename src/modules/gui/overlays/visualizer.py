@@ -9,7 +9,7 @@ import logging
 from collections import deque
 from typing import TYPE_CHECKING
 
-from modules.utils import bresenham, get_scancode_from_key, scale_coord, ICONS_FOLDER
+from modules.utils import bresenham, clamp, get_scancode_from_key, scale_coord, ICONS_FOLDER
 from modules.database import store
 from modules.platforms import get_platform, get_specific_qt_key, check_single_instance
 
@@ -209,19 +209,19 @@ class DiagnosticView(QGraphicsView):
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Left:
-            self.trail_width = max(1, min(MAX_TRAIL_WIDTH, self.trail_width - 1))
+            self.trail_width = clamp(self.trail_width - 1, 1, MAX_TRAIL_WIDTH)
             self.arrow_pressed.emit()
 
         if event.key() == Qt.Key.Key_Right:
-            self.trail_width = max(1, min(MAX_TRAIL_WIDTH, self.trail_width + 1))
+            self.trail_width = clamp(self.trail_width + 1, 1, MAX_TRAIL_WIDTH)
             self.arrow_pressed.emit()
 
         if event.key() == Qt.Key.Key_Down:
-            self.trail_height = max(1, min(MAX_TRAIL_HEIGHT, self.trail_height - 1))
+            self.trail_height = clamp(self.trail_height - 1, 1, MAX_TRAIL_HEIGHT)
             self.arrow_pressed.emit()
 
         if event.key() == Qt.Key.Key_Up:
-            self.trail_height = max(1, min(MAX_TRAIL_HEIGHT, self.trail_height + 1))
+            self.trail_height = clamp(self.trail_height + 1, 1, MAX_TRAIL_HEIGHT)
             self.arrow_pressed.emit()
 
         return super().keyPressEvent(event)

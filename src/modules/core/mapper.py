@@ -20,6 +20,7 @@ from modules.utils import (
     VKB_STRUCT,
     WINDOW_UPDATE_INTERVAL,
     MapperEvent,
+    clamp,
     get_scancode_from_key,
     rotate_resolution,
 )
@@ -101,13 +102,10 @@ class Mapper:
             self.game_window_info = None
             self.window_lost = True
 
-        self._update_config()
+        self._reload()
 
         self.mapper_event_dispatcher.register_callback(
-            "ON_CONFIG_RELOAD", self._update_config
-        )
-        self.mapper_event_dispatcher.register_callback(
-            "ON_LAYOUT_RELOAD", self._update_config
+            "ON_RELOAD", self._reload
         )
         self.mapper_event_dispatcher.register_callback(
             "ON_TARGET_WINDOW_CHANGE", self.rebind_target_window
@@ -129,7 +127,7 @@ class Mapper:
         )
         self.bridge.set_respawn_callback(self._on_worker_respawn)
 
-    def _update_config(self) -> None:
+    def _reload(self) -> None:
         settings = store.settings.get()
         layout = store.get_active_layout()
         if layout is None:
@@ -298,8 +296,8 @@ class Mapper:
         rot_dev_w = max(1.0, float(rot_dev_w))
         rot_dev_h = max(1.0, float(rot_dev_h))
 
-        norm_x = max(0.0, min(1.0, x / rot_dev_w))
-        norm_y = max(0.0, min(1.0, y / rot_dev_h))
+        norm_x = clamp(x / rot_dev_w, 0.0, 1.0)
+        norm_y = clamp(y / rot_dev_h, 0.0, 1.0)
 
         with self.lock:
             win = self.game_window_info

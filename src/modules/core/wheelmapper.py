@@ -38,10 +38,7 @@ class WheelMapper:
         self.rebuild_pipeline()
 
         self.mapper_event_dispatcher.register_callback(
-            "ON_CONFIG_RELOAD", self.rebuild_pipeline
-        )
-        self.mapper_event_dispatcher.register_callback(
-            "ON_LAYOUT_RELOAD", self.rebuild_pipeline
+            "ON_RELOAD", self.rebuild_pipeline
         )
         self.mapper_event_dispatcher.register_callback(
             "ON_WORKER_RESPAWN", self._on_worker_respawn_wheel

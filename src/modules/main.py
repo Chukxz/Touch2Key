@@ -59,21 +59,19 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     parser.add_argument(
         "--profile",
         action="store_true",
-        default=False,
         help="Enable cProfile execution tracing",
     )
 
     parser.add_argument(
         "--use-gui",
         action="store_true",
-        default=False,
         help="Initialize QApplication context",
     )
 
     parser.add_argument(
         "--config",
         type=str,
-        help="One-line comma-separated config: 'window_id,toggle_key,sprint_key,rate_cap,pps,k_device,m_device', use empty strings for defaults, e.g. ',,,100,50,,'",
+        help="One-line comma-separated config: 'window_id,toggle_key,sprint_key,rate_cap,pps,k_device,m_device', use empty strings or omit commas for defaults/database values, e.g. ',,,100,50,,'",
     )
 
     args = parser.parse_args()

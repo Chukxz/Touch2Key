@@ -64,11 +64,10 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     parser.add_argument(
         "--profile",
         action="store_true",
-        default=False,
         help="Enable cProfile execution tracing",
     )
 
-    args, _ = parser.parse_known_args()
+    args = parser.parse_args()
 
     if args.profile:
         gui_profiler = cProfile.Profile()

@@ -162,18 +162,15 @@ Because Touch2Key installs system-level drivers and kernel rules, **simply runni
 
 ### CLI Global Hotkeys
 
-When running the engine in CLI mode, the following hotkeys are active to control runtime behavior on the fly. **They are guarded to only trigger when your terminal window is the active foreground window**, preventing accidental input conflicts while playing games or navigating other applications (protected by a **0.35s** debounce cooldown):
+When running the engine in CLI mode, the following hotkeys are active to control runtime behavior on the fly. **They are guarded to only trigger when your terminal window is the active foreground window**, preventing accidental input conflicts while playing games or navigating other applications (protected by a **0.1s (short)** or **0.35s (long)** debounce cooldown):
 
-| Hotkey | Action | Step / Bounds | Description |
-| :--- | :--- | :--- | :--- |
-| `Esc` | Shutdown | — | Gracefully terminates the CLI engine session and cleans up worker processes. |
-| `F5` | Handedness Toggle | `True` / `False` | Dynamically switches layout orientation between left- and right-handed modes. |
-| `F6` | Layout Reload | — | Instantly reloads the active layout and zone pipelines from SQLite. |
-| `F7` | Config Reload | — | Refreshes global engine settings live from SQLite without requiring a restart. |
-| `Left` / `Right` | Rate Cap (Hz) | &plusmn;10.0 Hz `[30.0 - 1000.0]` | Dynamically tunes the mouse flush polling rate. Commits immediately to SQLite. |
-| `Down` / `Up` | PPS Alert Threshold | &plusmn;5.0 PPS `[10.0 - 500.0]` | Dynamically tunes the touch monitoring threshold. Commits immediately to SQLite. |
-
-*Arrow key tuning applies in-memory on the next polling loop cycle and persists immediately to SQLite, ensuring subsequent reloads (`F7`) or restarts retain your adjustments.*
+| Hotkey | Action | Step / Bounds | Description | Cooldown Type |
+| :--- | :--- | :--- | :--- | :---
+| `Esc` | Shutdown | — | Gracefully terminates the CLI engine session and cleans up worker processes. | Long |
+| `F5` | Handedness Toggle | `True` / `False` | Dynamically switches layout orientation between left- and right-handed modes. | Long |
+| `F6` | Reload | — | Instantly reloads the active layout, zone pipelines and global engine settings including typematics live from SQLite. | Long |
+| `Left` / `Right` | Rate Cap (Hz) | &plusmn;10.0 Hz `[30.0 - 1000.0]` | Dynamically tunes the mouse flush polling rate. Commits immediately to SQLite. | Short |
+| `Down` / `Up` | PPS Alert Threshold | &plusmn;5.0 PPS `[10.0 - 500.0]` | Dynamically tunes the touch monitoring threshold. Commits immediately to SQLite. | Short |
 
 ---
 
@@ -198,6 +195,12 @@ When running the engine in CLI mode, the following hotkeys are active to control
 | `touch2key-keyboard` | Test the virtual keyboard program output in standalone mode. |
 | `touch2key-visualizer` | Live event visualizer that dynamically loads active layout zones to highlight triggered hitboxes, and respects your configured game toggle key for cursor state testing. |
 
+### One Line CLI Flag
+One-line comma-separated config: 'window_id,toggle_key,sprint_key,rate_cap,pps,k_device,m_device', use empty strings or omit commas for defaults/database values, e.g. ',,,100,50,,'
+```bash
+touch2key --config
+```
+
 ### Typematic & System Commands (via Layout Manager)
 You can directly configure hardware auto-repeat behavior, two finger taps, bezel toggles, and left-handed mode via `touch2key-manage`:
 ```bash
@@ -212,7 +215,6 @@ touch2key-manage --reset-system
 touch2key-manage --set-image <layout_id> path/to/hud_screenshot.png  # e.g., --set-image 1 hud.png
 touch2key-manage --set-left-handed on
 ```
-See all commands by running `touch2key-manage [-h|--h|-help|--help]`
 
 ### Telemetry Commands
 ```bash

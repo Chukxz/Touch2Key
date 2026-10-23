@@ -18,6 +18,7 @@ from modules.utils import (
     Point,
     TouchEvent,
     TouchPhase,
+    clamp,
     get_adb_device,
     get_screen_size,
     is_device_online,
@@ -69,7 +70,7 @@ class TouchReader:
         self.process: subprocess.Popen | None = None
 
         self.mapper_event_dispatcher.register_callback(
-            "ON_CONFIG_RELOAD", self._on_config_reload
+            "ON_RELOAD", self._on_reload
         )
 
         threading.Thread(target=self._update_rotation, daemon=True).start()
@@ -79,7 +80,7 @@ class TouchReader:
         )
         self.wireless_thread.start()
 
-    def _on_config_reload(self) -> None:
+    def _on_reload(self) -> None:
         """Dynamically updates rate-limiting intervals and matrix transforms."""
         new_cap = store.settings.get().adb_rate_cap
         if new_cap > 0 and new_cap != self.adb_rate_cap:
@@ -358,13 +359,13 @@ class TouchReader:
                                 self.active_touches = max(0, self.active_touches - 1)
                         elif code == "ABS_MT_POSITION_X":
                             self._ensure_slot(current_slot)
-                            val = min(max(0, int(val_str, 16)), self.max_x)
+                            val = clamp(int(val_str, 16), 0, self.max_x)
                             if self.slots[current_slot]["x"] != val:
                                 self.slots[current_slot]["x"] = val
                                 self.slots[current_slot]["dirty"] = True
                         elif code == "ABS_MT_POSITION_Y":
                             self._ensure_slot(current_slot)
-                            val = min(max(0, int(val_str, 16)), self.max_y)
+                            val = clamp(int(val_str, 16), 0, self.max_y)
                             if self.slots[current_slot]["y"] != val:
                                 self.slots[current_slot]["y"] = val
                                 self.slots[current_slot]["dirty"] = True

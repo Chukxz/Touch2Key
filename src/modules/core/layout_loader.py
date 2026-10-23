@@ -39,7 +39,7 @@ class LayoutLoader:
 
         self.load_layout()
         self.mapper_event_dispatcher.register_callback(
-            "ON_LAYOUT_RELOAD", self.load_layout
+            "ON_RELOAD", self.load_layout
         )
 
     def load_layout(self) -> None:

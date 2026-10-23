@@ -30,33 +30,24 @@ class KeyMapper:
         self,
         mapper: Mapper,
         output_sink: BridgeOutputSink,
-        typematic_enabled: bool = True,
-        typematic_delay_ms: float = 250.0,
-        typematic_rate_hz: float = 30.0,
-        typematic_excluded_keys: str | None = None,
     ):
         self.mapper = mapper
         self.bridge = mapper.bridge
         self.output_sink = output_sink
         self.mapper_event_dispatcher = mapper.mapper_event_dispatcher
 
-        self.typematic_enabled = typematic_enabled
-        self.typematic_delay_ms = typematic_delay_ms
-        self.typematic_rate_hz = typematic_rate_hz
-        self.typematic_excluded_keys = typematic_excluded_keys
-
         self.lock = threading.Lock()
         self.pipelines: list[Any] = []
         self.ignored_keys = {MOUSE_WHEEL_SIMULATOR_CODE, SPRINT_DISTANCE_CODE}
 
+        self._update_bridge_typematics()
         self.rebuild_pipelines()
-        self._sync_typematic_to_bridge()
 
-        self.mapper_event_dispatcher.register_callback(
-            "ON_CONFIG_RELOAD", self._on_config_reload_key
+        self.mapper.mapper_event_dispatcher.register_callback(
+            "ON_RELOAD", self._update_bridge_typematics
         )
         self.mapper_event_dispatcher.register_callback(
-            "ON_LAYOUT_RELOAD", self.rebuild_pipelines
+            "ON_RELOAD", self.rebuild_pipelines
         )
         self.mapper_event_dispatcher.register_callback(
             "ON_WORKER_RESPAWN", self._on_worker_respawn_key
@@ -72,23 +63,16 @@ class KeyMapper:
                 resolved_codes.add(code)
         return resolved_codes
 
-    def _sync_typematic_to_bridge(self) -> None:
-        resolved = self._resolve_scancode_set(self.typematic_excluded_keys)
+    def _update_bridge_typematics(self) -> None:
+        settings = store.settings.get()
+        resolved = self._resolve_scancode_set(settings.typematic_excluded_keys)
         self.bridge.update_typematic(
-            enabled=self.typematic_enabled,
-            delay_ms=self.typematic_delay_ms,
-            rate_hz=self.typematic_rate_hz,
+            enabled=settings.typematic_enabled,
+            delay_ms=settings.typematic_delay_ms,
+            rate_hz=settings.typematic_rate_hz,
             exclude_scancodes=resolved,
         )
-
-    def _on_config_reload_key(self) -> None:
-        s = store.settings.get()
-        self.typematic_enabled = bool(getattr(s, "typematic_enabled", True))
-        self.typematic_delay_ms = float(getattr(s, "typematic_delay_ms", 250.0))
-        self.typematic_rate_hz = float(getattr(s, "typematic_rate_hz", 30.0))
-        self.typematic_excluded_keys = getattr(s, "typematic_excluded_keys", None)
-        self._sync_typematic_to_bridge()
-        logger.info("KeyMapper pushed updated typematic parameters to bridge.")
+        logger.info("KeyMapper updated typematic parameters to bridge.")
 
     def rebuild_pipelines(self) -> None:
         settings = store.settings.get()
@@ -178,4 +162,4 @@ class KeyMapper:
     def _on_worker_respawn_key(self, worker_type: str) -> None:
         if worker_type == "keyboard":
             self.release_all()
-            self._sync_typematic_to_bridge()
+            self._update_bridge_typematics()
