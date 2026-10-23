@@ -203,6 +203,11 @@ class Engine:
                 logger.debug("Hotkey poll failed", exc_info=True)
             self._stop_event.wait(_HOTKEY_POLL_INTERVAL)
 
+        if self._live_active:
+            self._live_active = False
+            AppLogManager.end_live_line()
+            AppLogManager.resume_console()
+
     def _poll_hotkeys(self, keyboard) -> None:
         now = time.perf_counter()
         keys = (*self._adjust_curves, *self._oneshot_actions)
