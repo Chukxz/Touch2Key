@@ -64,7 +64,7 @@ def _summary_lines(snap: dict[str, Any]) -> tuple[str, str]:
     ]
 
     parts_2 = [
-        f"Respawns Kbd {resp.get('keyboard', 0)} / Mouse {resp.get('mouse', 0)}",
+        f"Respawns: Keyboard {resp.get('keyboard', 0)} / Mouse {resp.get('mouse', 0)}",
         f"Virtual Kbd {'Not Active' if vkb_pid is None else 'Active'}",
         f"Visualizer {'Not Active' if visualizer_pid is None else 'Active'}",
     ]
@@ -78,8 +78,8 @@ def _row_text(row: dict[str, Any]) -> str:
     if "error" in row:
         return f"{head} {row['error']}"
     return (
-        f"{head} CPU {row['cpu']:5.1f}%  RSS {row['rss_mb']:7.1f} MB  "
-        f"THR {row['threads']:3d}"
+        f"{head} cpu {row['cpu']:5.1f}%  rss {row['rss_mb']:7.1f} MB  "
+        f"thr {row['threads']:3d}"
     )
 
 
