@@ -192,7 +192,7 @@ class Engine:
         try:
             store.settings.update(adb_rate_cap=new_rate)
             logger.info("CLI Hotkey: Rate Cap set to %.1f Hz (DB synced)", new_rate)
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD"))
+            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD", cooldown=1.0))
         except Exception as exc:
             logger.error("Failed to commit rate cap update to DB: %s", exc)
 
@@ -208,7 +208,7 @@ class Engine:
             logger.info(
                 "CLI Hotkey: PPS Alert Threshold set to %.1f PPS (DB synced)", new_pps
             )
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD"))
+            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD", cooldown=1.0))
         except Exception as exc:
             logger.error("Failed to commit PPS update to DB: %s", exc)
 
