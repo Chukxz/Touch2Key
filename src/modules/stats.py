@@ -57,16 +57,16 @@ def _summary_lines(snap: dict[str, Any]) -> tuple[str, str]:
     vkb_pid = snap.get("workers", {}).get("vkb")
     visualizer_pid = snap.get("workers", {}).get("visualizer")
     parts_1 = [
-        f"rate {rate_txt} {snap.get('rate_status') or 'n/a'}",
-        f"alert <{_num(snap.get('pps_threshold'))} PPS",
-        f"cap {_num(snap.get('rate_cap_hz'))} Hz",
-        f"mode {'menu' if snap.get('menu_mode') else 'game'}",
+        f"Rate {rate_txt} {snap.get('rate_status') or 'n/a'}",
+        f"Alert <{_num(snap.get('pps_threshold'))} PPS",
+        f"Cap {_num(snap.get('rate_cap_hz'))} Hz",
+        f"Cursor: {'Visible' if snap.get('menu_mode') else 'Not Visible'}",
     ]
 
     parts_2 = [
-        f"respawns kbd {resp.get('keyboard', 0)} / mouse {resp.get('mouse', 0)}",
-        f"virtual kbd {'Not Active' if vkb_pid is None else 'Active'}",
-        f"visualizer {'Not Active' if visualizer_pid is None else 'Active'}",
+        f"Respawns Kbd {resp.get('keyboard', 0)} / Mouse {resp.get('mouse', 0)}",
+        f"Virtual Kbd {'Not Active' if vkb_pid is None else 'Active'}",
+        f"Visualizer {'Not Active' if visualizer_pid is None else 'Active'}",
     ]
     if snap.get("window_lost"):
         parts_2.append("NO TARGET WINDOW")
@@ -78,8 +78,8 @@ def _row_text(row: dict[str, Any]) -> str:
     if "error" in row:
         return f"{head} {row['error']}"
     return (
-        f"{head} cpu {row['cpu']:5.1f}%  rss {row['rss_mb']:7.1f} MB  "
-        f"thr {row['threads']:3d}"
+        f"{head} CPU {row['cpu']:5.1f}%  RSS {row['rss_mb']:7.1f} MB  "
+        f"THR {row['threads']:3d}"
     )
 
 
