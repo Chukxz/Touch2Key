@@ -106,8 +106,9 @@ class Engine:
         self.rate_cap: float = ADB_RATE_CAP_MIN
         self.pps: float = PPS_ALERT_MIN
         self._last_hotkey_time = 0.0
+        self._initial_delay = 0.25
         self._long_hotkey_cooldown = 0.35
-        self._short_hotkey_cooldown = 0.1
+        self._short_hotkey_cooldown = 0.06
         self._mouse_flush_thread: threading.Thread | None = None
 
         if not self.headless:
@@ -191,16 +192,8 @@ class Engine:
         self.rate_cap = new_rate
         try:
             store.settings.update(adb_rate_cap=new_rate)
-            was_dispatch_immediate = self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD", cooldown=1.0))
-
-            if was_dispatch_immediate:
-                logger.info(
-                    "CLI Hotkey: Rate Cap set to %.1f Hz (event dispatched immediately, further events may be coalesced but the DB would always be synced)", new_rate
-                )
-            else:
-                logger.debug(
-                    "CLI Hotkey: Rate Cap set to %.1f Hz (DB synced) (event dispatch coalesced)", new_rate
-                )
+            msg = f"CLI Hotkey: Rate Cap set to {new_rate:.1f} Hz, reload event dispatched."
+            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD", cooldown=1.0, dispatch_msg=msg))
 
         except Exception as exc:
             logger.error("Failed to commit rate cap update to DB: %s", exc)
@@ -214,19 +207,11 @@ class Engine:
         self.pps = new_pps
         try:
             store.settings.update(pps_alert_threshold=new_pps)
-            was_dispatch_immediate = self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD", cooldown=1.0))
-
-            if was_dispatch_immediate:
-                logger.info(
-                    "CLI Hotkey: PPS Alert Threshold set to %.1f PPS (event dispatched immediately, further events may be coalesced but the DB would always be synced)", new_pps
-                )
-            else:
-                logger.debug(
-                    "CLI Hotkey: PPS Alert Threshold set to %.1f PPS (DB synced) (event dispatch coalesced)", new_pps
-                )
+            msg = f"CLI Hotkey: PPS Alert Threshold set to {new_pps:.1f} PPS, reload event dispatched."
+            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD", cooldown=1.0, dispatch_msg=msg))
 
         except Exception as exc:
-            logger.error("Failed to commit PPS update to DB: %s", exc)
+            logger.error("Failed to commit PPS update to DB: %s", exc))
 
     def _toggle_handedness_cli(self) -> None:
         if not self._check_debounce():
@@ -235,7 +220,7 @@ class Engine:
             settings = store.settings.get()
             new_val = not settings.left_handed
             store.settings.update(left_handed=new_val)
-            logger.info("CLI Triggered [F5]: Left-Handed mode set to %s", new_val)
+            logger.info("CLI Triggered [F5]: Left-Handed mode set to %s, reload event dispatched.", new_val)
             self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD"))
         except Exception as exc:
             logger.error(
