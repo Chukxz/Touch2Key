@@ -218,9 +218,14 @@ class Engine:
                 if self._adjust_actions[key]():
                     self._settings_dirty = True
 
-        # Live status line: suspend console logs while an adjust key is held.
+        # Live status line: only after a key has been held past the curve's
+        # initial delay (taps never enter live mode), until all keys release.
         adjusting = any(pressed[k] for k in self._adjust_curves)
-        if adjusting:
+        held_long = any(
+            c.is_held and (now - c.hold_start_time) >= c.initial_delay
+            for c in self._adjust_curves.values()
+        )
+        if adjusting and (self._live_active or held_long):
             if not self._live_active:
                 AppLogManager.suspend_console()
                 self._live_active = True
@@ -229,7 +234,7 @@ class Engine:
             if text != self._live_text:  # redraw only on change
                 self._live_text = text
                 AppLogManager.live_line(text)
-        elif self._live_active:
+        elif not adjusting and self._live_active:
             self._live_active = False
             AppLogManager.end_live_line()
             AppLogManager.resume_console()  # replays held logs
