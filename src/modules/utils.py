@@ -498,8 +498,11 @@ class MapperEventDispatcher:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._last_hotkey_time = 0.0
         self._cooldown = 0.5
+        self._last_debounce_times: dict[EVENT_TYPE, float] = {}
+        self._debounce_cache: dict[EVENT_TYPE, MapperEvent] = {}
+        self._debounce_lock = threading.Lock()
+        self._debounce_thread = threading.Thread(target=self._debounce_loop, daemon=True)
 
         self.callback_registry: dict[EVENT_TYPE, list[Callback]] = {
             "ON_RELOAD": [],
@@ -509,13 +512,26 @@ class MapperEventDispatcher:
             "ON_TARGET_WINDOW_CHANGE": [],
             "ON_DEVICES_CHANGE": [],
         }
-        
-    def _check_debounce(self) -> bool:
-        now = time.perf_counter()
-        if now - self._last_hotkey_time < self._cooldown:
-            return False
-        self._last_hotkey_time = now
-        return True
+    
+    def _debounce_loop(self) -> None:
+        with self._debounce_lock:
+            tmp_debounce_cache = self._debounce_cache.copy()
+
+        for action in tmp_debounce_cache:
+            event = tmp_debounce_cache.get(action)
+            if event is not None:
+                self.dispatch(event, False)
+                    
+    def _check_debounce(self, event: MapperEvent) -> bool:
+        with self._debounce_lock:
+            now = time.perf_counter()
+            if now - self._last_debounce_times.get(event.action, 0.0) < self._cooldown:
+                self._debounce_cache[event.action] = event
+                return False
+
+            self._debounce_cache[event.action] = None
+            self._last_debounce_times[event.action] = now
+            return True
 
     def register_callback(
         self,
@@ -617,14 +633,17 @@ class MapperEventDispatcher:
                 logger.debug(f"[+] Cleared all callbacks for event {event_type}")
             logger.debug("[+] Unregistered all callbacks for all events")
 
-    def dispatch(self, event: MapperEvent) -> None:
+    def dispatch(self, event: MapperEvent, should_debounce = True) -> None:
         with self._lock:
             callbacks = self.callback_registry.get(event.action, []).copy()
 
-        args = self._get_callback_args(event)
-        # Skip excessive events with action type in '_NO_ARGS' (e.g. "ON_RELOAD")
-        if not args and not self._check_debounce():
+        if should_debounce and not self._check_debounce(event):
             return
+       
+        with self._debounce_lock:
+            self._debounce_cache[event.action] = None
+
+        args = self._get_callback_args(event)
 
         for callback in callbacks:
             callback_name = getattr(callback, "__name__", repr(callback))
