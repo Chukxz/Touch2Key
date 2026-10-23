@@ -194,7 +194,7 @@ class Engine:
     def _hotkey_loop(self) -> None:
         import keyboard
   
-        while not (self._stop_event.is_set() or self.is_shutting_down):
+        while not self._stop_event.is_set():
             try:
                 self._poll_hotkeys(keyboard)
             except Exception:
