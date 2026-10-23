@@ -718,6 +718,7 @@ class Engine:
         except Exception as exc:
             logger.exception("Exception during engine teardown: %s", exc, exc_info=True)
         finally:
+            self.touch_event_counter.reset()
             store.close()
 
     def _count_respawn(self, worker_type: str | None = None) -> None:
