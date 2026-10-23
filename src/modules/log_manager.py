@@ -6,6 +6,7 @@ import contextlib
 import datetime
 import logging
 import sys
+import shutil
 import threading
 from logging.handlers import MemoryHandler, QueueHandler
 import multiprocessing
@@ -208,12 +209,16 @@ class AppLogManager:
     def live_line(cls, text: str) -> None:
         """Rewrite a single ANSI status line on the real stdout (bypasses logging).
 
-        No-op without a console stream. Call suspend_console() first so log
-        output doesn't interleave with the line.
+        Truncated to the terminal width so it never wraps. No-op without a
+        console stream. Call suspend_console() first so log output doesn't
+        interleave with the line.
         """
         stream = cls._orig_stdout
         if stream is None or not cls._console_handlers:
             return
+        width = shutil.get_terminal_size(fallback=(80, 24)).columns - 1
+        if width > 0 and len(text) > width:
+            text = text[:width]
         with cls._live_lock:
             try:
                 stream.write(f"\r\x1b[2K{text}")
