@@ -488,7 +488,7 @@ class MapperEvent:
     cooldown: float = 0.5
 
     def __post_init__(self) -> None:
-        self.cooldown = min(0.5, self.cooldown)
+        self.cooldown = min(0.01, self.cooldown)
 
 
 class MapperEventDispatcher:
