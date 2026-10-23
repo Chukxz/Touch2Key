@@ -640,7 +640,8 @@ class MainWindow(QMainWindow):
             logger_name="",
             level=logging.INFO,
         )
-        handler.emitter.message.connect(self.log_console.appendPlainText)
+
+        handler.emitter.message.connect(lambda line, _lvl: self.log_console.appendPlainText(line))
         self.log_message.connect(self.log_console.appendPlainText)
 
     def _wire_engine_signals(self) -> None:
@@ -1074,6 +1075,7 @@ class MainWindow(QMainWindow):
             )
 
     def _consume_engine_logs(self) -> None:
+        min_level = logging.INFO
         while True:
             try:
                 record = self.log_queue.get(timeout=0.2)
@@ -1086,6 +1088,9 @@ class MainWindow(QMainWindow):
 
             if record is None:
                 break
+
+            if getattr(record, "levelno", min_level) < min_level:
+                continue
 
             message = (
                 record.getMessage() if hasattr(record, "getMessage") else str(record)
