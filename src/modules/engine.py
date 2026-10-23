@@ -744,6 +744,10 @@ class Engine:
             "rate_status": getattr(mapper, "last_status", None),
             "menu_mode": self.is_visible,
             "window_lost": getattr(mapper, "window_lost", None),
+            "downs": self.touch_event_counter.event_count_down,
+            "moves": self.touch_event_counter.event_count_move,
+            "ups": self.touch_event_counter.event_count_up,
+            "all": self.touch_event_counter.event_count,
             "workers": {
                 "keyboard": alive_pid(getattr(bridge, "k_proc", None)),
                 "mouse": alive_pid(getattr(bridge, "m_proc", None)),
