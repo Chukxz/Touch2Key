@@ -485,11 +485,10 @@ class MapperEvent:
     target_window_title: str = ""
     keyboard_device_id: int | None = None
     mouse_device_id: int | None = None
-    cooldown: float = 0.5
+    cooldown: float = 0.0
 
     def __post_init__(self) -> None:
         self.cooldown = max(0.0, self.cooldown)
-
 
 
 class MapperEventDispatcher:
