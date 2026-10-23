@@ -486,6 +486,7 @@ class MapperEvent:
     keyboard_device_id: int | None = None
     mouse_device_id: int | None = None
     cooldown: float = 0.0
+    dispatch_msg: str | None = None
 
     def __post_init__(self) -> None:
         self.cooldown = max(0.0, self.cooldown)
@@ -648,19 +649,21 @@ class MapperEventDispatcher:
     def dispatch(
         self,
         event: MapperEvent,
-    ) -> bool:
+    ) -> None:
         if not self._check_debounce(event):
-            return False
+            return
 
         # Immediate dispatch supersedes a pending event of this action.
         with self._debounce_lock:
             self._debounce_cache.pop(event.action, None)
 
         self._deliver(event)
-        return True
 
     def _deliver(self, event: MapperEvent) -> None:
         """Invoke a snapshot of callbacks without holding registry locks."""
+        if event.dispatch_msg is not None:
+            print(event.dispatch_msg)
+
         with self._lock:
             callbacks = self.callback_registry.get(
                 event.action, []
