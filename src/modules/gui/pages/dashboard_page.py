@@ -382,11 +382,11 @@ class DashboardPage(QWidget):
             f"<span style='color:{color}'>{status}</span> "
             f"&nbsp;(alert below {_num(threshold)} PPS{threshold_note})",
             f"ADB rate cap: <b>{_num(cap)} Hz</b>{cap_note} &nbsp;|&nbsp; "
-            f"Mode: {'menu' if snap.get('menu_mode') else 'game'}",
-            f"Worker respawns: keyboard {resp.get('keyboard', 0)}, "
-            f"mouse {resp.get('mouse', 0)}",
-            f"virtual kbd {'Not Active' if vkb_pid is None else 'Active'}",
-            f"visualizer {'Not Active' if visualizer_pid is None else 'Active'}",
+            f"Cursor: {'Visible' if snap.get('menu_mode') else 'Not Visible'}",
+            f"Worker respawns: Keyboard {resp.get('keyboard', 0)}, "
+            f"Mouse {resp.get('mouse', 0)}",
+            f"Virtual Kbd {'Not Active' if vkb_pid is None else 'Active'}",
+            f"Visualizer {'Not Active' if visualizer_pid is None else 'Active'}",
         ]
         if snap.get("window_lost"):
             lines.append(f"<span style='color:{_WARN}'>No target window found</span>")
@@ -424,8 +424,8 @@ class DashboardPage(QWidget):
             total_cpu += cpu or 0.0
             total_rss += rss_mb
             rows.append(
-                f"{role:<8} pid {proc.pid:<7} cpu {cpu_txt:>6}  "
-                f"rss {rss_mb:7.1f} MB  thr {threads:3d}"
+                f"{role:<8} PID {proc.pid:<7} CPU {cpu_txt:>6}  "
+                f"RSS {rss_mb:7.1f} MB  THR {threads:3d}"
             )
 
         try:
