@@ -499,7 +499,6 @@ class MapperEventDispatcher:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._cooldown = 0.5
-        self.stop_event = threading.Event()
         self._last_debounce_times: dict[EVENT_TYPE, float] = {}
         self._debounce_cache: dict[EVENT_TYPE, MapperEvent] = {}
         self._debounce_lock = threading.Lock()
@@ -516,7 +515,7 @@ class MapperEventDispatcher:
         }
     
     def _debounce_loop(self) -> None:
-        while not self.stop_event.is_set():
+        while True:
             with self._debounce_lock:
                 tmp_debounce_cache = self._debounce_cache.copy()
 
@@ -525,8 +524,7 @@ class MapperEventDispatcher:
                 if event is not None:
                 self.dispatch(event, False)
         
-        if self.stop_event.wait(0.01)
-            break
+            time.sleep(0.01)
                     
     def _check_debounce(self, event: MapperEvent) -> bool:
         with self._debounce_lock:
@@ -699,10 +697,6 @@ class MapperEventDispatcher:
             )
 
         return ()
-
-    def stop(self):
-        self.stop_event.set()
-        self._debounce_thread.join(timeout=2.0)
 
 
 class EventCount():
