@@ -16,7 +16,6 @@ from PySide6.QtCore import Qt, QCoreApplication, QTimer
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 
-from modules.database import store
 from modules.gui.main_window import MainWindow
 from modules.platforms import check_single_instance, notify_existing_instance
 from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER, ICONS_FOLDER
@@ -120,7 +119,6 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     try:
         exit_code = app.exec()
     finally:
-        store.close()
         profiler_cleanup(gui_profiler)
 
     sys.exit(exit_code)
