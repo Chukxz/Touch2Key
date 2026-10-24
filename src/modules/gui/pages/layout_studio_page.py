@@ -798,15 +798,23 @@ class LayoutStudioPage(QWidget):
             return False
         return self.plotter_widget.save_to_database(name, as_copy=True)
 
-    def save_state(self) -> bool:
-        """Persists unsaved canvas/inspector edits (called on app close). True = safe to exit."""
+    def save_state(self, action: str = "closing") -> bool:
+        """Called by MainWindow.save_all_pages (close, setup, uninstall).
+
+        Prompts instead of silently saving. True = safe to continue.
+        """
         try:
             if self.plotter_widget.is_fatal_state or not self.plotter_widget.is_dirty:
                 return True
-            layout = self.plotter_widget.active_layout
-            if layout is None:
-                return True
-            return self.plotter_widget.save_to_database(layout.name)
+
+            if not self._confirm_unsaved(action):
+                return False  # Cancel, or Save failed (it already showed why)
+
+            # Discard was chosen: clear the flag so a second save_all_pages in
+            # the same flow (Uninstall -> self.close()) doesn't prompt again.
+            if self.plotter_widget.is_dirty:
+                self.plotter_widget._set_dirty(False)
+            return True
         except Exception as exc:
             logger.exception("Failed to save Layout Studio state.")
             QMessageBox.critical(
