@@ -1,108 +1,144 @@
 # Touch2Key
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![OS: Windows](https://img.shields.io/badge/os-Windows-blue.svg)](https://www.microsoft.com/en-us/windows)
-[![OS: Linux](https://img.shields.io/badge/os-Linux-yellow.svg)](https://www.linuxfoundation.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[
 
-**Touch2Key** is a high-performance, cross-platform input mapper designed to seamlessly translate touch interactions (via Android/ADB) into zero-latency keyboard and mouse inputs on your PC.
+![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)
 
-This is the Second Touch2Key Published Implementation with full GUI, CLI support, and improved functionality. 
-The first version with only CLI support and basic GUI windows can be accessed [here](https://github.com/Chukxz/touch2keybare).
+](https://www.python.org/downloads/)
+[
 
-> **Setup Note:** Enable **Developer Options** and **USB Debugging** on your Android device, and accept the RSA fingerprint authorization prompt when connecting your device to your PC. 
-> 
-> **For Wireless Play:** Connect your PC's Wi-Fi to your phone's hotspot and plug in the USB cable to establish the initial handshake. Once the application logs that the device has connected wirelessly, you can safely unplug the cable!
-> 
-> *Note: If pairing with game streamers like **Sunshine/Moonlight** or **Apollo/Artemis**, disable all virtual controller/mouse inputs within your streaming host to prevent mapping conflicts.*
+![OS: Windows](https://img.shields.io/badge/os-Windows-blue.svg)
+
+](https://www.microsoft.com/en-us/windows)
+[
+
+![OS: Linux](https://img.shields.io/badge/os-Linux-yellow.svg)
+
+](https://www.linuxfoundation.org/)
+[
+
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+
+](https://opensource.org/licenses/MIT)
+
+**Touch2Key** is a high-performance, cross-platform input mapper that translates touches on an Android device (via ADB) into low-latency keyboard and mouse input on your PC.
+
+This is the second published Touch2Key implementation, with a full GUI, CLI support, and improved functionality.
+The first version (CLI only, basic GUI windows) is available [here](https://github.com/Chukxz/touch2keybare).
+
+## At a Glance
+
+* **What it does:** Your phone's touchscreen becomes a configurable gamepad/HUD for PC games: buttons, joysticks, camera look, and mouse.
+* **Platforms:** Windows (Interception driver) and Linux (`evdev`/`uinput`, X11). Android device required.
+* **Two ways to run:** `touch2key-gui` (full GUI, recommended) or `touch2key` (CLI with runtime hotkeys).
+* **Admin rights:** needed only for setup and uninstall. Daily use runs as a normal user.
+* **Settings live in SQLite.** TOML/JSON are for import/export only.
+
+## Quick Start
+
+1. On your Android device, enable **Developer Options** and **USB Debugging**, then accept the RSA fingerprint prompt when you connect it.
+2. Install (inside a virtual environment, see [Installation](#installation)):
+   ```bash
+   pip install .
+   ```
+3. Run setup once (requires Administrator/`sudo`; reboot on Windows afterwards):
+   ```bash
+   touch2key-setup
+   ```
+4. Launch:
+   ```bash
+   touch2key-gui     # GUI (also available from the desktop shortcut created by setup)
+   touch2key         # CLI
+   ```
+5. Pick your target game window, draw your layout in **Layout Studio** (GUI), and start the engine.
+
+> **Wireless play:** connect your PC to your phone's hotspot and plug in the USB cable for the initial handshake. Once the app logs that the device connected wirelessly, you can unplug the cable.
+>
+> *If you also use game streamers like **Sunshine/Moonlight** or **Apollo/Artemis**, disable all virtual controller/mouse inputs in the streaming host to avoid mapping conflicts.*
 
 ---
 
 ## Architecture & Core Features
 
-* **5-Stage Input Pipeline:** Every touch contact is processed through an isolated, modular 5-stage pipeline:
+* **5-Stage Input Pipeline:** every touch contact passes through an isolated, modular pipeline:
   `Region` -> `Origin` -> `Constraint` -> `Transformation` -> `Semantic`
-  Decoupling spatial detection, reference baselines, mechanical bounds, mathematical transforms, and driver emissions eliminates state drift and input fighting.
+  Separating spatial detection, reference baselines, bounds, math transforms, and driver output prevents state drift and input fighting.
 
-* **Prioritized Deterministic Dispatching:** Touch contacts are routed using a strict 5-key precedence sort:
-    1. **Type Precedence** (`SystemToggle: 4` > `Button: 2` > `Joystick: 1` > `Mouse: 0`)
-  2. **Explicit Priority** (Custom user tier: `+200` to `-100`)
-  3. **Allow Multi Claim** (Splits a tier into allow_multi_claim `True` (sorted first) and `False` (sorted last) tiers.
-  4. **Hitbox Specificity** (Smaller bounding areas evaluate before broad/full-screen zones)
-  5. **Creation Order** (Deterministic tie-breaker)
+* **Deterministic Dispatching:** contacts are routed by a strict 5-key precedence sort:
+  1. **Type Precedence** (`SystemToggle: 4` > `Button: 2` > `Joystick: 1` > `Mouse: 0`)
+  2. **Explicit Priority** (custom tier: `+200` to `-100`)
+  3. **Allow Multi Claim** (splits a tier into `True` (sorted first) and `False` (sorted last))
+  4. **Hitbox Specificity** (smaller areas evaluate before broad/full-screen zones)
+  5. **Creation Order** (deterministic tie-breaker)
 
-* **Hardware-Accurate Typematic Engine (Key Auto-Repeat):**
-  * **Dedicated Low-Level Repeat Loop:** Hardware-accurate repeat pulses execute directly inside driver worker processes without pipe saturation or IPC latency.
-  * **Focus-Stealing for Diagonal Keys:** Pressing a new key steals typematic repeat focus without sending artificial `KEY_UP` releases to currently held keys, allowing diagonal movement to hold cleanly while spamming action keys.
-  * **Dynamic IPC Hot-Reloading:** Delay, rate, and exclusion sets can be altered live via the GUI or CLI without restarting the worker processes.
+* **Hardware-Accurate Typematic (Key Auto-Repeat):**
+  * Repeat pulses run inside the driver worker processes, with no pipe saturation or IPC latency.
+  * Pressing a new key steals repeat focus without releasing held keys, so diagonal movement stays held while you spam action keys.
+  * Delay, rate, and exclusions can be changed live from the GUI or CLI without restarting workers.
 
-* **Defensive Input Ownership & Multi-Claim:**
-  * **Simultaneous Firing:** Overlapping buttons sharing the same priority tier claim contacts concurrently, enabling multi-key combos from a single touch.
-  * **Single-Owner Isolation:** Joysticks and camera look enforce strict single-contact ownership, preventing jitter, delta duplication, or direction fluttering.
+* **Defensive Input Ownership:**
+  * **Multi-claim:** overlapping buttons in the same priority tier claim a contact together, enabling multi-key combos from one touch.
+  * **Single-owner:** joysticks and camera look own exactly one contact, preventing jitter and duplicated deltas.
 
-* **Hybrid Mode Switching (In-Game vs. Menu/Lobby):**
-  * **In-Game Mode (Cursor Hidden):** Custom HUD zones capture taps/drags to drive game controls.
-  * **Menu Mode (Cursor Visible):** Game buttons deactivate automatically, passing single-touch events through as absolute desktop clicks (`device_to_game_abs`) for clean lobby, map, and inventory navigation.
-  * **Hardware-Free Return Gates & Bezel Toggles (SystemToggle):** Control the engine state directly from the touchscreen without reaching for your PC keyboard. *Both systems are independently toggleable in your global settings, and the required bezel zones are automatically seeded and guaranteed to exist in every layout:*
-    * **Top Bezel:** Instantly toggles cursor visibility (switches between Game Mode and Menu Mode).
-    * **Bottom Bezel:** Loads the Virtual Keyboard. This runs in production mode sending direct IPC commands to the engine for zero-latency typing, bypassing standalone CLI testing modes.
-    * **Two Finger Tap Quick Return:** If the cursor is currently *visible* (Menu Mode), tapping two fingers anywhere on the screen will instantly hide it and return you to Game Mode. (Two finger tap is ignored while already in-game to prevent accidental triggers).
+* **Hybrid Mode Switching (In-Game vs. Menu):**
+  * **In-Game (cursor hidden):** HUD zones capture taps/drags to drive game controls.
+  * **Menu (cursor visible):** game buttons deactivate and single touches become absolute desktop clicks, for lobby, map, and inventory navigation.
+  * **Touchscreen-only switching:** *both are toggleable in settings, and the bezel zones are seeded in every layout automatically.*
+    * **Top Bezel:** toggles cursor visibility (Game Mode / Menu Mode).
+    * **Bottom Bezel:** opens the Virtual Keyboard (direct IPC to the engine for low-latency typing).
+    * **Two-Finger Tap:** in Menu Mode, tap two fingers anywhere to hide the cursor and return to Game Mode. Ignored while in-game.
 
-* **Dynamic Camera & Joystick Integration:**
-  * **Buttons:** Configurable `pointer` zones emit simultaneous keypresses and camera deltas (e.g., for aiming while shooting).
-  * **Fixed vs. Anchored/Floating Joysticks:** Fixed HUD joysticks free the rest of the display for full-screen camera look. Anchored and Floating joysticks partition screen halves dynamically based on user handedness and subsequently leash. Anchored joysticks initially snap (bounded by the snap radius) to fixed joystick HUD coordinates in the joystick region unlike Floating joysticks that report the initial touch position in the HUD region.
+* **Camera & Joysticks:**
+  * **Buttons:** `pointer` zones emit keypresses and camera deltas together (e.g. aiming while shooting).
+  * **Fixed joysticks** leave the rest of the screen free for camera look. **Anchored** and **Floating** joysticks split the screen by handedness. Anchored joysticks snap (within the snap radius) to the fixed HUD position; Floating joysticks start where you touch.
 
-* **Platform-Native Injection:** Low-level Windows NT kernel injection via the Interception driver and Linux `evdev`/`uinput` subsystem (X11 supported).
+* **Platform-Native Injection:** Windows via the Interception driver, Linux via `evdev`/`uinput` (X11 supported).
 
-* **Zero-Latency Processing:** Dedicated multiprocessing workers and helper threads with sub-millisecond heartbeat monitors and real-time status logging.
+* **Multiprocess by design:** dedicated worker processes and helper threads, with heartbeat monitors and live status logging.
 
-* **Interactive Plotting GUI & Layout Editor:** Comprehensive PySide6/Matplotlib interface supporting direct visual placement, live priority adjustments (`P`/`O` keys or toolbar spinboxes), dynamic zone sizing, and SQLite database storage.
+* **Layout Editor (GUI):** PySide6/Matplotlib canvas for placing zones, adjusting priorities (`P`/`O` keys or the inspector), resizing, and saving to SQLite.
 
-* **Live Input Visualizer (`touch2key-visualizer`):** A dedicated real-time testing environment. It dynamically loads your active layout zones to highlight exact hitboxes as you trigger them, and explicitly respects your configured game `toggle_key` so you can verify cursor state toggling and mappings safely outside of a live game environment.
+* **Live Input Visualizer (`touch2key-visualizer`):** loads your active layout, highlights hitboxes as you trigger them, and respects your configured `toggle_key`, so you can test mappings outside a game.
 
-* **Anti-Cheat Safe:** Humanized dwell times and randomized click durations for strictly user-initiated actions. No macros, automated scripts, or game-state tampering.
+* **Anti-Cheat Safe:** humanized dwell times and randomized click durations for user-initiated actions only. No macros, scripts, or game-state tampering.
 
 ---
 
 ## Window Selection & Persistence
 
-On startup in CLI mode, the engine launches an interactive Window Selector dialog or refreshing terminal (depends on the `--use-gui` flag), that lists all active desktop windows with their process titles and window classes. In GUI mode, configuration is dynamic and not tied to startup. 
-The Interception mouse and keyboard device can also be configured when running on Windows.
-
-* **Initial Binding:** Select your target emulator or native PC game window. The engine binds directly to its process and window ID.
-* **Self-Healing Window Tracking:** If the target window is lost due to a crash or restart, the engine uses the captured window class name to automatically re-acquire the largest active visible instance, maintaining your mapping session without manual intervention.
+* **CLI mode:** on startup the engine shows a window selector (a refreshing terminal list, or a dialog with `--use-gui`) listing active windows with their titles and classes. On Windows you can also choose the Interception keyboard and mouse devices.
+* **GUI mode:** configuration is dynamic and not tied to startup. Change the target window and devices any time from **Settings**.
+* **Self-healing tracking:** if the target window is lost (crash or restart), the engine uses the saved window class to re-acquire the largest visible matching window automatically.
 
 ---
 
 ## Key Customization & Storage
 
-* **Capture Dialog:** Binds core control keys (such as **Toggle** and **Sprint**) and configures performance limits (Rate Cap and Polls Per Second).
-* **SQLite Single Source of Truth:** Layout zones, priorities, hitboxes, and runtime defaults (including system gestures and typematic rules) are stored persistently in SQLite tables (`touch2key.db`) with foreign-key cascade protection. **The database is the single source of truth for the engine.** 
-* **Import/Export Bundles:** TOML and JSON formats are used strictly for importing, exporting, and sharing configuration bundles or legacy layouts. They are never used for active runtime state storage.
+* **Capture:** bind the core keys (**Toggle** and **Sprint**) and set performance limits (**ADB Rate Cap** and **PPS Alert Threshold**).
+* **SQLite is the single source of truth** (`touch2key.db`): layout zones, priorities, hitboxes, and runtime defaults (system gestures, typematic rules), with foreign-key cascade protection.
+* **Import/Export bundles:** TOML and JSON are used only to import, export, and share configurations or legacy layouts, never for active runtime state.
 
 ---
 
 ## Connectivity & Device Management
 
-* **Auto-Adaptive Multi-Touch:** Automatically queries Android touchscreen driver configurations (`ABS_MT_*` event capabilities and slot counts) over ADB upon connection.
-* **Wired & Wireless ADB:** Native high-speed direct USB routing. For wireless play, simply connect your PC to the phone's Wi-Fi hotspot and plug in the USB cable. Once the `adb tcpip 5555` handshake completes and the application logs a successful wireless connection, you can unplug the cable and play completely wirelessly.
-* **Resilient Event Stream:** Cable disconnects or Wi-Fi drops automatically pause the input pump and resume processing once ADB reconnects, avoiding application crashes or hung keys.
+* **Auto-adaptive multi-touch:** queries the touchscreen's `ABS_MT_*` capabilities and slot count over ADB on connect.
+* **Wired & wireless ADB:** USB by default. For wireless play, connect to the phone's hotspot, plug in USB, and wait for the successful `adb tcpip 5555` handshake log before unplugging.
+* **Resilient stream:** cable or Wi-Fi drops pause the input pump and resume when ADB reconnects, with no crashes or stuck keys.
 
 ---
 
 ## Automated Maintenance & Privacy
 
-Touch2Key features built-in housekeeping to ensure logs and diagnostic files never bloat your storage, while still keeping enough history for effective troubleshooting.
-
-* **Application Logs:** Automatically pruned after **60 days (2 months)** or capped at a maximum of **100 files**, whichever comes first.
-* **Diagnostic Dumps:** Retained for up to **60 days** and capped at the **20 most recent files**.
-* **Local Storage:** All logs and runtime data are securely stored locally inside your centralized `data/` directory and are completely isolated from permanent application assets.
+* **Application logs:** pruned after **60 days** or beyond **100 files**, whichever comes first.
+* **Diagnostic dumps:** kept up to **60 days**, capped at the **20 most recent** files.
+* **Local only:** logs and runtime data are stored in the local `data/` directory, separate from application assets.
 
 ---
 
 ## Icon Shortcuts
 
-The app sets up an icon shortcut on your desktop (that launches the GUI directly) when setup is run either from the GUI (GUI script command: `touch2key-gui`) or from the terminal (CLI setup command: `touch2key-setup`), aside from managing essential stuff like binaries, drivers, and rules. Uninstallation also works similarly and always removes the icon shortcut, aside from managing those same essential items and application data.
+Running setup from the GUI (`touch2key-gui`) or the terminal (`touch2key-setup`) also creates a desktop shortcut that launches the GUI. Uninstalling always removes it.
 
 ---
 
@@ -111,19 +147,19 @@ The app sets up an icon shortcut on your desktop (that launches the GUI directly
 ### Prerequisites
 * Python 3.10+
 * Android device with **USB Debugging** enabled
-* **Windows users:** Administrator privileges required during **initial setup** (to install the Interception driver) and **uninstallation**. Daily execution runs under a standard user account.
-* **Linux users:** `sudo` access required during **initial setup** (for `uinput`/`udev` rules) and **uninstallation**. Daily execution runs under a standard user account.
+* **Windows:** Administrator privileges for **initial setup** (Interception driver) and **uninstallation**. Daily use runs as a standard user.
+* **Linux:** `sudo` for **initial setup** (`uinput`/`udev` rules) and **uninstallation**. Daily use runs as a standard user.
 
-### Setup
-* **Install:** Remember to create a virtual environment on your machine by using the appropriate `venv` command and activating it (depending on your OS) after navigating to the `Touch2Key` directory on your machine before running the `pip install .` command as it is the standard python practice to avoid package conflicts and ensure isolation.
+### Install
+Use a virtual environment to avoid package conflicts:
 
 ```bash
-git clone [https://github.com/Chukxz/Touch2Key.git](https://github.com/Chukxz/Touch2Key.git)
+git clone https://github.com/Chukxz/Touch2Key.git
 cd Touch2Key
 python -m venv .venv
 
 # Windows: .venv\Scripts\activate
-# Linux: source .venv/bin/activate
+# Linux:   source .venv/bin/activate
 
 pip install .
 ```
@@ -132,53 +168,29 @@ pip install .
 
 | Action | Command | Description |
 | :--- | :--- | :--- |
-| **Standard** | `touch2key-setup` | Runs the OS configuration wizard and installs drivers/rules/binaries and shortcuts. |
-| **Skip Confirmation** | `touch2key-setup [--yes, -y]` | Skip confirmation prompts / run non-interactively. |
-| **Skip Reboot** | `touch2key-setup --no-restart` | Skip reboot prompt after setup (Windows). |
+| **Standard** | `touch2key-setup` | Runs the OS configuration wizard: installs drivers, rules, binaries, and shortcuts. |
+| **Skip Confirmation** | `touch2key-setup [--yes, -y]` | Runs non-interactively. |
+| **Skip Reboot** | `touch2key-setup --no-restart` | Skips the reboot prompt (Windows). |
 
-*(Note: Windows requires a system reboot after installation to fully load the driver).*
+*(Windows requires a reboot after installation to load the driver.)*
 
 ---
 
 ## Uninstallation
 
-Because Touch2Key installs system-level drivers and kernel rules, **simply running `pip uninstall Touch2Key` is not sufficient.** You should first run the included uninstaller before uninstalling via pip.
+Touch2Key installs system-level drivers and kernel rules, so **`pip uninstall Touch2Key` alone is not enough.** Run the uninstaller first.
 
-> **Elevation Note:** Running the uninstaller requires **Administrator** (Windows) or **sudo** (Linux) privileges to successfully unregister the kernel drivers and system rules.
-
-### Uninstallation Commands
+> **Elevation:** requires **Administrator** (Windows) or **sudo** (Linux).
 
 | Action | Command | Description |
 | :--- | :--- | :--- |
-| **Standard** | `touch2key-uninstall` | Removes drivers/rules/binaries/shortcuts; preserves all user data. |
-| **Purge** | `touch2key-uninstall --purge` | Removes drivers/rules/binaries/shortcuts **AND** deletes all user data — all saved jsons/images/profiles (bundles) files, settings toml file, runtime files, and database files. |
-| **Purge-All** | `touch2key-uninstall --purge-all` | Removes drivers/rules/binaries/shortcuts **AND** deletes all user and diagnostic data — all saved jsons/images/profiles (bundles) files, settings toml file, runtime files, database files, **AND** the diagnostics (profiling — .prof) and log files. |
-| **Skip Confirmation** | `touch2key-uninstall [--yes, -y]` | Skip confirmation prompt. |
-| **Skip Reboot** | `touch2key-uninstall --no-restart` | Skip reboot prompt (Windows). |
+| **Standard** | `touch2key-uninstall` | Removes drivers, rules, binaries, and shortcuts; keeps all user data. |
+| **Purge** | `touch2key-uninstall --purge` | As above, **and** deletes user data: jsons, images, profile bundles, settings TOML, runtime files, and the database. |
+| **Purge-All** | `touch2key-uninstall --purge-all` | As Purge, **and** deletes diagnostics (`.prof`) and log files. |
+| **Skip Confirmation** | `touch2key-uninstall [--yes, -y]` | Skips the confirmation prompt. |
+| **Skip Reboot** | `touch2key-uninstall --no-restart` | Skips the reboot prompt (Windows). |
 
-*(Note: Windows requires a system reboot after uninstallation to fully release the driver).*
-
----
-
-### CLI Global Hotkeys
-
-When running the engine in CLI mode, these hotkeys control runtime behavior on the fly. They only trigger while your terminal is the active foreground window, so they never interfere with games or other applications. Losing focus counts as releasing every key.
-
-| Hotkey | Action | Step / Bounds | Description |
-| :--- | :--- | :--- | :--- |
-| `Esc` | Shutdown | — | Gracefully terminates the CLI engine session and cleans up worker processes. |
-| `F5` | Handedness Toggle | `True` / `False` | Switches layout orientation between left- and right-handed modes, then reloads. |
-| `F6` | Reload | — | Reloads the active layout, zone pipelines and global engine settings (including typematics) live from SQLite. |
-| `Left` / `Right` | Rate Cap (Hz) | ±10.0 Hz `[30.0 – 1000.0]` | Tunes the mouse flush and touch reader polling rate. Hold to auto-repeat. |
-| `Down` / `Up` | PPS Alert Threshold | ±5.0 PPS `[10.0 – 500.0]` | Tunes the touch monitoring threshold. Hold to auto-repeat. |
-
-#### Key behavior
-
-- **Arrow keys (hold to repeat):** a press steps once immediately. After a 400 ms hold, repeat starts at 5 Hz and ramps along a cubic curve up to 30 Hz over 1.5 s. The operating system's own key repeat is ignored. Releasing the key resets the ramp.
-- **F5 / F6 (single action):** each physical press fires once, and holding the key does nothing further. A shared 350 ms cooldown prevents accidental double triggers.
-- **Opposing keys cancel:** holding Left + Right (or Down + Up) together does nothing until one is released. Keys on different axes work simultaneously.
-- **Live status line:** while an arrow key is held, one terminal line updates in place with the current `Rate Cap` and `PPS`. Other log output is held back and replayed in order on release. A quick tap shows no live line but logs the new value once.
-- **Persistence:** values change in memory on every step. The SQLite write and layout reload are batched to at most once every 250 ms, and the final value is always saved after release.
+*(Windows requires a reboot after uninstallation to release the driver.)*
 
 ---
 
@@ -187,30 +199,33 @@ When running the engine in CLI mode, these hotkeys control runtime behavior on t
 | Command | Description |
 | :--- | :--- |
 | `touch2key` | Launches the engine in CLI mode. |
-| `touch2key --profile` | Launches the engine in CLI mode and also runs profiling. |
-| `touch2key --use-gui` | Launches the engine in CLI mode with a QApplication context (not the same as a full GUI but with some GUI windows). |
-| `touch2key-adb` | Displays full ADB executable path if found. |
+| `touch2key --profile` | CLI mode with profiling. |
+| `touch2key --use-gui` | CLI mode with a QApplication context (some GUI windows, not the full GUI). |
+| `touch2key-gui` | Launches the full GUI. |
+| `touch2key-gui --profile` | GUI mode with profiling. |
+| `touch2key-gui --terminal-log {auto,on,off}` | Terminal log output in GUI mode. `auto` (default) prints only if a terminal exists, `on` prints whenever a console stream exists, `off` never prints. Logs are always written to the log file. |
+| `touch2key-adb` | Shows the full ADB executable path, if found. |
 | `touch2key-capture` | ADB screen capture. |
-| `touch2key-gui` | Launches the engine in GUI mode. |
-| `touch2key-gui --profile` | Launches the engine in GUI mode and also runs profiling. |
-| `touch2key-manage` | Interactive Layout, Profile, Image, and Typematic Manager. |
+| `touch2key-manage` | Interactive Layout, Profile, Image, and Typematic manager. |
 | `touch2key-plot` | Mapping visualizer. |
 | `touch2key-preflight` | Diagnostic checks. |
-| `touch2key-setup` | Runs the OS configuration wizard and installs drivers/rules/binaries and shortcuts. |
-| `touch2key-stats` | Runtime registry and telemetry snapshot for the running engine. |
-| `touch2key-uninstall` | Safely removes drivers, rules, binaries, and shortcuts. |
-| `touch2key-wireless` | Forces ADB wireless connection. |
-| `touch2key-keyboard` | Test the virtual keyboard program output in standalone mode. |
-| `touch2key-visualizer` | Live event visualizer that dynamically loads active layout zones to highlight triggered hitboxes, and respects your configured game toggle key for cursor state testing. |
+| `touch2key-setup` | OS configuration wizard (drivers, rules, binaries, shortcuts). |
+| `touch2key-stats` | Live telemetry for the running engine. |
+| `touch2key-uninstall` | Removes drivers, rules, binaries, and shortcuts. |
+| `touch2key-wireless` | Forces an ADB wireless connection. |
+| `touch2key-keyboard` | Tests the virtual keyboard output standalone. |
+| `touch2key-visualizer` | Live event visualizer with your active layout and toggle key. |
 
-### One Line CLI Flag
-One-line comma-separated config: 'window_id,toggle_key,sprint_key,rate_cap,pps,k_device,m_device', use empty strings or omit commas for defaults/database values, e.g. ',,,100,50,,'
+### One-Line Config Flag
+Comma-separated: `window_id,toggle_key,sprint_key,rate_cap,pps,k_device,m_device`. Use empty values for defaults/database values, e.g. `,,,100,50,,`
+
 ```bash
 touch2key --config
 ```
 
-### Typematic & System Commands (via Layout Manager)
-You can directly configure hardware auto-repeat behavior, two finger taps, bezel toggles, and left-handed mode via `touch2key-manage`:
+### Typematic & System Commands (`touch2key-manage`)
+Configure auto-repeat, two-finger tap, bezel toggles, and left-handed mode:
+
 ```bash
 touch2key-manage --show-typematic
 touch2key-manage --set-typematic on --typematic-delay 200 --typematic-rate 35
@@ -220,30 +235,50 @@ touch2key-manage --show-system
 touch2key-manage --set-two-finger-tap off
 touch2key-manage --set-bezel-toggle on
 touch2key-manage --reset-system
-touch2key-manage --set-image <layout_id> path/to/hud_screenshot.png  # e.g., --set-image 1 hud.png
+touch2key-manage --set-image <layout_id> path/to/hud_screenshot.png  # e.g. --set-image 1 hud.png
 touch2key-manage --set-left-handed on
 ```
 
-### Telemetry Commands
+### Telemetry (`touch2key-stats`)
+Attaches to a running engine (GUI or CLI):
+
 ```bash
 touch2key-stats                  # sample every second until Ctrl+C
 touch2key-stats -i 5             # every 5 seconds
 touch2key-stats --once           # one sample; exit code 1 if no engine
 touch2key-stats --json >> t.log  # JSON Lines, one object per sample
-touch2key-stats -c, --clear      # Wipes previous terminal output (if json flag is not set)
+touch2key-stats -c, --clear      # clear the terminal between samples (ignored with --json)
 ```
 
 ---
 
+## CLI Global Hotkeys
+
+In CLI mode these hotkeys tune the engine live. They only trigger while your terminal is the foreground window, so they never interfere with games, and losing focus counts as releasing every key.
+
+| Hotkey | Action | Step / Bounds | Description |
+| :--- | :--- | :--- | :--- |
+| `Esc` | Shutdown | — | Gracefully stops the engine and its worker processes. |
+| `F5` | Handedness Toggle | `True` / `False` | Switches between left- and right-handed layouts, then reloads. |
+| `F6` | Reload | — | Reloads the layout, pipelines, and settings (including typematic) from SQLite. |
+| `Left` / `Right` | Rate Cap (Hz) | ±10.0 Hz `[30.0 – 1000.0]` | Tunes the mouse flush and touch reader polling rate. Hold to repeat. |
+| `Down` / `Up` | PPS Alert Threshold | ±5.0 PPS `[10.0 – 500.0]` | Tunes the touch monitoring threshold. Hold to repeat. |
+
+**Behavior**
+- **Arrow keys:** one step on press. After a 400 ms hold, repeat starts at 5 Hz and ramps along a cubic curve to 30 Hz over 1.5 s. OS key repeat is ignored, and releasing resets the ramp.
+- **F5 / F6:** one action per physical press, with a shared 350 ms cooldown.
+- **Opposing keys cancel:** Left + Right (or Down + Up) together do nothing. Different axes work simultaneously.
+- **Live status line:** while an arrow key is held, one terminal line shows the current `Rate Cap` and `PPS`. Other log output is held and replayed on release.
+- **Persistence:** values change in memory on every step. The SQLite write and reload are batched to at most once every 250 ms, and the final value is always saved after release.
+
+In **GUI mode** the arrow keys belong to Qt. Change the same values on the **Settings** page (ADB Rate Cap and PPS Alert Threshold).
+
+---
+
 ## Contributing
-Please use `black` for formatting (recommended), `pytest` for unit testing (optional), and `snakeviz` for visual view of the profile (optional).
-
-Install these via running `pip install .[dev]` during installation.
-
-To support editable mode, run `pip install -e .[dev]` (add the `-e` flag) during installation, but note that contributions to the Touch2Key's github repository would likely require permissions from the author(s).
+Use `black` for formatting (recommended), `pytest` for tests (optional), and `snakeviz` to view profiles (optional). Install them with `pip install .[dev]`, or `pip install -e .[dev]` for editable mode. Contributions to the main repository likely require the author's permission.
 
 ---
 
 ## License
 MIT License.
->>>>
