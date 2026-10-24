@@ -5,6 +5,8 @@ import multiprocessing
 import argparse
 import cProfile
 import datetime
+import signal
+import logging
 from typing import TYPE_CHECKING, cast
 
 from modules.engine import Engine, shutdown_engine_process
@@ -13,12 +15,14 @@ from modules.scripts.preflight import run as run_preflight
 from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER, ICONS_FOLDER
 from modules.log_manager import AppLogManager, initialize_cleanup
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, QCoreApplication
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 
 if TYPE_CHECKING:
     from cProfile import Profile
+    
+logger = logging.getLogger("modules.main")
 
 cli_profiler: Profile | None = None
 
@@ -30,13 +34,12 @@ def profiler_cleanup(prof: Profile | None, filename: str = "touch2key_cli") -> N
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         dump_file_path = DIAGNOSTICS_FOLDER / f"{filename}_{timestamp}.prof"
         prof.dump_stats(dump_file_path)
-        print(f"[+] Profiling data saved to: {dump_file_path}")
+        logger.info(f"[+] Profiling data saved to: {dump_file_path}")
 
 
 def run(parser: argparse.ArgumentParser | None = None) -> None:
     global cli_profiler
-    # Initialize CLI logging (terminal output + buffers file output)
-    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_cli")
+    AppLogManager.setup_logging(log_prefix="touch2key_cli")
 
     # -----------------------------------------------------------------------
     # OS & Environment Validation
@@ -47,7 +50,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         if not check_display_protocol():
             sys.exit(1)
     elif sys.platform != "win32":
-        print(f"[!] Unsupported OS: {sys.platform}")
+        logger.info(f"[!] Unsupported OS: {sys.platform}")
         sys.exit(1)
 
     # -----------------------------------------------------------------------
@@ -71,7 +74,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     parser.add_argument(
         "--config",
         type=str,
-        help="One-line comma-separated config: 'window_id,toggle_key,sprint_key,rate_cap,pps,k_device,m_device', use empty strings or omit commas for defaults/database values, e.g. ',,,100,50,,'",
+        help="One-line comma-separated config: 'window_id,toggle_key,slogger.info_key,rate_cap,pps,k_device,m_device', use empty strings or omit commas for defaults/database values, e.g. ',,,100,50,,'",
     )
 
     args = parser.parse_args()
@@ -79,7 +82,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     if args.profile:
         cli_profiler = cProfile.Profile()
         cli_profiler.enable()
-        print(f"[+] Profiling started.")
+        logger.info(f"[+] Profiling started.")
 
     # -----------------------------------------------------------------------
     # Boot Sequence
@@ -96,6 +99,9 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         timer = QTimer()
         timer.start(500)
         timer.timeout.connect(lambda: None)  # Kickstarts the Python interpreter loop
+
+        # Handle Ctrl+C cleanly
+        signal.signal(signal.SIGINT, lambda *_: QCoreApplication.quit())
 
     if not run_preflight():
         profiler_cleanup(cli_profiler)
@@ -125,7 +131,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         else:
             engine._start()
     except KeyboardInterrupt:
-        # print("Engine received shutdown signal, exiting cleanly.")
+        # logger.info("Engine received shutdown signal, exiting cleanly.")
         pass
     finally:
         engine._shutdown()

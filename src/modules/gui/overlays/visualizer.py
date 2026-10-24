@@ -9,7 +9,13 @@ import logging
 from collections import deque
 from typing import TYPE_CHECKING
 
-from modules.utils import bresenham, clamp, get_scancode_from_key, scale_coord, ICONS_FOLDER
+from modules.utils import (
+    bresenham,
+    clamp,
+    get_scancode_from_key,
+    scale_coord,
+    ICONS_FOLDER,
+)
 from modules.database import store
 from modules.platforms import get_platform, get_specific_qt_key, check_single_instance
 
@@ -381,8 +387,8 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
-def _final_write():
-    _write(-1)
+def unregister_visualizer_file():
+    VISUALIZER_RUNTIME_FILE.unlink(missing_ok=True)
 
 
 def _write(payload: int) -> None:
@@ -401,7 +407,7 @@ def run(
     pid = os.getpid()
     _write(pid)
 
-    atexit.register(_final_write)
+    atexit.register(unregister_visualizer_file)
 
     app = QApplication(sys.argv)
     app_icon_path = ICONS_FOLDER / "app.png"
@@ -417,7 +423,7 @@ def run(
 
 def main() -> None:
     """Dedicated entry point for touch2key-visualizer."""
-    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_visualizer")
+    AppLogManager.setup_logging(log_prefix="touch2key_visualizer")
     run()
 
 

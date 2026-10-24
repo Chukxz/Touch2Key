@@ -326,7 +326,8 @@ def run(parent=None) -> bool:
 def main() -> None:
     """Dedicated entry point for touch2key-uninstall script execution."""
     gui = "--gui" in sys.argv[1:]
-    AppLogManager.setup_logging(is_gui=gui, log_prefix="touch2key_uninstall")
+    console = "auto" if gui else "on"
+    AppLogManager.setup_logging(log_prefix="touch2key_uninstall", console=console)
 
     # run() infers GUI mode from QApplication.instance(), so a --gui child
     # must create the QApplication before calling it.

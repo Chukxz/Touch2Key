@@ -9,7 +9,7 @@ logger = logging.getLogger("modules.scripts.wireless_connect")
 
 
 def run() -> None:
-    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_wireless")
+    AppLogManager.setup_logging(log_prefix="touch2key_wireless")
 
     logger.info("Searching for ADB device to establish wireless connection...")
     logger.info("[INFO] Polling continuously. Press Ctrl+C to cancel.")

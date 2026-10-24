@@ -88,7 +88,7 @@ def run(verbose: bool = True, parent=None) -> bool:
 
 def main() -> None:
     """Dedicated entry point for touch2key-preflight script execution."""
-    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_preflight")
+    AppLogManager.setup_logging(log_prefix="touch2key_preflight")
     run()
 
 

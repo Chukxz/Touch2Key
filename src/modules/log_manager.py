@@ -13,11 +13,43 @@ from logging.handlers import MemoryHandler, QueueHandler
 import multiprocessing
 from modules.utils import LOGS_FOLDER, DIAGNOSTICS_FOLDER, prune_directory
 
+_CONSOLE_MODES = ("auto", "on", "off")
+
 
 def initialize_cleanup() -> None:
     """Prunes old log and diagnostics files based on age and count limits."""
     prune_directory(LOGS_FOLDER, max_age_days=60, max_count=100)
     prune_directory(DIAGNOSTICS_FOLDER, max_age_days=60, max_count=20)
+
+
+def _normalize_console_mode(mode: str | bool | None) -> str:
+    if mode is True:
+        return "on"
+    if mode is False:
+        return "off"
+    mode = (mode or "auto").lower()
+    return mode if mode in _CONSOLE_MODES else "auto"
+
+
+def _isatty(stream) -> bool:
+    try:
+        return bool(stream is not None and stream.isatty())
+    except Exception:
+        return False
+
+
+def _windows_console_process_count() -> int:
+    """Processes attached to our console; 0 if we have no console (Windows)."""
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        if not kernel32.GetConsoleWindow():
+            return 0
+        buf = (ctypes.c_uint * 16)()
+        return int(kernel32.GetConsoleProcessList(buf, 16))
+    except Exception:
+        return 0
 
 
 class _StreamToLogger:
@@ -108,22 +140,64 @@ class AppLogManager:
     _memory_handler: MemoryHandler | None = None
     _target_file_handler: logging.FileHandler | None = None
     _console_handlers: list[_SuspendableStreamHandler] = []
+    _console_level = logging.INFO
+    _console_allowed = False  # False in queue (worker) mode
+    _formatter: logging.Formatter | None = None
     _history: collections.deque[str] = collections.deque(maxlen=1000)
     _live_lock = threading.Lock()
     _live_active = False
     _orig_stdout = sys.stdout
     _orig_stderr = sys.stderr
 
+    # ------------------------------------------------------------------
+    # Terminal detection
+    # ------------------------------------------------------------------
+    @classmethod
+    def has_terminal(cls) -> bool:
+        """True if there is a usable terminal to print to.
+
+        False under pythonw.exe / desktop-icon launches without a console.
+        """
+        if cls._orig_stdout is None and cls._orig_stderr is None:
+            return False
+        if sys.platform == "win32":
+            return _windows_console_process_count() > 0
+        return _isatty(cls._orig_stdout) or _isatty(cls._orig_stderr)
+
+    @classmethod
+    def owns_console(cls) -> bool:
+        """Heuristic (Windows): the console was created for this process, i.e.
+        double-click launch of a console script rather than a shell launch.
+
+        Entry-point launcher stubs add a process, so up to 2 counts as owned.
+        Always False on other platforms.
+        """
+        if sys.platform != "win32":
+            return False
+        count = _windows_console_process_count()
+        return 0 < count <= 2
+
+    @classmethod
+    def console_enabled(cls) -> bool:
+        return bool(cls._console_handlers)
+
+    # ------------------------------------------------------------------
+    # Setup
+    # ------------------------------------------------------------------
     @classmethod
     def setup_logging(
         cls,
-        is_gui: bool = False,
         level: int = logging.INFO,
         log_prefix: str = "touch2key",
         log_queue: multiprocessing.Queue | None = None,
+        console: str | bool = "on",
     ) -> None:
         """Initializes logging pipeline. If log_queue is provided, routes logs to the queue
         and skips local file creation.
+
+        console: "auto" (only if a terminal exists), "on" (whenever a stream
+        exists), "off". Booleans are accepted. Can be changed later with
+        set_console(). Ignored in queue mode.
         """
         if cls._initialized:
             return
@@ -135,11 +209,14 @@ class AppLogManager:
             "[%(asctime)s] [%(levelname)s] [%(name)s]: %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
+        cls._formatter = formatter
+        cls._console_level = level
 
         if log_queue is not None:
             # Route all root logs into the multiprocessing queue (no file saved)
             queue_handler = QueueHandler(log_queue)
             root_logger.addHandler(queue_handler)
+            cls._console_allowed = False
         else:
             # Standard local file and memory buffering mode
             LOGS_FOLDER.mkdir(parents=True, exist_ok=True)
@@ -159,25 +236,8 @@ class AppLogManager:
             )
             root_logger.addHandler(cls._memory_handler)
 
-            if not is_gui:
-                # No-console launches (pythonw.exe) have None streams;
-                # StreamHandler(None) falls back to None and recurses.
-                if cls._orig_stdout is not None:
-                    stdout_handler = _SuspendableStreamHandler(cls._orig_stdout, history=cls._history)
-                    stdout_handler.setFormatter(formatter)
-                    stdout_handler.setLevel(level)
-                    stdout_handler.addFilter(
-                        lambda record: level <= record.levelno < logging.WARNING
-                    )
-                    root_logger.addHandler(stdout_handler)
-                    cls._console_handlers.append(stdout_handler)
-
-                if cls._orig_stderr is not None:
-                    stderr_handler = _SuspendableStreamHandler(cls._orig_stderr, history=cls._history)
-                    stderr_handler.setFormatter(formatter)
-                    stderr_handler.setLevel(logging.WARNING)
-                    root_logger.addHandler(stderr_handler)
-                    cls._console_handlers.append(stderr_handler)
+            cls._console_allowed = True
+            cls.set_console(console)
 
             atexit.register(cls.flush_and_close)
 
@@ -188,6 +248,89 @@ class AppLogManager:
         sys.stderr = _StreamToLogger(stderr_logger, logging.ERROR, cls._orig_stderr)
 
         cls._initialized = True
+
+    # ------------------------------------------------------------------
+    # Runtime console toggle
+    # ------------------------------------------------------------------
+    @classmethod
+    def set_console(cls, mode: str | bool | None = "auto") -> bool:
+        """Turn terminal logging on/off at runtime. Returns True if active.
+
+        Never raises: with no usable stream, "on" simply stays inactive.
+        """
+        if not cls._console_allowed:
+            return False
+
+        mode = _normalize_console_mode(mode)
+        want = mode == "on" or (mode == "auto" and cls.has_terminal())
+
+        if want and not cls._console_handlers:
+            cls._add_console_handlers()
+            if not cls._console_handlers:
+                logging.getLogger(__name__).debug(
+                    "Terminal logging requested (%s) but no console stream exists.",
+                    mode,
+                )
+        elif not want and cls._console_handlers:
+            cls._remove_console_handlers()
+        return bool(cls._console_handlers)
+
+    @classmethod
+    def _add_console_handlers(cls) -> None:
+        root_logger = logging.getLogger()
+        level = cls._console_level
+
+        # No-console launches (pythonw.exe) have None streams;
+        # StreamHandler(None) falls back to sys.stderr and recurses.
+        if cls._orig_stdout is not None:
+            stdout_handler = _SuspendableStreamHandler(
+                cls._orig_stdout, history=cls._history
+            )
+            stdout_handler.setFormatter(cls._formatter)
+            stdout_handler.setLevel(level)
+            stdout_handler.addFilter(
+                lambda record: level <= record.levelno < logging.WARNING
+            )
+            root_logger.addHandler(stdout_handler)
+            cls._console_handlers.append(stdout_handler)
+
+        if cls._orig_stderr is not None:
+            stderr_handler = _SuspendableStreamHandler(
+                cls._orig_stderr, history=cls._history
+            )
+            stderr_handler.setFormatter(cls._formatter)
+            stderr_handler.setLevel(logging.WARNING)
+            root_logger.addHandler(stderr_handler)
+            cls._console_handlers.append(stderr_handler)
+
+    @classmethod
+    def _remove_console_handlers(cls) -> None:
+        cls.end_live_line()
+        root_logger = logging.getLogger()
+        for handler in cls._console_handlers:
+            handler.resume(force=True)  # don't swallow held records
+            root_logger.removeHandler(handler)
+        cls._console_handlers.clear()
+
+    @classmethod
+    @contextlib.contextmanager
+    def raw_streams(cls):
+        """Temporarily restore the real stdout/stderr.
+
+        Use around code that prints formatted text, e.g. argparse usage and
+        --help, which the redirect would otherwise strip and split into
+        prefixed log lines. With no terminal the streams may be None; the
+        redirect is then left in place so nothing crashes.
+        """
+        saved = sys.stdout, sys.stderr
+        if cls._orig_stdout is not None:
+            sys.stdout = cls._orig_stdout
+        if cls._orig_stderr is not None:
+            sys.stderr = cls._orig_stderr
+        try:
+            yield
+        finally:
+            sys.stdout, sys.stderr = saved
 
     @classmethod
     def write_record(cls, record: logging.LogRecord) -> None:

@@ -284,7 +284,7 @@ class Engine:
 
             self.rate_cap = new_rate
             if self.touch_reader is not None:
-                self.touch_reader.set_rate_cap(new_rate)
+                self.touch_reader.set_rate_cap(self.rate_cap)
             return True
 
     def _adjust_pps_cli(self, delta: float) -> bool:
@@ -415,7 +415,7 @@ class Engine:
                 self.pps = settings.pps_alert_threshold or DEFAULT_PPS
 
         if self.touch_reader is not None:
-            self.touch_reader.set_rate_cap(rate)
+            self.touch_reader.set_rate_cap(self.rate_cap)
 
         with self.lock:
             self._release_active_inputs()
@@ -890,7 +890,7 @@ def _read_visualizer() -> int | None:
 
 
 def run_engine_process(conn: Connection, log_queue: Queue) -> None:
-    AppLogManager.setup_logging(is_gui=True, log_prefix="engine", log_queue=log_queue)
+    AppLogManager.setup_logging(log_prefix="engine", log_queue=log_queue, console="auto")
     dispatcher = IpcMapperEventDispatcher(conn)
     engine: Engine | None = None
     try:

@@ -159,7 +159,7 @@ def capture_android_screen(custom_img_name: str | None = None, parent=None) -> P
 
 
 def run() -> None:
-    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_capture")
+    AppLogManager.setup_logging(log_prefix="touch2key_capture")
     logger.info("Initializing screen capture...")
     try:
         capture_android_screen()

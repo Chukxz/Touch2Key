@@ -1816,7 +1816,7 @@ def run() -> None:
 
 def main() -> None:
     """Dedicated CLI management entry point."""
-    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_manage")
+    AppLogManager.setup_logging(log_prefix="touch2key_manage")
     run()
 
 

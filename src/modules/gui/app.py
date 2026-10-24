@@ -11,6 +11,7 @@ import sys
 import datetime
 from typing import TYPE_CHECKING, cast
 import signal
+import logging
 
 from PySide6.QtCore import Qt, QCoreApplication, QTimer
 from PySide6.QtWidgets import QApplication
@@ -24,6 +25,8 @@ from modules.log_manager import AppLogManager, initialize_cleanup
 if TYPE_CHECKING:
     from cProfile import Profile
 
+logger = logging.getLogger("modules.gui.app")
+
 gui_profiler: Profile | None = None
 
 
@@ -34,13 +37,12 @@ def profiler_cleanup(prof: Profile | None, filename: str = "touch2key_gui") -> N
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         dump_file_path = DIAGNOSTICS_FOLDER / f"{filename}_{timestamp}.prof"
         prof.dump_stats(dump_file_path)
-        print(f"[+] Profiling data saved to: {dump_file_path}")
+        logger.info(f"[+] Profiling data saved to: {dump_file_path}")
 
 
 def run(parser: argparse.ArgumentParser | None = None) -> None:
     global gui_profiler
-    # Initialize GUI logging (no terminal spam + buffers file output)
-    AppLogManager.setup_logging(is_gui=True, log_prefix="touch2key_gui")
+    AppLogManager.setup_logging(log_prefix="touch2key_gui", console="auto")
 
     # -----------------------------------------------------------------------
     # OS & Environment Validation
@@ -51,7 +53,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         if not check_display_protocol():
             sys.exit(1)
     elif sys.platform != "win32":
-        print(f"[!] Unsupported OS: {sys.platform}")
+        logger.info(f"[!] Unsupported OS: {sys.platform}")
         sys.exit(1)
 
     # -----------------------------------------------------------------------
@@ -65,13 +67,37 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         action="store_true",
         help="Enable cProfile execution tracing",
     )
+    parser.add_argument(
+        "--terminal-log",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="logger.info logs to the terminal: auto (only if one exists), on, off",
+    )
+
+    try:
+        with AppLogManager.raw_streams():
+            args = parser.parse_args()
+    except SystemExit as exc:
+        if exc.code in (0, None):
+            logger.info("Exiting after --help.")
+        else:
+            logger.error("Invalid command-line arguments (exit code %s).", exc.code)
+        raise
+
+    active = AppLogManager.set_console(args.terminal_log)
+    logger.debug(
+        "Terminal logging: requested=%s active=%s has_terminal=%s",
+        args.terminal_log,
+        active,
+        AppLogManager.has_terminal(),
+    )
 
     args = parser.parse_args()
 
     if args.profile:
         gui_profiler = cProfile.Profile()
         gui_profiler.enable()
-        print(f"[+] Profiling started.")
+        logger.info(f"[+] Profiling started.")
 
     # -----------------------------------------------------------------------
     # Boot Sequence (Initialize Qt Application Early)

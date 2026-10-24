@@ -37,8 +37,7 @@ class LayoutStudioWindow(QMainWindow):
 
 
 def run() -> None:
-    # Initialize standard terminal logging (is_gui=False for CLI mode)
-    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_studio")
+    AppLogManager.setup_logging(log_prefix="touch2key_studio")
 
     app = cast(QApplication, QApplication.instance() or QApplication(sys.argv))
     app_icon_path = ICONS_FOLDER / "app.png"

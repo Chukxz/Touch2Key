@@ -139,13 +139,23 @@ def main() -> None:
             for _, p in procs:
                 cached = tracked.get(p.pid)
                 if cached is None or cached != p:  # new, or PID reused
-                    p.cpu_percent(interval=None)  # prime the baseline
+                    try:
+                        p.cpu_percent(interval=None)  # prime the baseline
+                    except psutil.NoSuchProcess:
+                        continue
+                    except psutil.AccessDenied:
+                        pass
                     tracked[p.pid] = p
 
             time.sleep(args.interval)
 
             snap = read_snapshot(engine.pid) or snap  # fresh values after the wait
-            rows = [_proc_stats(role, tracked[p.pid]) for role, p in procs]
+
+            rows = [
+                _proc_stats(role, tracked[p.pid])
+                for role, p in procs
+                if p.pid in tracked
+            ]
 
             if args.json:
                 print(
@@ -158,6 +168,7 @@ def main() -> None:
 
                 stamp = time.strftime("%H:%M:%S")
                 summaries = _summary_lines(snap)
+                print("\n")
                 for summary in summaries:
                     print(f"{stamp}  {summary}", flush=True)
                 for row in rows:
