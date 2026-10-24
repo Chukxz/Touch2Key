@@ -36,7 +36,7 @@ The first version (CLI only, basic GUI windows) is available [here](https://gith
    ```
 5. Pick your target game window, draw your layout in **Layout Studio** (GUI), and start the engine.
 
-> **Wireless play:** connect your PC to your phone's hotspot (5G WiFi recommended) and plug in the USB cable for the initial handshake. Once the app logs that the device connected wirelessly, you can unplug the cable.
+> **Wireless play:** connect your PC to your phone's hotspot (5GHz WiFi recommended) and plug in the USB cable for the initial handshake. Once the app logs that the device connected wirelessly, you can unplug the cable.
 >
 > *If you also use game streamers like **Sunshine/Moonlight** or **Apollo/Artemis**, disable all virtual controller/mouse inputs in the streaming host to avoid mapping conflicts.*
 
