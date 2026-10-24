@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QEvent, QObject, Qt, QCoreApplication
+from PySide6.QtCore import QEvent, QObject, Qt, QCoreApplication, QTimer
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -59,6 +59,10 @@ if TYPE_CHECKING:
     from modules.gui.main_window import EngineProcessController
 
 logger = logging.getLogger("modules.gui.settings_page")
+
+# Spin box steps are written to the DB (and the engine reloaded) once per this
+# many milliseconds of quiet, instead of once per step.
+_SAVE_DEBOUNCE_MS = 250
 
 # -------------------------------------------------------------------------
 # Input Filters
@@ -282,6 +286,14 @@ class SettingsPage(QWidget):
         self.w_id: int | None = None
         self.k_id: int | None = None
         self.m_id: int | None = None
+
+        # Debounced spin box saves: field -> latest value. Written by one
+        # GUI-thread timer, so the reload is always delivered on the GUI thread.
+        self._pending: dict[str, float] = {}
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(_SAVE_DEBOUNCE_MS)
+        self._save_timer.timeout.connect(self._flush_pending)
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -526,8 +538,39 @@ class SettingsPage(QWidget):
             self.m_id = self.engine_controller.m_id
 
     def _notify_reload(self) -> None:
+        # cooldown=0: delivered synchronously on the calling (GUI) thread. Burst
+        # control for spin boxes is done by the save timer, not the dispatcher.
         if self.dispatcher:
             self.dispatcher.dispatch(MapperEvent(action="ON_RELOAD"))
+
+    # ------------------------------------------------------------------
+    # Debounced saves (continuous spin boxes only)
+    # ------------------------------------------------------------------
+    def _queue_save(self, field: str, value: float) -> None:
+        self._pending[field] = value
+        self._save_timer.start()  # restarts: writes after 250 ms of quiet
+
+    def _flush_pending(self) -> None:
+        """Write queued spin box values now (one DB write, one reload)."""
+        self._save_timer.stop()
+        if not self._pending:
+            return
+        pending, self._pending = self._pending, {}
+        try:
+            store.settings.update(**pending)
+            self._notify_reload()
+        except Exception:
+            logger.exception("Failed to save settings: %s", list(pending))
+
+    def _discard_pending(self) -> None:
+        """Drop queued values (used before a reset/import overwrites them)."""
+        self._save_timer.stop()
+        self._pending.clear()
+
+    def save_state(self) -> bool:
+        """Called by MainWindow.save_all_pages on close and before setup/uninstall."""
+        self._flush_pending()
+        return True
 
     def _wire_signals(self) -> None:
         self.select_window_btn.clicked.connect(self._handle_window_selection)
@@ -682,6 +725,9 @@ class SettingsPage(QWidget):
             self._active_seq_row.stop_recording()
 
     def hideEvent(self, event) -> None:
+        # Flush before load_settings() so a step made just before leaving the
+        # page is saved instead of being overwritten by the DB value.
+        self._flush_pending()
         self._cancel_captures()
         self.load_settings()
         super().hideEvent(event)
@@ -760,6 +806,8 @@ class SettingsPage(QWidget):
             QMessageBox.critical(self, "Error", f"Could not save key binding:\n{exc}")
 
     def load_settings(self) -> None:
+        # Never overwrite spin boxes whose latest step is still queued.
+        self._flush_pending()
         try:
             settings = store.settings.get()
 
@@ -852,35 +900,34 @@ class SettingsPage(QWidget):
         except Exception:
             logger.exception("Failed to update anchored_joystick setting")
 
+    # -- Continuous spin boxes: debounced -------------------------------
     def _on_sensitivity_x_changed(self, value: float) -> None:
-        try:
-            store.settings.update(sensitivity_x=value)
-            self._notify_reload()
-        except Exception:
-            logger.exception("Failed to update X sensitivity setting")
+        self._queue_save("sensitivity_x", value)
 
     def _on_sensitivity_y_changed(self, value: float) -> None:
-        try:
-            store.settings.update(sensitivity_y=value)
-            self._notify_reload()
-        except Exception:
-            logger.exception("Failed to update Y sensitivity setting")
+        self._queue_save("sensitivity_y", value)
 
     def _on_deadzone_changed(self, value: float) -> None:
-        try:
-            store.settings.update(deadzone=value)
-            self._notify_reload()
-        except Exception:
-            logger.exception("Failed to update deadzone setting")
+        self._queue_save("deadzone", value)
 
     def _on_hysteresis_changed(self, value: float) -> None:
-        try:
-            store.settings.update(hysteresis=value)
-            self._notify_reload()
-        except Exception:
-            logger.exception("Failed to update hysteresis setting")
+        self._queue_save("hysteresis", value)
 
+    def _on_rate_cap_changed(self, value: float) -> None:
+        self._queue_save("adb_rate_cap", value)
+
+    def _on_pps_alert_changed(self, value: float) -> None:
+        self._queue_save("pps_alert_threshold", value)
+
+    def _on_typematic_delay_changed(self, value: float) -> None:
+        self._queue_save("typematic_delay_ms", value)
+
+    def _on_typematic_rate_changed(self, value: float) -> None:
+        self._queue_save("typematic_rate_hz", value)
+
+    # -- Resets / toggles: immediate -------------------------------------
     def _on_reset_input_defaults(self) -> None:
+        self._discard_pending()
         try:
             store.settings.update(
                 left_handed=False,
@@ -900,20 +947,6 @@ class SettingsPage(QWidget):
                 self, "Error", f"Failed to reset input controls:\n{exc}"
             )
 
-    def _on_rate_cap_changed(self, value: float) -> None:
-        try:
-            store.settings.update(adb_rate_cap=value)
-            self._notify_reload()
-        except Exception:
-            logger.exception("Failed to update adb_rate_cap setting")
-
-    def _on_pps_alert_changed(self, value: float) -> None:
-        try:
-            store.settings.update(pps_alert_threshold=value)
-            self._notify_reload()
-        except Exception:
-            logger.exception("Failed to update pps_alert_threshold setting")
-
     def _on_typematic_enabled_changed(self, checked: bool) -> None:
         self.typematic_delay_spin.setEnabled(checked)
         self.typematic_rate_spin.setEnabled(checked)
@@ -923,21 +956,8 @@ class SettingsPage(QWidget):
         except Exception:
             logger.exception("Failed to update typematic enabled setting")
 
-    def _on_typematic_delay_changed(self, value: float) -> None:
-        try:
-            store.settings.update(typematic_delay_ms=value)
-            self._notify_reload()
-        except Exception:
-            logger.exception("Failed to update typematic_delay setting")
-
-    def _on_typematic_rate_changed(self, value: float) -> None:
-        try:
-            store.settings.update(typematic_rate_hz=value)
-            self._notify_reload()
-        except Exception:
-            logger.exception("Failed to update typematic_rate setting")
-
     def _on_reset_typematic_defaults(self) -> None:
+        self._discard_pending()
         try:
             store.settings.update(
                 typematic_enabled=True,
@@ -984,6 +1004,7 @@ class SettingsPage(QWidget):
             )
 
     def _on_export_toml(self) -> None:
+        self._flush_pending()  # export reads the DB
         path_str, _ = QFileDialog.getSaveFileName(
             self,
             "Export Settings",
@@ -1005,6 +1026,7 @@ class SettingsPage(QWidget):
             QMessageBox.critical(self, "Export Error", str(exc))
 
     def _on_import_toml(self) -> None:
+        self._discard_pending()  # the import overwrites the DB
         PROFILES_FOLDER.mkdir(parents=True, exist_ok=True)
         path_str, _ = QFileDialog.getOpenFileName(
             self,
@@ -1036,6 +1058,7 @@ class SettingsPage(QWidget):
             QMessageBox.critical(self, "Import Error", f"Failed to import file:\n{exc}")
 
     def _on_export_bundle(self) -> None:
+        self._flush_pending()  # export reads the DB
         PROFILES_FOLDER.mkdir(parents=True, exist_ok=True)
         folder = QFileDialog.getExistingDirectory(
             self, "Select Target Folder for Bundle", str(PROFILES_FOLDER)
@@ -1067,6 +1090,7 @@ class SettingsPage(QWidget):
             QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
+            self._discard_pending()
             try:
                 store.settings.reset_to_defaults()
                 self.load_settings()
@@ -1086,6 +1110,7 @@ class SettingsPage(QWidget):
             QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
+            self._discard_pending()
             try:
                 store.settings.wipe_database()
 
