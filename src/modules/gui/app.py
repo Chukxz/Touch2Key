@@ -90,9 +90,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         args.terminal_log,
         active,
         AppLogManager.has_terminal(),
-    )
-
-    args = parser.parse_args()
+    )   
 
     if args.profile:
         gui_profiler = cProfile.Profile()
