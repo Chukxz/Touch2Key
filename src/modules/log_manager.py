@@ -129,7 +129,6 @@ class AppLogManager:
         if log_queue is not None:
             # Route all root logs into the multiprocessing queue (no file saved)
             queue_handler = QueueHandler(log_queue)
-            queue_handler.setFormatter(formatter)
             root_logger.addHandler(queue_handler)
         else:
             # Standard local file and memory buffering mode
@@ -179,6 +178,12 @@ class AppLogManager:
         sys.stderr = _StreamToLogger(stderr_logger, logging.ERROR, cls._orig_stderr)
 
         cls._initialized = True
+
+    @classmethod
+    def write_record(cls, record: logging.LogRecord) -> None:
+        """Write a record (e.g. from the worker queue) to the file log only."""
+        if cls._memory_handler:
+            cls._memory_handler.handle(record)
 
     # ------------------------------------------------------------------
     # Console suspension / live line
