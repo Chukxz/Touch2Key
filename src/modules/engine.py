@@ -404,8 +404,11 @@ class Engine:
         settings = store.settings.get()
         self.two_finger_tap_enabled = settings.two_finger_tap_enabled
         self.bezel_toggle_enabled = settings.bezel_toggle_enabled
-        self.rate_cap = settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP
-        self.pps = settings.pps_alert_threshold or DEFAULT_PPS
+        with self._adjust_lock:
+            # Uncommitted hotkey steps are newer than the DB; keep them.
+            if not self._settings_dirty:
+                self.rate_cap = settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP
+                self.pps = settings.pps_alert_threshold or DEFAULT_PPS
         with self.lock:
             self._release_active_inputs()
             self._tiers = self._build_pipeline_tiers()
