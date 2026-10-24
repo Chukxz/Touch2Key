@@ -754,6 +754,18 @@ class MainWindow(QMainWindow):
     def _on_wireless_connect(self) -> None:
         connect_wireless_gui(parent=self)
 
+    def _flush_settings(self) -> None:
+        """Write queued Settings spin box steps to the DB.
+
+        Used before the engine starts so the worker reads the latest values.
+        Deliberately does not touch Layout Studio: saving a dirty canvas must
+        stay an explicit user action (Save / Discard prompt).
+        """
+        page = self.pages.get("Settings")
+        save_state = getattr(page, "save_state", None)
+        if save_state is not None:
+            save_state()
+
     def _toggle_engine(self) -> None:
         self.sidebar_engine_btn.setEnabled(False)
 
@@ -761,8 +773,7 @@ class MainWindow(QMainWindow):
             if self.engine_controller.is_running():
                 self.engine_controller.stop_engine()
             else:
-                # Pending settings must be in the DB before the engine reads them.
-                self.save_all_pages()
+                self._flush_settings()
                 self.engine_controller.start_engine(
                     window_id=self.engine_controller.window_id,
                     log_queue=self.log_queue,
@@ -781,7 +792,7 @@ class MainWindow(QMainWindow):
         try:
             if not self.engine_controller.is_running():
                 self.dashboard_page.start_btn.setEnabled(False)
-                self.save_all_pages()
+                self._flush_settings()
                 self.engine_controller.start_engine(
                     window_id=self.engine_controller.window_id,
                     log_queue=self.log_queue,
@@ -928,9 +939,15 @@ class MainWindow(QMainWindow):
             self.nav_toggle_btn.setToolTip("Collapse sidebar")
 
     def save_all_pages(self) -> bool:
-        """Persist state from all GUI pages to the database."""
+        """Persist state from all GUI pages to the database.
+
+        Every page is given the chance to save, even if an earlier one fails,
+        so a failed Layout Studio save can't leave queued Settings steps
+        unwritten. Returns False if any page reported failure.
+        """
         logger.info("Initiating global state save across all pages")
 
+        ok = True
         try:
             for title, page_widget in self.pages.items():
                 save_state = getattr(
@@ -944,10 +961,11 @@ class MainWindow(QMainWindow):
                         "GUI page %s state was not saved",
                         title,
                     )
-                    return False
+                    ok = False
 
-            logger.info("All GUI page states saved successfully")
-            return True
+            if ok:
+                logger.info("All GUI page states saved successfully")
+            return ok
 
         except Exception as exc:
             logger.exception(
