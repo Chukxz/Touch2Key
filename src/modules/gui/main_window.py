@@ -636,13 +636,15 @@ class MainWindow(QMainWindow):
             logger.info("Could not find a page with title '%s'.", title)
 
     def _setup_logging(self) -> None:
-        handler = install_gui_logging(
+        self._gui_log_handler = install_gui_logging(
             logger_name="",
             level=logging.INFO,
         )
-
-        handler.emitter.message.connect(lambda line, _lvl: self.log_console.appendPlainText(line))
+        self._gui_log_handler.emitter.message.connect(self._on_gui_log_line)
         self.log_message.connect(self.log_console.appendPlainText)
+
+    def _on_gui_log_line(self, line: str, levelno: int) -> None:
+        self.log_console.appendPlainText(line)
 
     def _wire_engine_signals(self) -> None:
         controller = self.engine_controller
@@ -1089,13 +1091,16 @@ class MainWindow(QMainWindow):
             if record is None:
                 break
 
-            if getattr(record, "levelno", min_level) < min_level:
+            if not isinstance(record, logging.LogRecord):
+                self.log_message.emit(str(record))
                 continue
 
-            message = (
-                record.getMessage() if hasattr(record, "getMessage") else str(record)
-            )
-            self.log_message.emit(message)
+            # File gets everything, including DEBUG.
+            AppLogManager.write_record(record)
+
+            # Console gets INFO+, formatted like GUI-process lines.
+            if record.levelno >= min_level:
+                self.log_message.emit(self._gui_log_handler.format(record))
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if not self.save_all_pages():
