@@ -162,15 +162,23 @@ Because Touch2Key installs system-level drivers and kernel rules, **simply runni
 
 ### CLI Global Hotkeys
 
-When running the engine in CLI mode, the following hotkeys are active to control runtime behavior on the fly. **They are guarded to only trigger when your terminal window is the active foreground window**, preventing accidental input conflicts while playing games or navigating other applications (protected by a **0.1s (short)** or **0.35s (long)** debounce cooldown):
+When running the engine in CLI mode, these hotkeys control runtime behavior on the fly. They only trigger while your terminal is the active foreground window, so they never interfere with games or other applications. Losing focus counts as releasing every key.
 
-| Hotkey | Action | Step / Bounds | Description | Cooldown Type |
-| :--- | :--- | :--- | :--- | :---
-| `Esc` | Shutdown | — | Gracefully terminates the CLI engine session and cleans up worker processes. | Long |
-| `F5` | Handedness Toggle | `True` / `False` | Dynamically switches layout orientation between left- and right-handed modes. | Long |
-| `F6` | Reload | — | Instantly reloads the active layout, zone pipelines and global engine settings including typematics live from SQLite. | Long |
-| `Left` / `Right` | Rate Cap (Hz) | &plusmn;10.0 Hz `[30.0 - 1000.0]` | Dynamically tunes the mouse flush polling rate. Commits immediately to SQLite. | Short |
-| `Down` / `Up` | PPS Alert Threshold | &plusmn;5.0 PPS `[10.0 - 500.0]` | Dynamically tunes the touch monitoring threshold. Commits immediately to SQLite. | Short |
+| Hotkey | Action | Step / Bounds | Description |
+| :--- | :--- | :--- | :--- |
+| `Esc` | Shutdown | — | Gracefully terminates the CLI engine session and cleans up worker processes. |
+| `F5` | Handedness Toggle | `True` / `False` | Switches layout orientation between left- and right-handed modes, then reloads. |
+| `F6` | Reload | — | Reloads the active layout, zone pipelines and global engine settings (including typematics) live from SQLite. |
+| `Left` / `Right` | Rate Cap (Hz) | ±10.0 Hz `[30.0 – 1000.0]` | Tunes the mouse flush polling rate. Hold to auto-repeat. |
+| `Down` / `Up` | PPS Alert Threshold | ±5.0 PPS `[10.0 – 500.0]` | Tunes the touch monitoring threshold. Hold to auto-repeat. |
+
+#### Key behavior
+
+- **Arrow keys (hold to repeat):** a press steps once immediately. After a 400 ms hold, repeat starts at 5 Hz and ramps along a cubic curve up to 30 Hz over 1.5 s. The operating system's own key repeat is ignored. Releasing the key resets the ramp.
+- **F5 / F6 (single action):** each physical press fires once, and holding the key does nothing further. A shared 350 ms cooldown prevents accidental double triggers.
+- **Opposing keys cancel:** holding Left + Right (or Down + Up) together does nothing until one is released. Keys on different axes work simultaneously.
+- **Live status line:** while an arrow key is held, one terminal line updates in place with the current `Rate Cap` and `PPS`. Other log output is held back and replayed in order on release. A quick tap shows no live line but logs the new value once.
+- **Persistence:** values change in memory on every step. The SQLite write and layout reload are batched to at most once every 250 ms, and the final value is always saved after release.
 
 ---
 
