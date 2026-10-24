@@ -80,6 +80,11 @@ class TouchReader:
         )
         self.wireless_thread.start()
 
+    def set_rate_cap(self, hz: float) -> None:
+        if hz > 0 and hz != self.adb_rate_cap:
+            self.adb_rate_cap = float(hz)
+            self.move_interval = 1.0 / self.adb_rate_cap
+
     def _on_reload(self) -> None:
         """Dynamically updates rate-limiting intervals and matrix transforms."""
         new_cap = store.settings.get().adb_rate_cap
