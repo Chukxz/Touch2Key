@@ -1,25 +1,10 @@
 # Touch2Key
 
-[
-
-![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)
-
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 ](https://www.python.org/downloads/)
-[
-
-![OS: Windows](https://img.shields.io/badge/os-Windows-blue.svg)
-
-](https://www.microsoft.com/en-us/windows)
-[
-
-![OS: Linux](https://img.shields.io/badge/os-Linux-yellow.svg)
-
-](https://www.linuxfoundation.org/)
-[
-
-![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
-
-](https://opensource.org/licenses/MIT)
+[![OS: Windows](https://img.shields.io/badge/os-Windows-blue.svg)](https://www.microsoft.com/en-us/windows)
+[![OS: Linux](https://img.shields.io/badge/os-Linux-yellow.svg)](https://www.linuxfoundation.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
 **Touch2Key** is a high-performance, cross-platform input mapper that translates touches on an Android device (via ADB) into low-latency keyboard and mouse input on your PC.
 
