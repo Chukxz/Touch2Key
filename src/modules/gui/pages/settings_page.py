@@ -567,7 +567,7 @@ class SettingsPage(QWidget):
         self._save_timer.stop()
         self._pending.clear()
 
-    def save_state(self) -> bool:
+    def save_state(self, action: str = "closing") -> bool:
         """Called by MainWindow.save_all_pages on close and before setup/uninstall."""
         self._flush_pending()
         return True
