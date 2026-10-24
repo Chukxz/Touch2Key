@@ -282,3 +282,4 @@ Use `black` for formatting (recommended), `pytest` for tests (optional), and `sn
 
 ## License
 MIT License.
+>>>>
