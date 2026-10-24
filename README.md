@@ -169,7 +169,7 @@ When running the engine in CLI mode, these hotkeys control runtime behavior on t
 | `Esc` | Shutdown | — | Gracefully terminates the CLI engine session and cleans up worker processes. |
 | `F5` | Handedness Toggle | `True` / `False` | Switches layout orientation between left- and right-handed modes, then reloads. |
 | `F6` | Reload | — | Reloads the active layout, zone pipelines and global engine settings (including typematics) live from SQLite. |
-| `Left` / `Right` | Rate Cap (Hz) | ±10.0 Hz `[30.0 – 1000.0]` | Tunes the mouse flush polling rate. Hold to auto-repeat. |
+| `Left` / `Right` | Rate Cap (Hz) | ±10.0 Hz `[30.0 – 1000.0]` | Tunes the mouse flush and touch reader polling rate. Hold to auto-repeat. |
 | `Down` / `Up` | PPS Alert Threshold | ±5.0 PPS `[10.0 – 500.0]` | Tunes the touch monitoring threshold. Hold to auto-repeat. |
 
 #### Key behavior
