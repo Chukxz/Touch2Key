@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+import os
 import collections
 import contextlib
 import datetime
@@ -42,15 +43,25 @@ class _SuspendableStreamHandler(logging.StreamHandler):
     """StreamHandler that can hold records and replay them in order on resume.
 
     Suspension is nestable (counter). Filters/levels are applied at handle()
-    time, so only records that would have been printed are held.
+    time, so only records that would have been printed are held. Printed lines
+    are also appended to a shared history deque.
     """
 
-    def __init__(self, stream, max_held: int = 5000):
+    def __init__(self, stream, max_held: int = 5000, history=None):
         super().__init__(stream)
         self._suspend_depth = 0
         self._max_held = max_held
         self._held: collections.deque[logging.LogRecord] = collections.deque()
         self._dropped = 0
+        self._history = history
+
+    def _write(self, record: logging.LogRecord) -> None:
+        if self._history is not None:
+            try:
+                self._history.append(self.format(record))
+            except Exception:
+                pass
+        super().emit(record)
 
     def emit(self, record: logging.LogRecord) -> None:
         # Called with the handler lock held (Handler.handle).
@@ -60,7 +71,7 @@ class _SuspendableStreamHandler(logging.StreamHandler):
                 self._dropped += 1
             self._held.append(record)
             return
-        super().emit(record)
+        self._write(record)
 
     def suspend(self) -> None:
         self.acquire()
@@ -72,9 +83,7 @@ class _SuspendableStreamHandler(logging.StreamHandler):
     def resume(self, force: bool = False) -> None:
         self.acquire()
         try:
-            self._suspend_depth = (
-                0 if force else max(0, self._suspend_depth - 1)
-            )
+            self._suspend_depth = 0 if force else max(0, self._suspend_depth - 1)
             if self._suspend_depth > 0:
                 return
             if self._dropped:
@@ -86,7 +95,7 @@ class _SuspendableStreamHandler(logging.StreamHandler):
                     pass
                 self._dropped = 0
             while self._held:
-                super().emit(self._held.popleft())
+                self._write(self._held.popleft())
             self.flush()
         finally:
             self.release()
@@ -99,6 +108,7 @@ class AppLogManager:
     _memory_handler: MemoryHandler | None = None
     _target_file_handler: logging.FileHandler | None = None
     _console_handlers: list[_SuspendableStreamHandler] = []
+    _history: collections.deque[str] = collections.deque(maxlen=1000)
     _live_lock = threading.Lock()
     _live_active = False
     _orig_stdout = sys.stdout
@@ -153,7 +163,7 @@ class AppLogManager:
                 # No-console launches (pythonw.exe) have None streams;
                 # StreamHandler(None) falls back to None and recurses.
                 if cls._orig_stdout is not None:
-                    stdout_handler = _SuspendableStreamHandler(cls._orig_stdout)
+                    stdout_handler = _SuspendableStreamHandler(cls._orig_stdout, history=cls._history)
                     stdout_handler.setFormatter(formatter)
                     stdout_handler.setLevel(level)
                     stdout_handler.addFilter(
@@ -163,7 +173,7 @@ class AppLogManager:
                     cls._console_handlers.append(stdout_handler)
 
                 if cls._orig_stderr is not None:
-                    stderr_handler = _SuspendableStreamHandler(cls._orig_stderr)
+                    stderr_handler = _SuspendableStreamHandler(cls._orig_stderr, history=cls._history)
                     stderr_handler.setFormatter(formatter)
                     stderr_handler.setLevel(logging.WARNING)
                     root_logger.addHandler(stderr_handler)
@@ -186,7 +196,7 @@ class AppLogManager:
             cls._memory_handler.handle(record)
 
     # ------------------------------------------------------------------
-    # Console suspension / live line
+    # Console suspension / live line / history
     # ------------------------------------------------------------------
     @classmethod
     def suspend_console(cls) -> None:
@@ -245,6 +255,46 @@ class AppLogManager:
             except Exception:
                 pass
             cls._live_active = False
+
+    @classmethod
+    def console_history(cls) -> list[str]:
+        """Copy of the recent log lines printed to the terminal."""
+        return list(cls._history)
+
+    @classmethod
+    def clear_console(cls) -> None:
+        """Clear the terminal screen and the remembered log lines."""
+        cls._history.clear()
+        stream = cls._orig_stdout
+        if stream is None:
+            return
+        try:
+            stream.flush()
+        except Exception:
+            pass
+        os.system("cls" if os.name == "nt" else "clear")
+
+    @classmethod
+    def console_write(
+        cls, text: str = "", end: str = "\n", remember: bool = True
+    ) -> None:
+        """Print raw text on the real stdout (bypasses logging and the file log).
+
+        Complete lines (end == "\\n") are remembered for console_history()
+        unless remember=False. Use remember=False for transient lines such as
+        an input prompt.
+        """
+        stream = cls._orig_stdout
+        if stream is None:
+            return
+        with cls._live_lock:
+            try:
+                stream.write(text + end)
+                stream.flush()
+                if remember and end == "\n":
+                    cls._history.append(text)
+            except Exception:
+                pass
 
     @classmethod
     def flush_and_close(cls) -> None:

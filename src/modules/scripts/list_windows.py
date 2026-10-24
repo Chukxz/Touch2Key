@@ -3,11 +3,11 @@ from __future__ import annotations
 import logging
 import sys
 import time
-import os
 from typing import Optional
 
 from modules.platforms import get_platform
 from modules.utils import WINDOWS_HEADERS
+from modules.log_manager import AppLogManager
 
 logger = logging.getLogger("modules.platforms.windows.select_window")
 
@@ -43,60 +43,69 @@ def _gather_window_rows(window_manager) -> dict[int, list]:
     return rows
 
 
-def _print_window_table(
-    rows: dict[int, list], current_input: str = "", last_warning: str = ""
-) -> str:
-    # Use native OS command for clean terminal clearing on both Windows and Linux
-    os.system("cls" if sys.platform == "win32" else "clear")
-    table_str = ""
-
-    table_str += "[?] Select target window (auto-refreshing every 1s, 'q' to abort):\n"
+def _build_table(rows: dict[int, list]) -> str:
+    table_str = "[?] Select target window (auto-refreshing every 1s, 'q' to abort):\n"
     if not rows:
-        table_str += "    [!] No visible windows detected.\n"
-    else:
-        header_str = " | ".join(
+        return table_str + "    [!] No visible windows detected.\n"
+
+    header_str = " | ".join(
+        [
+            f"{WINDOWS_HEADERS[0]:<10}",
+            f"{WINDOWS_HEADERS[1]:<35}",
+            f"{WINDOWS_HEADERS[2]:<25}",
+            f"{WINDOWS_HEADERS[3]:<6}",
+            f"{WINDOWS_HEADERS[4]:<6}",
+            f"{WINDOWS_HEADERS[5]:<6}",
+            f"{WINDOWS_HEADERS[6]:<6}",
+        ]
+    )
+    table_str += f"    {header_str}\n"
+    table_str += "    " + "-" * len(header_str) + "\n"
+
+    for row in rows.values():
+        wid, title, cls_name, left, top, width, height = row
+        safe_title = (title[:32] + "...") if len(title) > 35 else title
+        safe_cls = (cls_name[:22] + "...") if len(cls_name) > 25 else cls_name
+        row_str = " | ".join(
             [
-                f"{WINDOWS_HEADERS[0]:<10}",
-                f"{WINDOWS_HEADERS[1]:<35}",
-                f"{WINDOWS_HEADERS[2]:<25}",
-                f"{WINDOWS_HEADERS[3]:<6}",
-                f"{WINDOWS_HEADERS[4]:<6}",
-                f"{WINDOWS_HEADERS[5]:<6}",
-                f"{WINDOWS_HEADERS[6]:<6}",
+                f"{wid:<10}",
+                f"{safe_title:<35}",
+                f"{safe_cls:<25}",
+                f"{left:<6}",
+                f"{top:<6}",
+                f"{width:<6}",
+                f"{height:<6}",
             ]
         )
-
-        table_str += f"    {header_str}\n"
-        table_str += "    " + "-" * len(header_str) + "\n"
-
-        for row in rows.values():
-            wid, title, cls_name, left, top, width, height = row
-
-            safe_title = (title[:32] + "...") if len(title) > 35 else title
-            safe_cls = (cls_name[:22] + "...") if len(cls_name) > 25 else cls_name
-
-            row_str = " | ".join(
-                [
-                    f"{wid:<10}",
-                    f"{safe_title:<35}",
-                    f"{safe_cls:<25}",
-                    f"{left:<6}",
-                    f"{top:<6}",
-                    f"{width:<6}",
-                    f"{height:<6}",
-                ]
-            )
-            table_str += f"    {row_str}\n"
-
-    print(table_str + last_warning)
-
-    print(
-        f"\n>> Enter window # + Enter to select, 'q' + Enter to abort: {current_input}",
-        end="",
-        flush=True,
-    )
-
+        table_str += f"    {row_str}\n"
     return table_str
+
+
+def _render(
+    base: list[str],
+    table_str: str,
+    current_input: str = "",
+    warning: str = "",
+    prompt: bool = True,
+) -> None:
+    """Clear the screen, then draw preserved logs, the table, and the prompt."""
+    AppLogManager.clear_console()
+    for line in base:
+        AppLogManager.console_write(line)
+    if base:
+        AppLogManager.console_write("")
+    for line in table_str.rstrip("\n").splitlines():
+        AppLogManager.console_write(line)
+    if warning:
+        for line in warning.rstrip("\n").splitlines():
+            AppLogManager.console_write(line)
+    if prompt:
+        AppLogManager.console_write("")
+        AppLogManager.console_write(
+            f">> Enter window # + Enter to select, 'q' + Enter to abort: {current_input}",
+            end="",
+            remember=False,
+        )
 
 
 def _poll_key_windows() -> tuple[Optional[str], Optional[str]]:
@@ -146,15 +155,16 @@ def _select_window_cli() -> Optional[tuple[int, str]]:
     is_typing = False
     table_str = ""
     last_warning = ""
+    # Logs already on screen (typically ~2 lines); captured before the first clear.
+    base = AppLogManager.console_history()
 
     try:
         while True:
             rows = _gather_window_rows(window_manager)
 
             if not is_typing:
-                table_str = _print_window_table(
-                    rows, "".join(buffer), last_warning=last_warning
-                )
+                table_str = _build_table(rows)
+                _render(base, table_str, "".join(buffer), warning=last_warning)
 
             elapsed = 0.0
             while elapsed < REFRESH_INTERVAL_SECONDS:
@@ -163,7 +173,7 @@ def _select_window_cli() -> Optional[tuple[int, str]]:
                 )
 
                 if action == "enter":
-                    print()
+                    AppLogManager.console_write("", remember=False)
                     line = "".join(buffer).strip().lower()
                     if line == "q":
                         return None
@@ -193,7 +203,9 @@ def _select_window_cli() -> Optional[tuple[int, str]]:
                         break
 
                     title = rows[window_id][1]
-                    logger.info("Window selected: %s (%s)", window_id, title)
+                    # Final screen: preserved logs + table, then the selection line.
+                    _render(base, table_str, prompt=False)
+                    logger.info("Window selected: %s (%s)\n", window_id, title)
                     return window_id, title
 
                 elif action == "backspace":
@@ -202,27 +214,12 @@ def _select_window_cli() -> Optional[tuple[int, str]]:
                         if not buffer:
                             is_typing = False
                             last_warning = ""
-
-                    os.system("cls" if sys.platform == "win32" else "clear")
-                    print(table_str)
-                    # Added trailing spaces ("   ") to blank out any leftover trailing characters
-                    print(
-                        f"\r>> Enter window # + Enter to select, 'q' + Enter to abort: {''.join(buffer)}   ",
-                        end="",
-                        flush=True,
-                    )
+                    _render(base, table_str, "".join(buffer))
 
                 elif action == "char" and val:
                     buffer.append(val)
                     is_typing = True
-
-                    os.system("cls" if sys.platform == "win32" else "clear")
-                    print(table_str)
-                    print(
-                        f"\r>> Enter window # + Enter to select, 'q' + Enter to abort: {''.join(buffer)}",
-                        end="",
-                        flush=True,
-                    )
+                    _render(base, table_str, "".join(buffer))
 
                 time.sleep(0.05)
                 elapsed += 0.05

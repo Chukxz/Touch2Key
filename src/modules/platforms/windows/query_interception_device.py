@@ -6,6 +6,7 @@ from typing import Optional
 from interception.constants import FilterKeyFlag, FilterMouseButtonFlag, KeyFlag
 from interception.interception import Interception
 from modules.utils import MODIFIER_KEYS, get_scancode_from_key
+from modules.log_manager import AppLogManager
 
 logger = logging.getLogger("modules.platforms.windows.query_interception_device")
 
@@ -43,15 +44,37 @@ def _qualifies_stroke(stroke, is_keyboard: bool) -> bool:
 # ==========================================
 
 
+def _table_lines(rows: list[list]) -> list[str]:
+    if not rows:
+        return ["    [!] No devices actively registered in this category."]
+    lines = [
+        f"    {'Device ID':<10} │ {'VID':<9} │ {'PID':<9} │ {'Hardware ID'}",
+        f"    {'─' * 10}┼{'─' * 11}┼{'─' * 11}┼{'─' * 20}",
+    ]
+    lines += [
+        f"    {str(dev_id):<10} │ {vid:<9} │ {pid:<9} │ {clean}"
+        for dev_id, vid, pid, clean in rows
+    ]
+    return lines
+
+
+def _show(lines: list[str]) -> None:
+    """Clear the screen and print the given lines."""
+    AppLogManager.clear_console()
+    for line in lines:
+        AppLogManager.console_write(line)
+
+
 def _select_device_cli(
     context: Interception,
     device_range: range,
     is_keyboard: bool,
     prompt: str,
+    transcript: list[str],
 ) -> int | None:
-    print(f"\n[?] {prompt}")
-    print("Available devices detected in registry:\n")
-
+    """Show a clean selection screen. On success, `transcript` (the preserved
+    logs plus earlier steps) gains this step's prompt, table and result, and
+    the screen is redrawn from it."""
     rows: list[list] = []
     for dev in device_range:
         raw_hwid = context.devices[dev].get_HWID()
@@ -60,16 +83,18 @@ def _select_device_cli(
             vid, pid = _extract_vid_pid(clean)
             rows.append([dev, vid, pid, clean])
 
-    if not rows:
-        print("    [!] No devices actively registered in this category.")
-    else:
-        print(f"    {'Device ID':<10} │ {'VID':<9} │ {'PID':<9} │ {'Hardware ID'}")
-        print(f"    {'─' * 10}┼{'─' * 11}┼{'─' * 11}┼{'─' * 20}")
-        for dev_id, vid, pid, clean in rows:
-            print(f"    {str(dev_id):<10} │ {vid:<9} │ {pid:<9} │ {clean}")
-
-    print(
-        f"\n>> Waiting for physical input ({"tap a key" if is_keyboard else "left-click mouse"} on target device)..."
+    header = ["", f"[?] {prompt}"]
+    table = _table_lines(rows)
+    action = "tap a key" if is_keyboard else "left-click mouse"
+    _show(
+        [
+            *header,
+            "Available devices detected in registry:",
+            "",
+            *table,
+            "",
+            f">> Waiting for physical input ({action} on target device)...",
+        ]
     )
 
     target_filter_fn = context.is_keyboard if is_keyboard else context.is_mouse
@@ -84,7 +109,8 @@ def _select_device_cli(
         context.set_filter(target_filter_fn, active_flag)
         context.set_filter(other_filter_fn, 0)
     except Exception as exc:
-        print(f"[!] Failed to bind interception filters: {exc}")
+        _show(transcript)
+        AppLogManager.console_write(f"[!] Failed to bind interception filters: {exc}")
         return None
 
     try:
@@ -98,12 +124,19 @@ def _select_device_cli(
                         raw_hwid = context.devices[dev].get_HWID() or ""
                         clean = raw_hwid.split("\x00")[0].strip()
                         vid, pid = _extract_vid_pid(clean)
-                        print(
-                            f"[+] Hardware detected: Device {dev} (VID: {vid}, PID: {pid}) -> {clean}"
+                        _end_str = "" if is_keyboard else "\n"
+                        detected = (
+                            f"[+] Hardware detected: Device {dev} "
+                            f"(VID: {vid}, PID: {pid}) -> {clean}"
+                            f"{_end_str}"
                         )
+                        transcript.extend([*header, *table, detected])
+                        _show(transcript)
+                        logger.debug("Selected device %s: %s", dev, clean)
                         return dev
     except KeyboardInterrupt:
-        logger.info("\n[!] Input capture cancelled.")
+        _show(transcript)
+        logger.info("[!] Input capture cancelled.")
         return None
     finally:
         try:
@@ -115,12 +148,15 @@ def _select_device_cli(
 
 def _select_devices_cli() -> Optional[tuple[int, int]]:
     ctx = Interception()
+    # Logs already on screen (typically ~2 lines) survive every redraw.
+    transcript = AppLogManager.console_history()
     try:
         k_id = _select_device_cli(
             ctx,
             KEYBOARD_RANGE,
             is_keyboard=True,
             prompt="Tap any non-modifier key on the target KEYBOARD to bind:",
+            transcript=transcript,
         )
         if k_id is None:
             return None
@@ -130,6 +166,7 @@ def _select_devices_cli() -> Optional[tuple[int, int]]:
             MOUSE_RANGE,
             is_keyboard=False,
             prompt="Left-click on the target MOUSE to bind:",
+            transcript=transcript,
         )
         if m_id is None:
             return None

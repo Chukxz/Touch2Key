@@ -55,10 +55,10 @@ logger = logging.getLogger("modules.engine")
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection
     from multiprocessing.queues import Queue
- 
-_HOTKEY_POLL_INTERVAL = 0.005    # 5 ms key-state polling
-_ADJUST_COMMIT_INTERVAL = 0.25   # coalesce DB write + reload while held
-_ONESHOT_COOLDOWN = 0.35         # F5 / F6 cooldown
+
+_HOTKEY_POLL_INTERVAL = 0.005  # 5 ms key-state polling
+_ADJUST_COMMIT_INTERVAL = 0.25  # coalesce DB write + reload while held
+_ONESHOT_COOLDOWN = 0.35  # F5 / F6 cooldown
 
 
 class Engine:
@@ -117,6 +117,7 @@ class Engine:
         self._adjust_lock = threading.Lock()
         self._settings_dirty = False
         self._last_commit_time = 0.0
+        self._live_shown = False
         self._live_active = False
         self._live_text = ""
 
@@ -131,8 +132,7 @@ class Engine:
 
         # Typematic keys: one cubic InputCurve per key.
         self._adjust_curves: dict[str, InputCurve] = {
-            key: InputCurve(CurveType.CUBIC)
-            for key in ("left", "right", "down", "up")
+            key: InputCurve(CurveType.CUBIC) for key in ("left", "right", "down", "up")
         }
         self._adjust_actions = {
             "left": lambda: self._adjust_rate_cap_cli(-10.0),
@@ -195,7 +195,7 @@ class Engine:
 
     def _hotkey_loop(self) -> None:
         import keyboard
-  
+
         while not self._stop_event.is_set():
             try:
                 self._poll_hotkeys(keyboard)
@@ -217,6 +217,12 @@ class Engine:
         if any(pressed.values()) and not self._is_terminal_focused():
             pressed = dict.fromkeys(keys, False)
 
+        # Opposing keys on the same axis cancel: treat both as released so
+        # their curves reset instead of drifting.
+        for a, b in (("left", "right"), ("down", "up")):
+            if pressed[a] and pressed[b]:
+                pressed[a] = pressed[b] = False
+
         # Typematic: cubic curve drives repeat timing (OS auto-repeat ignored).
         for key, curve in self._adjust_curves.items():
             if curve.check_input(now, pressed[key]):
@@ -233,6 +239,7 @@ class Engine:
         if adjusting and (self._live_active or held_long):
             if not self._live_active:
                 AppLogManager.suspend_console()
+                self._live_shown = True
                 self._live_active = True
                 self._live_text = ""
             text = f"Rate Cap {self.rate_cap:.1f} Hz | PPS {self.pps:.1f}"
@@ -296,7 +303,12 @@ class Engine:
             logger.error("Failed to commit rate/PPS update to DB: %s", exc)
             self._settings_dirty = True  # retry after next interval
             return
-        logger.debug("Committed rate cap %.1f Hz, PPS %.1f; reload dispatched.", rate, pps)
+        if self._live_shown:
+            logger.debug("Committed rate cap %.1f Hz, PPS %.1f.", rate, pps)
+            if not self._live_active:  # final commit after release
+                self._live_shown = False
+        else:
+            logger.info("Rate Cap %.1f Hz | PPS %.1f\n", rate, pps)
         self.mapper_event_dispatcher.dispatch(
             MapperEvent(action="ON_RELOAD", cooldown=1.0)
         )

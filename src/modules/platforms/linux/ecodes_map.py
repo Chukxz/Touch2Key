@@ -3,6 +3,7 @@ from __future__ import annotations
 from evdev import AbsInfo, ecodes
 
 from modules.utils import (
+    ABS_CONST,
     BUTTON_4_DOWN,
     BUTTON_4_UP,
     BUTTON_5_DOWN,
@@ -146,11 +147,11 @@ MOUSE_CAP = {
     ecodes.EV_ABS: [
         (
             ecodes.ABS_X,
-            AbsInfo(value=0, min=0, max=65535, fuzz=0, flat=0, resolution=0),
+            AbsInfo(value=0, min=0, max=ABS_CONST, fuzz=0, flat=0, resolution=0),
         ),
         (
             ecodes.ABS_Y,
-            AbsInfo(value=0, min=0, max=65535, fuzz=0, flat=0, resolution=0),
+            AbsInfo(value=0, min=0, max=ABS_CONST, fuzz=0, flat=0, resolution=0),
         ),
     ],
 }
