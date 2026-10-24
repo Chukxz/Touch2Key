@@ -34,6 +34,7 @@ from modules.gui.overlays.visualizer import run as run_visualizer
 from modules.gui.pages.dashboard_page import DashboardPage
 from modules.gui.pages.layout_studio_page import LayoutStudioPage
 from modules.gui.pages.settings_page import SettingsPage
+from modules.log_manager import AppLogManager
 from modules.scripts.preflight import run as run_preflight
 from modules.scripts.show_adb_path import run as run_show_adb_path
 from modules.utils import (
@@ -442,6 +443,10 @@ class MainWindow(QMainWindow):
             APP_NAME,
         )
 
+        # Created before anything that can start the engine.
+        self.log_queue = multiprocessing.Queue()
+        self._stop_log_thread = threading.Event()
+
         self.dispatcher = MapperEventDispatcher()
         self.engine_controller = EngineProcessController(self)
 
@@ -449,9 +454,6 @@ class MainWindow(QMainWindow):
         self._setup_tools()
         self._setup_logging()
         self._wire_engine_signals()
-
-        self.log_queue = multiprocessing.Queue()
-        self._stop_log_thread = threading.Event()
 
         self._log_thread = threading.Thread(
             target=self._consume_engine_logs,
@@ -759,6 +761,8 @@ class MainWindow(QMainWindow):
             if self.engine_controller.is_running():
                 self.engine_controller.stop_engine()
             else:
+                # Pending settings must be in the DB before the engine reads them.
+                self.save_all_pages()
                 self.engine_controller.start_engine(
                     window_id=self.engine_controller.window_id,
                     log_queue=self.log_queue,
@@ -777,6 +781,7 @@ class MainWindow(QMainWindow):
         try:
             if not self.engine_controller.is_running():
                 self.dashboard_page.start_btn.setEnabled(False)
+                self.save_all_pages()
                 self.engine_controller.start_engine(
                     window_id=self.engine_controller.window_id,
                     log_queue=self.log_queue,
