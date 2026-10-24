@@ -938,7 +938,7 @@ class MainWindow(QMainWindow):
             self.nav_toggle_btn.setText("◀")
             self.nav_toggle_btn.setToolTip("Collapse sidebar")
 
-    def save_all_pages(self) -> bool:
+    def save_all_pages(self, action: str = "closing") -> bool:
         """Persist state from all GUI pages to the database.
 
         Every page is given the chance to save, even if an earlier one fails,
@@ -956,7 +956,7 @@ class MainWindow(QMainWindow):
                     None,
                 )
 
-                if save_state is not None and not save_state():
+                if save_state is not None and not save_state(action):
                     logger.info(
                         "GUI page %s state was not saved",
                         title,
@@ -980,7 +980,7 @@ class MainWindow(QMainWindow):
             return False
 
     def _on_run_setup(self) -> None:
-        if not self.save_all_pages():
+        if not self.save_all_pages("setting up"):
             return
 
         reply = QMessageBox.question(
@@ -1063,7 +1063,7 @@ class MainWindow(QMainWindow):
             )
 
     def _on_run_uninstall(self) -> None:
-        if not self.save_all_pages():
+        if not self.save_all_pages("uninstalling"):
             return
 
         reply = QMessageBox.warning(
