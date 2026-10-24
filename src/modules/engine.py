@@ -281,7 +281,10 @@ class Engine:
             new_rate = clamp(self.rate_cap + delta, ADB_RATE_CAP_MIN, ADB_RATE_CAP_MAX)
             if new_rate == self.rate_cap:
                 return False
+
             self.rate_cap = new_rate
+            if self.touch_reader is not None:
+                self.touch_reader.set_rate_cap(new_rate)
             return True
 
     def _adjust_pps_cli(self, delta: float) -> bool:
@@ -404,11 +407,16 @@ class Engine:
         settings = store.settings.get()
         self.two_finger_tap_enabled = settings.two_finger_tap_enabled
         self.bezel_toggle_enabled = settings.bezel_toggle_enabled
+
         with self._adjust_lock:
             # Uncommitted hotkey steps are newer than the DB; keep them.
             if not self._settings_dirty:
                 self.rate_cap = settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP
                 self.pps = settings.pps_alert_threshold or DEFAULT_PPS
+
+        if self.touch_reader is not None:
+            self.touch_reader.set_rate_cap(rate)
+
         with self.lock:
             self._release_active_inputs()
             self._tiers = self._build_pipeline_tiers()
