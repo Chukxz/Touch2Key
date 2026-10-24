@@ -68,6 +68,11 @@ class DashboardPage(QWidget):
     stop_requested = Signal()
     navigate_requested = Signal(str)  # page title, e.g. "Settings"
 
+    # Dispatcher callbacks may run on a non-GUI thread (debounced deliveries).
+    # Emitting a signal queues the real work onto the GUI thread.
+    _reload_requested = Signal()
+    _target_window_changed = Signal()
+
     def __init__(
         self,
         engine_controller: EngineProcessController,
@@ -85,6 +90,9 @@ class DashboardPage(QWidget):
         self._telemetry_timer = QTimer(self)
         self._telemetry_timer.setInterval(_TELEMETRY_INTERVAL_MS)
         self._telemetry_timer.timeout.connect(self._update_telemetry)
+
+        self._reload_requested.connect(self.refresh_state)
+        self._target_window_changed.connect(self._refresh_target_label)
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -191,10 +199,14 @@ class DashboardPage(QWidget):
     def _register_dispatcher_events(self) -> None:
         if not self.dispatcher:
             return
-        self.dispatcher.register_callback("ON_RELOAD", self.refresh_state)
+        self.dispatcher.register_callback("ON_RELOAD", self._on_reload_event)
         self.dispatcher.register_callback(
             "ON_TARGET_WINDOW_CHANGE", self._on_target_window_change
         )
+
+    def _on_reload_event(self) -> None:
+        """Dispatcher callback; may run on any thread."""
+        self._reload_requested.emit()
 
     def on_page_shown(self) -> None:
         self.refresh_state()
@@ -269,7 +281,8 @@ class DashboardPage(QWidget):
             self.target_window_label.setText("None (Foreground Active Window)")
 
     def _on_target_window_change(self, *args: Any, **kwargs: Any) -> None:
-        self._refresh_target_label()
+        """Dispatcher callback; may run on any thread."""
+        self._target_window_changed.emit()
 
     # ------------------------------------------------------------------
     # Engine state
@@ -383,11 +396,11 @@ class DashboardPage(QWidget):
             f"&nbsp;(alert below {_num(threshold)} PPS{threshold_note})",
             f"ADB rate cap: <b>{_num(cap)} Hz</b>{cap_note} &nbsp;|&nbsp; "
             f"Cursor: {'Visible' if snap.get('menu_mode') else 'Not Visible'}",
-            f"Touch Events Count:",
-            f"    DOWN {snap.get("downs", 0)}",
-            f"    MOVE {snap.get("moves", 0)}",
-            f"    UP {snap.get("ups", 0)}",
-            f"    ALL {snap.get("all", 0)}",
+            "Touch Events Count:",
+            f"    DOWN {snap.get('downs', 0)}",
+            f"    MOVE {snap.get('moves', 0)}",
+            f"    UP {snap.get('ups', 0)}",
+            f"    ALL {snap.get('all', 0)}",
             f"Worker respawns: Keyboard {resp.get('keyboard', 0)}, "
             f"Mouse {resp.get('mouse', 0)}",
             f"Virtual Kbd {'Not Active' if vkb_pid is None else 'Active'}",
