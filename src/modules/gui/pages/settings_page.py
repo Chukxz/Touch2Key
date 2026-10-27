@@ -290,6 +290,7 @@ class SettingsPage(QWidget):
         # Debounced spin box saves: field -> latest value. Written by one
         # GUI-thread timer, so the reload is always delivered on the GUI thread.
         self._pending: dict[str, float] = {}
+        self._save_failed = False
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(_SAVE_DEBOUNCE_MS)
@@ -306,6 +307,16 @@ class SettingsPage(QWidget):
         scroll_layout = QVBoxLayout(scroll_content)
         scroll_layout.setContentsMargins(0, 0, 0, 0)
         scroll_layout.setSpacing(16)
+
+        # 0. Save-failure banner (hidden until a debounced write fails)
+        self.save_status_label = QLabel("")
+        self.save_status_label.setWordWrap(True)
+        self.save_status_label.setStyleSheet(
+            "color: #d9534f; font-weight: bold; padding: 6px;"
+            "border: 1px solid #d9534f; border-radius: 4px;"
+        )
+        self.save_status_label.setVisible(False)
+        scroll_layout.addWidget(self.save_status_label)
 
         # 1. Hardware & Device Configuration
         hw_group = QGroupBox("Hardware & Device Configuration")
@@ -484,7 +495,9 @@ class SettingsPage(QWidget):
         system_form.addRow("Enable Bezel Toggles:", self.bezel_toggle_enabled_check)
 
         system_reset_row = QHBoxLayout()
-        self.reset_system_btn = QPushButton("Reset System Toggles to Defaults")
+        self.reset_system_btn = QPushButton(
+            "Reset Bezel and Two Finger Tap to Defaults"
+        )
         system_reset_row.addWidget(self.reset_system_btn)
         system_reset_row.addStretch()
         system_form.addRow("", system_reset_row)
@@ -515,6 +528,37 @@ class SettingsPage(QWidget):
         scroll_layout.addStretch()
         scroll_area.setWidget(scroll_content)
         root_layout.addWidget(scroll_area)
+
+        # Debounced spin boxes: DB field -> widget (used by _set_spin).
+        self._spin_fields: dict[str, QDoubleSpinBox] = {
+            "sensitivity_x": self.sensitivity_spin_x,
+            "sensitivity_y": self.sensitivity_spin_y,
+            "deadzone": self.deadzone_spin,
+            "hysteresis": self.hysteresis_spin,
+            "adb_rate_cap": self.rate_cap_spin,
+            "pps_alert_threshold": self.pps_alert_spin,
+            "typematic_delay_ms": self.typematic_delay_spin,
+            "typematic_rate_hz": self.typematic_rate_spin,
+        }
+
+        # Every widget load_settings() repopulates; signals are blocked on
+        # exactly these while loading.
+        self._loadable_widgets: tuple[QWidget, ...] = (
+            self.left_handed_check,
+            self.floating_check,
+            self.anchored_check,
+            self.sensitivity_spin_x,
+            self.sensitivity_spin_y,
+            self.deadzone_spin,
+            self.hysteresis_spin,
+            self.rate_cap_spin,
+            self.pps_alert_spin,
+            self.typematic_enabled_check,
+            self.typematic_delay_spin,
+            self.typematic_rate_spin,
+            self.two_finger_tap_enabled_check,
+            self.bezel_toggle_enabled_check,
+        )
 
         self._wire_signals()
         self._refresh_hw_ui()
@@ -550,6 +594,18 @@ class SettingsPage(QWidget):
         self._pending[field] = value
         self._save_timer.start()  # restarts: writes after 250 ms of quiet
 
+    def _set_save_failed(self, failed: bool) -> None:
+        # Edge-triggered: touch the UI only on a state change.
+        if failed == self._save_failed:
+            return
+        self._save_failed = failed
+        if failed:
+            self.save_status_label.setText(
+                "Could not save recent changes to the database. "
+                "They are shown here but not applied; retrying automatically."
+            )
+        self.save_status_label.setVisible(failed)
+
     def _flush_pending(self) -> None:
         """Write queued spin box values now (one DB write, one reload)."""
         self._save_timer.stop()
@@ -558,14 +614,34 @@ class SettingsPage(QWidget):
         pending, self._pending = self._pending, {}
         try:
             store.settings.update(**pending)
-            self._notify_reload()
         except Exception:
             logger.exception("Failed to save settings: %s", list(pending))
+            # Requeue without clobbering edits made since the swap.
+            for field, value in pending.items():
+                self._pending.setdefault(field, value)
+            self._set_save_failed(True)
+            self._save_timer.setInterval(min(self._save_timer.interval() * 2, 5000))
+            self._save_timer.start()  # retry with backoff
+            return
+        self._set_save_failed(False)
+        self._save_timer.setInterval(_SAVE_DEBOUNCE_MS)
+        try:
+            self._notify_reload()
+        except Exception:
+            logger.exception("Reload after saving settings failed")
 
     def _discard_pending(self) -> None:
         """Drop queued values (used before a reset/import overwrites them)."""
         self._save_timer.stop()
         self._pending.clear()
+        self._save_timer.setInterval(_SAVE_DEBOUNCE_MS)
+        self._set_save_failed(False)
+
+    def _set_spin(self, field: str, value: float) -> None:
+        # A queued value is newer than the DB; keep the user's edit on screen.
+        if field in self._pending:
+            return
+        self._spin_fields[field].setValue(value)
 
     def save_state(self, action: str = "closing") -> bool:
         """Called by MainWindow.save_all_pages on close and before setup/uninstall."""
@@ -806,8 +882,12 @@ class SettingsPage(QWidget):
             QMessageBox.critical(self, "Error", f"Could not save key binding:\n{exc}")
 
     def load_settings(self) -> None:
-        # Never overwrite spin boxes whose latest step is still queued.
+        # Spin boxes whose latest step is still queued (e.g. a failed write
+        # awaiting retry) are skipped by _set_spin so the user's edit stays.
         self._flush_pending()
+
+        for widget in self._loadable_widgets:
+            widget.blockSignals(True)
         try:
             settings = store.settings.get()
 
@@ -821,33 +901,18 @@ class SettingsPage(QWidget):
                     return []
                 return [k.strip().lower() for k in val.split(",") if k.strip()]
 
-            self.left_handed_check.blockSignals(True)
-            self.floating_check.blockSignals(True)
-            self.anchored_check.blockSignals(True)
-            self.sensitivity_spin_x.blockSignals(True)
-            self.sensitivity_spin_y.blockSignals(True)
-            self.deadzone_spin.blockSignals(True)
-            self.hysteresis_spin.blockSignals(True)
-            self.rate_cap_spin.blockSignals(True)
-            self.pps_alert_spin.blockSignals(True)
-            self.typematic_enabled_check.blockSignals(True)
-            self.typematic_delay_spin.blockSignals(True)
-            self.typematic_rate_spin.blockSignals(True)
-            self.two_finger_tap_enabled_check.blockSignals(True)
-            self.bezel_toggle_enabled_check.blockSignals(True)
-
             self.left_handed_check.setChecked(settings.left_handed)
             self.floating_check.setChecked(settings.floating_joystick)
             self.anchored_check.setChecked(settings.anchored_joystick)
-            self.sensitivity_spin_x.setValue(settings.sensitivity_x)
-            self.sensitivity_spin_y.setValue(settings.sensitivity_y)
-            self.deadzone_spin.setValue(settings.deadzone)
-            self.hysteresis_spin.setValue(settings.hysteresis)
-            self.rate_cap_spin.setValue(settings.adb_rate_cap)
-            self.pps_alert_spin.setValue(settings.pps_alert_threshold)
+            self._set_spin("sensitivity_x", settings.sensitivity_x)
+            self._set_spin("sensitivity_y", settings.sensitivity_y)
+            self._set_spin("deadzone", settings.deadzone)
+            self._set_spin("hysteresis", settings.hysteresis)
+            self._set_spin("adb_rate_cap", settings.adb_rate_cap)
+            self._set_spin("pps_alert_threshold", settings.pps_alert_threshold)
             self.typematic_enabled_check.setChecked(settings.typematic_enabled)
-            self.typematic_delay_spin.setValue(settings.typematic_delay_ms)
-            self.typematic_rate_spin.setValue(settings.typematic_rate_hz)
+            self._set_spin("typematic_delay_ms", settings.typematic_delay_ms)
+            self._set_spin("typematic_rate_hz", settings.typematic_rate_hz)
             self.two_finger_tap_enabled_check.setChecked(
                 settings.two_finger_tap_enabled
             )
@@ -857,27 +922,18 @@ class SettingsPage(QWidget):
                 parse_seq(settings.typematic_excluded_keys)
             )
 
-            self.left_handed_check.blockSignals(False)
-            self.floating_check.blockSignals(False)
-            self.anchored_check.blockSignals(False)
-            self.sensitivity_spin_x.blockSignals(False)
-            self.sensitivity_spin_y.blockSignals(False)
-            self.deadzone_spin.blockSignals(False)
-            self.hysteresis_spin.blockSignals(False)
-            self.rate_cap_spin.blockSignals(False)
-            self.pps_alert_spin.blockSignals(False)
-            self.typematic_enabled_check.blockSignals(False)
-            self.typematic_delay_spin.blockSignals(False)
-            self.typematic_rate_spin.blockSignals(False)
-            self.two_finger_tap_enabled_check.blockSignals(False)
-            self.bezel_toggle_enabled_check.blockSignals(False)
-
-            on = settings.typematic_enabled
-            self.typematic_delay_spin.setEnabled(on)
-            self.typematic_rate_spin.setEnabled(on)
-
         except Exception:
             logger.exception("Failed to load settings from database")
+
+        finally:
+            # No DB access here: the load may have failed because the DB is
+            # unavailable, and an exception in a finally block would leave
+            # signals blocked.
+            for widget in self._loadable_widgets:
+                widget.blockSignals(False)
+            on = self.typematic_enabled_check.isChecked()
+            self.typematic_delay_spin.setEnabled(on)
+            self.typematic_rate_spin.setEnabled(on)
 
     def _on_left_handed_changed(self, checked: bool) -> None:
         try:
@@ -996,7 +1052,7 @@ class SettingsPage(QWidget):
             )
             self.load_settings()
             self._notify_reload()
-            logger.info("System toggle settings reset to factory defaults")
+            logger.info("Bezel and Two Finger Tap settings reset to factory defaults")
         except Exception as exc:
             logger.exception("Failed to reset system settings")
             QMessageBox.critical(

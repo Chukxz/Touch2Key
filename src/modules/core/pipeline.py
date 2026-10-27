@@ -5,12 +5,10 @@ import logging
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Generic, TypeVar
+from typing import Generic, TypeVar, Callable
 
 from modules.utils import (
     BEZEL_DP_THICKNESS,
-    TOP_BEZEL_ID,
-    BOTTOM_BEZEL_ID,
     CONSTRAINT_MODES,
     ORIGIN_MODES,
     REGION_MODES,
@@ -55,14 +53,6 @@ class OutputSink(ABC):
 
     @abstractmethod
     def mouse_down(self, button: int) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def toggle_menu_mode(self) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def toggle_virtual_keyboard(self) -> None:
         raise NotImplementedError
 
 
@@ -378,24 +368,35 @@ class Semantic(ABC, Generic[T]):
 
 
 @dataclass(slots=True)
-class ButtonSemantic(Semantic[T], Generic[T]):
-    output: int
+class ButtonSemantic(Semantic[T]):
+    scancode: int
+    _down: bool = field(init=False, default_factory=bool)
     mouse_button: bool = False
+    
+    def __post_init__(self) -> None:
+       self._down = False   
 
     def process(
         self, context: PipelineContext, value: T, output_sink: OutputSink
     ) -> None:
         if context.event.phase is TouchPhase.DOWN:
             (output_sink.mouse_down if self.mouse_button else output_sink.key_down)(
-                self.output
+                self.scancode
             )
+            self._down = True
+            
         elif context.event.phase is TouchPhase.UP:
             (output_sink.mouse_up if self.mouse_button else output_sink.key_up)(
-                self.output
+                self.scancode
             )
+            self._down = False
 
     def reset(self, output_sink: OutputSink) -> None:
-        (output_sink.mouse_up if self.mouse_button else output_sink.key_up)(self.output)
+        if self._down:
+            (output_sink.mouse_up if self.mouse_button else output_sink.key_up)(
+                self.scancode
+            )
+            self._down = False
 
 
 @dataclass(slots=True)
@@ -438,7 +439,7 @@ class PointerSemantic(Semantic[Vector]):
 
 @dataclass(slots=True)
 class ToggleSemantic(Semantic[Unit]):
-    output: int
+    callback: Callable[..., None]
     max_duration_s: float = 0.3
     max_drift_px: float = 30.0
 
@@ -466,10 +467,7 @@ class ToggleSemantic(Semantic[Unit]):
             self._start_pos = None
 
             if duration <= self.max_duration_s and drift <= self.max_drift_px:
-                if self.output == TOP_BEZEL_ID:
-                    output_sink.toggle_menu_mode()
-                elif self.output == BOTTOM_BEZEL_ID:
-                    output_sink.toggle_virtual_keyboard()
+                self.callback()
 
     def reset(self, output_sink: OutputSink | None = None) -> None:
         self._start_time = None
@@ -492,7 +490,7 @@ class Pipeline(Generic[T]):
     type_precedence: int = 0
     creation_id: int = 0
     allow_multi_claim: bool = False
-    is_system: bool = False
+    is_bezel: bool = False
 
     _owned_contact: int | None = field(init=False, default=None)
     _prev_position: Point | None = field(init=False, default=None)

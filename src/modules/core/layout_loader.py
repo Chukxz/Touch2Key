@@ -27,18 +27,16 @@ class LayoutLoader:
         self,
         dispatcher: MapperEventDispatcher,
         foreground_window: Any = None,
-        toggle_mode_callback: Any | None = None,
     ):
-        self.mapper_event_dispatcher = dispatcher
+        self.dispatcher = dispatcher
         self.foreground_window = foreground_window
-        self.toggle_mode_callback = toggle_mode_callback
         self.layout_lock = threading.Lock()
 
-        self.keys_json_data: list[tuple[int, dict[str, Any]]] = []
-        self.bezels_json_data: list[tuple[int, dict[str, Any]]] = []
+        self.keys_data: list[tuple[int, dict[str, Any]]] = []
+        self.bezels_data: list[tuple[int, dict[str, Any]]] = []
 
         self.load_layout()
-        self.mapper_event_dispatcher.register_callback(
+        self.dispatcher.register_callback(
             "ON_RELOAD", self.load_layout
         )
 
@@ -48,8 +46,8 @@ class LayoutLoader:
         if layout is None:
             logger.warning("No active layout found in SQLite database.")
             with self.layout_lock:
-                self.keys_json_data = []
-                self.bezels_json_data = []
+                self.keys_data = []
+                self.bezels_data = []
             return
 
         # Native repository auto-heals bezels, so we just fetch the zones
@@ -60,8 +58,8 @@ class LayoutLoader:
         layout_h = max(int(layout.height or 0), 1)
 
         # Temporary lists to prevent duplicate appending on reload
-        new_keys_json_data: list[tuple[int, dict[str, Any]]] = []
-        new_bezels_json_data: list[tuple[int, dict[str, Any]]] = []
+        new_keys_data: list[tuple[int, dict[str, Any]]] = []
+        new_bezels_data: list[tuple[int, dict[str, Any]]] = []
 
         for zone in zones:
             if zone.scancode == SPRINT_DISTANCE_CODE:
@@ -95,14 +93,14 @@ class LayoutLoader:
                 z_dict["y2"] = (zone.y2 or 0.0) / layout_h
 
             if zone.zone_type == BEZEL:
-                new_bezels_json_data.append((zone.scancode, z_dict))
+                new_bezels_data.append((zone.scancode, z_dict))
             else:
-                new_keys_json_data.append((zone.scancode, z_dict))
+                new_keys_data.append((zone.scancode, z_dict))
 
         # Safely swap the active lists under lock
         with self.layout_lock:
-            self.keys_json_data = new_keys_json_data
-            self.bezels_json_data = new_bezels_json_data
+            self.keys_data = new_keys_data
+            self.bezels_data = new_bezels_data
 
         logger.info(
             "Active layout '%s' loaded. (%dx%d, %d zones)",

@@ -8,6 +8,7 @@ import ctypes
 import logging
 from collections import deque
 from typing import TYPE_CHECKING
+import signal
 
 from modules.utils import (
     bresenham,
@@ -31,7 +32,7 @@ from PySide6.QtGui import (
     QPainter,
     QIcon,
 )
-from PySide6.QtCore import QEvent, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal, QCoreApplication
 
 from modules import AppLogManager
 from modules.utils import READ_ATTEMPTS, VISUALIZER_RUNTIME_FILE
@@ -61,8 +62,7 @@ MOUSE_BUTTON_INFO: dict[Qt.MouseButton, tuple[str, str]] = {
 
 
 def get_locations_dict(width: int, height: int) -> dict[int, tuple[int, int]]:
-    # NOTE: coordinates are scaled by the *device* resolution (json_dev_*).
-    # Verify scale_coord maps into screen space; the scene is screen-sized.
+
     loc_dict: dict[int, tuple[int, int]] = {}
 
     zones = store.get_active_layout_zones()
@@ -173,8 +173,8 @@ class DiagnosticView(QGraphicsView):
         pos_y = pos.y()
 
         points_generator = bresenham(
-            self.f_p_x or pos_x,
-            self.f_p_y or pos_y,
+            self.f_p_x if self.f_p_x is not None else pos_x,
+            self.f_p_y if self.f_p_y is not None else pos_y,
             pos_x,
             pos_y,
             width0=self.trail_width,
@@ -243,7 +243,7 @@ class MainWindow(QMainWindow):
         self.toggle_key_scancode = toggle_key_scancode
         self.loc_dict: dict[int, tuple[int, int]] = {}
         # Positional args kept as-is; platform signature not visible here.
-        self.cursor_visible = _PLATFORM.WindowManager().is_cursor_visible(True, 0)
+        self.cursor_visible = _PLATFORM.WindowManager().is_cursor_visible(True, 0)[0]
         self.data: deque[dict] = deque(maxlen=MAX_EVENT_LOG)
         # Keyed by native scancode (fallback: Qt key) so unmapped keys don't collide.
         self.pressed_keys: dict[int, str] = {}
@@ -251,6 +251,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(VISUALIZER_NAME)
         self.setWindowOpacity(0.4)
+        self.showFullScreen()
 
         self.view = DiagnosticView(self.loc_dict, self)
         self.view.mouse_pressed.connect(self._on_mouse_pressed)
@@ -414,9 +415,15 @@ def run(
     if app_icon_path.exists():
         app.setWindowIcon(QIcon(str(app_icon_path)))
 
-    # Hold an owning reference for the lifetime of the event loop.
+    # Allow Python signals to be processed periodically by running a dummy timer
+    timer = QTimer()
+    timer.start(500)
+    timer.timeout.connect(lambda: None)  # Kickstarts the Python interpreter loop
+
+    # Handle Ctrl+C cleanly
+    signal.signal(signal.SIGINT, lambda *_: QCoreApplication.quit())
+
     window = MainWindow(toggle_key_scancode)
-    window.showFullScreen()
     window.activateWindow()
     sys.exit(app.exec())
 

@@ -2538,7 +2538,6 @@ class LayoutsPlotterWidget(QWidget):
                 p_cfg.pipeline_config["down"] = indicators_map[2]
                 p_cfg.pipeline_config["right"] = indicators_map[3]
 
-            # VERIFY (needs pipeline.py): these re-assert the idx of every stage on each save.
             p_cfg.set_origin_config(
                 idx=0 if entry_scancode == MOUSE_WHEEL_SIMULATOR_CODE else 1
             )

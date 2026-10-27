@@ -39,7 +39,7 @@ class TouchReader:
         dispatcher: MapperEventDispatcher,
         rate_cap: float = DEFAULT_ADB_RATE_CAP,
     ):
-        self.mapper_event_dispatcher = dispatcher
+        self.dispatcher = dispatcher
 
         self.device: str | None = None
         self.device_touch_event: str | None = None
@@ -69,7 +69,7 @@ class TouchReader:
         self.touch_event_processor: Any = None
         self.process: subprocess.Popen | None = None
 
-        self.mapper_event_dispatcher.register_callback(
+        self.dispatcher.register_callback(
             "ON_RELOAD", self._on_reload
         )
 

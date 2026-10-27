@@ -39,8 +39,6 @@ class TwoFingerTapTracker:
     a delayed single-finger tap from leaking into menu actions before the
     gesture has been decided.
 
-    ``process`` remains as a compatibility wrapper for older callers; new code
-    should use ``observe`` so rejected events can be replayed.
     """
 
     max_tap_duration_s: float = 0.25

@@ -781,7 +781,7 @@ class InputCurve:
             self.is_held = False
             return False
 
-        # Phase 1: Initial Press
+        # Initial Press
         if not self.is_held:
             self.is_held = True
             self.hold_start_time = current_time_sec
@@ -794,11 +794,11 @@ class InputCurve:
         if time_held < self.initial_delay:
             return False
             
-        # Phase 2: Calculate progress (0.0 to 1.0)
+        # Calculate progress (0.0 to 1.0)
         ramp_active_time = time_held - self.initial_delay
         progress = min(ramp_active_time / self.ramp_duration, 1.0)
         
-        # Phase 3: Apply the selected easing function
+        # Apply the selected easing function
         if self.curve_type == CurveType.LINEAR:
             eased_progress = progress
             
@@ -809,7 +809,7 @@ class InputCurve:
             # Standard Expo Ease-In: stays flat then spikes aggressively
             eased_progress = 0.0 if progress == 0.0 else math.pow(2, 10 * (progress - 1))
             
-        # Phase 4: Interpolate the delay and check if it's time to fire
+        # Interpolate the delay and check if it's time to fire
         current_delay = self.start_delay - (eased_progress * (self.start_delay - self.min_delay))
         
         if (current_time_sec - self.last_fire_time) >= current_delay:
@@ -1302,10 +1302,8 @@ def scale_coord(base: float, val: float | None = None) -> float:
         return 0.0
     return val * base if val <= 1.0 else val
 
-
 def clamp(value, lo, hi):
     return max(lo, min(hi, value))
-
 
 def make_copy_name(name: str) -> str:
     matches = list(COPY_RE.finditer(name))

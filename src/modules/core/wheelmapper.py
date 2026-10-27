@@ -30,23 +30,32 @@ class WheelMapper:
     def __init__(self, mapper: Mapper, output_sink: BridgeOutputSink):
         self.mapper = mapper
         self.output_sink = output_sink
-        self.mapper_event_dispatcher = mapper.mapper_event_dispatcher
+        self.dispatcher = mapper.dispatcher
 
         self.lock = threading.Lock()
         self.pipeline: Pipeline | None = None
 
         self.rebuild_pipeline()
 
-        self.mapper_event_dispatcher.register_callback(
-            "ON_RELOAD", self.rebuild_pipeline
-        )
-        self.mapper_event_dispatcher.register_callback(
+        self.dispatcher.register_callback("ON_RELOAD", self.rebuild_pipeline)
+        self.dispatcher.register_callback(
             "ON_WORKER_RESPAWN", self._on_worker_respawn_wheel
         )
 
     def rebuild_pipeline(self) -> None:
         settings = store.settings.get()
         layout = store.get_active_layout()
+        layout_loader = self.mapper.engine_ref.layout_loader
+
+        if layout_loader is None:
+            logger.warning(
+                "Layout Loader not initialized. WheelMapper pipeline will be empty."
+            )
+            self.touch_up()
+            with self.lock:
+                self.pipeline = None
+            return
+
         if layout is None:
             logger.warning(
                 "No active layout found in SQLite database. WheelMapper pipeline will be empty."
@@ -61,7 +70,9 @@ class WheelMapper:
         w = float(layout.width)
         h = float(layout.height)
 
-        key_raw_zones = self.mapper.layout_loader.keys_json_data.copy()
+        with layout_loader.layout_lock:
+            key_raw_zones = layout_loader.keys_data.copy()
+            
         wheel_zone_values = None
         for _, values in key_raw_zones:
             if (
@@ -82,7 +93,7 @@ class WheelMapper:
                 self.pipeline = None
             return
 
-        z_id = int(wheel_zone_values.get("id", 0))
+        zone_id = int(wheel_zone_values.get("id", 0))
         priority = int(wheel_zone_values.get("priority", 0))
         ignore_app_settings = bool(wheel_zone_values.get("ignore_app_settings", False))
 
@@ -92,7 +103,7 @@ class WheelMapper:
             else float(settings.deadzone)
         )
         hysteresis = (
-            float(wheel_zone_values.get("hysteresis", 4.0))
+            float(wheel_zone_values.get("hysteresis", 5.0))
             if ignore_app_settings
             else float(settings.hysteresis)
         )
@@ -125,7 +136,7 @@ class WheelMapper:
                 sprint=sprint,
                 hysteresis_deg=hysteresis,
                 priority=priority,
-                creation_id=z_id,
+                creation_id=zone_id,
             )
             logger.info(
                 "Configured Anchored Floating Joystick at (%.1f, %.1f)",
@@ -146,7 +157,7 @@ class WheelMapper:
                 sprint=sprint,
                 hysteresis_deg=hysteresis,
                 priority=priority,
-                creation_id=z_id,
+                creation_id=zone_id,
             )
             logger.info("Configured Floating Joystick.")
 
@@ -163,7 +174,7 @@ class WheelMapper:
                 sprint=sprint,
                 hysteresis_deg=hysteresis,
                 priority=priority,
-                creation_id=z_id,
+                creation_id=zone_id,
             )
             logger.info("Configured Fixed Joystick at (%.1f, %.1f)", center.x, center.y)
 

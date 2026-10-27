@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 from PIL import Image
 
@@ -49,8 +49,10 @@ from modules.utils import (
     MOUSE_WHEEL_SIMULATOR_CODE,
     PROFILES_FOLDER,
     RECTANGLE,
+    SCANCODES,
     SENSITIVITY_MAX,
     SENSITIVITY_MIN,
+    SPECIAL_MAP,
     SPRINT_DISTANCE_CODE,
     TOML_PATH,
     TOP_BEZEL_ID,
@@ -59,6 +61,7 @@ from modules.utils import (
     TYPEMATIC_RATE_MAX_HZ,
     TYPEMATIC_RATE_MIN_HZ,
     clamp,
+    get_key_from_scancode,
     get_scancode_from_key,
 )
 
@@ -67,6 +70,28 @@ VALID_SORT_ORDERS = ("Recently Modified", "Name (A-Z)", "Created (Newest)")
 # ---------------------------------------------------------------------------
 # Input & Validation Helpers
 # ---------------------------------------------------------------------------
+
+
+def get_target_id(raw_id: str):
+    if raw_id.isdigit():
+        if store.layouts.get(int(raw_id)) is not None:
+            target_id = int(raw_id)
+        else:
+            target_id = None
+            print(f"Error: No layout with ID {int(raw_id)} found in the database.")
+
+    else:
+        print(
+            f"Warning: Provided layout ID {raw_id} is not a digit, falling back to active layout."
+        )
+        layout = store.get_active_layout()
+        if layout:
+            target_id = layout.id
+        else:
+            target_id = None
+            print("Error: No active ayout found in the database")
+
+    return target_id
 
 
 def _prompt_float(prompt: str, current: float) -> float:
@@ -184,32 +209,27 @@ def set_profile_image(layout_id: int, image_path_input: str | Path) -> bool:
     return True
 
 
-def show_left_handed() -> None:
-    s = store.settings.get()
-    print("\n--- Left-Handed Mode ---")
-    print(f"  Left-Handed: {'Yes' if s.left_handed else 'No'}\n")
+def configure_directional_keys(layout_id) -> None:
+    show_directional_keys(layout_id)
+    directions = {"up", "left", "down", "right"}
+    was_set = [False, False, False, False]
+    i = 0
 
+    for direction in directions:
+        was_set[i] = set_directional_key(layout_id, direction)
+        i += 1
 
-def configure_left_handed_interactive() -> None:
-    s = store.settings.get()
-    show_left_handed()
-    val_in = (
-        input(
-            f"Enable left-handed mode? (y/n, current: {'y' if s.left_handed else 'n'}): "
+    if any(was_set):
+        print(
+            f"Directional scancodes successfully updated for layout with ID: {layout_id}."
         )
-        .strip()
-        .lower()
-    )
-    if val_in in ("y", "n"):
-        store.settings.update(left_handed=(val_in == "y"))
-        print("Left-handed mode updated successfully.")
-    show_left_handed()
+    show_directional_keys(layout_id)
 
 
 def show_input_controls() -> None:
     """Prints all global touch, joystick, sensitivity, deadzone, hysteresis, and keybinding settings."""
     s = store.settings.get()
-    print("\n--- Touch, Input Controls & Global Keybindings ---")
+    print("\n--- Handedness, Touch, Input Controls & Global Keybindings ---")
     print(f"  Left-Handed Mode:  {'Yes' if s.left_handed else 'No'}")
     print(f"  Floating Joystick: {'Yes' if s.floating_joystick else 'No'}")
     print(f"  Anchored Joystick: {'Yes' if s.anchored_joystick else 'No'}")
@@ -353,7 +373,7 @@ def list_profiles(search_query: str = "") -> None:
             print(f"\nNo profiles matching '{search_query.strip()}'.\n")
             return
 
-    # One query; excludes the system bezels (same count the GUI shows).
+    # One query; excludes the bezels (same count the GUI shows).
     zone_counts = store.zones.count_by_layout()
 
     header_filter = (
@@ -423,7 +443,7 @@ def list_layout_zones(layout_id: int) -> None:
         )
         return
 
-    print(f"\n--- Zones / Pipelines for '{layout.name}' (ID: {layout_id}) ---")
+    print(f"\n--- Zones / Pipelines for Layout '{layout.name}' (ID: {layout_id}) ---")
 
     for z in zones:
         coords = "N/A"
@@ -451,13 +471,14 @@ def list_layout_zones(layout_id: int) -> None:
             f"  [{z.id}] {z.name or 'Unnamed'} | Key: {z.scancode} | "
             f"Type: {z.zone_type} | Prio: {z.priority} | {coords}{extra}{cam_flag}"
         )
+
     print()
 
 
 def set_bezel_thickness(
     layout_id: int, top_dp: Optional[float] = None, bottom_dp: Optional[float] = None
 ) -> bool:
-    """Updates top and/or bottom system bezel thickness (in dp) for a layout."""
+    """Updates top and/or bottom bezel thickness (in dp) for a layout."""
     layout = store.layouts.get(layout_id)
     if not layout:
         print(f"Error: Layout ID {layout_id} not found.")
@@ -476,7 +497,94 @@ def set_bezel_thickness(
             clamped_bot = int(clamp(bottom_dp, MIN_BEZEL_DP, MAX_BEZEL_DP))
             store.zones.update_bezel(layout, z, False, clamped_bot)
 
-    print(f"System bezels updated for layout '{layout.name}' (ID: {layout_id}).")
+    print(f"Bezels updated for layout '{layout.name}' (ID: {layout_id}).")
+    return True
+
+
+def list_supported_keys() -> None:
+    print("--- Supported keys ---")
+    print(format_supported_keys([SCANCODES, SPECIAL_MAP]))
+
+
+def format_supported_keys(input_dict_list: list[dict[str, Any]]):
+    output = ""
+
+    MIN_LEN = 60
+    KEY_WIDTH = 20
+    line = ""
+    line_len = 0
+
+    for input_dict in input_dict_list:
+        for key in input_dict.keys():
+            key_len = len(key)
+
+            if line_len > MIN_LEN:
+                output += line + "\n"
+                line = ""
+                line_len = 0
+
+            suffix_len = min(0, KEY_WIDTH - key_len - 2)
+            line += f"'{key}'" + " " * suffix_len
+            line_len += key_len + suffix_len + 2
+
+    return output
+
+
+def show_directional_keys(layout_id: int) -> None:
+    layout = store.layouts.get(layout_id)
+    if not layout:
+        print(f"Error: Layout ID {layout_id} not found.")
+
+    directional_scancodes = store.zones.get_mouse_wheel_directional_scancodes(layout)
+    norm_keys = [
+        (get_key_from_scancode(_d_s) or "").upper() for _d_s in directional_scancodes
+    ]
+    print(
+        f"\n--- Directional Keys: {str(norm_keys).replace("[", "").replace("]", "").replace("'", "")} ---"
+    )
+
+
+def set_directional_key(layout_id: int, direction: str | None) -> bool:
+    """`direction_rev_map` {'up': 0, 'left': 1, 'down': 2, 'right': 3}"""
+    layout = store.layouts.get(layout_id)
+    if not layout:
+        print(f"Error: Layout ID {layout_id} not found.")
+        return False
+
+    if not direction:
+        print(f"Error: Direction not specified.")
+        return False
+
+    mouse_wheel_zone = store.zones.get_mouse_wheel_zone(layout)
+    if mouse_wheel_zone is None:
+        print("Error: Layout has no Mouse Wheel")
+        return False
+
+    key = input(
+        f"Enter key for '{direction}' e.g. 'w' or 'u' or '2' (alphanumeric single characters),\nfor arrow keys use 'up', 'left', 'down' or 'right'\nor use --list-supported-keys to view the supported keys: "
+    )
+    key_scancode = get_scancode_from_key(key)
+
+    if key_scancode is None:
+        print(
+            f"Error: Key '{key}' is not supported, use --list-supported-keys to view the supported keys."
+        )
+        return False
+
+    direction_rev_map = {"up": 0, "left": 1, "down": 2, "right": 3}
+    direction_id = direction_rev_map.get(direction)
+
+    if direction_id is None:
+        print(f"Error: {direction.capitalize()} direction is invalid.")
+        return False
+
+    store.zones.set_mouse_wheel_directional_scancodes(
+        layout, direction_id, key_scancode
+    )
+    print(
+        f"'{direction.capitalize()}' directional scancode successfully updated to '{key_scancode}' (Key: '{key}') for layout '{layout.name}' (ID: {layout_id})."
+    )
+
     return True
 
 
@@ -661,7 +769,7 @@ def delete_profile(layout_id: int) -> bool:
 
 
 def clear_zones(layout_id: int) -> bool:
-    """Removes all touch zones from a profile while keeping the layout entry and its system bezels."""
+    """Removes all touch zones from a profile while keeping the layout entry and its bezels."""
     target = store.layouts.get(layout_id)
     if not target:
         print(f"Error: Layout ID {layout_id} not found.")
@@ -671,7 +779,7 @@ def clear_zones(layout_id: int) -> bool:
     store.zones.clear_non_bezel_zones(layout_id)
 
     print(
-        f"All touch zones cleared (system bezels kept) for layout '{target.name}' (ID: {layout_id})."
+        f"All touch zones cleared (bezels kept) for layout '{target.name}' (ID: {layout_id})."
     )
     return True
 
@@ -893,6 +1001,7 @@ def export_profile_toml(
 def interactive_menu() -> None:
     """Terminal CLI UI loop."""
     search_filter = ""
+
     while True:
         list_profiles(search_filter)
         print("\nCommands:")
@@ -901,13 +1010,16 @@ def interactive_menu() -> None:
         print("  [so]   Set Profile Sort Order")
         print("  [fl]   Filter Profiles by Name")
         print("  [si]   Set Profile Background Image")
-        print("  [lh]   View / Configure Left-Handed Mode")
-        print("  [ic]   View / Configure Touch, Input Controls & Global Keybindings")
+        print("  [lk]   List Supported Keys")
+        print("  [ik]   View / Configure Directional Keys")
+        print(
+            "  [ic]   View / Configure Handedness, Touch, Input Controls & Global Keybindings"
+        )
         print("  [ric]  Reset Input Controls to Defaults")
         print("  [ck]   Capture Global Keybindings (Toggle & Sprint)")
         print("  [pf]   Configure ADB Rate Cap & PPS Alert Threshold")
         print("  [lz]   List Zones / Pipelines for Profile")
-        print("  [bz]   Configure System Bezel Thickness (Top / Bottom dp)")
+        print("  [bz]   Configure Bezel Thickness (Top / Bottom dp)")
         print(
             "  [ez]   Edit Single Zone Pipeline (Priority / Sens / Deadzone / Pointer)"
         )
@@ -937,13 +1049,18 @@ def interactive_menu() -> None:
         if choice == "q":
             break
 
-        elif choice == "s":
-            raw_id = input("Enter Layout ID to activate: ").strip()
-            if raw_id.isdigit():
-                set_active_profile(int(raw_id))
+        if choice == "s":
+            raw_id = input(
+                "Enter Layout ID to activate (Leave blank for active): "
+            ).strip()
+            target_id = get_target_id(raw_id)
 
-        elif choice == "n":
+            if target_id is not None:
+                set_active_profile(target_id)
+
+        if choice == "n":
             name = input("Enter new profile name: ").strip()
+
             if name:
                 s = store.settings.get()
                 w = _prompt_int(
@@ -958,68 +1075,78 @@ def interactive_menu() -> None:
                 )
                 create_new_profile(name, w, h, d)
 
-        elif choice == "so":
+        if choice == "so":
             print("Available sort orders:")
+
             for idx, mode in enumerate(VALID_SORT_ORDERS, start=1):
                 print(f"  [{idx}] {mode}")
             sel = input("Select sort order (1-3 or name): ").strip()
+
             if sel in ("1", "2", "3"):
                 set_profile_sort_order(VALID_SORT_ORDERS[int(sel) - 1])
+
             elif sel:
                 set_profile_sort_order(sel)
 
-        elif choice == "fl":
+        if choice == "fl":
             search_filter = input(
                 "Enter search filter (leave blank to show all): "
             ).strip()
 
-        elif choice == "si":
-            raw_id = input("Enter Layout ID: ").strip()
+        if choice == "si":
+            raw_id = input("Enter Layout ID (Leave blank for active): ").strip()
             img_path = (
                 input(f"Enter image filename or path [Search dir: {IMAGES_FOLDER}]: ")
                 .strip()
                 .strip('"')
             )
-            if raw_id.isdigit() and img_path:
-                set_profile_image(int(raw_id), img_path)
+            target_id = get_target_id(raw_id)
 
-        elif choice == "lh":
-            configure_left_handed_interactive()
+            if target_id is not None:
+                if raw_id.isdigit() and img_path:
+                    set_profile_image(target_id, img_path)
 
-        elif choice == "ic":
+        if choice == "lk":
+            list_supported_keys()
+
+        if choice == "ik":
+            raw_id = input("Enter Layout ID (Leave blank for active): ").strip()
+            target_id = get_target_id(raw_id)
+
+            if target_id is not None:
+                configure_directional_keys(target_id)
+
+        if choice == "ic":
             configure_input_controls_interactive()
 
-        elif choice == "ric":
+        if choice == "ric":
             confirm = (
                 input("Reset input controls to factory defaults? (y/N): ")
                 .strip()
                 .lower()
             )
+
             if confirm == "y":
                 reset_input_controls_defaults()
 
-        elif choice == "ck":
+        if choice == "ck":
             capture_keys_cli()
 
-        elif choice == "pf":
+        if choice == "pf":
             capture_performance_settings_cli()
 
-        elif choice == "lz":
-            raw_id = input("Enter Layout ID to view zones: ").strip()
-            if raw_id.isdigit():
-                list_layout_zones(int(raw_id))
+        if choice == "lz":
+            raw_id = input(
+                "Enter Layout ID to view zones (Leave blank for active): "
+            ).strip()
+            target_id = get_target_id(raw_id)
 
-        elif choice == "bz":
-            raw_id = input("Enter Layout ID (leave blank for active): ").strip()
+            if target_id is not None:
+                list_layout_zones(target_id)
 
-            if raw_id.isdigit():
-                target_id = int(raw_id)
-            else:
-                layout = store.get_active_layout()
-                if layout:
-                    target = layout.id
-                else:
-                    target_id = None
+        if choice == "bz":
+            raw_id = input("Enter Layout ID (Leave blank for active): ").strip()
+            target_id = get_target_id(raw_id)
 
             if target_id is not None:
                 top_in = input(
@@ -1031,16 +1158,20 @@ def interactive_menu() -> None:
                 top_val = float(top_in) if top_in else None
                 bot_val = float(bot_in) if bot_in else None
                 set_bezel_thickness(target_id, top_val, bot_val)
+
             else:
                 print("No valid layout selected.")
 
-        elif choice == "ez":
+        if choice == "ez":
             raw_zid = input("Enter Zone ID to edit: ").strip()
+
             if raw_zid.isdigit():
                 zid = int(raw_zid)
                 zone = store.zones.get(zid)
+
                 if not zone or zone.zone_type == BEZEL:
                     print(f"Error: Non-bezel Zone ID {zid} not found.")
+
                 else:
                     zone.set_parsed_config_from_json()
                     _, _, sx, sy, dz, hys = zone.CONFIG_HELPER.get_transform_config()
@@ -1067,6 +1198,7 @@ def interactive_menu() -> None:
                         .strip()
                         .lower()
                     )
+
                     ptr = zone.pointer if ptr_in not in ("y", "n") else (ptr_in == "y")
                     new_sx = _prompt_float(f"Sensitivity X (current: {sx:.2f}): ", sx)
                     new_sy = _prompt_float(f"Sensitivity Y (current: {sy:.2f}): ", sy)
@@ -1083,20 +1215,24 @@ def interactive_menu() -> None:
                         hysteresis=new_hys,
                     )
 
-        elif choice == "rz1":
+        if choice == "rz1":
             raw_zid = input("Enter Zone ID to reset to AppSettings: ").strip()
+
             if raw_zid.isdigit():
                 reset_single_zone_to_app_settings(int(raw_zid))
 
-        elif choice == "dz":
+        if choice == "dz":
             raw_zid = input("Enter Zone ID to delete: ").strip()
             if raw_zid.isdigit():
                 delete_single_zone(int(raw_zid))
 
-        elif choice == "cp":
-            raw_id = input("Enter Layout ID to duplicate: ").strip()
-            if raw_id.isdigit():
-                target_id = int(raw_id)
+        if choice == "cp":
+            raw_id = input(
+                "Enter Layout ID to duplicate (Leave blank for active): "
+            ).strip()
+            target_id = get_target_id(raw_id)
+
+            if target_id is not None:
                 source = store.layouts.get(target_id)
                 if source:
                     new_name = input(
@@ -1104,19 +1240,25 @@ def interactive_menu() -> None:
                     ).strip()
                     duplicate_profile(target_id, new_name)
 
-        elif choice == "rn":
-            raw_id = input("Enter Layout ID to rename: ").strip()
-            if raw_id.isdigit():
-                target_id = int(raw_id)
+        if choice == "rn":
+            raw_id = input(
+                "Enter Layout ID to rename (Leave blank for active): "
+            ).strip()
+            target_id = get_target_id(raw_id)
+
+            if target_id is not None:
                 target = store.layouts.get(target_id)
                 if target:
                     new_name = input(f"Enter new name for '{target.name}': ").strip()
                     rename_profile(target_id, new_name)
 
-        elif choice == "cz":
-            raw_id = input("Enter Layout ID to clear zones: ").strip()
-            if raw_id.isdigit():
-                target_id = int(raw_id)
+        if choice == "cz":
+            raw_id = input(
+                "Enter Layout ID to clear zones (Leave blank for active): "
+            ).strip()
+            target_id = get_target_id(raw_id)
+
+            if target_id is not None:
                 confirm = (
                     input(f"Clear all zones for Layout ID {target_id}? (y/N): ")
                     .strip()
@@ -1125,31 +1267,29 @@ def interactive_menu() -> None:
                 if confirm == "y":
                     clear_zones(target_id)
 
-        elif choice == "rz":
+        if choice == "rz":
             raw_id = input(
                 "Enter Layout ID to reset zones (Leave blank for active): "
             ).strip()
-            try:
-                target_id = int(raw_id) if raw_id else None
-                active = (
-                    store.layouts.get(target_id)
-                    if target_id
-                    else store.get_active_layout()
-                )
-                if active:
-                    count = reset_layout_zones_to_app_settings(active.id)
+            target_id = get_target_id(raw_id)
+
+            if target_id is not None:
+                target_layout = store.layouts.get(target_id)
+                if target_layout:
+                    count = reset_layout_zones_to_app_settings(target_layout.id)
                     print(
-                        f"Reset {count} zones in layout '{active.name}' to default AppSettings."
+                        f"Reset {count} zones in layout '{target_layout.name}' to default AppSettings."
                     )
                 else:
                     print("No layout selected or active.")
-            except ValueError:
-                print("Invalid layout ID provided.")
 
-        elif choice == "d":
-            raw_id = input("Enter Layout ID to delete: ").strip()
-            if raw_id.isdigit():
-                target_id = int(raw_id)
+        if choice == "d":
+            raw_id = input(
+                "Enter Layout ID to delete (Leave blank for active): "
+            ).strip()
+            target_id = get_target_id(raw_id)
+
+            if target_id is not None:
                 confirm = (
                     input(
                         f"Confirm delete Layout ID {target_id} and its zones? (y/N): "
@@ -1160,20 +1300,21 @@ def interactive_menu() -> None:
                 if confirm == "y":
                     delete_profile(target_id)
 
-        elif choice == "ty":
+        if choice == "ty":
             configure_typematic_interactive()
 
-        elif choice == "rty":
+        if choice == "rty":
             confirm = (
                 input("Reset typematic settings to defaults? (y/N): ").strip().lower()
             )
+
             if confirm == "y":
                 reset_typematic_defaults()
 
-        elif choice == "ss":
+        if choice == "ss":
             configure_system_interactive()
 
-        elif choice == "rss":
+        if choice == "rss":
             confirm = (
                 input(
                     "Reset two finger tap and bezel toggle settings to defaults? (y/N): "
@@ -1181,58 +1322,64 @@ def interactive_menu() -> None:
                 .strip()
                 .lower()
             )
+
             if confirm == "y":
                 reset_system_defaults()
 
-        elif choice == "i":
+        if choice == "i":
             raw_path = (
                 input(f"Enter path to JSON file [Default: {JSONS_FOLDER}]: ")
                 .strip()
                 .strip('"')
             )
+
             if raw_path:
                 import_profile_json(Path(raw_path))
 
-        elif choice == "e":
-            raw_id = input("Enter Layout ID to export: ").strip()
-            if raw_id.isdigit():
-                export_profile_json(int(raw_id))
+        if choice == "e":
+            raw_id = input(
+                "Enter Layout ID to export (Leave blank for active): "
+            ).strip()
+            target_id = get_target_id(raw_id)
 
-        elif choice == "st":
+            if target_id is not None:
+                export_profile_json(target_id)
+
+        if choice == "st":
             raw_id = input(
                 "Enter Layout ID to link with TOML (Leave blank for standalone settings.toml): "
             ).strip()
             linked_id = int(raw_id) if raw_id.isdigit() else None
             export_profile_toml(layout_id=linked_id)
 
-        elif choice == "lt":
+        if choice == "lt":
+
             if migrate_toml_config():
                 print("Settings imported successfully from settings.toml.")
+
             else:
                 print("Failed to import settings.toml (file missing or invalid).")
 
-        elif choice == "eb":
+        if choice == "eb":
             raw_id = input(
                 "Enter Layout ID to bundle (Leave blank for active): "
             ).strip()
+            target_id = get_target_id(raw_id)
+
             try:
-                target_id = int(raw_id) if raw_id else None
-                active = (
-                    store.layouts.get(target_id)
-                    if target_id
-                    else store.get_active_layout()
-                )
-                if active:
+                target_layout = store.layouts.get(target_id)
+                if target_layout:
                     t_path, j_path = export_bundle(
-                        profile_name=active.name, layout_id=active.id
+                        profile_name=target_layout.name, layout_id=target_layout.id
                     )
                     print(f"Bundle exported:\n  - TOML: {t_path}\n  - JSON: {j_path}")
                 else:
                     print("No active layout available to bundle.")
+
             except Exception as exc:
                 print(f"Export bundle failed: {exc}")
 
-        elif choice == "ib":
+        if choice == "ib":
             raw_path = (
                 input(
                     f"Enter path to file or bundle folder [Default: {PROFILES_FOLDER}]: "
@@ -1240,27 +1387,31 @@ def interactive_menu() -> None:
                 .strip()
                 .strip('"')
             )
+
             if raw_path and import_any(Path(raw_path)):
                 print("Configuration imported and synced to SQLite.")
+
             else:
                 print(
                     "Import failed. Check that file/folder exists and syntax is valid."
                 )
 
-        elif choice == "r":
+        if choice == "r":
             confirm = (
                 input("Reset all app settings to defaults? (y/N): ").strip().lower()
             )
+
             if confirm == "y":
                 store.settings.reset_to_defaults()
                 print("Application settings reset to defaults.")
 
-        elif choice == "w":
+        if choice == "w":
             confirm = (
                 input("WARNING: Wipe ALL layouts, zones, and reset settings? (y/N): ")
                 .strip()
                 .lower()
             )
+
             if confirm == "y":
                 wipe_database()
 
@@ -1274,6 +1425,12 @@ def interactive_menu() -> None:
 
 def run() -> None:
     parser = argparse.ArgumentParser(description="CLI Layout & Profile Manager")
+    parser.add_argument(
+        "-k",
+        "--list-supported-keys",
+        action="store_true",
+        help="List all supported keys",
+    )
     parser.add_argument(
         "-l", "--list", action="store_true", help="List all saved profiles"
     )
@@ -1315,19 +1472,14 @@ def run() -> None:
 
     # Input Controls & Global Keybindings CLI flags
     parser.add_argument(
-        "--show-left-handed",
+        "--show-input",
         action="store_true",
-        help="Display left-handed mode status",
+        help="Display touch, joystick, sensitivity, deadzone, hysteresis, and keybinding settings",
     )
     parser.add_argument(
         "--set-left-handed",
         choices=["on", "off"],
         help="Enable or disable left-handed mode",
-    )
-    parser.add_argument(
-        "--show-input",
-        action="store_true",
-        help="Display touch, joystick, sensitivity, deadzone, hysteresis, and keybinding settings",
     )
     parser.add_argument(
         "--set-floating-joystick",
@@ -1381,7 +1533,24 @@ def run() -> None:
         type=float,
         nargs=3,
         metavar=("LAYOUT_ID", "TOP_DP", "BOTTOM_DP"),
-        help="Set top and bottom system bezel thickness in dp for a layout",
+        help="Set top and bottom bezel thickness in dp for a layout",
+    )
+    parser.add_argument(
+        "--show-directional-keys",
+        type=int,
+        metavar="ID",
+        help="Display directional keys for a layout",
+    )
+    parser.add_argument(
+        "--edit-layout-directionals",
+        type=int,
+        metavar="LAYOUT_ID",
+        help="Edit a layout's directionals by ID (combine with the --set-key flag)",
+    )
+    parser.add_argument(
+        "--set-key",
+        choices=["up", "left", "down", "right"],
+        help="Set the specified directional key for --edit-layout-directionals",
     )
     parser.add_argument(
         "--edit-zone",
@@ -1517,7 +1686,7 @@ def run() -> None:
     parser.add_argument(
         "--set-bezel-toggle",
         choices=["on", "off"],
-        help="Enable or disable system bezel touch toggles",
+        help="Enable or disable bezel touch toggles",
     )
     parser.add_argument(
         "--reset-system",
@@ -1607,34 +1776,41 @@ def run() -> None:
     )
 
     args = parser.parse_args()
+    has_args = False
 
     try:
-        if args.set_left_handed is not None:
-            store.settings.update(left_handed=(args.set_left_handed == "on"))
-            print("Left-handed mode updated successfully.")
-            show_left_handed()
-            return
-
-        if args.show_left_handed:
-            show_left_handed()
-            return
-
         input_updates = {}
+
+        if args.set_left_handed is not None:
+            has_args = True
+            input_updates["left_handed"] = args.set_left_handed == "on"
+
         if args.set_floating_joystick is not None:
+            has_args = True
             input_updates["floating_joystick"] = args.set_floating_joystick == "on"
+
         if args.set_anchored_joystick is not None:
+            has_args = True
             input_updates["anchored_joystick"] = args.set_anchored_joystick == "on"
+
         if args.sensitivity_x is not None:
+            has_args = True
             input_updates["sensitivity_x"] = clamp(
                 args.sensitivity_x, SENSITIVITY_MIN, SENSITIVITY_MAX
             )
+            has_args = True
+
         if args.sensitivity_y is not None:
             input_updates["sensitivity_y"] = clamp(
                 args.sensitivity_y, SENSITIVITY_MIN, SENSITIVITY_MAX
             )
+
         if args.deadzone is not None:
+            has_args = True
             input_updates["deadzone"] = clamp(args.deadzone, DEADZONE_MIN, DEADZONE_MAX)
+
         if args.hysteresis is not None:
+            has_args = True
             input_updates["hysteresis"] = clamp(
                 args.hysteresis, HYSTERESIS_MIN, HYSTERESIS_MAX
             )
@@ -1643,29 +1819,37 @@ def run() -> None:
             store.settings.update(**input_updates)
             print("Input controls and keybindings updated successfully.")
             show_input_controls()
-            return
 
         if args.reset_input:
+            has_args = True
             reset_input_controls_defaults()
-            return
-        elif args.show_input:
+
+        if args.show_input:
+            has_args = True
             show_input_controls()
-            return
 
         typematic_updates = {}
+
         if args.set_typematic is not None:
+            has_args = True
             typematic_updates["typematic_enabled"] = (
                 True if args.set_typematic == "on" else False
             )
+
         if args.typematic_delay is not None:
+            has_args = True
             typematic_updates["typematic_delay_ms"] = clamp(
                 args.typematic_delay, TYPEMATIC_DELAY_MIN_MS, TYPEMATIC_DELAY_MAX_MS
             )
+
         if args.typematic_rate is not None:
+            has_args = True
             typematic_updates["typematic_rate_hz"] = clamp(
                 args.typematic_rate, TYPEMATIC_RATE_MIN_HZ, TYPEMATIC_RATE_MAX_HZ
             )
+
         if args.typematic_excludes is not None:
+            has_args = True
             current_ex = store.settings.get().typematic_excluded_keys
             typematic_updates["typematic_excluded_keys"] = _normalize_excluded_keys(
                 args.typematic_excludes, current_ex
@@ -1675,21 +1859,25 @@ def run() -> None:
             store.settings.update(**typematic_updates)
             print("Typematic settings updated successfully.")
             show_typematic()
-            return
 
         if args.reset_typematic:
+            has_args = True
             reset_typematic_defaults()
-            return
-        elif args.show_typematic:
+
+        if args.show_typematic:
+            has_args = True
             show_typematic()
-            return
 
         system_updates = {}
+
         if args.set_two_finger_tap is not None:
+            has_args = True
             system_updates["two_finger_tap_enabled"] = (
                 True if args.set_two_finger_tap == "on" else False
             )
+
         if args.set_bezel_toggle is not None:
+            has_args = True
             system_updates["bezel_toggle_enabled"] = (
                 True if args.set_bezel_toggle == "on" else False
             )
@@ -1698,36 +1886,60 @@ def run() -> None:
             store.settings.update(**system_updates)
             print("System settings updated successfully.")
             show_system()
-            return
 
         if args.reset_system:
+            has_args = True
             reset_system_defaults()
-            return
-        elif args.show_system:
+
+        if args.show_system:
+            has_args = True
             show_system()
-            return
+
+        if args.list_supported_keys:
+            has_args = True
+            list_supported_keys()
 
         if args.sort is not None:
+            has_args = True
             set_profile_sort_order(args.sort)
-            if not args.list:
-                return
 
         if args.list or args.filter:
+            has_args = True
             list_profiles(args.filter)
-        elif args.new is not None:
+
+        if args.new is not None:
+            has_args = True
             w, h, d = args.dims if args.dims else (None, None, None)
             create_new_profile(args.new, w, h, d)
-        elif args.set_image is not None:
+
+        if args.set_image is not None:
+            has_args = True
             set_profile_image(int(args.set_image[0]), args.set_image[1])
-        elif args.set_active is not None:
+
+        if args.set_active is not None:
+            has_args = True
             set_active_profile(args.set_active)
-        elif args.list_zones is not None:
+
+        if args.list_zones is not None:
+            has_args = True
             list_layout_zones(args.list_zones)
-        elif args.set_bezels is not None:
+
+        if args.set_bezels is not None:
+            has_args = True
             set_bezel_thickness(
                 int(args.set_bezels[0]), args.set_bezels[1], args.set_bezels[2]
             )
-        elif args.edit_zone is not None:
+
+        if args.show_directional_keys is not None:
+            has_args = True
+            show_directional_keys(args.show_directional_keys)
+
+        if args.edit_layout_directionals is not None:
+            has_args = True
+            set_directional_key(args.edit_layout_directionals, args.set_key)
+
+        if args.edit_zone is not None:
+            has_args = True
             edit_single_zone(
                 args.edit_zone,
                 priority=args.zone_priority,
@@ -1744,19 +1956,34 @@ def run() -> None:
                 deadzone=args.zone_deadzone,
                 hysteresis=args.zone_hysteresis,
             )
-        elif args.reset_zone is not None:
+            has_args = True
+
+        if args.reset_zone is not None:
+            has_args = True
             reset_single_zone_to_app_settings(args.reset_zone)
-        elif args.delete_zone is not None:
+
+        if args.delete_zone is not None:
+            has_args = True
             delete_single_zone(args.delete_zone)
-        elif args.duplicate is not None:
+
+        if args.duplicate is not None:
+            has_args = True
             duplicate_profile(int(args.duplicate[0]), args.duplicate[1])
-        elif args.rename is not None:
+
+        if args.rename is not None:
+            has_args = True
             rename_profile(int(args.rename[0]), args.rename[1])
-        elif args.delete is not None:
+
+        if args.delete is not None:
+            has_args = True
             delete_profile(args.delete)
-        elif args.clear_zones is not None:
+
+        if args.clear_zones is not None:
+            has_args = True
             clear_zones(args.clear_zones)
-        elif args.reset_zones is not None:
+
+        if args.reset_zones is not None:
+            has_args = True
             target_id = args.reset_zones
             if target_id == -1:
                 active = store.get_active_layout()
@@ -1766,50 +1993,73 @@ def run() -> None:
                 print(f"Reset {count} zones in layout ID {target_id} to AppSettings.")
             else:
                 print("No layout specified or active.")
-        elif args.import_json is not None:
+
+        if args.import_json is not None:
+            has_args = True
             import_profile_json(args.import_json)
-        elif args.export_json is not None:
+
+        if args.export_json is not None:
+            has_args = True
             export_profile_json(args.export_json, args.output)
-        elif args.export_toml_layout is not None:
+
+        if args.export_toml_layout is not None:
+            has_args = True
             export_profile_toml(args.export_toml_layout, args.output)
-        elif args.export_toml is not None:
+
+        if args.export_toml is not None:
+            has_args = True
             export_profile_toml(None, args.export_toml)
-        elif args.import_toml is not None:
+
+        if args.import_toml is not None:
+            has_args = True
             if migrate_toml_config(args.import_toml):
                 print(f"Settings imported from: {args.import_toml}")
             else:
                 print(f"Failed to import settings from: {args.import_toml}")
-        elif args.export_bundle is not None:
+
+        if args.export_bundle is not None:
+            has_args = True
+
             if args.bundle_layout_id is not None:
                 target = store.layouts.get(args.bundle_layout_id)
                 if not target:
                     print(f"Error: Layout ID {args.bundle_layout_id} not found.")
-                    return
-                t_path, j_path = export_bundle(
-                    args.export_bundle,
-                    profile_name=target.name,
-                    layout_id=target.id,
-                )
+                else:
+                    t_path, j_path = export_bundle(
+                        args.export_bundle,
+                        profile_name=target.name,
+                        layout_id=target.id,
+                    )
             else:
                 t_path, j_path = export_bundle(args.export_bundle)
             print(f"Bundle exported:\n  - TOML: {t_path}\n  - JSON: {j_path}")
-        elif args.import_bundle is not None:
+
+        if args.import_bundle is not None:
+            has_args = True
             if import_any(args.import_bundle):
                 print(f"Bundle imported from: {args.import_bundle}")
             else:
                 print(f"Failed to import bundle from: {args.import_bundle}")
-        elif args.import_any is not None:
+
+        if args.import_any is not None:
+            has_args = True
             if import_any(args.import_any):
                 print(f"Configuration imported from: {args.import_any}")
             else:
                 print(f"Failed to import configuration from: {args.import_any}")
-        elif args.reset_settings:
+
+        if args.reset_settings:
+            has_args = True
             store.settings.reset_to_defaults()
             print("Application settings reset to defaults.")
-        elif args.wipe_database:
+
+        if args.wipe_database:
+            has_args = True
             wipe_database()
-        else:
+
+        if not has_args:
             interactive_menu()
+
     finally:
         store.close()
 

@@ -57,9 +57,9 @@ class SingleInstanceServer(QObject):
         self.window = window
         self.server_name = server_name
 
-        # NOTE: Removing the server name unconditionally can interfere
-        # with an already-running instance. Keep this behavior in mind
-        # if you later revise the single-instance startup protocol.
+        # Removing the server name unconditionally can interfere with an
+        # already-running instance. It's good for us to keep this behavior
+        # in mind in case we later revise the single-instance startup protocol.
         QLocalServer.removeServer(self.server_name)
 
         self.server = QLocalServer(self)

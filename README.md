@@ -49,7 +49,7 @@ The first version (CLI only, basic GUI windows) is available [here](https://gith
   Separating spatial detection, reference baselines, bounds, math transforms, and driver output prevents state drift and input fighting.
 
 * **Deterministic Dispatching:** contacts are routed by a strict 5-key precedence sort:
-  1. **Type Precedence** (`SystemToggle: 4` > `Button: 2` > `Joystick: 1` > `Mouse: 0`)
+  1. **Type Precedence** (`Bezel: 4` > `Button: 2` > `Joystick: 1` > `Mouse: 0`)
   2. **Explicit Priority** (custom tier: `+200` to `-100`)
   3. **Allow Multi Claim** (splits a tier into `True` (sorted first) and `False` (sorted last))
   4. **Hitbox Specificity** (smaller areas evaluate before broad/full-screen zones)

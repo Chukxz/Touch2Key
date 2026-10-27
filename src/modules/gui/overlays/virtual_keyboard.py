@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import logging
 from typing import TYPE_CHECKING
+import signal
 
 from PySide6.QtWidgets import (
     QApplication,
@@ -12,7 +13,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QSizePolicy,
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QCoreApplication
 from PySide6.QtGui import QIcon
 
 from modules.utils import (
@@ -145,7 +146,7 @@ NAV_LAYOUT = [
 
 # --- Numpad Block ---
 NUMPAD_LAYOUT = [
-    ("Toggle Cursor", TOP_BEZEL_ID, 0, 0, 1, 4),
+    ("Toggle Key", TOP_BEZEL_ID, 0, 0, 1, 4),
     ("7", 0x47, 1, 0, 1, 1),
     ("8", 0x48, 1, 1, 1, 1),
     ("9", 0x49, 1, 2, 1, 1),
@@ -286,7 +287,6 @@ class VirtualKeyboard(QWidget):
     def __init__(self, conn: Connection | None):
         super().__init__()
         self.conn = conn
-        self._pressed_keys = set()
 
         self.modifier_key_codes = [
             code
@@ -382,32 +382,28 @@ class VirtualKeyboard(QWidget):
                     btn.set_active(states.get(name, False))
 
     def _send_key(self, state: int, key_code: int, key_name: str):
-        if state == 0:
-            self._pressed_keys.add(key_code)
-        elif state == 1:
-            self._pressed_keys.discard(key_code)
-
         if self.conn is None:
-            action = "DOWN" if state == 0 else "UP  "
+            action = "DOWN" if state == 0 else "UP"
+            _platform = "Unsupported Platform"
+
+            if key_code in (TOP_BEZEL_ID, M_LEFT, M_RIGHT, M_MIDDLE):
+                key_code_hex = "Internal"
+            else:
+                key_code_hex = hex(key_code)
 
             if sys.platform == "win32":
-                if key_code in (TOP_BEZEL_ID, M_LEFT, M_RIGHT, M_MIDDLE):
-                    key_code_hex = "Internal"
-                else:
-                    key_code_hex = hex(key_code)
+                _platform = "Windows"
 
             elif sys.platform == "linux":
-                if key_code == TOP_BEZEL_ID:
-                    key_code_hex = "Internal"
+                _platform = "Linux"
+                linux_code = self._linux_key_map.get(key_code)
+                if linux_code is None:
+                    key_code_hex = "None"
                 else:
-                    linux_code = self._linux_key_map.get(key_code, None)
-                    if linux_code is None:
-                        key_code_hex = "None"
-                    else:
-                        key_code_hex = hex(linux_code)
+                    key_code_hex = hex(linux_code)
 
             logger.info(
-                f"[VirtualKeyboard] {key_name}: {action} | key_code: {key_code_hex}"
+                f"[VirtualKeyboard] {(_platform)} {key_name}: {action} | key_code: {key_code_hex}"
             )
             return
 
@@ -416,18 +412,8 @@ class VirtualKeyboard(QWidget):
         except OSError:
             self.close()
 
-    def release_all(self):
-        if self.conn is not None and self._pressed_keys:
-            for code in list(self._pressed_keys):
-                try:
-                    self.conn.send_bytes(VKB_STRUCT.pack(1, int(code)))
-                except OSError:
-                    pass
-            self._pressed_keys.clear()
-
     def closeEvent(self, event):
         self.lock_state_timer.stop()
-        self.release_all()
 
         if self.conn:
             try:
@@ -449,6 +435,14 @@ def run(conn: Connection | None = None, enforce_single_instance=True):
     if app_icon_path.exists():
         app.setWindowIcon(QIcon(str(app_icon_path)))
 
+    # Allow Python signals to be processed periodically by running a dummy timer
+    timer = QTimer()
+    timer.start(500)
+    timer.timeout.connect(lambda: None)  # Kickstarts the Python interpreter loop
+
+    # Handle Ctrl+C cleanly
+    signal.signal(signal.SIGINT, lambda *_: QCoreApplication.quit())
+
     window = VirtualKeyboard(conn)
     window.show()
     sys.exit(app.exec())
@@ -460,7 +454,7 @@ def virtual_keyboard_worker(conn: Connection):
 
 def main() -> None:
     """Dedicated entry point for touch2key-keyboard."""
-    AppLogManager.setup_logging(is_gui=False, log_prefix="touch2key_keyboard")
+    AppLogManager.setup_logging(log_prefix="touch2key_keyboard")
     run()
 
 

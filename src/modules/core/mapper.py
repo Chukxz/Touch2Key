@@ -28,7 +28,6 @@ from modules.utils import (
 if TYPE_CHECKING:
     from modules.engine import Engine
     from modules.platforms.base import AbstractBridge
-    from .layout_loader import LayoutLoader
     from .touch_reader import TouchReader
 
 logger = logging.getLogger("modules.core.mapper")
@@ -39,7 +38,6 @@ _PULSE_INTERVAL = 5.0
 class Mapper:
     def __init__(
         self,
-        layout_loader: LayoutLoader,
         touch_reader: TouchReader,
         bridge: AbstractBridge,
         pps: float,
@@ -47,8 +45,6 @@ class Mapper:
         window_id: int | None,
         ref: Engine,
     ):
-        self.layout_loader = layout_loader
-        self.mapper_event_dispatcher = self.layout_loader.mapper_event_dispatcher
         self.touch_reader = touch_reader
         self.bridge = bridge
         self.emulator = emulator
@@ -59,6 +55,7 @@ class Mapper:
         self.last_pulse_time = time.perf_counter()
         self._pulse_lock = threading.Lock()
         self.engine_ref = ref
+        self.dispatcher = ref.dispatcher
 
         self.window_manager = get_platform().WindowManager()
         self.screen_w, self.screen_h = self.window_manager.get_screen_dimensions()
@@ -73,6 +70,7 @@ class Mapper:
         self.device_height = 1080
         self.dpi = 160
         self.toggle_key_scancode: int | None = None
+        self.vkb_pressed_keys: set[int] = set()
 
         # Resolve target window (fallback to active foreground window)
         if window_id and self.window_manager.is_window_valid(window_id):
@@ -104,10 +102,8 @@ class Mapper:
 
         self._reload()
 
-        self.mapper_event_dispatcher.register_callback(
-            "ON_RELOAD", self._reload
-        )
-        self.mapper_event_dispatcher.register_callback(
+        self.dispatcher.register_callback("ON_RELOAD", self._reload)
+        self.dispatcher.register_callback(
             "ON_TARGET_WINDOW_CHANGE", self.rebind_target_window
         )
 
@@ -122,7 +118,7 @@ class Mapper:
         )
         self.vkb_listener.start()
 
-        self.mapper_event_dispatcher.dispatch(
+        self.dispatcher.dispatch(
             MapperEvent(action="ON_MENU_MODE_TOGGLE", is_visible=self.last_cursor_state)
         )
         self.bridge.set_respawn_callback(self._on_worker_respawn)
@@ -200,7 +196,7 @@ class Mapper:
         )
         if is_visible != self.last_cursor_state:
             self.last_cursor_state = is_visible
-            self.mapper_event_dispatcher.dispatch(
+            self.dispatcher.dispatch(
                 MapperEvent(action="ON_MENU_MODE_TOGGLE", is_visible=is_visible)
             )
 
@@ -321,7 +317,9 @@ class Mapper:
                 self.last_pulse_time = now
                 pps = current_count / elapsed
                 status = (
-                    "HEALTHY" if pps >= self.pps else ("IDLE" if pps == 0 else "LOW RATE")
+                    "HEALTHY"
+                    if pps >= self.pps
+                    else ("IDLE" if pps == 0 else "LOW RATE")
                 )
                 self.last_rate = pps
                 self.last_status = status
@@ -341,48 +339,7 @@ class Mapper:
 
                 payload = reader.recv_bytes()
                 state, scancode = VKB_STRUCT.unpack(payload)
-
-                is_toggle_mode = scancode == TOP_BEZEL_ID
-                is_toggle_vkb = scancode == BOTTOM_BEZEL_ID
-                is_mouse_left = scancode == M_LEFT
-                is_mouse_middle = scancode == M_MIDDLE
-                is_mouse_right = scancode == M_RIGHT
-                is_mouse_back = scancode == M_BACK
-                is_mouse_forward = scancode == M_FORWARD
-
-                if state == 0:  # DOWN / PRESS
-                    if is_toggle_mode or is_toggle_vkb:
-                        pass
-                    elif is_mouse_left:
-                        self.bridge.left_click_down()
-                    elif is_mouse_middle:
-                        self.bridge.middle_click_down()
-                    elif is_mouse_right:
-                        self.bridge.right_click_down()
-                    elif is_mouse_back:
-                        self.bridge.button4_down()
-                    elif is_mouse_forward:
-                        self.bridge.button5_down()
-                    else:
-                        self.bridge.key_down(scancode)
-
-                elif state == 1:  # UP / RELEASE
-                    if is_toggle_mode:
-                        self.engine_ref.toggle_mode()
-                    elif is_toggle_vkb:
-                        self.engine_ref.toggle_virtual_keyboard()
-                    elif is_mouse_left:
-                        self.bridge.left_click_up()
-                    elif is_mouse_middle:
-                        self.bridge.middle_click_up()
-                    elif is_mouse_right:
-                        self.bridge.right_click_up()
-                    elif is_mouse_back:
-                        self.bridge.button4_up()
-                    elif is_mouse_forward:
-                        self.bridge.button5_up()
-                    else:
-                        self.bridge.key_up(scancode)
+                self._virtual_keyboard_sink(state, scancode)
 
             except EOFError:
                 self.stop_event.wait(VKB_SLEEP_TIME)
@@ -390,8 +347,67 @@ class Mapper:
                 logger.warning("Virtual Keyboard worker exception: %s", e)
                 self.stop_event.wait(VKB_SLEEP_TIME)
 
+    def _virtual_keyboard_sink(self, state: int, scancode: int):
+        is_toggle_key = scancode == TOP_BEZEL_ID
+        is_toggle_vkb = scancode == BOTTOM_BEZEL_ID
+        is_mouse_left = scancode == M_LEFT
+        is_mouse_middle = scancode == M_MIDDLE
+        is_mouse_right = scancode == M_RIGHT
+        is_mouse_back = scancode == M_BACK
+        is_mouse_forward = scancode == M_FORWARD
+
+        if state == 0:  # DOWN / PRESS
+            self.vkb_pressed_keys.add(scancode)
+
+            if is_toggle_key:
+                if self.toggle_key_scancode is None:
+                    return
+                self.bridge.key_down(self.toggle_key_scancode)
+            elif is_toggle_vkb:
+                pass
+            elif is_mouse_left:
+                self.bridge.left_click_down()
+            elif is_mouse_middle:
+                self.bridge.middle_click_down()
+            elif is_mouse_right:
+                self.bridge.right_click_down()
+            elif is_mouse_back:
+                self.bridge.button4_down()
+            elif is_mouse_forward:
+                self.bridge.button5_down()
+            else:
+                self.bridge.key_down(scancode)
+
+        elif state == 1:  # UP / RELEASE
+            self.vkb_pressed_keys.discard(scancode)
+
+            if is_toggle_key:
+                if self.toggle_key_scancode is None:
+                    return
+                self.bridge.key_up(self.toggle_key_scancode)
+            elif is_toggle_vkb:
+                self.engine_ref.toggle_virtual_keyboard()
+            elif is_mouse_left:
+                self.bridge.left_click_up()
+            elif is_mouse_middle:
+                self.bridge.middle_click_up()
+            elif is_mouse_right:
+                self.bridge.right_click_up()
+            elif is_mouse_back:
+                self.bridge.button4_up()
+            elif is_mouse_forward:
+                self.bridge.button5_up()
+            else:
+                self.bridge.key_up(scancode)
+
+    def release_vkb_keys(self):
+        if self.vkb_pressed_keys:
+            for code in list(self.vkb_pressed_keys):
+                self._virtual_keyboard_sink(1, code)
+            self.vkb_pressed_keys.clear()
+
     def _on_worker_respawn(self, worker_type: str) -> None:
-        self.mapper_event_dispatcher.dispatch(
+        self.dispatcher.dispatch(
             MapperEvent(action="ON_WORKER_RESPAWN", worker_type=worker_type)
         )
 

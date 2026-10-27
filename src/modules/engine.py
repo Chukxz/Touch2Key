@@ -6,6 +6,7 @@ import os
 import sys
 import threading
 import time
+import psutil
 from typing import TYPE_CHECKING, Any
 
 from modules import (
@@ -65,10 +66,14 @@ class Engine:
     def __init__(
         self,
         headless: bool = False,
-        dispatcher: MapperEventDispatcher | None = None,
+        dispatcher: MapperEventDispatcher | IpcMapperEventDispatcher | None = None,
+        conn: Connection | None = None
     ):
         platform_mod = get_platform()
         self.headless = headless
+        self.conn = conn
+        self.dispatcher = dispatcher or MapperEventDispatcher()
+        
         self.system_config = platform_mod.SystemConfig()
         self.system_config.set_high_priority(os.getpid(), "Main")
         self.system_config.set_dpi_awareness()
@@ -90,6 +95,7 @@ class Engine:
         self.mouse_mapper: MouseMapper | None = None
         self.key_mapper: KeyMapper | None = None
         self.wheel_mapper: WheelMapper | None = None
+        self.two_finger_tap_tracker = TwoFingerTapTracker()
 
         self._tiers: list[list[Pipeline]] = []
         # Ownership is fixed at DOWN; MOVE/UP never get offered to a new tier.
@@ -101,8 +107,6 @@ class Engine:
         self.lock = threading.RLock()
         self.is_shutting_down = False
         self._stop_event = threading.Event()
-        self.mapper_event_dispatcher = dispatcher or MapperEventDispatcher()
-        self.two_finger_tap_tracker = TwoFingerTapTracker()
 
         self.vkb_reader, self.vkb_writer = multiprocessing.Pipe(duplex=False)
         self.vkb_process: multiprocessing.Process | None = None
@@ -312,7 +316,7 @@ class Engine:
                 self._live_shown = False
         else:
             logger.info("Rate Cap %.1f Hz | PPS %.1f\n", rate, pps)
-        self.mapper_event_dispatcher.dispatch(
+        self.dispatcher.dispatch(
             MapperEvent(action="ON_RELOAD", cooldown=1.0)
         )
 
@@ -330,7 +334,7 @@ class Engine:
                 "CLI Triggered [F5]: Left-Handed mode set to %s, reload event dispatched.",
                 new_val,
             )
-            self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD"))
+            self.dispatcher.dispatch(MapperEvent(action="ON_RELOAD"))
         except Exception as exc:
             logger.error(
                 "Failed to toggle handedness via hotkey: %s", exc, exc_info=True
@@ -339,7 +343,7 @@ class Engine:
     def _reload_cli(self) -> None:
         if not self._check_debounce():
             return
-        self.mapper_event_dispatcher.dispatch(MapperEvent(action="ON_RELOAD"))
+        self.dispatcher.dispatch(MapperEvent(action="ON_RELOAD"))
         logger.info("CLI Triggered [F6]: Reload event dispatched.")
 
     def _on_devices_change(
@@ -382,15 +386,7 @@ class Engine:
                 self.wheel_mapper.touch_up()
             if self.mouse_mapper:
                 self.mouse_mapper.touch_up()
-
-    def toggle_mode(self) -> None:
-        with self.lock:
-            new_state = not self.is_visible
-        self._apply_visibility(new_state)
-        self.mapper_event_dispatcher.dispatch(
-            MapperEvent(action="ON_MENU_MODE_TOGGLE", is_visible=new_state)
-        )
-
+                
     def _apply_visibility(self, visible: bool) -> None:
         with self.lock:
             visible = bool(visible)
@@ -430,7 +426,7 @@ class Engine:
     def _pipeline_precedence(pipeline: Pipeline) -> int:
         # System status is authoritative even if a factory forgot to set its
         # explicit type_precedence metadata.
-        if getattr(pipeline, "is_system", False):
+        if getattr(pipeline, "is_bezel", False):
             return max(4, int(getattr(pipeline, "type_precedence", 0)))
         return int(getattr(pipeline, "type_precedence", 0))
 
@@ -494,12 +490,12 @@ class Engine:
         if not self.mapper:
             return
         gx, gy = self.mapper.device_to_game_abs(event.position.x, event.position.y)
+        self.mapper.bridge.mouse_move_abs(int(round(gx)), int(round(gy)))
+        
         if event.phase is TouchPhase.DOWN:
             self._cursor_contacts.add(event.contact_id)
-            self.mapper.bridge.mouse_move_abs(int(round(gx)), int(round(gy)))
             self.mapper.bridge.left_click_down()
-        elif event.phase is TouchPhase.MOVE:
-            self.mapper.bridge.mouse_move_abs(int(round(gx)), int(round(gy)))
+
         elif event.phase is TouchPhase.UP:
             self.mapper.bridge.left_click_up()
             self._cursor_contacts.discard(event.contact_id)
@@ -537,7 +533,7 @@ class Engine:
 
                 for pipeline in tier:
                     if (
-                        getattr(pipeline, "is_system", False)
+                        getattr(pipeline, "is_bezel", False)
                         and not self.bezel_toggle_enabled
                     ):
                         continue
@@ -581,12 +577,15 @@ class Engine:
         self.touch_event_counter.record(touch_event)
 
         if self.mapper is not None:
-            self.mapper.event_count += 1
+            with self.mapper._pulse_lock:
+                self.mapper.event_count += 1
 
         if self.is_visible and self.two_finger_tap_enabled:
             decision = self.two_finger_tap_tracker.observe(touch_event)
             if decision.status is GestureStatus.RECOGNIZED:
-                self.toggle_mode()
+                threading.Thread(
+                    target=self._request_engine_shutdown, daemon=True, name="ShutdownThread"
+                )
                 return
             if decision.status is GestureStatus.PENDING:
                 return
@@ -624,6 +623,9 @@ class Engine:
                     if self.vkb_process.is_alive():
                         self.vkb_process.kill()
                 self.vkb_process = None
+            
+            if self.mapper:
+                self.mapper.release_vkb_keys()
 
     def toggle_virtual_keyboard(self) -> None:
         if self.vkb_process is not None and self.vkb_process.is_alive():
@@ -685,14 +687,24 @@ class Engine:
 
         self.two_finger_tap_enabled = settings.two_finger_tap_enabled
         self.bezel_toggle_enabled = settings.bezel_toggle_enabled
-        self.layout_loader = LayoutLoader(
-            self.mapper_event_dispatcher,
-            foreground_window=self.foreground_window,
-            toggle_mode_callback=self.toggle_mode,
+
+        self.dispatcher.register_callback(
+            "ON_MENU_MODE_TOGGLE", self._apply_visibility
         )
-        self.touch_reader = TouchReader(self.mapper_event_dispatcher, self.rate_cap)
+        self.dispatcher.register_callback("ON_RELOAD", self._on_reload)
+        self.dispatcher.register_callback(
+            "ON_DEVICES_CHANGE", self._on_devices_change
+        )
+        self.dispatcher.register_callback(
+            "ON_WORKER_RESPAWN", self._count_respawn
+        )
+        
+        self.layout_loader = LayoutLoader(
+            self.dispatcher,
+            foreground_window=self.foreground_window,
+        )
+        self.touch_reader = TouchReader(self.dispatcher, self.rate_cap)
         self.mapper = Mapper(
-            self.layout_loader,
             self.touch_reader,
             self.bridge,
             self.pps,
@@ -702,8 +714,6 @@ class Engine:
         )
         self.output_sink = BridgeOutputSink(
             bridge=self.mapper.bridge,
-            toggle_mode=self.toggle_mode,
-            toggle_vkb=self.toggle_virtual_keyboard,
         )
         self.bezel_mapper = BezelMapper(self.mapper, self.output_sink)
         self.mouse_mapper = MouseMapper(self.mapper, self.output_sink)
@@ -711,29 +721,19 @@ class Engine:
         self.wheel_mapper = WheelMapper(self.mapper, self.output_sink)
         self._tiers = self._build_pipeline_tiers()
 
-        self.touch_reader.bind_touch_event(self._process_touch_event)
-        self.mapper_event_dispatcher.register_callback(
-            "ON_MENU_MODE_TOGGLE", self._apply_visibility
-        )
-        self.mapper_event_dispatcher.register_callback("ON_RELOAD", self._on_reload)
-        self.mapper_event_dispatcher.register_callback(
-            "ON_DEVICES_CHANGE", self._on_devices_change
-        )
-        self.mapper_event_dispatcher.register_callback(
-            "ON_WORKER_RESPAWN", self._count_respawn
-        )
-
         self.bridge.start_worker_processes(k_device_handle, m_device_handle)
         self._mouse_flush_thread = threading.Thread(
             target=self._mouse_flush_loop, daemon=True, name="MouseFlushThread"
         )
         self._mouse_flush_thread.start()
-
+        
         try:
             self._publisher = TelemetryPublisher(self._telemetry_snapshots)
             self._publisher.start()
         except Exception:
             logger.exception("Telemetry publisher failed to start.")
+
+        self.touch_reader.bind_touch_event(self._process_touch_event)
 
     def _start(self, config_str: str | None = None) -> None:
         if config_str is not None:
@@ -833,12 +833,18 @@ class Engine:
                 self.vkb_writer.close()
             except Exception:
                 pass
-            self.mapper_event_dispatcher.unregister_all()
+            self.dispatcher.unregister_all()
         except Exception as exc:
             logger.exception("Exception during engine teardown: %s", exc, exc_info=True)
         finally:
             self.touch_event_counter.reset()
             store.close()
+            
+    def _request_engine_shutdown(self):
+        if self.conn is not None and isinstance(self.dispatcher, IpcMapperEventDispatcher):
+            shutdown_engine_process(self, self.dispatcher, self.conn)
+        else:
+            self._shutdown()
 
     def _count_respawn(self, worker_type: str | None = None) -> None:
         if worker_type:
@@ -881,7 +887,19 @@ def _read_visualizer() -> int | None:
     for _ in range(READ_ATTEMPTS):
         try:
             data = VISUALIZER_RUNTIME_FILE.read_text(encoding="utf-8")
-            return int(data) if data.isnumeric() and int(data) > 0 else None
+            processed_data =  int(data) if data.isnumeric() and int(data) > 0 else None
+            
+            if processed_data is not None:
+                try:
+                    psutil.Process(processed_data)
+                except psutil.NoSuchProcess:
+                    processed_data = None
+                    pass
+                except psutil.AccessDenied:
+                    processed_data = None
+                    pass
+                
+            return processed_data
         except FileNotFoundError:
             return None
         except (OSError, ValueError):
@@ -900,16 +918,21 @@ def run_engine_process(conn: Connection, log_queue: Queue) -> None:
             dispatcher.send_error(f"Expected IPC_CMD_START, got {got!r}")
             return
         config = unpack_ipc_start_cmd(start_payload)
-        engine = Engine(headless=True, dispatcher=dispatcher)
+        engine = Engine(headless=True, dispatcher=dispatcher, conn=conn)
         engine.start_headless(**config)
         dispatcher.send_started()
+        
     except KeyboardInterrupt:
         logger.info("Engine received shutdown signal, exiting cleanly.")
         shutdown_engine_process(engine, dispatcher, conn)
+        return
+    
     except Exception as exc:
         logger.error("[ENGINE PROCESS] Startup failure: %s", exc, exc_info=True)
         dispatcher.send_error(str(exc))
         shutdown_engine_process(engine, dispatcher, conn)
+        return
+        
     dispatcher.run_command_loop()
     shutdown_engine_process(engine, dispatcher, conn)
 

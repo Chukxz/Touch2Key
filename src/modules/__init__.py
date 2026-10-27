@@ -18,7 +18,7 @@ from .core.pipeline_factory import (
     FixedJoystick,
     AnchoredJoystick,
     FloatingJoystick,
-    SystemToggle,
+    Bezel,
 )
 from .core.touch_reader import TouchReader
 from .core.layout_loader import LayoutLoader
@@ -52,7 +52,7 @@ __all__ = [
     "FixedJoystick",
     "FloatingJoystick",
     "AnchoredJoystick",
-    "SystemToggle",
+    "Bezel",
     "BridgeOutputSink",
     "GestureStatus",
     "TwoFingerTapTracker",

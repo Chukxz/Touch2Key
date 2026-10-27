@@ -131,8 +131,8 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
         else:
             engine._start()
     except KeyboardInterrupt:
-        # logger.info("Engine received shutdown signal, exiting cleanly.")
-        pass
+        logger.info("Engine received shutdown signal, exiting cleanly.")
+        engine._shutdown()
     finally:
         engine._shutdown()
         profiler_cleanup(cli_profiler)

@@ -473,6 +473,13 @@ class LayoutsRepository:
                 },
             )
 
+            new_row = conn.execute(
+                "SELECT * FROM layouts WHERE id = ?;", (layout_id,)
+            ).fetchone()
+            LayoutZonesRepository()._resync_bezels_in_txn(
+                conn, Layout.from_row(new_row)
+            )
+
         layout = self.get(layout_id)
         if layout is None:
             raise KeyError(f"No layout with id={layout_id}.")
@@ -1006,6 +1013,49 @@ class LayoutZonesRepository:
             pipeline_json=new_json,
         ).id
 
+    def _resync_bezels_in_txn(self, conn: sqlite3.Connection, layout: Layout) -> None:
+        """Recomputes bezel geometry from `layout` using the caller's transaction (no commit)."""
+        rows = conn.execute(
+            "SELECT * FROM layout_zones WHERE layout_id = ? AND zone_type = ?;",
+            (layout.id, BEZEL),
+        ).fetchall()
+        for row in rows:
+            zone = LayoutZone.from_row(row)
+            if zone.scancode == TOP_BEZEL_ID:
+                is_top = True
+            elif zone.scancode == BOTTOM_BEZEL_ID:
+                is_top = False
+            else:
+                continue
+
+            zone.set_parsed_config_from_json()
+            _, _, dp, _ = zone.CONFIG_HELPER.get_region_config()
+            cx, cy, x1, y1, x2, y2, dp = self._calculate_native_bezel(
+                layout, is_top, int(dp)
+            )
+            zone.CONFIG_HELPER.set_region_config(bezel_dp_thickness=dp)
+            new_json = zone.CONFIG_HELPER.get_pipeline_json_from_config()
+
+            if self._bezel_unchanged(zone, cx, cy, x1, y1, x2, y2, new_json):
+                continue
+            conn.execute(
+                "UPDATE layout_zones SET cx = ?, cy = ?, r = NULL, x1 = ?, y1 = ?, "
+                "x2 = ?, y2 = ?, pipeline_json = ?, updated_at = datetime('now') "
+                "WHERE id = ?;",
+                (cx, cy, x1, y1, x2, y2, new_json, zone.id),
+            )
+
+    def get_mouse_wheel_zone(self, layout: Layout) -> Optional[LayoutZone]:
+        current_zones = self.list_for_layout(layout.id, False)
+        mouse_wheel_zone: Optional[LayoutZone] = None
+
+        for zone in current_zones:
+            if zone.scancode == MOUSE_WHEEL_SIMULATOR_CODE:
+                mouse_wheel_zone = zone
+                break
+
+        return mouse_wheel_zone
+
     def get_mouse_wheel_directional_scancodes(self, layout: Optional[Layout]):
         W = 0x11
         A = 0x1E
@@ -1017,13 +1067,7 @@ class LayoutZonesRepository:
         if layout is None:
             return def_ret
 
-        current_zones = self.list_for_layout(layout.id, False)
-        mouse_wheel_zone: Optional[LayoutZone] = None
-
-        for zone in current_zones:
-            if zone.scancode == MOUSE_WHEEL_SIMULATOR_CODE:
-                mouse_wheel_zone = zone
-                break
+        mouse_wheel_zone: Optional[LayoutZone] = self.get_mouse_wheel_zone(layout)
 
         if mouse_wheel_zone is None:
             return def_ret
@@ -1038,3 +1082,25 @@ class LayoutZonesRepository:
             right = int(zone_json.get("right", D))
 
             return up, left, down, right
+
+    def set_mouse_wheel_directional_scancodes(self, layout: Optional[Layout], direction_id: int, direction_value: int) -> bool:
+        """`direction_map` {0: 'up', 1: 'left', 2: 'down', 3: 'right'}"""
+        if layout is None:
+            return False
+
+        mouse_wheel_zone: Optional[LayoutZone] = self.get_mouse_wheel_zone(layout)
+        if mouse_wheel_zone is None:
+            return False
+
+        direction_map = {0: "up", 1: "left", 2: "down", 3: "right"}
+        mouse_wheel_zone.set_parsed_config_from_json()
+        zone_json = mouse_wheel_zone.CONFIG_HELPER.pipeline_config
+        
+        direction = direction_map.get(direction_id)
+        if direction is None:
+            return False
+        
+        zone_json.update(
+            {direction: direction_value}
+        )
+        return True

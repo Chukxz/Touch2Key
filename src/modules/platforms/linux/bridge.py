@@ -514,6 +514,7 @@ class UInputBridge(AbstractBridge):
                 (self._mouse_button4_down, BUTTON_4_UP),
                 (self._mouse_button5_down, BUTTON_5_UP),
             ]
+            
             for is_down, release_flag in button_releases:
                 if is_down:
                     try:

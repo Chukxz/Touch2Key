@@ -25,23 +25,10 @@ class BridgeOutputSink(OutputSink):
     """Bridges Semantic stage outputs to the hardware driver Bridge."""
 
     bridge: AbstractBridge
-    toggle_mode: Callable[[], None] | None = None
-    toggle_vkb: Callable[[], None] | None = None
-
     # Accumulators for fractional mouse movements to prevent slow-aim pixel loss
     _acc_x: float = field(init=False, default=0.0)
     _acc_y: float = field(init=False, default=0.0)
     _lock: threading.Lock = field(default_factory=threading.Lock)
-
-    def toggle_menu_mode(self) -> None:
-        """Invokes Engine.toggle_mode directly."""
-        if self.toggle_mode is not None:
-            self.toggle_mode()
-
-    def toggle_virtual_keyboard(self) -> None:
-        """Invokes Engine.toggle_virtual_keyboard directly."""
-        if self.toggle_vkb is not None:
-            self.toggle_vkb()
 
     def key_down(self, scancode: int) -> None:
         self.bridge.key_down(scancode)

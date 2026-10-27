@@ -27,17 +27,17 @@ class MouseMapper:
     def __init__(self, mapper: Mapper, output_sink: BridgeOutputSink):
         self.mapper = mapper
         self.output_sink = output_sink
-        self.mapper_event_dispatcher = mapper.mapper_event_dispatcher
+        self.dispatcher = mapper.dispatcher
 
         self.lock = threading.Lock()
         self.pipeline: Pipeline | None = None
 
         self.rebuild_pipeline()
 
-        self.mapper_event_dispatcher.register_callback(
+        self.dispatcher.register_callback(
             "ON_RELOAD", self.rebuild_pipeline
         )
-        self.mapper_event_dispatcher.register_callback(
+        self.dispatcher.register_callback(
             "ON_WORKER_RESPAWN", self._on_worker_respawn_mouse
         )
 
@@ -131,7 +131,7 @@ class MouseMapper:
                     look_region = RectangularRegion(
                         Point(0.0, 0.0), Point(dev_w / 2.0, dev_h)
                     )
-                else:
+                else:   
                     look_region = RectangularRegion(
                         Point(dev_w / 2.0, 0.0), Point(dev_w, dev_h)
                     )
