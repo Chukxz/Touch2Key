@@ -56,6 +56,11 @@ class OutputSink(ABC):
         raise NotImplementedError
 
 
+# ---------------------------------------------------------------------------
+# Regions, Constraints, Origins, Transforms, Semantics
+# ---------------------------------------------------------------------------
+
+
 @dataclass(slots=True)
 class Region(ABC):
     @abstractmethod
@@ -115,11 +120,6 @@ class RectangularRegion(Region):
     @property
     def area(self) -> float:
         return (self._x2 - self._x1) * (self._y2 - self._y1)
-
-
-# ---------------------------------------------------------------------------
-# Constraints, Origins, Transforms, Semantics
-# ---------------------------------------------------------------------------
 
 
 @dataclass(slots=True)
