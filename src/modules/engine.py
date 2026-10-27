@@ -364,18 +364,16 @@ class Engine:
         """Clear pipeline ownership and release held outputs once on a state boundary."""
         self._dispatch_generation += 1
         self._contact_owners.clear()
-        self._cursor_contacts.clear()
         self.two_finger_tap_tracker.reset()
+
+        if self._cursor_contacts and self.mapper:
+            self.mapper.bridge.left_click_up()
+        self._cursor_contacts.clear()
 
         if self.output_sink:
             for tier in self._tiers:
                 for pipeline in tier:
-                    try:
-                        pipeline.reset(self.output_sink)
-                    except Exception:
-                        logger.exception(
-                            "Failed to reset pipeline during state transition"
-                        )
+                    pipeline.reset(self.output_sink)
 
             if self.bezel_mapper:
                 self.bezel_mapper.release_all()
