@@ -374,12 +374,7 @@ class Engine:
         if self.output_sink:
             for tier in self._tiers:
                 for pipeline in tier:
-                    try:
-                        pipeline.reset(self.output_sink)
-                    except Exception:
-                        logger.exception(
-                            "Failed to reset pipeline during state transition"
-                        )
+                    pipeline.reset(self.output_sink)
 
             if self.bezel_mapper:
                 self.bezel_mapper.release_all()
