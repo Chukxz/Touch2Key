@@ -217,7 +217,7 @@ def set_profile_image(layout_id: int, image_path_input: str | Path) -> bool:
 
 def configure_directional_keys(layout_id) -> None:
     show_directional_keys(layout_id)
-    directions = {"up", "left", "down", "right"}
+    directions = ("up", "left", "down", "right")
     was_set = [False, False, False, False]
     i = 0
 

@@ -26,19 +26,15 @@ class LayoutLoader:
     def __init__(
         self,
         dispatcher: MapperEventDispatcher,
-        foreground_window: Any = None,
     ):
         self.dispatcher = dispatcher
-        self.foreground_window = foreground_window
         self.layout_lock = threading.Lock()
 
         self.keys_data: list[tuple[int, dict[str, Any]]] = []
         self.bezels_data: list[tuple[int, dict[str, Any]]] = []
 
         self.load_layout()
-        self.dispatcher.register_callback(
-            "ON_RELOAD", self.load_layout
-        )
+        self.dispatcher.register_callback("ON_RELOAD", self.load_layout)
 
     def load_layout(self) -> None:
         """Loads metadata and parses bezel and keys pipelines."""

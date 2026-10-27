@@ -373,7 +373,12 @@ class Engine:
         if self.output_sink:
             for tier in self._tiers:
                 for pipeline in tier:
-                    pipeline.reset(self.output_sink)
+                    try:
+                        pipeline.reset(self.output_sink)
+                    except Exception:
+                        logger.exception(
+                            "Failed to reset pipeline during state transition"
+                        )
 
             if self.bezel_mapper:
                 self.bezel_mapper.release_all()
@@ -692,10 +697,7 @@ class Engine:
         self.dispatcher.register_callback("ON_MENU_MODE_TOGGLE", self._apply_visibility)
         self.dispatcher.register_callback("ON_WORKER_RESPAWN", self._count_respawn)
 
-        self.layout_loader = LayoutLoader(
-            self.dispatcher,
-            foreground_window=self.foreground_window,
-        )
+        self.layout_loader = LayoutLoader(self.dispatcher)
         self.touch_reader = TouchReader(self.dispatcher, self.rate_cap)
         self.mapper = Mapper(
             self.touch_reader,
@@ -817,7 +819,7 @@ class Engine:
                 thread.join(timeout=2.0)
                 if thread.is_alive():
                     logger.warning("Mouse flush thread did not stop within timeout")
-            
+
             self.close_virtual_keyboard()
             if self.touch_reader is not None:
                 self.touch_reader.stop()

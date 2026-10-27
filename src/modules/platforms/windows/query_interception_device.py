@@ -20,6 +20,17 @@ _MODIFIER_SCANCODES = [
 _VID_REGEX = re.compile(r"VID[_\-]([0-9A-Fa-f]{4})", re.IGNORECASE)
 _PID_REGEX = re.compile(r"PID[_\-]([0-9A-Fa-f]{4})", re.IGNORECASE)
 
+MOUSE_FILTER = (
+    FilterMouseButtonFlag.FILTER_MOUSE_LEFT_BUTTON_DOWN
+    | FilterMouseButtonFlag.FILTER_MOUSE_RIGHT_BUTTON_DOWN
+    | FilterMouseButtonFlag.FILTER_MOUSE_MIDDLE_BUTTON_DOWN
+    | FilterMouseButtonFlag.FILTER_MOUSE_BUTTON_4_DOWN
+    | FilterMouseButtonFlag.FILTER_MOUSE_BUTTON_5_DOWN
+    | FilterMouseButtonFlag.FILTER_MOUSE_WHEEL
+    | FilterMouseButtonFlag.FILTER_MOUSE_HWHEEL
+    | FilterMouseButtonFlag.FILTER_MOUSE_MOVE
+)
+
 
 def _extract_vid_pid(hwid: str) -> tuple[str, str]:
     """Parse VID and PID from an Interception device hardware ID."""
@@ -85,7 +96,8 @@ def _select_device_cli(
 
     header = ["", f"[?] {prompt}"]
     table = _table_lines(rows)
-    action = "tap a key" if is_keyboard else "left-click mouse"
+    action = "tap a key on" if is_keyboard else "interact with"
+    device = "KEYBOARD" if is_keyboard else "MOUSE"
     _show(
         [
             *header,
@@ -93,17 +105,13 @@ def _select_device_cli(
             "",
             *table,
             "",
-            f">> Waiting for physical input ({action} on target device)...",
+            f">> Waiting for physical input ({action} the target {device})...",
         ]
     )
 
     target_filter_fn = context.is_keyboard if is_keyboard else context.is_mouse
     other_filter_fn = context.is_mouse if is_keyboard else context.is_keyboard
-    active_flag = (
-        FilterKeyFlag.FILTER_KEY_DOWN
-        if is_keyboard
-        else FilterMouseButtonFlag.FILTER_MOUSE_LEFT_BUTTON_DOWN
-    )
+    active_flag = FilterKeyFlag.FILTER_KEY_DOWN if is_keyboard else MOUSE_FILTER
 
     try:
         context.set_filter(target_filter_fn, active_flag)
@@ -155,7 +163,7 @@ def _select_devices_cli() -> Optional[tuple[int, int]]:
             ctx,
             KEYBOARD_RANGE,
             is_keyboard=True,
-            prompt="Tap any non-modifier key on the target KEYBOARD to bind:",
+            prompt="Tap a key on the target KEYBOARD to bind:",
             transcript=transcript,
         )
         if k_id is None:
@@ -165,7 +173,7 @@ def _select_devices_cli() -> Optional[tuple[int, int]]:
             ctx,
             MOUSE_RANGE,
             is_keyboard=False,
-            prompt="Left-click on the target MOUSE to bind:",
+            prompt="Interact with the target MOUSE to bind:",
             transcript=transcript,
         )
         if m_id is None:
@@ -215,11 +223,7 @@ def _create_gui_dialogs(context: Interception):
         def run(self) -> None:
             target_filter = self.ctx.is_keyboard if self.is_kb else self.ctx.is_mouse
             other_filter = self.ctx.is_mouse if self.is_kb else self.ctx.is_keyboard
-            active_flag = (
-                FilterKeyFlag.FILTER_KEY_DOWN
-                if self.is_kb
-                else FilterMouseButtonFlag.FILTER_MOUSE_LEFT_BUTTON_DOWN
-            )
+            active_flag = FilterKeyFlag.FILTER_KEY_DOWN if self.is_kb else MOUSE_FILTER
 
             try:
                 self.ctx.set_filter(target_filter, active_flag)
@@ -409,7 +413,7 @@ def _select_devices_gui(parent=None) -> Optional[tuple[int, int]]:
             KEYBOARD_RANGE,
             is_kb=True,
             title="Configure Keyboard Device",
-            prompt="Tap any non-modifier key on the keyboard you wish to bind:",
+            prompt="Tap a key on the keyboard you wish to bind:",
             parent=parent,
         )
         if kb_dlg.exec() != QDialog.DialogCode.Accepted:
@@ -421,7 +425,7 @@ def _select_devices_gui(parent=None) -> Optional[tuple[int, int]]:
             MOUSE_RANGE,
             is_kb=False,
             title="Configure Mouse Device",
-            prompt="Click left mouse button on the device you wish to bind:",
+            prompt="Interact with the mouse you wish to bind:",
             parent=parent,
         )
         if mouse_dlg.exec() != QDialog.DialogCode.Accepted:
