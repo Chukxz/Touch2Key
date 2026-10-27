@@ -74,11 +74,8 @@ class WheelMapper:
             key_raw_zones = layout_loader.keys_data.copy()
             
         wheel_zone_values = None
-        for _, values in key_raw_zones:
-            if (
-                values.get("name") == MOUSE_WHEEL_SIMULATOR_CODE
-                and values.get("type") == CIRCLE
-            ):
+        for scancode, values in key_raw_zones:
+            if scancode == MOUSE_WHEEL_SIMULATOR_CODE and values.get("type") == CIRCLE:
                 wheel_zone_values = values
                 break
 

@@ -36,9 +36,7 @@ class TwoFingerTapTracker:
 
     ``observe`` is the engine-facing API. While a gesture is ambiguous, events
     are retained and returned only if the candidate is rejected. This prevents
-    a delayed single-finger tap from leaking into menu actions before the
-    gesture has been decided.
-
+    a delayed single-finger tap from leaking before the gesture has been decided.
     """
 
     max_tap_duration_s: float = 0.25
@@ -50,15 +48,6 @@ class TwoFingerTapTracker:
     _candidate_ids: set[int] = field(default_factory=set, init=False)
     _pending_since: float | None = field(default=None, init=False)
     _recognized: bool = field(default=False, init=False)
-
-    @property
-    def is_tracking(self) -> bool:
-        """True while one or more contacts in the current candidate are down."""
-        return any(c.up_time is None for c in self._contacts.values())
-
-    @property
-    def is_pending(self) -> bool:
-        return bool(self._buffer) and not self._recognized
 
     def reset(self) -> None:
         self._contacts.clear()
@@ -118,6 +107,7 @@ class TwoFingerTapTracker:
         original order, including the event that caused rejection. The caller
         must send them through ordinary dispatch with gesture detection bypassed.
         """
+        
         cid = event.contact_id
         phase = event.phase
         now = event.timestamp

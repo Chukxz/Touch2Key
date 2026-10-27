@@ -67,13 +67,13 @@ class Engine:
         self,
         headless: bool = False,
         dispatcher: MapperEventDispatcher | IpcMapperEventDispatcher | None = None,
-        conn: Connection | None = None
+        conn: Connection | None = None,
     ):
         platform_mod = get_platform()
         self.headless = headless
         self.conn = conn
         self.dispatcher = dispatcher or MapperEventDispatcher()
-        
+
         self.system_config = platform_mod.SystemConfig()
         self.system_config.set_high_priority(os.getpid(), "Main")
         self.system_config.set_dpi_awareness()
@@ -105,6 +105,7 @@ class Engine:
 
         self.is_visible = False
         self.lock = threading.RLock()
+        self.vkb_lock = threading.Lock()
         self.is_shutting_down = False
         self._stop_event = threading.Event()
 
@@ -316,9 +317,7 @@ class Engine:
                 self._live_shown = False
         else:
             logger.info("Rate Cap %.1f Hz | PPS %.1f\n", rate, pps)
-        self.dispatcher.dispatch(
-            MapperEvent(action="ON_RELOAD", cooldown=1.0)
-        )
+        self.dispatcher.dispatch(MapperEvent(action="ON_RELOAD", cooldown=1.0))
 
     # ------------------------------------------------------------------
     # One-shot: handedness / reload (350 ms, non-typematic)
@@ -386,7 +385,7 @@ class Engine:
                 self.wheel_mapper.touch_up()
             if self.mouse_mapper:
                 self.mouse_mapper.touch_up()
-                
+
     def _apply_visibility(self, visible: bool) -> None:
         with self.lock:
             visible = bool(visible)
@@ -491,7 +490,7 @@ class Engine:
             return
         gx, gy = self.mapper.device_to_game_abs(event.position.x, event.position.y)
         self.mapper.bridge.mouse_move_abs(int(round(gx)), int(round(gy)))
-        
+
         if event.phase is TouchPhase.DOWN:
             self._cursor_contacts.add(event.contact_id)
             self.mapper.bridge.left_click_down()
@@ -583,9 +582,13 @@ class Engine:
         if self.is_visible and self.two_finger_tap_enabled:
             decision = self.two_finger_tap_tracker.observe(touch_event)
             if decision.status is GestureStatus.RECOGNIZED:
-                threading.Thread(
-                    target=self._request_engine_shutdown, daemon=True, name="ShutdownThread"
+                shutdown_thread = threading.Thread(
+                    target=self._request_engine_shutdown,
+                    daemon=True,
+                    name="ShutdownThread",
                 )
+                shutdown_thread.start()
+                shutdown_thread.join(timeout=2.0)
                 return
             if decision.status is GestureStatus.PENDING:
                 return
@@ -598,7 +601,7 @@ class Engine:
         self._dispatch_normal(touch_event)
 
     def start_virtual_keyboard(self) -> None:
-        with self.lock:
+        with self.vkb_lock:
             if self.vkb_process is not None and self.vkb_process.is_alive():
                 return
             while self.vkb_reader.poll():
@@ -615,7 +618,7 @@ class Engine:
             self.vkb_process.start()
 
     def close_virtual_keyboard(self) -> None:
-        with self.lock:
+        with self.vkb_lock:
             if self.vkb_process is not None:
                 if self.vkb_process.is_alive():
                     self.vkb_process.terminate()
@@ -623,7 +626,7 @@ class Engine:
                     if self.vkb_process.is_alive():
                         self.vkb_process.kill()
                 self.vkb_process = None
-            
+
             if self.mapper:
                 self.mapper.release_vkb_keys()
 
@@ -688,17 +691,9 @@ class Engine:
         self.two_finger_tap_enabled = settings.two_finger_tap_enabled
         self.bezel_toggle_enabled = settings.bezel_toggle_enabled
 
-        self.dispatcher.register_callback(
-            "ON_MENU_MODE_TOGGLE", self._apply_visibility
-        )
-        self.dispatcher.register_callback("ON_RELOAD", self._on_reload)
-        self.dispatcher.register_callback(
-            "ON_DEVICES_CHANGE", self._on_devices_change
-        )
-        self.dispatcher.register_callback(
-            "ON_WORKER_RESPAWN", self._count_respawn
-        )
-        
+        self.dispatcher.register_callback("ON_MENU_MODE_TOGGLE", self._apply_visibility)
+        self.dispatcher.register_callback("ON_WORKER_RESPAWN", self._count_respawn)
+
         self.layout_loader = LayoutLoader(
             self.dispatcher,
             foreground_window=self.foreground_window,
@@ -726,7 +721,10 @@ class Engine:
             target=self._mouse_flush_loop, daemon=True, name="MouseFlushThread"
         )
         self._mouse_flush_thread.start()
-        
+
+        self.dispatcher.register_callback("ON_RELOAD", self._on_reload)
+        self.dispatcher.register_callback("ON_DEVICES_CHANGE", self._on_devices_change)
+
         try:
             self._publisher = TelemetryPublisher(self._telemetry_snapshots)
             self._publisher.start()
@@ -821,13 +819,14 @@ class Engine:
                 thread.join(timeout=2.0)
                 if thread.is_alive():
                     logger.warning("Mouse flush thread did not stop within timeout")
+            
+            self.close_virtual_keyboard()
             if self.touch_reader is not None:
                 self.touch_reader.stop()
             if self.mapper is not None:
                 self.mapper.stop()
             if self.bridge is not None:
                 self.bridge.shutdown()
-            self.close_virtual_keyboard()
             try:
                 self.vkb_reader.close()
                 self.vkb_writer.close()
@@ -839,9 +838,11 @@ class Engine:
         finally:
             self.touch_event_counter.reset()
             store.close()
-            
+
     def _request_engine_shutdown(self):
-        if self.conn is not None and isinstance(self.dispatcher, IpcMapperEventDispatcher):
+        if self.conn is not None and isinstance(
+            self.dispatcher, IpcMapperEventDispatcher
+        ):
             shutdown_engine_process(self, self.dispatcher, self.conn)
         else:
             self._shutdown()
@@ -887,8 +888,8 @@ def _read_visualizer() -> int | None:
     for _ in range(READ_ATTEMPTS):
         try:
             data = VISUALIZER_RUNTIME_FILE.read_text(encoding="utf-8")
-            processed_data =  int(data) if data.isnumeric() and int(data) > 0 else None
-            
+            processed_data = int(data) if data.isnumeric() and int(data) > 0 else None
+
             if processed_data is not None:
                 try:
                     psutil.Process(processed_data)
@@ -898,7 +899,7 @@ def _read_visualizer() -> int | None:
                 except psutil.AccessDenied:
                     processed_data = None
                     pass
-                
+
             return processed_data
         except FileNotFoundError:
             return None
@@ -908,7 +909,9 @@ def _read_visualizer() -> int | None:
 
 
 def run_engine_process(conn: Connection, log_queue: Queue) -> None:
-    AppLogManager.setup_logging(log_prefix="engine", log_queue=log_queue, console="auto")
+    AppLogManager.setup_logging(
+        log_prefix="engine", log_queue=log_queue, console="auto"
+    )
     dispatcher = IpcMapperEventDispatcher(conn)
     engine: Engine | None = None
     try:
@@ -921,18 +924,18 @@ def run_engine_process(conn: Connection, log_queue: Queue) -> None:
         engine = Engine(headless=True, dispatcher=dispatcher, conn=conn)
         engine.start_headless(**config)
         dispatcher.send_started()
-        
+
     except KeyboardInterrupt:
         logger.info("Engine received shutdown signal, exiting cleanly.")
         shutdown_engine_process(engine, dispatcher, conn)
         return
-    
+
     except Exception as exc:
         logger.error("[ENGINE PROCESS] Startup failure: %s", exc, exc_info=True)
         dispatcher.send_error(str(exc))
         shutdown_engine_process(engine, dispatcher, conn)
         return
-        
+
     dispatcher.run_command_loop()
     shutdown_engine_process(engine, dispatcher, conn)
 
@@ -948,10 +951,6 @@ def shutdown_engine_process(
         dispatcher.send_error(str(exc))
     finally:
         dispatcher.send_stopped()
-        try:
-            conn.close()
-        except OSError:
-            pass
 
 
 def parse_config_arg(config_str: str) -> dict:

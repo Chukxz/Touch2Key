@@ -403,7 +403,8 @@ class Mapper:
     def release_vkb_keys(self):
         if self.vkb_pressed_keys:
             for code in list(self.vkb_pressed_keys):
-                self._virtual_keyboard_sink(1, code)
+                if code != BOTTOM_BEZEL_ID:
+                    self._virtual_keyboard_sink(1, code)
             self.vkb_pressed_keys.clear()
 
     def _on_worker_respawn(self, worker_type: str) -> None:

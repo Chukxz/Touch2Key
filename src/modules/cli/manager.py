@@ -73,26 +73,32 @@ VALID_SORT_ORDERS = ("Recently Modified", "Name (A-Z)", "Created (Newest)")
 
 
 def get_target_id(raw_id: str):
+    target_id = None
+    
     if raw_id.isdigit():
         if store.layouts.get(int(raw_id)) is not None:
             target_id = int(raw_id)
         else:
-            target_id = None
             print(f"Error: No layout with ID {int(raw_id)} found in the database.")
 
-    else:
+    elif raw_id == "":
         print(
-            f"Warning: Provided layout ID {raw_id} is not a digit, falling back to active layout."
+            f"Warning: No layout ID was provided, falling back to active layout."
         )
         layout = store.get_active_layout()
         if layout:
             target_id = layout.id
         else:
-            target_id = None
             print("Error: No active ayout found in the database")
 
     return target_id
 
+
+def _guard_float(value: str) -> float | None:
+    try:
+        return float(value)
+    except ValueError:
+        return None
 
 def _prompt_float(prompt: str, current: float) -> float:
     """Asks for a float; blank or invalid input keeps `current`."""
@@ -523,9 +529,16 @@ def format_supported_keys(input_dict_list: list[dict[str, Any]]):
                 line = ""
                 line_len = 0
 
-            suffix_len = min(0, KEY_WIDTH - key_len - 2)
+            suffix_len = max(0, KEY_WIDTH - key_len - 2)
             line += f"'{key}'" + " " * suffix_len
             line_len += key_len + suffix_len + 2
+    
+    output += line + "\n"
+    line = ""
+    
+    if line_len > 0:
+        print("\n")
+        line_len = 0        
 
     return output
 
@@ -539,8 +552,9 @@ def show_directional_keys(layout_id: int) -> None:
     norm_keys = [
         (get_key_from_scancode(_d_s) or "").upper() for _d_s in directional_scancodes
     ]
+    final_keys = str(norm_keys).replace("[", "").replace("]", "").replace("'", "")
     print(
-        f"\n--- Directional Keys: {str(norm_keys).replace("[", "").replace("]", "").replace("'", "")} ---"
+        f"\n--- Directional Keys: {final_keys} ---"
     )
 
 
@@ -1102,8 +1116,7 @@ def interactive_menu() -> None:
             )
             target_id = get_target_id(raw_id)
 
-            if target_id is not None:
-                if raw_id.isdigit() and img_path:
+            if target_id is not None and img_path:
                     set_profile_image(target_id, img_path)
 
         if choice == "lk":
@@ -1155,8 +1168,8 @@ def interactive_menu() -> None:
                 bot_in = input(
                     f"Bottom bezel dp ({MIN_BEZEL_DP}-{MAX_BEZEL_DP}, blank to keep): "
                 ).strip()
-                top_val = float(top_in) if top_in else None
-                bot_val = float(bot_in) if bot_in else None
+                top_val = _guard_float(top_in)
+                bot_val = _guard_float(bot_in)
                 set_bezel_thickness(target_id, top_val, bot_val)
 
             else:
@@ -1798,9 +1811,9 @@ def run() -> None:
             input_updates["sensitivity_x"] = clamp(
                 args.sensitivity_x, SENSITIVITY_MIN, SENSITIVITY_MAX
             )
-            has_args = True
 
         if args.sensitivity_y is not None:
+            has_args = True
             input_updates["sensitivity_y"] = clamp(
                 args.sensitivity_y, SENSITIVITY_MIN, SENSITIVITY_MAX
             )
@@ -2030,9 +2043,10 @@ def run() -> None:
                         profile_name=target.name,
                         layout_id=target.id,
                     )
+                    print(f"Bundle exported:\n  - TOML: {t_path}\n  - JSON: {j_path}")
             else:
                 t_path, j_path = export_bundle(args.export_bundle)
-            print(f"Bundle exported:\n  - TOML: {t_path}\n  - JSON: {j_path}")
+                print(f"Bundle exported:\n  - TOML: {t_path}\n  - JSON: {j_path}")
 
         if args.import_bundle is not None:
             has_args = True

@@ -34,9 +34,7 @@ class MouseMapper:
 
         self.rebuild_pipeline()
 
-        self.dispatcher.register_callback(
-            "ON_RELOAD", self.rebuild_pipeline
-        )
+        self.dispatcher.register_callback("ON_RELOAD", self.rebuild_pipeline)
         self.dispatcher.register_callback(
             "ON_WORKER_RESPAWN", self._on_worker_respawn_mouse
         )
@@ -131,7 +129,7 @@ class MouseMapper:
                     look_region = RectangularRegion(
                         Point(0.0, 0.0), Point(dev_w / 2.0, dev_h)
                     )
-                else:   
+                else:
                     look_region = RectangularRegion(
                         Point(dev_w / 2.0, 0.0), Point(dev_w, dev_h)
                     )

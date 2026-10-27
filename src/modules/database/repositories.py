@@ -231,7 +231,7 @@ class AppSettingsRepository:
         row = conn.execute("SELECT * FROM app_settings WHERE id = 1;").fetchone()
         if row is None:
             with conn:
-                conn.execute("INSERT OR IGNORE INTO app_settings (id) VALUES (1);")
+                conn.execute("INSERT OR IGNORE INTO app_settings (id, typematic_excluded_keys) VALUES (1, ?);")
             row = conn.execute("SELECT * FROM app_settings WHERE id = 1;").fetchone()
         return AppSettings.from_row(row)
 
@@ -1103,4 +1103,6 @@ class LayoutZonesRepository:
         zone_json.update(
             {direction: direction_value}
         )
+        
+        self.update(mouse_wheel_zone.id, pipeline_json=mouse_wheel_zone.CONFIG_HELPER.get_pipeline_json_from_config())
         return True

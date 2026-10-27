@@ -10,7 +10,6 @@ from modules.core.pipeline_output import BridgeOutputSink
 from modules.database import store
 from modules.utils import (
     CIRCLE,
-    EXCLUDED_KEYS,
     MOUSE_SCANCODES,
     MOUSE_WHEEL_SIMULATOR_CODE,
     RECTANGLE,
