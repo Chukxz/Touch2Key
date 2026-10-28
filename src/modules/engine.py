@@ -6,7 +6,6 @@ import os
 import sys
 import threading
 import time
-import psutil
 from typing import TYPE_CHECKING, Any
 
 from modules import (
@@ -36,7 +35,6 @@ from modules.utils import (
     IPC_CMD_START,
     PPS_ALERT_MAX,
     PPS_ALERT_MIN,
-    READ_ATTEMPTS,
     VISUALIZER_RUNTIME_FILE,
     CurveType,
     IpcMapperEventDispatcher,
@@ -49,7 +47,7 @@ from modules.utils import (
     clamp,
     unpack_ipc_start_cmd,
 )
-from modules.runtime_info import TelemetryPublisher
+from modules.runtime_info import read_process, TelemetryPublisher
 
 logger = logging.getLogger("modules.engine")
 
@@ -885,27 +883,8 @@ class Engine:
 
 
 def _read_visualizer() -> int | None:
-    for _ in range(READ_ATTEMPTS):
-        try:
-            data = VISUALIZER_RUNTIME_FILE.read_text(encoding="utf-8")
-            processed_data = int(data) if data.isnumeric() and int(data) > 0 else None
-
-            if processed_data is not None:
-                try:
-                    psutil.Process(processed_data)
-                except psutil.NoSuchProcess:
-                    processed_data = None
-                    pass
-                except psutil.AccessDenied:
-                    processed_data = None
-                    pass
-
-            return processed_data
-        except FileNotFoundError:
-            return None
-        except (OSError, ValueError):
-            time.sleep(0.01)  # writer is mid-replace; retry
-    return None
+    proc = read_process(VISUALIZER_RUNTIME_FILE)
+    return proc.pid if proc is not None else None
 
 
 def run_engine_process(conn: Connection, log_queue: Queue) -> None:
