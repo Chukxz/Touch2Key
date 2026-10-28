@@ -109,6 +109,7 @@ UDEV_RULE_PATH = Path("/etc/udev/rules.d/99-touch2key.rules")
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+MOUSE_CPI = 800.0  # counts per inch of mouse travel
 
 VISUALIZER_RUNTIME_FILE = DATA_FOLDER / "visualizer_runtime.json"
 RUNTIME_FILE = DATA_FOLDER / "engine_runtime.json"
@@ -1287,20 +1288,15 @@ def px_to_dp(px: float, dpi: int = BASELINE_DPI) -> float:
     return px / (dpi / BASELINE_DPI)
 
 
-def get_counts_per_dp(screen_width: int, dev_width: int, dev_dpi: int) -> float:
-    return (screen_width / dev_width) * (dev_dpi / BASELINE_DPI)
+def get_counts_per_dp(mouse_cpi: float = MOUSE_CPI) -> float:
+    """Counts per dp of finger travel at sensitivity 1.0 (1 dp == 1/160 inch)."""
+    return mouse_cpi / BASELINE_DPI
 
-
-def look_counts_per_px(
-    sensitivity: float,
-    screen_width: int,
-    dev_width: int,
-    dpi: int = BASELINE_DPI,
-) -> float:
+def look_counts_per_px(sensitivity: float, dpi: int = BASELINE_DPI) -> float:
     """Mouse counts per device pixel: px -> dp (uniform) -> counts."""
     return (
         px_to_dp(1.0, dpi if dpi > 0 else BASELINE_DPI)
-        * get_counts_per_dp(screen_width, dev_width, dpi)
+        * get_counts_per_dp()
         * sensitivity
     )
 
