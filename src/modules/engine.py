@@ -26,6 +26,7 @@ from modules.database import store
 from modules.gui.overlays import virtual_keyboard_worker
 from modules.log_manager import AppLogManager
 from modules.platforms import get_platform
+from modules.runtime_info import TelemetryPublisher, read_process
 from modules.scripts.list_windows import select_window
 from modules.utils import (
     ADB_RATE_CAP_MAX,
@@ -37,8 +38,8 @@ from modules.utils import (
     PPS_ALERT_MIN,
     VISUALIZER_RUNTIME_FILE,
     CurveType,
-    IpcMapperEventDispatcher,
     InputCurve,
+    IpcMapperEventDispatcher,
     MapperEvent,
     MapperEventDispatcher,
     TouchEvent,
@@ -47,7 +48,6 @@ from modules.utils import (
     clamp,
     unpack_ipc_start_cmd,
 )
-from modules.runtime_info import read_process, TelemetryPublisher
 
 logger = logging.getLogger("modules.engine")
 
@@ -57,7 +57,8 @@ if TYPE_CHECKING:
 
 _HOTKEY_POLL_INTERVAL = 0.005  # 5 ms key-state polling
 _ADJUST_COMMIT_INTERVAL = 0.25  # coalesce DB write + reload while held
-_ONESHOT_COOLDOWN = 0.35  # F5 / F6 cooldown
+_ONESHOT_COOLDOWN = 0.35  # F5 / F6 / F8 cooldown
+_ADJUST_KEYS = ("left", "right", "down", "up")
 
 
 class Engine:
@@ -107,9 +108,6 @@ class Engine:
         self.is_shutting_down = False
         self._stop_event = threading.Event()
 
-        if isinstance(self.dispatcher, MapperEventDispatcher):
-            self.dispatcher.set_reload_transaction_lock(self.lock)
-
         self.vkb_reader, self.vkb_writer = multiprocessing.Pipe(duplex=False)
         self.vkb_process: multiprocessing.Process | None = None
 
@@ -127,18 +125,28 @@ class Engine:
         self._live_active = False
         self._live_text = ""
 
+        # Input curve cycling state (defaults to CUBIC on startup).
+        self._curve_types: tuple[CurveType, ...] = tuple(CurveType)
+        self._curve_idx: int = self._curve_types.index(CurveType.CUBIC)
+        self._current_curve: CurveType = self._curve_types[self._curve_idx]
+
         # One-shot (non-typematic) keys: shared 350 ms cooldown.
         self._last_hotkey_time = 0.0
         self._hotkey_cooldown = _ONESHOT_COOLDOWN
-        self._oneshot_prev: dict[str, bool] = {"f5": False, "f6": False}
+        self._oneshot_prev: dict[str, bool] = {
+            "f5": False,
+            "f6": False,
+            "f8": False,
+        }
         self._oneshot_actions = {
             "f5": self._toggle_handedness_cli,
             "f6": self._reload_cli,
+            "f8": self._cycle_input_curve_cli,
         }
 
-        # Typematic keys: one cubic InputCurve per key.
+        # Typematic keys: one InputCurve per key initialized to default curve.
         self._adjust_curves: dict[str, InputCurve] = {
-            key: InputCurve(CurveType.CUBIC) for key in ("left", "right", "down", "up")
+            key: InputCurve(self._current_curve) for key in _ADJUST_KEYS
         }
         self._adjust_actions = {
             "left": lambda: self._adjust_rate_cap_cli(-10.0),
@@ -173,7 +181,11 @@ class Engine:
 
                 logger.info(
                     "[CLI Interactive Launch] Active Hotkeys: [Esc] Exit | [F5] Handedness | "
-                    "[F6] Reload | [Left/Right] Rate Cap (-/+ 10) | [Down/Up] PPS (-/+ 5)"
+                    "[F6] Reload | [F8] Input Curve | [Left/Right] Rate Cap (-/+ 10) | [Down/Up] PPS (-/+ 5)"
+                )
+                logger.info(
+                    "[CLI Interactive Launch] Default Input Curve: %s",
+                    self._current_curve.name,
                 )
             except Exception as exc:
                 logger.debug(
@@ -229,7 +241,7 @@ class Engine:
             if pressed[a] and pressed[b]:
                 pressed[a] = pressed[b] = False
 
-        # Typematic: cubic curve drives repeat timing (OS auto-repeat ignored).
+        # Typematic: active InputCurve drives repeat timing (OS auto-repeat ignored).
         for key, curve in self._adjust_curves.items():
             if curve.check_input(now, pressed[key]):
                 if self._adjust_actions[key]():
@@ -272,7 +284,7 @@ class Engine:
             self._commit_adjustments(now)
 
     def _check_debounce(self) -> bool:
-        """350 ms cooldown for one-shot hotkeys (F5 / F6)."""
+        """350 ms cooldown for one-shot hotkeys (F5 / F6 / F8)."""
         now = time.perf_counter()
         if now - self._last_hotkey_time < self._hotkey_cooldown:
             return False
@@ -321,7 +333,7 @@ class Engine:
         self.dispatcher.dispatch(MapperEvent(action="ON_RELOAD", cooldown=1.0))
 
     # ------------------------------------------------------------------
-    # One-shot: handedness / reload (350 ms, non-typematic)
+    # One-shot: handedness / reload / input curve (350 ms, non-typematic)
     # ------------------------------------------------------------------
     def _toggle_handedness_cli(self) -> None:
         if not self._check_debounce():
@@ -345,6 +357,19 @@ class Engine:
             return
         self.dispatcher.dispatch(MapperEvent(action="ON_RELOAD"))
         logger.info("CLI Triggered [F6]: Reload event dispatched.")
+
+    def _cycle_input_curve_cli(self) -> None:
+        if not self._check_debounce():
+            return
+        with self._adjust_lock:
+            self._curve_idx = (self._curve_idx + 1) % len(self._curve_types)
+            self._current_curve = self._curve_types[self._curve_idx]
+            for key in _ADJUST_KEYS:
+                self._adjust_curves[key] = InputCurve(self._current_curve)
+        logger.info(
+            "CLI Triggered [F8]: Input curve set to %s.",
+            self._current_curve.name,
+        )
 
     def _on_devices_change(
         self,
@@ -378,7 +403,9 @@ class Engine:
                         pipeline.reset(self.output_sink)
                     except Exception as exc:
                         logger.exception(
-                            "Failed to reset pipeline during state transition: %s", exc, exc_info=True
+                            "Failed to reset pipeline during state transition: %s",
+                            exc,
+                            exc_info=True,
                         )
 
             if self.bezel_mapper:
@@ -403,22 +430,52 @@ class Engine:
             logger.debug("Bridge health check failed during mode switch", exc_info=True)
 
     def _on_reload(self) -> None:
-        settings = store.settings.get()
-        self.two_finger_tap_enabled = settings.two_finger_tap_enabled
-        self.bezel_toggle_enabled = settings.bezel_toggle_enabled
-
-        with self._adjust_lock:
-            # Uncommitted hotkey steps are newer than the DB; keep them.
-            if not self._settings_dirty:
-                self.rate_cap = settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP
-                self.pps = settings.pps_alert_threshold or DEFAULT_PPS
-
-        if self.touch_reader is not None:
-            self.touch_reader.set_rate_cap(self.rate_cap)
-
+        """Explicitly orchestrate full engine & submapper reload in a single lock transaction."""
         with self.lock:
+            # 1. Refresh layout snapshot first so all downstream components see consistent state.
+            if self.layout_loader is not None:
+                if hasattr(self.layout_loader, "reload"):
+                    self.layout_loader.reload()
+                elif hasattr(self.layout_loader, "_on_reload"):
+                    self.layout_loader._on_reload()
+                snap = self.layout_loader.snapshot
+                settings = snap.settings if snap is not None else store.settings.get()
+            else:
+                settings = store.settings.get()
+
+            # 2. Update Engine & TouchReader settings.
+            self.two_finger_tap_enabled = settings.two_finger_tap_enabled
+            self.bezel_toggle_enabled = settings.bezel_toggle_enabled
+
+            with self._adjust_lock:
+                # Uncommitted hotkey steps are newer than the DB; keep them.
+                if not self._settings_dirty:
+                    self.rate_cap = settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP
+                    self.pps = settings.pps_alert_threshold or DEFAULT_PPS
+
+            if self.touch_reader is not None:
+                self.touch_reader._on_reload()
+                self.touch_reader.set_rate_cap(self.rate_cap)
+
+            # 3. Release any active touch ownership and held keys/buttons prior to rebuild.
             self._release_active_inputs()
+
+            # 4. Explicitly rebuild Mapper and all Submapper pipelines in deterministic order.
+            if self.mapper is not None:
+                self.mapper._reload()
+            if self.bezel_mapper is not None:
+                self.bezel_mapper.rebuild_pipelines()
+            if self.mouse_mapper is not None:
+                self.mouse_mapper.rebuild_pipeline()
+            if self.key_mapper is not None:
+                self.key_mapper._update_bridge_typematics()
+                self.key_mapper.rebuild_pipelines()
+            if self.wheel_mapper is not None:
+                self.wheel_mapper.rebuild_pipeline()
+
+            # 5. Rebuild sorted routing tiers from the newly constructed pipelines.
             self._tiers = self._build_pipeline_tiers()
+
         logger.info(
             "Engine reloaded: Rate Cap=%.1f Hz, PPS Threshold=%.1f PPS",
             self.rate_cap,
@@ -568,7 +625,7 @@ class Engine:
         with self.lock:
             if self.is_shutting_down:
                 return
-           
+
             if not all(
                 (
                     self.mouse_mapper,
@@ -597,10 +654,10 @@ class Engine:
                     should_shutdown = True
 
                 elif decision.status is GestureStatus.REJECTED:
-                    # Replay once through normal dispatch, bypassing gesture tracking.
+                    # Replay all buffered events through normal dispatch, bypassing gesture tracking.
                     for buffered_event in decision.replay:
                         self._dispatch_normal(buffered_event)
-                        return
+                    return
 
                 else:
                     self._dispatch_normal(touch_event)
@@ -616,11 +673,9 @@ class Engine:
                 daemon=True,
                 name="ShutdownThread",
             )
-
             shutdown_thread.start()
             shutdown_thread.join(timeout=2.0)
             return
-
 
     def start_virtual_keyboard(self) -> None:
         with self.vkb_lock:
