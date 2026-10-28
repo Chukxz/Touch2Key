@@ -34,9 +34,7 @@ class KeyMapper:
         self.pipelines: list[Any] = []
         self._update_bridge_typematics()
         self.rebuild_pipelines()
-
-        self.dispatcher.register_callback("ON_RELOAD", self._update_bridge_typematics)
-        self.dispatcher.register_callback("ON_RELOAD", self.rebuild_pipelines)
+        
         self.dispatcher.register_callback(
             "ON_WORKER_RESPAWN", self._on_worker_respawn_key
         )
