@@ -1,45 +1,48 @@
 from __future__ import annotations
 
 import atexit
-import sys
-import os
-import time
 import ctypes
 import logging
+import os
+import signal
+import sys
+import time
 from collections import deque
 from typing import TYPE_CHECKING
-import signal
 
+from PySide6.QtCore import QCoreApplication, QEvent, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QGuiApplication,
+    QIcon,
+    QKeyEvent,
+    QMouseEvent,
+    QPainter,
+    QPen,
+    QBrush,
+    QResizeEvent,
+)
+from PySide6.QtWidgets import QApplication, QGraphicsScene, QGraphicsView, QMainWindow
+
+from modules import AppLogManager
+from modules.database import store
+from modules.platforms import (
+    check_single_instance,
+    get_platform,
+    get_specific_qt_key,
+)
 from modules.utils import (
+    ICONS_FOLDER,
+    VISUALIZER_RUNTIME_FILE,
     bresenham,
     clamp,
     get_scancode_from_key,
-    scale_coord,
-    ICONS_FOLDER,
 )
-from modules.database import store
-from modules.platforms import get_platform, get_specific_qt_key, check_single_instance
-
-from PySide6.QtWidgets import QApplication, QMainWindow, QGraphicsScene, QGraphicsView
-from PySide6.QtGui import (
-    QKeyEvent,
-    QMouseEvent,
-    QGuiApplication,
-    QColor,
-    QPen,
-    QBrush,
-    QFont,
-    QPainter,
-    QIcon,
-)
-from PySide6.QtCore import QEvent, Qt, QTimer, Signal, QCoreApplication
-
-from modules import AppLogManager
-from modules.utils import VISUALIZER_RUNTIME_FILE
-from modules.ma
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QGraphicsItem
+
 
 logger = logging.getLogger("modules.gui.overlays.visualizer")
 
@@ -64,17 +67,18 @@ MOUSE_BUTTON_INFO: dict[Qt.MouseButton, tuple[str, str]] = {
 
 class DiagnosticView(QGraphicsView):
     mouse_pressed = Signal(str, int, int)  # (button name, x, y)
-    mouse_released = Signal(str)  # (button_name)
+    mouse_released = Signal(str)  # (button name)
     arrow_pressed = Signal()
-    resized = Signal(int, int)  # (x, y)
+    resized = Signal(int, int)  # (viewport width, viewport height)
 
     def __init__(
         self,
-        loc_dict: dict[int, tuple[int, int]],
+        loc_dict: dict[int, tuple[float, float]],
         parent: QMainWindow | None = None,
-    ):
+    ) -> None:
         super().__init__(parent)
-        self._loc_dict = loc_dict
+
+        self._loc_dict: dict[int, tuple[float, float]] = loc_dict
         self.setMouseTracking(True)
 
         self._scene = QGraphicsScene(self)
@@ -101,11 +105,14 @@ class DiagnosticView(QGraphicsView):
     def set_active_text(self, text: str) -> None:
         self.active_buttons.setPlainText(text)
 
-    def _add_trail_rect(self, x: int, y: int, w=5, h=5) -> None:
+    def _add_trail_rect(
+        self, x: int, y: int, w: int = 5, h: int = 5
+    ) -> None:
         rect = self._scene.addRect(
             x, y, w, h, QPen(QColor("#cccccc")), QBrush(QColor("#cccccc"))
         )
         self.trail_rects.append(rect)
+
         if len(self.trail_rects) > self.max_trail_number:
             old_rect = self.trail_rects.pop(0)
             self._remove_scene_item(old_rect)
@@ -114,7 +121,12 @@ class DiagnosticView(QGraphicsView):
         self.active_buttons.setPos(x + 20, y - 20)
 
     def set_labelled_ripple(
-        self, x: int, y: int, name: str, scancode: int | None, color: str
+        self,
+        x: int,
+        y: int,
+        name: str,
+        scancode: int | None,
+        color: str,
     ) -> None:
         self._set_active_buttons_pos(x, y)
 
@@ -124,15 +136,14 @@ class DiagnosticView(QGraphicsView):
         ripple = self._scene.addEllipse(
             pos_x - 15, pos_y - 15, 30, 30, QPen(QColor(color), 2)
         )
-        label = self._scene.addText(f"{name}", QFont("Arial", 8))
+        label = self._scene.addText(name, QFont("Arial", 8))
         label.setDefaultTextColor(QColor(color))
         label.setPos(pos_x, pos_y + 15)
 
         self._expire_later([ripple, label], RIPPLE_LIFETIME_MS)
 
     def _expire_later(self, items: list[QGraphicsItem], msec: int) -> None:
-        # Timer is parented to the view, so it dies with it and never fires
-        # against a destroyed scene.
+        # Parenting the timer to the view prevents it outliving the scene.
         timer = QTimer(self)
         timer.setSingleShot(True)
 
@@ -148,17 +159,22 @@ class DiagnosticView(QGraphicsView):
         if item.scene() is self._scene:
             self._scene.removeItem(item)
 
-    def set_loc_dict(self, loc_dict: dict[int, tuple[int, int]]) -> None:
+    def set_loc_dict(
+        self, loc_dict: dict[int, tuple[float, float]]
+    ) -> None:
         self._loc_dict = loc_dict
 
     @staticmethod
-    def _mouse_button_info(btn: Qt.MouseButton) -> tuple[str, str]:
-        return MOUSE_BUTTON_INFO.get(btn, (f"Btn{int(btn.value)}", "white"))
+    def _mouse_button_info(
+        btn: Qt.MouseButton,
+    ) -> tuple[str, str]:
+        return MOUSE_BUTTON_INFO.get(
+            btn, (f"Btn{int(btn.value)}", "white")
+        )
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         pos = event.position().toPoint()
-        pos_x = pos.x()
-        pos_y = pos.y()
+        pos_x, pos_y = pos.x(), pos.y()
 
         points_generator = bresenham(
             self.f_p_x if self.f_p_x is not None else pos_x,
@@ -169,14 +185,13 @@ class DiagnosticView(QGraphicsView):
             height0=self.trail_height,
         )
 
-        for generated_point in points_generator:
-            x, y, w, h = generated_point
+        for x, y, w, h in points_generator:
             self._add_trail_rect(x, y, w, h)
 
         self.f_p_x = pos_x
         self.f_p_y = pos_y
+        self.active_buttons.setPos(pos_x + 20, pos_y - 20)
 
-        self.active_buttons.setPos(pos.x() + 20, pos.y() - 20)
         super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -188,6 +203,7 @@ class DiagnosticView(QGraphicsView):
 
         self.set_labelled_ripple(pos.x(), pos.y(), btn_name, scancode, color)
         self.mouse_pressed.emit(btn_name, pos.x(), pos.y())
+
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -195,51 +211,63 @@ class DiagnosticView(QGraphicsView):
         self.mouse_released.emit(btn_name)
         super().mouseReleaseEvent(event)
 
-    def resizeEvent(self, event) -> None:
-        w, h = self.viewport().width(), self.viewport().height()
-        self.setSceneRect(0, 0, w, h)
-        self.resized.emit(w, h)
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        # Let QGraphicsView update its viewport before measuring it.
         super().resizeEvent(event)
 
+        viewport_size = self.viewport().size()
+        width, height = viewport_size.width(), viewport_size.height()
+
+        self.setSceneRect(0.0, 0.0, float(width), float(height))
+        self.resized.emit(width, height)
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key.Key_Left:
-            self.trail_width = clamp(self.trail_width - 1, 1, MAX_TRAIL_WIDTH)
+        key = event.key()
+
+        if key == Qt.Key.Key_Left:
+            self.trail_width = clamp(
+                self.trail_width - 1, 1, MAX_TRAIL_WIDTH
+            )
+            self.arrow_pressed.emit()
+        elif key == Qt.Key.Key_Right:
+            self.trail_width = clamp(
+                self.trail_width + 1, 1, MAX_TRAIL_WIDTH
+            )
+            self.arrow_pressed.emit()
+        elif key == Qt.Key.Key_Down:
+            self.trail_height = clamp(
+                self.trail_height - 1, 1, MAX_TRAIL_HEIGHT
+            )
+            self.arrow_pressed.emit()
+        elif key == Qt.Key.Key_Up:
+            self.trail_height = clamp(
+                self.trail_height + 1, 1, MAX_TRAIL_HEIGHT
+            )
             self.arrow_pressed.emit()
 
-        if event.key() == Qt.Key.Key_Right:
-            self.trail_width = clamp(self.trail_width + 1, 1, MAX_TRAIL_WIDTH)
-            self.arrow_pressed.emit()
-
-        if event.key() == Qt.Key.Key_Down:
-            self.trail_height = clamp(self.trail_height - 1, 1, MAX_TRAIL_HEIGHT)
-            self.arrow_pressed.emit()
-
-        if event.key() == Qt.Key.Key_Up:
-            self.trail_height = clamp(self.trail_height + 1, 1, MAX_TRAIL_HEIGHT)
-            self.arrow_pressed.emit()
-
-        return super().keyPressEvent(event)
+        super().keyPressEvent(event)
 
 
 class MainWindow(QMainWindow):
-    def __init__(
-        self,
-        toggle_key_scancode: int | None,
-    ):
+    def __init__(self, toggle_key_scancode: int | None) -> None:
         super().__init__()
 
         self.toggle_key_scancode = toggle_key_scancode
-        self.loc_dict: dict[int, tuple[int, int]] = {}
-        # Positional args kept as-is; platform signature not visible here.
-        self.cursor_visible = _PLATFORM.WindowManager().is_cursor_visible(True, 0)[0]
+        self.loc_dict: dict[int, tuple[float, float]] = {}
+
+        # Positional arguments retained because the platform signature is
+        # determined by the existing WindowManager implementation.
+        self.cursor_visible = (
+            _PLATFORM.WindowManager().is_cursor_visible(True, 0)[0]
+        )
+
         self.data: deque[dict] = deque(maxlen=MAX_EVENT_LOG)
-        # Keyed by native scancode (fallback: Qt key) so unmapped keys don't collide.
+        # Keyed by native scancode (fallback: Qt key).
         self.pressed_keys: dict[int, str] = {}
         self.pressed_mouse_buttons: set[str] = set()
 
         self.setWindowTitle(VISUALIZER_NAME)
         self.setWindowOpacity(0.4)
-        self.showFullScreen()
 
         self.view = DiagnosticView(self.loc_dict, self)
         self.view.mouse_pressed.connect(self._on_mouse_pressed)
@@ -249,18 +277,22 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.view)
 
         self.instruction = self.view._scene.addText(
-            f"Press ESC to exit (when cursor is visible).\n(Left/Right: increase/decrease trail width ({self.view.trail_width}) [1-{MAX_TRAIL_WIDTH}]).\n(Up/Down: increase/decrease trail height ({self.view.trail_height}) [1-{MAX_TRAIL_HEIGHT}]).\nMaximum number of trails: {MAX_TRAIL_NUMBER}.",
+            self._instruction_text(),
             QFont("Arial", 15),
         )
         self.instruction.setDefaultTextColor(QColor("#cccccc"))
-        _ins_bd_rect = self.instruction.boundingRect()
 
-        _offset_x = int((self.width() - _ins_bd_rect.width()) * 0.5)
-        _offset_y = int((self.height() - _ins_bd_rect.height()) * 0.2)
+        # Show first so the initial resize event has a valid viewport size.
+        self.showFullScreen()
+        self._on_view_resized(
+            self.view.viewport().width(),
+            self.view.viewport().height(),
+        )
+        self._position_instruction()
 
-        self.instruction.setPos(_offset_x, _offset_y)
-
-    # ----------------------------------------------------------------- cursor
+    # ------------------------------------------------------------------
+    # Cursor
+    # ------------------------------------------------------------------
 
     def _force_cursor_hidden(self) -> None:
         if sys.platform == "win32":
@@ -279,47 +311,99 @@ class MainWindow(QMainWindow):
             while QGuiApplication.overrideCursor() is not None:
                 QGuiApplication.restoreOverrideCursor()
 
-    # ---------------------------------------------------------------- display
+    # ------------------------------------------------------------------
+    # Display
+    # ------------------------------------------------------------------
 
     def _update_active_display(self) -> None:
-        parts = list(self.pressed_keys.values()) + sorted(self.pressed_mouse_buttons)
-        self.view.set_active_text(f"[{' + '.join(parts)}]" if parts else "")
+        parts = list(self.pressed_keys.values()) + sorted(
+            self.pressed_mouse_buttons
+        )
+        self.view.set_active_text(
+            f"[{' + '.join(parts)}]" if parts else ""
+        )
 
     def _clear_pressed_state(self) -> None:
         self.pressed_keys.clear()
         self.pressed_mouse_buttons.clear()
         self._update_active_display()
 
-    def _update_instruction_text(self) -> None:
-        self.instruction.setPlainText(
-            f"Press ESC to exit (when cursor is visible).\n(Left/Right: increase/decrease trail width ({self.view.trail_width}) [1-{MAX_TRAIL_WIDTH}]).\n(Up/Down: increase/decrease trail height ({self.view.trail_height}) [1-{MAX_TRAIL_HEIGHT}]).\nMaximum number of trails: {MAX_TRAIL_NUMBER}.",
+    def _instruction_text(self) -> str:
+        return (
+            "Press ESC to exit (when cursor is visible).\n"
+            f"(Left/Right: increase/decrease trail width "
+            f"({self.view.trail_width}) [1-{MAX_TRAIL_WIDTH}]).\n"
+            f"(Up/Down: increase/decrease trail height "
+            f"({self.view.trail_height}) [1-{MAX_TRAIL_HEIGHT}]).\n"
+            f"Maximum number of trails: {MAX_TRAIL_NUMBER}."
         )
 
-    def _on_view_resized(self, w: int, h: int) -> None:
-        self.loc_dict = self.get_locations_dict(w, h)
+    def _update_instruction_text(self) -> None:
+        self.instruction.setPlainText(self._instruction_text())
+        self._position_instruction()
+
+    def _position_instruction(self) -> None:
+        instruction = getattr(self, "instruction", None)
+        if instruction is None:
+            return
+
+        viewport = self.view.viewport()
+        bounds = instruction.boundingRect()
+
+        x = (viewport.width() - bounds.width()) * 0.5
+        y = (viewport.height() - bounds.height()) * 0.2
+        instruction.setPos(x, y)
+
+    def _on_view_resized(self, width: int, height: int) -> None:
+        self.loc_dict = self.get_locations_dict(width, height)
         self.view.set_loc_dict(self.loc_dict)
+        self._position_instruction()
 
-    def get_locations_dict(width: int, height: int) -> dict[int, tuple[float, float]]:
-
+    @staticmethod
+    def get_locations_dict(
+        width: int,
+        height: int,
+    ) -> dict[int, tuple[float, float]]:
         loc_dict: dict[int, tuple[float, float]] = {}
 
         layout = store.get_active_layout()
+        if layout is None:
+            return loc_dict
+
+        layout_width = float(layout.width or 0)
+        layout_height = float(layout.height or 0)
+
+        # Incomplete or invalid layouts should not cause division by zero.
+        if layout_width <= 0.0 or layout_height <= 0.0:
+            return loc_dict
+
         zones = store.get_active_layout_zones()
-        
-        if layout is not None:
-            for zone in zones:
-                w = (float(zone.cx or 0) / layout.width) * width
-                h = (float(zone.cy or 0) / layout.height) * height
-                loc_dict[zone.scancode] = (w, h)
+        scale_x = width / layout_width
+        scale_y = height / layout_height
+
+        for zone in zones:
+            loc_dict[zone.scancode] = (
+                float(zone.cx or 0) * scale_x,
+                float(zone.cy or 0) * scale_y,
+            )
 
         return loc_dict
 
-    # ------------------------------------------------------------ view slots
+    # ------------------------------------------------------------------
+    # View slots
+    # ------------------------------------------------------------------
 
-    def _on_mouse_pressed(self, btn_name: str, x: int, y: int) -> None:
+    def _on_mouse_pressed(
+        self, btn_name: str, x: int, y: int
+    ) -> None:
         self.pressed_mouse_buttons.add(btn_name)
         self.data.append(
-            {"x": x, "y": y, "type": f"{btn_name} Click", "time": time.time()}
+            {
+                "x": x,
+                "y": y,
+                "type": f"{btn_name} Click",
+                "time": time.time(),
+            }
         )
         self._update_active_display()
 
@@ -327,7 +411,9 @@ class MainWindow(QMainWindow):
         self.pressed_mouse_buttons.discard(btn_name)
         self._update_active_display()
 
-    # ----------------------------------------------------------------- events
+    # ------------------------------------------------------------------
+    # Events
+    # ------------------------------------------------------------------
 
     @staticmethod
     def _key_identity(event: QKeyEvent) -> int:
@@ -352,7 +438,10 @@ class MainWindow(QMainWindow):
                 self._force_cursor_visible()
                 self.cursor_visible = True
 
-        if event.key() == Qt.Key.Key_Escape and self.cursor_visible:
+        if (
+            event.key() == Qt.Key.Key_Escape
+            and self.cursor_visible
+        ):
             self.close()
             return
 
@@ -360,12 +449,20 @@ class MainWindow(QMainWindow):
         self.pressed_keys[self._key_identity(event)] = key_name
 
         cursor_pos = self.view.mapFromGlobal(self.cursor().pos())
-        mx, my = cursor_pos.x(), cursor_pos.y()
+        mouse_x, mouse_y = cursor_pos.x(), cursor_pos.y()
+
         self.data.append(
-            {"x": mx, "y": my, "type": f"Key: {key_name}", "time": time.time()}
+            {
+                "x": mouse_x,
+                "y": mouse_y,
+                "type": f"Key: {key_name}",
+                "time": time.time(),
+            }
         )
 
-        self.view.set_labelled_ripple(mx, my, key_name, scancode, "red")
+        self.view.set_labelled_ripple(
+            mouse_x, mouse_y, key_name, scancode, "red"
+        )
         self._update_active_display()
         super().keyPressEvent(event)
 
@@ -379,38 +476,35 @@ class MainWindow(QMainWindow):
         super().keyReleaseEvent(event)
 
     def changeEvent(self, event: QEvent) -> None:
-        # Focus sits on the child view, so QMainWindow.focusOutEvent never fires;
-        # window deactivation is the reliable signal.
+        # Focus is on the child view, so window deactivation is the
+        # reliable place to clear potentially stuck pressed-key state.
         if event.type() == QEvent.Type.WindowDeactivate:
             self._clear_pressed_state()
+
         super().changeEvent(event)
 
     def closeEvent(self, event) -> None:
-        # Always restore the cursor, whatever path closed the window.
+        # Restore the cursor on every close path.
         self._force_cursor_visible()
         super().closeEvent(event)
 
 
-def unregister_visualizer_file():
+def unregister_visualizer_file() -> None:
     VISUALIZER_RUNTIME_FILE.unlink(missing_ok=True)
 
 
 def _write(payload: int) -> None:
     tmp = VISUALIZER_RUNTIME_FILE.with_suffix(".tmp")
     tmp.write_text(str(payload), encoding="utf-8")
-    os.replace(tmp, VISUALIZER_RUNTIME_FILE)  # atomic: readers never see a torn file
+    os.replace(tmp, VISUALIZER_RUNTIME_FILE)
 
 
-def run(
-    toggle_key_scancode: int | None = None,
-) -> None:
+def run(toggle_key_scancode: int | None = None) -> None:
     success, _ = check_single_instance(VISUALIZER_NAME)
     if not success:
         sys.exit(0)
 
-    pid = os.getpid()
-    _write(pid)
-
+    _write(os.getpid())
     atexit.register(unregister_visualizer_file)
 
     app = QApplication(sys.argv)
@@ -418,13 +512,15 @@ def run(
     if app_icon_path.exists():
         app.setWindowIcon(QIcon(str(app_icon_path)))
 
-    # Allow Python signals to be processed periodically by running a dummy timer
+    # Periodically give Python a chance to process SIGINT.
     timer = QTimer()
     timer.start(500)
-    timer.timeout.connect(lambda: None)  # Kickstarts the Python interpreter loop
+    timer.timeout.connect(lambda: None)
 
-    # Handle Ctrl+C cleanly
-    signal.signal(signal.SIGINT, lambda *_: QCoreApplication.quit())
+    signal.signal(
+        signal.SIGINT,
+        lambda *_: QCoreApplication.quit(),
+    )
 
     window = MainWindow(toggle_key_scancode)
     window.activateWindow()
