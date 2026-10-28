@@ -116,12 +116,8 @@ class KeyMapper:
                     region=region,
                     pointer=zone.pointer,
                     # finger px -> dp -> mouse counts, same scale as the look area
-                    sensitivity_x=look_counts_per_px(
-                        sens_x, self.mapper.screen_w, layout.width, layout.dpi
-                    ),
-                    sensitivity_y=look_counts_per_px(
-                        sens_y, self.mapper.screen_w, layout.width, layout.dpi
-                    ),
+                    sensitivity_x=look_counts_per_px(sens_x, layout.dpi),
+                    sensitivity_y=look_counts_per_px(sens_y, layout.dpi),
                     mouse_button=zone.scancode in MOUSE_SCANCODES,
                     priority=zone.priority,
                     creation_id=zone.id,
