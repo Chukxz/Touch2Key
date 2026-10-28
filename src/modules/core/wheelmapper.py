@@ -25,10 +25,8 @@ class WheelMapper:
         self.mapper = mapper
         self.output_sink = output_sink
         self.dispatcher = mapper.dispatcher
-
-        self.lock = threading.Lock()
+        self.engine_ref = mapper.engine_ref
         self.pipeline: Pipeline | None = None
-
         self.rebuild_pipeline()
 
         self.dispatcher.register_callback("ON_RELOAD", self.rebuild_pipeline)
@@ -40,11 +38,11 @@ class WheelMapper:
         if reason:
             logger.warning(reason)
         self.touch_up()
-        with self.lock:
+        with self.engine_ref.lock:
             self.pipeline = None
 
     def rebuild_pipeline(self) -> None:
-        loader = self.mapper.engine_ref.layout_loader
+        loader = self.engine_ref.layout_loader
         if loader is None:
             self._clear("Layout Loader not initialized. WheelMapper pipeline will be empty.")
             return
@@ -142,13 +140,13 @@ class WheelMapper:
             )
             logger.info("Configured Fixed Joystick at (%.1f, %.1f)", center.x, center.y)
 
-        with self.lock:
+        with self.engine_ref.lock:
             if self.pipeline is not None:
                 self.pipeline.reset(self.output_sink)
             self.pipeline = pipeline
 
     def touch_up(self) -> None:
-        with self.lock:
+        with self.engine_ref.lock:
             if self.pipeline is not None:
                 self.pipeline.reset(self.output_sink)
 
