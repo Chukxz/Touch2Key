@@ -46,6 +46,8 @@ PACK_ABS_STRUCT = struct.Struct("<Bii")  # task_id, x, y
 PACK_KEY_STRUCT = struct.Struct("<HB")  # key_code, key_state
 PACK_WHEEL_STRUCT = struct.Struct("<Bhh")  # task_id, delta_x, delta_y
 
+PACK_REL_STRUCT_SIZE = 32767  # (2 ** (16 - 1) - 1)
+
 # Sentinel values for IPC Key and Mouse streams
 KEY_PING = 2
 KEY_CONFIG = 3  # Configuration payload for typematic timing & exclusions
