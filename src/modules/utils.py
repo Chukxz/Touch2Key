@@ -464,7 +464,7 @@ class Vector:
     def magnitude_squared(self) -> float:
         return self.x * self.x + self.y * self.y
 
-def scaled(self, factor: float) -> Vector:
+    def scaled(self, factor: float) -> Vector:
         return Vector(self.x * factor, self.y * factor)
 
 
