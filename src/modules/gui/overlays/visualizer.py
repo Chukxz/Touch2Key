@@ -35,7 +35,8 @@ from PySide6.QtGui import (
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal, QCoreApplication
 
 from modules import AppLogManager
-from modules.utils import READ_ATTEMPTS, VISUALIZER_RUNTIME_FILE
+from modules.utils import VISUALIZER_RUNTIME_FILE
+from modules.ma
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QGraphicsItem
@@ -59,19 +60,6 @@ MOUSE_BUTTON_INFO: dict[Qt.MouseButton, tuple[str, str]] = {
     Qt.MouseButton.BackButton: ("Back", "orange"),
     Qt.MouseButton.ForwardButton: ("Forward", "yellow"),
 }
-
-
-def get_locations_dict(width: int, height: int) -> dict[int, tuple[int, int]]:
-
-    loc_dict: dict[int, tuple[int, int]] = {}
-
-    zones = store.get_active_layout_zones()
-    for zone in zones:
-        scaled_x = int(scale_coord(width, zone.cx))
-        scaled_y = int(scale_coord(height, zone.cy))
-        loc_dict[zone.scancode] = (scaled_x, scaled_y)
-
-    return loc_dict
 
 
 class DiagnosticView(QGraphicsView):
@@ -308,8 +296,23 @@ class MainWindow(QMainWindow):
         )
 
     def _on_view_resized(self, w: int, h: int) -> None:
-        self.loc_dict = get_locations_dict(w, h)
+        self.loc_dict = self.get_locations_dict(w, h)
         self.view.set_loc_dict(self.loc_dict)
+
+    def get_locations_dict(width: int, height: int) -> dict[int, tuple[float, float]]:
+
+        loc_dict: dict[int, tuple[float, float]] = {}
+
+        layout = store.get_active_layout()
+        zones = store.get_active_layout_zones()
+        
+        if layout is not None:
+            for zone in zones:
+                w = (float(zone.cx or 0) / layout.width) * width
+                h = (float(zone.cy or 0) / layout.height) * height
+                loc_dict[zone.scancode] = (w, h)
+
+        return loc_dict
 
     # ------------------------------------------------------------ view slots
 

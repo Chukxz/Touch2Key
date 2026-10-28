@@ -7,13 +7,11 @@ from typing import TYPE_CHECKING
 
 from modules.core.pipeline import (
     AlwaysRegion,
-    CircularRegion,
     Point,
     RectangularRegion,
 )
 from modules.core.pipeline_factory import MousePointer
-from modules.database import store
-from modules.utils import MIN_PRIORITY, scale_coord
+from modules.utils import MIN_PRIORITY, look_counts_per_px
 
 if TYPE_CHECKING:
     from modules.core.pipeline import Pipeline
@@ -39,112 +37,87 @@ class MouseMapper:
             "ON_WORKER_RESPAWN", self._on_worker_respawn_mouse
         )
 
+    def _clear(self, reason: str) -> None:
+        logger.warning(reason)
+        self.touch_up()
+        with self.lock:
+            self.pipeline = None
+
     def rebuild_pipeline(self) -> None:
-        settings = store.settings.get()
-        layout = store.get_active_layout()
-        if layout is None:
-            logger.warning(
-                "No active layout found in SQLite database. MouseMapper pipeline will be empty."
+        loader = self.mapper.engine_ref.layout_loader
+        if loader is None:
+            self._clear(
+                "Layout Loader not initialized. MouseMapper pipeline will be empty."
             )
-            self.touch_up()
-            with self.lock:
-                self.pipeline = None
             return
 
+        snap = loader.snapshot
+        layout = snap.layout
+        if layout is None:
+            self._clear(
+                "No active layout found in SQLite database. MouseMapper pipeline will be empty."
+            )
+            return
+
+        settings = snap.settings
         dev_w = float(layout.width)
         dev_h = float(layout.height)
-        pc_w = float(self.mapper.screen_w)
-        pc_h = float(self.mapper.screen_h)
 
-        ratio_x = (pc_w / dev_w) if dev_w > 0 else 1.0
-        ratio_y = (pc_h / dev_h) if dev_h > 0 else 1.0
         sens_x = settings.sensitivity_x
         sens_y = settings.sensitivity_y
 
-        custom_look_zone = None
+        zone = snap.look_zone
         zone_priority = MIN_PRIORITY
         zone_creation_id = sys.maxsize
 
-        for zone in store.zones.list_for_layout(layout.id):
-            try:
-                zone.set_parsed_config_from_json()
-                sem_idx, _, _ = zone.CONFIG_HELPER.get_semantic_config()
-                if sem_idx == 2:  # POINTER
-                    custom_look_zone = zone
-                    zone_priority = zone.priority
-                    zone_creation_id = zone.id
-                    break
-            except Exception:
-                pass
+        if zone is not None:
+            zone_priority = zone.priority
+            zone_creation_id = zone.id
 
-        if custom_look_zone is not None:
-            zone = custom_look_zone
-            reg_type = zone.zone_type.upper()
+            if zone.ignore_app_settings:
+                sens_x = zone.sensitivity_x
+                sens_y = zone.sensitivity_y
 
-            zone.set_parsed_config_from_json()
-            _, _, trans_sens_x, trans_sens_y, _, _ = (
-                zone.CONFIG_HELPER.get_transform_config()
-            )
-
-            sens_x = trans_sens_x if zone.ignore_app_settings else sens_x
-            sens_y = trans_sens_y if zone.ignore_app_settings else sens_y
-
-            if (
-                reg_type == "CIRCLE"
-                and zone.cx is not None
-                and zone.cy is not None
-                and zone.r
-            ):
-                look_region = CircularRegion(
-                    Point(scale_coord(dev_w, zone.cx), scale_coord(dev_h, zone.cy)),
-                    scale_coord(dev_w, zone.r),
-                )
-            elif (
-                reg_type == "RECTANGLE"
-                and zone.x1 is not None
-                and zone.y1 is not None
-                and zone.x2 is not None
-                and zone.y2 is not None
-            ):
-                look_region = RectangularRegion(
-                    Point(scale_coord(dev_w, zone.x1), scale_coord(dev_h, zone.y1)),
-                    Point(scale_coord(dev_w, zone.x2), scale_coord(dev_h, zone.y2)),
-                )
-            else:
+            look_region = zone.region()
+            if look_region is None or look_region.area <= 0.0:
                 look_region = AlwaysRegion()
+
             logger.info(
                 "MouseMapper assigned custom layout Look Area: '%s' (%s)",
                 zone.name,
-                reg_type,
+                zone.zone_type,
+            )
+
+        elif not settings.floating_joystick and not settings.anchored_joystick:
+            look_region = AlwaysRegion()
+            logger.info(
+                "MouseMapper assigned Full-Screen Region (Fixed Joystick active)."
             )
 
         else:
-            if not settings.floating_joystick and not settings.anchored_joystick:
-                look_region = AlwaysRegion()
-                logger.info(
-                    "MouseMapper assigned Full-Screen Region (Fixed Joystick active)."
+            if settings.left_handed:
+                look_region = RectangularRegion(
+                    Point(0.0, 0.0), Point(dev_w / 2.0, dev_h)
                 )
             else:
-                if settings.left_handed:
-                    look_region = RectangularRegion(
-                        Point(0.0, 0.0), Point(dev_w / 2.0, dev_h)
-                    )
-                else:
-                    look_region = RectangularRegion(
-                        Point(dev_w / 2.0, 0.0), Point(dev_w, dev_h)
-                    )
-                logger.info(
-                    "MouseMapper restricted to %s half-screen.",
-                    "Left" if settings.left_handed else "Right",
+                look_region = RectangularRegion(
+                    Point(dev_w / 2.0, 0.0), Point(dev_w, dev_h)
                 )
+            logger.info(
+                "MouseMapper restricted to %s half-screen.",
+                "Left" if settings.left_handed else "Right",
+            )
 
-        final_sens_x = sens_x * ratio_x
-        final_sens_y = sens_y * ratio_y
-
+        # finger px -> dp (layout DPI) -> mouse counts; uniform on X and Y and
+        # independent of both the phone and the PC resolution.
         pipeline = MousePointer(
             region=look_region,
-            sensitivity_x=final_sens_x,
-            sensitivity_y=final_sens_y,
+            sensitivity_x=look_counts_per_px(
+                sens_x, self.mapper.screen_w, layout.width, layout.dpi
+            ),
+            sensitivity_y=look_counts_per_px(
+                sens_y, self.mapper.screen_w, layout.width, layout.dpi
+            ),
             priority=zone_priority,
             creation_id=zone_creation_id,
         )

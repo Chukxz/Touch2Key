@@ -4,21 +4,17 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Any
 
-from modules.core.pipeline import CircularRegion, Point, RectangularRegion
 from modules.core.pipeline_factory import Button
 from modules.core.pipeline_output import BridgeOutputSink
 from modules.database import store
 from modules.utils import (
-    CIRCLE,
     MOUSE_SCANCODES,
-    MOUSE_WHEEL_SIMULATOR_CODE,
-    RECTANGLE,
-    SPRINT_DISTANCE_CODE,
     get_scancode_from_key,
-    scale_coord,
+    look_counts_per_px,
 )
 
 if TYPE_CHECKING:
+    from .layout_loader import LayoutSnapshot
     from .mapper import Mapper
 
 logger = logging.getLogger("modules.core.key_mapper")
@@ -37,21 +33,22 @@ class KeyMapper:
 
         self.lock = threading.Lock()
         self.pipelines: list[Any] = []
-        self.ignored_scancodes = {MOUSE_WHEEL_SIMULATOR_CODE, SPRINT_DISTANCE_CODE}
 
         self._update_bridge_typematics()
         self.rebuild_pipelines()
 
-        self.mapper.dispatcher.register_callback(
-            "ON_RELOAD", self._update_bridge_typematics
-        )
+        self.dispatcher.register_callback("ON_RELOAD", self._update_bridge_typematics)
         self.dispatcher.register_callback("ON_RELOAD", self.rebuild_pipelines)
         self.dispatcher.register_callback(
             "ON_WORKER_RESPAWN", self._on_worker_respawn_key
         )
 
+    def _snapshot(self) -> LayoutSnapshot | None:
+        loader = self.mapper.engine_ref.layout_loader
+        return loader.snapshot if loader is not None else None
+
     def _resolve_scancode_set(self, raw_tokens: str | None) -> set[int]:
-        resolved_codes = set()
+        resolved_codes: set[int] = set()
 
         if raw_tokens is not None:
             tokens = {k.strip().lower() for k in raw_tokens.split(",") if k.strip()}
@@ -63,7 +60,8 @@ class KeyMapper:
         return resolved_codes
 
     def _update_bridge_typematics(self) -> None:
-        settings = store.settings.get()
+        snap = self._snapshot()
+        settings = snap.settings if snap is not None else store.settings.get()
         resolved = self._resolve_scancode_set(settings.typematic_excluded_keys)
         self.bridge.update_typematic(
             enabled=settings.typematic_enabled,
@@ -73,92 +71,62 @@ class KeyMapper:
         )
         logger.info("KeyMapper updated typematic parameters to bridge.")
 
-    def rebuild_pipelines(self) -> None:
-        settings = store.settings.get()
-        layout = store.get_active_layout()
-        layout_loader = self.mapper.engine_ref.layout_loader
+    def _clear(self, reason: str) -> None:
+        logger.warning(reason)
+        self.release_all()
+        with self.lock:
+            self.pipelines = []
 
-        if layout_loader is None:
-            logger.warning(
+    def rebuild_pipelines(self) -> None:
+        snap = self._snapshot()
+        if snap is None:
+            self._clear(
                 "Layout Loader not initialized. KeyMapper pipelines will be empty."
             )
-            self.release_all()
-            with self.lock:
-                self.pipelines = []
             return
-
+        layout = snap.layout
         if layout is None:
-            logger.warning(
+            self._clear(
                 "No active layout found in SQLite database. KeyMapper pipelines will be empty."
             )
-            self.release_all()
-            with self.lock:
-                self.pipelines = []
             return
 
-        with layout_loader.layout_lock:
-            key_raw_zones = layout_loader.keys_data.copy()
-
-        w = float(layout.width)
-        h = float(layout.height)
-
+        settings = snap.settings
         new_pipelines = []
 
-        for scancode, values in key_raw_zones:
-            if scancode in self.ignored_scancodes:
+        for zone in snap.keys:
+            region = zone.region()
+            if region is None:
                 continue
 
-            zone_id = int(values.get("id", 0))
-            zone_type = str(values.get("type", ""))
-            pointer = bool(values.get("pointer", False))
-            priority = int(values.get("priority", 0))
-            ignore_app_settings = bool(values.get("ignore_app_settings", False))
-            is_mouse_btn = scancode in MOUSE_SCANCODES
-
             sens_x = (
-                float(values.get("sensitivity_x", 1.0))
-                if ignore_app_settings
+                zone.sensitivity_x
+                if zone.ignore_app_settings
                 else settings.sensitivity_x
             )
             sens_y = (
-                float(values.get("sensitivity_y", 1.0))
-                if ignore_app_settings
+                zone.sensitivity_y
+                if zone.ignore_app_settings
                 else settings.sensitivity_y
             )
 
-            if zone_type == CIRCLE:
-                region = CircularRegion(
-                    center=Point(
-                        scale_coord(w, values.get("cx")),
-                        scale_coord(h, values.get("cy")),
+            new_pipelines.append(
+                Button(
+                    scancode=zone.scancode,
+                    region=region,
+                    pointer=zone.pointer,
+                    # finger px -> dp -> mouse counts, same scale as the look area
+                    sensitivity_x=look_counts_per_px(
+                        sens_x, self.mapper.screen_w, layout.width, layout.dpi
                     ),
-                    radius=scale_coord(w, values.get("r", values.get("val1", 50.0))),
+                    sensitivity_y=look_counts_per_px(
+                        sens_y, self.mapper.screen_w, layout.width, layout.dpi
+                    ),
+                    mouse_button=zone.scancode in MOUSE_SCANCODES,
+                    priority=zone.priority,
+                    creation_id=zone.id,
                 )
-            elif zone_type == RECTANGLE:
-                region = RectangularRegion(
-                    top_left=Point(
-                        scale_coord(w, values.get("x1")),
-                        scale_coord(h, values.get("y1")),
-                    ),
-                    bottom_right=Point(
-                        scale_coord(w, values.get("x2")),
-                        scale_coord(h, values.get("y2")),
-                    ),
-                )
-            else:
-                continue
-
-            pipeline = Button(
-                scancode=scancode,
-                region=region,
-                pointer=pointer,
-                sensitivity_x=sens_x,
-                sensitivity_y=sens_y,
-                mouse_button=is_mouse_btn,
-                priority=priority,
-                creation_id=zone_id,
             )
-            new_pipelines.append(pipeline)
 
         with self.lock:
             for pipeline in self.pipelines:

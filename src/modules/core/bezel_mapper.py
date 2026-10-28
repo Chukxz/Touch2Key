@@ -4,18 +4,10 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Any
 
-from modules.core.pipeline import Point, RectangularRegion
 from modules.core.pipeline_factory import Bezel
-from modules.database import store
-from modules.utils import (
-    BEZEL,
-    BOTTOM_BEZEL_ID,
-    TOP_BEZEL_ID,
-    scale_coord,
-)
+from modules.utils import BOTTOM_BEZEL_ID, TOP_BEZEL_ID
 
 if TYPE_CHECKING:
-    from modules.engine import Engine
     from modules.core.mapper import Mapper
     from modules.core.pipeline_output import BridgeOutputSink
 
@@ -39,75 +31,52 @@ class BezelMapper:
             "ON_WORKER_RESPAWN", self._on_worker_respawn_bezel
         )
 
-    def rebuild_pipelines(self) -> None:
-        layout = store.get_active_layout()
-        layout_loader = self.engine_ref.layout_loader
+    def _clear(self, reason: str) -> None:
+        logger.warning(reason)
+        self.release_all()
+        with self.lock:
+            self.pipelines = []
 
-        if layout_loader is None:
-            logger.warning(
-                "Layout Loader not initialized. BezelMapper pipelines will be empty."
-            )
-            self.release_all()
-            with self.lock:
-                self.pipelines = []
+    def rebuild_pipelines(self) -> None:
+        loader = self.engine_ref.layout_loader
+        if loader is None:
+            self._clear("Layout Loader not initialized. BezelMapper pipelines will be empty.")
             return
 
-        if layout is None:
-            logger.warning(
+        snap = loader.snapshot
+        if snap.layout is None:
+            self._clear(
                 "No active layout found in SQLite database. BezelMapper pipelines will be empty."
             )
-            self.release_all()
-            with self.lock:
-                self.pipelines = []
             return
-
-        with layout_loader.layout_lock:
-            bezels_raw_zones = layout_loader.bezels_data.copy()
-
-        w = float(layout.width)
-        h = float(layout.height)
 
         new_pipelines = []
 
-        for scancode, values in bezels_raw_zones:
-            z_type = str(values.get("type", ""))
-            priority = int(values.get("priority", 0))
-            zone_id = int(values.get("id", 0))
-
-            if z_type != BEZEL:
+        for zone in snap.bezels:
+            region = zone.region()
+            if region is None:
                 continue
 
-            region = RectangularRegion(
-                top_left=Point(
-                    scale_coord(w, values.get("x1")),
-                    scale_coord(h, values.get("y1")),
-                ),
-                bottom_right=Point(
-                    scale_coord(w, values.get("x2")),
-                    scale_coord(h, values.get("y2")),
-                ),
-            )
-
-            passed_scancode = scancode
+            passed_scancode = zone.scancode
             passed_callback = None
 
-            if scancode == TOP_BEZEL_ID:
+            if zone.scancode == TOP_BEZEL_ID:
                 if self.mapper.toggle_key_scancode is None:
                     continue
-
                 passed_scancode = self.mapper.toggle_key_scancode
 
-            if scancode == BOTTOM_BEZEL_ID:
+            if zone.scancode == BOTTOM_BEZEL_ID:
                 passed_callback = self.engine_ref.toggle_virtual_keyboard
 
-            pipeline = Bezel(
-                scancode=passed_scancode,
-                region=region,
-                priority=priority,
-                callback=passed_callback,
-                creation_id=zone_id,
+            new_pipelines.append(
+                Bezel(
+                    scancode=passed_scancode,
+                    region=region,
+                    priority=zone.priority,
+                    callback=passed_callback,
+                    creation_id=zone.id,
+                )
             )
-            new_pipelines.append(pipeline)
 
         with self.lock:
             for pipeline in self.pipelines:
