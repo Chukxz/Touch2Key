@@ -510,6 +510,7 @@ def set_bezel_thickness(
 def list_supported_keys() -> None:
     print("--- Supported keys ---")
     print(format_supported_keys([SCANCODES, SPECIAL_MAP]))
+    print("\n")
 
 
 def format_supported_keys(input_dict_list: list[dict[str, Any]]):
@@ -534,12 +535,6 @@ def format_supported_keys(input_dict_list: list[dict[str, Any]]):
             line_len += key_len + suffix_len + 2
     
     output += line + "\n"
-    line = ""
-    
-    if line_len > 0:
-        print("\n")
-        line_len = 0        
-
     return output
 
 
