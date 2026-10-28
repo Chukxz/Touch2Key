@@ -39,6 +39,7 @@ from modules.utils import (
     clamp,
     get_scancode_from_key,
 )
+from modules.runtime_info import register_process, unregister_process
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QGraphicsItem
@@ -490,21 +491,14 @@ class MainWindow(QMainWindow):
 
 
 def unregister_visualizer_file() -> None:
-    VISUALIZER_RUNTIME_FILE.unlink(missing_ok=True)
-
-
-def _write(payload: int) -> None:
-    tmp = VISUALIZER_RUNTIME_FILE.with_suffix(".tmp")
-    tmp.write_text(str(payload), encoding="utf-8")
-    os.replace(tmp, VISUALIZER_RUNTIME_FILE)
-
+    unregister_process(VISUALIZER_RUNTIME_FILE)
 
 def run(toggle_key_scancode: int | None = None) -> None:
     success, _ = check_single_instance(VISUALIZER_NAME)
     if not success:
         sys.exit(0)
 
-    _write(os.getpid())
+    register_process(VISUALIZER_RUNTIME_FILE)
     atexit.register(unregister_visualizer_file)
 
     app = QApplication(sys.argv)
