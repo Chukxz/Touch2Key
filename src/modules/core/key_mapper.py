@@ -31,8 +31,6 @@ class KeyMapper:
         self.output_sink = output_sink
         self.dispatcher = mapper.dispatcher
         self.engine_ref = mapper.engine_ref
-
-        self.lock = threading.Lock()
         self.pipelines: list[Any] = []
 
         self._update_bridge_typematics()
