@@ -501,9 +501,6 @@ class MapperEventDispatcher:
 
     Eligible pending events are delivered by deadline, preserving collection
     order when deadlines are equal. Callbacks are executed outside locks.
-    
-    Prevents overlapping `ON_RELOAD` sequences.
-    If a transaction lock is specified `ON_RELOAD` becomes a single transaction.
     """
 
     _NO_ARGS: frozenset[EVENT_TYPE] = frozenset({"ON_RELOAD"})
@@ -516,10 +513,7 @@ class MapperEventDispatcher:
 
         # action -> (deadline, collection_sequence, event)
         self._debounce_cache: dict[EVENT_TYPE, tuple[float, int, MapperEvent]] = {}
-
         self._next_sequence = 0
-        self._reload_lock = threading.Lock()
-        self._reload_transaction_lock = None
 
         self.callback_registry: dict[EVENT_TYPE, list[Callback]] = {
             "ON_RELOAD": [],
@@ -536,9 +530,6 @@ class MapperEventDispatcher:
             name="MapperEventDebouncer",
         )
         self._debounce_thread.start()
-
-    def set_reload_transaction_lock(self, lock) -> None:
-        self._reload_transaction_lock = lock
 
     def _debounce_loop(self) -> None:
         while True:
@@ -670,20 +661,6 @@ class MapperEventDispatcher:
         self._deliver(event)
 
     def _deliver(self, event: MapperEvent) -> None:
-        if event.action != "ON_RELOAD":
-            self._deliver_callbacks(event)
-            return
-
-        with self._reload_lock:
-            transaction_lock = self._reload_transaction_lock
-
-            if transaction_lock is None:
-                self._deliver_callbacks(event)
-            else:
-                with transaction_lock:
-                    self._deliver_callbacks(event)
-
-    def _deliver_callbacks(self, event: MapperEvent) -> None:
         """Invoke a snapshot of callbacks without holding registry locks."""
         if event.dispatch_msg is not None:
             print(event.dispatch_msg)
@@ -694,20 +671,12 @@ class MapperEventDispatcher:
         args = self._get_callback_args(event)
 
         for callback in callbacks:
-            callback_name = getattr(callback, "__name__", repr(callback))
-
             try:
                 callback(*args)
-                logger.debug(
-                    "Dispatched event %s to callback %s",
-                    event.action,
-                    callback_name,
-                )
-
             except Exception:
                 logger.exception(
                     "Error in callback %s for event %s",
-                    callback_name,
+                    getattr(callback, "__name__", repr(callback)),
                     event.action,
                 )
 
