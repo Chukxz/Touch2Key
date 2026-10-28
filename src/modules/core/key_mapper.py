@@ -30,6 +30,7 @@ class KeyMapper:
         self.bridge = mapper.bridge
         self.output_sink = output_sink
         self.dispatcher = mapper.dispatcher
+        self.engine_ref = mapper.engine_ref
 
         self.lock = threading.Lock()
         self.pipelines: list[Any] = []
@@ -44,7 +45,7 @@ class KeyMapper:
         )
 
     def _snapshot(self) -> LayoutSnapshot | None:
-        loader = self.mapper.engine_ref.layout_loader
+        loader = self.engine_ref.layout_loader
         return loader.snapshot if loader is not None else None
 
     def _resolve_scancode_set(self, raw_tokens: str | None) -> set[int]:
@@ -74,7 +75,7 @@ class KeyMapper:
     def _clear(self, reason: str) -> None:
         logger.warning(reason)
         self.release_all()
-        with self.lock:
+        with self.engine_ref.lock:
             self.pipelines = []
 
     def rebuild_pipelines(self) -> None:
@@ -124,13 +125,13 @@ class KeyMapper:
                 )
             )
 
-        with self.lock:
+        with self.engine_ref.lock:
             for pipeline in self.pipelines:
                 pipeline.reset(self.output_sink)
             self.pipelines = new_pipelines
 
     def release_all(self) -> None:
-        with self.lock:
+        with self.engine_ref.lock:
             for pipeline in self.pipelines:
                 pipeline.reset(self.output_sink)
 
