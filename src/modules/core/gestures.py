@@ -89,8 +89,6 @@ class TwoFingerTapTracker:
 
         a_up_time = a.up_time
         b_up_time = b.up_time
-        # _valid_contact has checked these, but explicit guards keep the types
-        # narrowed locally for the release synchronization comparison.
         if a_up_time is None or b_up_time is None:
             return False
 
@@ -107,7 +105,7 @@ class TwoFingerTapTracker:
         original order, including the event that caused rejection. The caller
         must send them through ordinary dispatch with gesture detection bypassed.
         """
-        
+
         cid = event.contact_id
         phase = event.phase
         now = event.timestamp
@@ -176,6 +174,11 @@ class TwoFingerTapTracker:
                 contact.invalid = True
                 return self._reject()
 
+            # If only one finger was used and it lifted, a two-finger tap is impossible.
+            # Reject immediately so single-finger taps never get swallowed.
+            if len(self._candidate_ids) < 2:
+                return self._reject()
+
             if len(self._candidate_ids) == 2 and all(
                 self._contacts[c].up_time is not None for c in self._candidate_ids
             ):
@@ -184,9 +187,6 @@ class TwoFingerTapTracker:
                     return GestureDecision(GestureStatus.RECOGNIZED)
                 return self._reject()
 
-            # Keep the candidate buffered after the first finger lifts: the
-            # second finger may still arrive/release inside the synchronization
-            # window.
             return GestureDecision(GestureStatus.PENDING)
 
         return GestureDecision(GestureStatus.PENDING)
