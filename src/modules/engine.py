@@ -560,46 +560,64 @@ class Engine:
         # Unowned MOVE/UP are ignored.
 
     def _process_touch_event(self, touch_event: TouchEvent) -> None:
-        if self.is_shutting_down:
-            return
-        if not all(
-            (
-                self.mouse_mapper,
-                self.key_mapper,
-                self.wheel_mapper,
-                self.bezel_mapper,
-                self.mapper,
-                self.output_sink,
-            )
-        ):
-            return
+        should_shutdown = False
 
-        self.touch_event_counter.record(touch_event)
-
-        if self.mapper is not None:
-            with self.mapper._pulse_lock:
-                self.mapper.event_count += 1
-
-        if self.is_visible and self.two_finger_tap_enabled:
-            decision = self.two_finger_tap_tracker.observe(touch_event)
-            if decision.status is GestureStatus.RECOGNIZED:
-                shutdown_thread = threading.Thread(
-                    target=self._request_engine_shutdown,
-                    daemon=True,
-                    name="ShutdownThread",
+        with self.lock:
+            if self.is_shutting_down:
+                return
+           
+            if not all(
+                (
+                    self.mouse_mapper,
+                    self.key_mapper,
+                    self.wheel_mapper,
+                    self.bezel_mapper,
+                    self.mapper,
+                    self.output_sink,
                 )
-                shutdown_thread.start()
-                shutdown_thread.join(timeout=2.0)
-                return
-            if decision.status is GestureStatus.PENDING:
-                return
-            if decision.status is GestureStatus.REJECTED:
-                # Replay once through normal dispatch, bypassing gesture tracking.
-                for buffered_event in decision.replay:
-                    self._dispatch_normal(buffered_event)
+            ):
                 return
 
-        self._dispatch_normal(touch_event)
+            self.touch_event_counter.record(touch_event)
+
+            if self.mapper is not None:
+                with self.mapper._pulse_lock:
+                    self.mapper.event_count += 1
+
+            if self.is_visible and self.two_finger_tap_enabled:
+                decision = self.two_finger_tap_tracker.observe(touch_event)
+
+                if decision.status is GestureStatus.PENDING:
+                    return
+
+                if decision.status is GestureStatus.RECOGNIZED:
+                    should_shutdown = True
+
+                elif decision.status is GestureStatus.REJECTED:
+                    # Replay once through normal dispatch, bypassing gesture tracking.
+                    for buffered_event in decision.replay:
+                        self._dispatch_normal(buffered_event)
+                        return
+
+                else:
+                    self._dispatch_normal(touch_event)
+                    return
+
+            else:
+                self._dispatch_normal(touch_event)
+                return
+
+        if should_shutdown:
+            shutdown_thread = threading.Thread(
+                target=self._request_engine_shutdown,
+                daemon=True,
+                name="ShutdownThread",
+            )
+
+            shutdown_thread.start()
+            shutdown_thread.join(timeout=2.0)
+            return
+
 
     def start_virtual_keyboard(self) -> None:
         with self.vkb_lock:
