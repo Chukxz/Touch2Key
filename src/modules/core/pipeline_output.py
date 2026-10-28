@@ -71,11 +71,8 @@ class BridgeOutputSink(OutputSink):
     def flush_mouse_move(self) -> None:
         """Dispatches aggregated whole pixels to the OS and retains the fractional remainder."""
         with self._lock:
-            pre_idx = int(round(self._acc_x))
-            pre_idy = int(round(self._acc_y))
-            
-            idx = int(clamp(pre_idx, -PACK_REL_STRUCT_SIZE, PACK_REL_STRUCT_SIZE))
-            idy = int(clamp(pre_idy, -PACK_REL_STRUCT_SIZE, PACK_REL_STRUCT_SIZE))
+            idx = int(clamp(round(self._acc_x), -PACK_REL_STRUCT_SIZE, PACK_REL_STRUCT_SIZE))
+            idy = int(clamp(round(self._acc_y), -PACK_REL_STRUCT_SIZE, PACK_REL_STRUCT_SIZE))
 
             if idx != 0 or idy != 0:
                 self.bridge.mouse_move_rel(idx, idy)
