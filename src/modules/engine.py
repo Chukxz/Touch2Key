@@ -950,7 +950,11 @@ def shutdown_engine_process(
         logger.error("[ENGINE PROCESS] Shutdown failure: %s", exc, exc_info=True)
         dispatcher.send_error(str(exc))
     finally:
-        dispatcher.send_stopped()
+        try:
+            dispatcher.send_stopped()
+        except OSError as exc:
+            logger.error("[ENGINE PROCESS]
+Connection closed: %s, exc, exc_info=True)
 
 
 def parse_config_arg(config_str: str) -> dict:
