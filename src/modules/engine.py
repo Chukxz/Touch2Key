@@ -107,6 +107,9 @@ class Engine:
         self.is_shutting_down = False
         self._stop_event = threading.Event()
 
+        if isinstance(self.dispatcher, MapperEventDispatcher):
+            self.dispatcher.set_reload_transaction_lock(self.lock)
+
         self.vkb_reader, self.vkb_writer = multiprocessing.Pipe(duplex=False)
         self.vkb_process: multiprocessing.Process | None = None
 
