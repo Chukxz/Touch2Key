@@ -464,7 +464,7 @@ class Vector:
     def magnitude_squared(self) -> float:
         return self.x * self.x + self.y * self.y
 
-    def scaled(self, factor: float) -> Vector:
+def scaled(self, factor: float) -> Vector:
         return Vector(self.x * factor, self.y * factor)
 
 
@@ -518,6 +518,8 @@ class MapperEventDispatcher:
         self._debounce_cache: dict[EVENT_TYPE, tuple[float, int, MapperEvent]] = {}
 
         self._next_sequence = 0
+        self._reload_lock = threading.Lock()
+        self._reload_transaction_lock = None
 
         self.callback_registry: dict[EVENT_TYPE, list[Callback]] = {
             "ON_RELOAD": [],
@@ -534,6 +536,9 @@ class MapperEventDispatcher:
             name="MapperEventDebouncer",
         )
         self._debounce_thread.start()
+
+    def set_reload_transaction_lock(self, lock) -> None:
+        self._reload_transaction_lock = lock
 
     def _debounce_loop(self) -> None:
         while True:
@@ -665,6 +670,20 @@ class MapperEventDispatcher:
         self._deliver(event)
 
     def _deliver(self, event: MapperEvent) -> None:
+        if event.action != "ON_RELOAD":
+            self._deliver_callbacks(event)
+            return
+
+        with self._reload_lock:
+            transaction_lock = self._reload_transaction_lock
+
+            if transaction_lock is None:
+                self._deliver_callbacks(event)
+            else:
+                with transaction_lock:
+                    self._deliver_callbacks(event)
+
+    def _deliver_callbacks(self, event: MapperEvent) -> None:
         """Invoke a snapshot of callbacks without holding registry locks."""
         if event.dispatch_msg is not None:
             print(event.dispatch_msg)
@@ -684,6 +703,7 @@ class MapperEventDispatcher:
                     event.action,
                     callback_name,
                 )
+
             except Exception:
                 logger.exception(
                     "Error in callback %s for event %s",
