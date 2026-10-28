@@ -501,6 +501,9 @@ class MapperEventDispatcher:
 
     Eligible pending events are delivered by deadline, preserving collection
     order when deadlines are equal. Callbacks are executed outside locks.
+    
+    Prevents overlapping `ON_RELOAD` sequences.
+    If a transaction lock is specified `ON_RELOAD` becomes a single transaction.
     """
 
     _NO_ARGS: frozenset[EVENT_TYPE] = frozenset({"ON_RELOAD"})
