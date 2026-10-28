@@ -13,6 +13,7 @@ from modules.utils import (
     M_MIDDLE,
     M_RIGHT,
     PACK_REL_STRUCT_SIZE,
+    clamp,
 )
 
 if TYPE_CHECKING:
