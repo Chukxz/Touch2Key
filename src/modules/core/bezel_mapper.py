@@ -20,9 +20,7 @@ class BezelMapper:
         self.output_sink = output_sink
         self.dispatcher = mapper.dispatcher
         self.engine_ref = mapper.engine_ref
-
         self.pipelines: list[Any] = []
-
         self.rebuild_pipelines()
 
         self.dispatcher.register_callback("ON_RELOAD", self.rebuild_pipelines)
