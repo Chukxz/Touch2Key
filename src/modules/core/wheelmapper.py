@@ -29,7 +29,6 @@ class WheelMapper:
         self.pipeline: Pipeline | None = None
         self.rebuild_pipeline()
 
-        self.dispatcher.register_callback("ON_RELOAD", self.rebuild_pipeline)
         self.dispatcher.register_callback(
             "ON_WORKER_RESPAWN", self._on_worker_respawn_wheel
         )
