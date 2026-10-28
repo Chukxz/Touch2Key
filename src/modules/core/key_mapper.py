@@ -32,7 +32,6 @@ class KeyMapper:
         self.dispatcher = mapper.dispatcher
         self.engine_ref = mapper.engine_ref
         self.pipelines: list[Any] = []
-
         self._update_bridge_typematics()
         self.rebuild_pipelines()
 
