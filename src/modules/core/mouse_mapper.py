@@ -112,12 +112,8 @@ class MouseMapper:
         # independent of both the phone and the PC resolution.
         pipeline = MousePointer(
             region=look_region,
-            sensitivity_x=look_counts_per_px(
-                sens_x, self.mapper.screen_w, layout.width, layout.dpi
-            ),
-            sensitivity_y=look_counts_per_px(
-                sens_y, self.mapper.screen_w, layout.width, layout.dpi
-            ),
+            sensitivity_x=look_counts_per_px(sens_x, layout.dpi),
+            sensitivity_y=look_counts_per_px(sens_y, layout.dpi),
             priority=zone_priority,
             creation_id=zone_creation_id,
         )
