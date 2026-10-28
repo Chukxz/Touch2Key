@@ -94,8 +94,7 @@ class LayoutLoader:
         self.snapshot: LayoutSnapshot | None = None
 
         self.load_layout()
-        self.dispatcher.register_callback("ON_RELOAD", self.load_layout)
-
+        
     @staticmethod
     def _wheel_keys(zone: LayoutZone) -> tuple[int, int, int, int]:
         cfg = zone.CONFIG_HELPER.pipeline_config
