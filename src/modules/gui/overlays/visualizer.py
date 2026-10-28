@@ -35,6 +35,8 @@ from modules.platforms import (
 from modules.utils import (
     ICONS_FOLDER,
     VISUALIZER_RUNTIME_FILE,
+    CurveType,
+    InputCurve,
     bresenham,
     clamp,
     get_scancode_from_key,
@@ -103,6 +105,59 @@ class DiagnosticView(QGraphicsView):
         self.f_p_x: int | None = None
         self.f_p_y: int | None = None
 
+        # Input curve cycling state (defaults to CUBIC on startup).
+        self._curve_types: tuple[CurveType, ...] = tuple(CurveType)
+        self._curve_idx: int = self._curve_types.index(CurveType.CUBIC)
+        self._current_curve: CurveType = self._curve_types[self._curve_idx]
+
+        self._adjust_curves: dict[str, InputCurve] = {
+            key: InputCurve(self._current_curve) for key in ("left", "right", "down", "up")
+        }
+        self._pressed_keys: set[int] = set()
+        self._last_f8_time = 0.0
+
+        # Poll timer for smooth typematic curve evaluation on held arrow keys (5 ms interval)
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setInterval(5)
+        self._poll_timer.timeout.connect(self._poll_hotkeys)
+        self._poll_timer.start()
+
+        logger.info("[Visualizer Launch] Default Input Curve: %s", self._current_curve.name)
+
+    def get_current_curve_name(self) -> str:
+        return self._current_curve.name
+
+    def _poll_hotkeys(self) -> None:
+        now = time.perf_counter()
+
+        left_pressed = Qt.Key.Key_Left in self._pressed_keys
+        right_pressed = Qt.Key.Key_Right in self._pressed_keys
+        down_pressed = Qt.Key.Key_Down in self._pressed_keys
+        up_pressed = Qt.Key.Key_Up in self._pressed_keys
+
+        # Opposing keys on the same axis cancel: treat both as released.
+        if left_pressed and right_pressed:
+            left_pressed = right_pressed = False
+        if down_pressed and up_pressed:
+            down_pressed = up_pressed = False
+
+        changed = False
+        if self._adjust_curves["left"].check_input(now, left_pressed):
+            self.trail_width = clamp(self.trail_width - 1, 1, MAX_TRAIL_WIDTH)
+            changed = True
+        if self._adjust_curves["right"].check_input(now, right_pressed):
+            self.trail_width = clamp(self.trail_width + 1, 1, MAX_TRAIL_WIDTH)
+            changed = True
+        if self._adjust_curves["down"].check_input(now, down_pressed):
+            self.trail_height = clamp(self.trail_height - 1, 1, MAX_TRAIL_HEIGHT)
+            changed = True
+        if self._adjust_curves["up"].check_input(now, up_pressed):
+            self.trail_height = clamp(self.trail_height + 1, 1, MAX_TRAIL_HEIGHT)
+            changed = True
+
+        if changed:
+            self.arrow_pressed.emit()
+
     def set_active_text(self, text: str) -> None:
         self.active_buttons.setPlainText(text)
 
@@ -144,7 +199,6 @@ class DiagnosticView(QGraphicsView):
         self._expire_later([ripple, label], RIPPLE_LIFETIME_MS)
 
     def _expire_later(self, items: list[QGraphicsItem], msec: int) -> None:
-        # Parenting the timer to the view prevents it outliving the scene.
         timer = QTimer(self)
         timer.setSingleShot(True)
 
@@ -213,7 +267,6 @@ class DiagnosticView(QGraphicsView):
         super().mouseReleaseEvent(event)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
-        # Let QGraphicsView update its viewport before measuring it.
         super().resizeEvent(event)
 
         viewport_size = self.viewport().size()
@@ -223,30 +276,33 @@ class DiagnosticView(QGraphicsView):
         self.resized.emit(width, height)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        key = event.key()
+        if event.isAutoRepeat():
+            super().keyPressEvent(event)
+            return
 
-        if key == Qt.Key.Key_Left:
-            self.trail_width = clamp(
-                self.trail_width - 1, 1, MAX_TRAIL_WIDTH
-            )
-            self.arrow_pressed.emit()
-        elif key == Qt.Key.Key_Right:
-            self.trail_width = clamp(
-                self.trail_width + 1, 1, MAX_TRAIL_WIDTH
-            )
-            self.arrow_pressed.emit()
-        elif key == Qt.Key.Key_Down:
-            self.trail_height = clamp(
-                self.trail_height - 1, 1, MAX_TRAIL_HEIGHT
-            )
-            self.arrow_pressed.emit()
-        elif key == Qt.Key.Key_Up:
-            self.trail_height = clamp(
-                self.trail_height + 1, 1, MAX_TRAIL_HEIGHT
-            )
-            self.arrow_pressed.emit()
+        key = event.key()
+        self._pressed_keys.add(key)
+
+        if key == Qt.Key.Key_F8:
+            now = time.perf_counter()
+            if now - self._last_f8_time >= 0.35:  # 350 ms debounce
+                self._last_f8_time = now
+                self._curve_idx = (self._curve_idx + 1) % len(self._curve_types)
+                self._current_curve = self._curve_types[self._curve_idx]
+                for k in self._adjust_curves:
+                    self._adjust_curves[k] = InputCurve(self._current_curve)
+                logger.info("Visualizer Input Curve cycled to %s", self._current_curve.name)
+                self.arrow_pressed.emit()
 
         super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event: QKeyEvent) -> None:
+        if event.isAutoRepeat():
+            super().keyReleaseEvent(event)
+            return
+
+        self._pressed_keys.discard(event.key())
+        super().keyReleaseEvent(event)
 
 
 class MainWindow(QMainWindow):
@@ -256,14 +312,11 @@ class MainWindow(QMainWindow):
         self.toggle_key_scancode = toggle_key_scancode
         self.loc_dict: dict[int, tuple[float, float]] = {}
 
-        # Positional arguments retained because the platform signature is
-        # determined by the existing WindowManager implementation.
         self.cursor_visible = (
             _PLATFORM.WindowManager().is_cursor_visible(True, 0)[0]
         )
 
         self.data: deque[dict] = deque(maxlen=MAX_EVENT_LOG)
-        # Keyed by native scancode (fallback: Qt key).
         self.pressed_keys: dict[int, str] = {}
         self.pressed_mouse_buttons: set[str] = set()
 
@@ -283,7 +336,6 @@ class MainWindow(QMainWindow):
         )
         self.instruction.setDefaultTextColor(QColor("#cccccc"))
 
-        # Show first so the initial resize event has a valid viewport size.
         self.showFullScreen()
         self._on_view_resized(
             self.view.viewport().width(),
@@ -330,8 +382,10 @@ class MainWindow(QMainWindow):
         self._update_active_display()
 
     def _instruction_text(self) -> str:
+        curve_name = self.view.get_current_curve_name()
         return (
             "Press ESC to exit (when cursor is visible).\n"
+            f"[F8] Cycle Input Curve: [{curve_name}]\n"
             f"(Left/Right: increase/decrease trail width "
             f"({self.view.trail_width}) [1-{MAX_TRAIL_WIDTH}]).\n"
             f"(Up/Down: increase/decrease trail height "
@@ -374,7 +428,6 @@ class MainWindow(QMainWindow):
         layout_width = float(layout.width or 0)
         layout_height = float(layout.height or 0)
 
-        # Incomplete or invalid layouts should not cause division by zero.
         if layout_width <= 0.0 or layout_height <= 0.0:
             return loc_dict
 
@@ -477,21 +530,19 @@ class MainWindow(QMainWindow):
         super().keyReleaseEvent(event)
 
     def changeEvent(self, event: QEvent) -> None:
-        # Focus is on the child view, so window deactivation is the
-        # reliable place to clear potentially stuck pressed-key state.
         if event.type() == QEvent.Type.WindowDeactivate:
             self._clear_pressed_state()
 
         super().changeEvent(event)
 
     def closeEvent(self, event) -> None:
-        # Restore the cursor on every close path.
         self._force_cursor_visible()
         super().closeEvent(event)
 
 
 def unregister_visualizer_file() -> None:
     unregister_process(VISUALIZER_RUNTIME_FILE)
+
 
 def run(toggle_key_scancode: int | None = None) -> None:
     success, _ = check_single_instance(VISUALIZER_NAME)
@@ -506,7 +557,6 @@ def run(toggle_key_scancode: int | None = None) -> None:
     if app_icon_path.exists():
         app.setWindowIcon(QIcon(str(app_icon_path)))
 
-    # Periodically give Python a chance to process SIGINT.
     timer = QTimer()
     timer.start(500)
     timer.timeout.connect(lambda: None)
