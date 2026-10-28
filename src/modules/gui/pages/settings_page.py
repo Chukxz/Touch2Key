@@ -52,6 +52,7 @@ from modules.utils import (
     TYPEMATIC_RATE_MAX_HZ,
     TYPEMATIC_RATE_MIN_HZ,
     get_scancode_from_key,
+    parse_seq,
 )
 
 if TYPE_CHECKING:
@@ -354,15 +355,11 @@ class SettingsPage(QWidget):
         kb_group = QGroupBox("Global Key Bindings")
         kb_form = QFormLayout(kb_group)
 
-        self.toggle_key_label = QLabel("Not set")
-        self.toggle_key_btn = QPushButton("Capture")
-        self.toggle_key_clear_btn = QPushButton("Clear")
-        kb_form.addRow(
-            "Toggle Key (Menu Mode):",
-            self._paired_row(
-                self.toggle_key_label, self.toggle_key_btn, self.toggle_key_clear_btn
-            ),
-        )
+        self.toggle_hotkeys = KeySequenceRow("toggle_hotkeys", self)
+        toggle_hotkeys_scroll_area = QScrollArea()
+        toggle_hotkeys_scroll_area.setWidget(self.toggle_hotkeys)
+        toggle_hotkeys_scroll_area.setWidgetResizable(True)
+        kb_form.addRow("Excluded Keys:", toggle_hotkeys_scroll_area)
 
         self.sprint_key_label = QLabel("Not set")
         self.sprint_key_btn = QPushButton("Capture")
@@ -652,12 +649,6 @@ class SettingsPage(QWidget):
         self.select_window_btn.clicked.connect(self._handle_window_selection)
         self.rebind_hw_btn.clicked.connect(self._handle_hardware_rebind)
 
-        self.toggle_key_btn.clicked.connect(
-            lambda: self._begin_single_key_capture("toggle_key")
-        )
-        self.toggle_key_clear_btn.clicked.connect(
-            lambda: self._on_clear_key("toggle_key")
-        )
         self.sprint_key_btn.clicked.connect(
             lambda: self._begin_single_key_capture("sprint_key")
         )
@@ -795,7 +786,6 @@ class SettingsPage(QWidget):
             self._single_key_filter.deleteLater()
             self._single_key_filter = None
 
-        self.toggle_key_btn.setEnabled(True)
         self.sprint_key_btn.setEnabled(True)
         if self._active_seq_row is not None:
             self._active_seq_row.stop_recording()
@@ -812,14 +802,8 @@ class SettingsPage(QWidget):
         self._cancel_captures()
         self.load_settings()
 
-        btn = (
-            self.toggle_key_btn if target_field == "toggle_key" else self.sprint_key_btn
-        )
-        lbl = (
-            self.toggle_key_label
-            if target_field == "toggle_key"
-            else self.sprint_key_label
-        )
+        btn = self.sprint_key_btn
+        lbl = self.sprint_key_label
 
         lbl.setText("Press any key (Esc to cancel)...")
         btn.setEnabled(False)
@@ -891,15 +875,10 @@ class SettingsPage(QWidget):
         try:
             settings = store.settings.get()
 
-            self.toggle_key_label.setText(settings.toggle_key or "Not set")
-            self.sprint_key_label.setText(settings.sprint_key or "Not set")
-            self.toggle_key_clear_btn.setEnabled(bool(settings.toggle_key))
-            self.sprint_key_clear_btn.setEnabled(bool(settings.sprint_key))
+            self.toggle_hotkeys.set_sequence(parse_seq(settings.toggle_hotkeys, ","))
 
-            def parse_seq(val: str | None) -> list[str]:
-                if not val or not val.strip():
-                    return []
-                return [k.strip().lower() for k in val.split(",") if k.strip()]
+            self.sprint_key_label.setText(settings.sprint_key or "Not set")
+            self.sprint_key_clear_btn.setEnabled(bool(settings.sprint_key))
 
             self.left_handed_check.setChecked(settings.left_handed)
             self.floating_check.setChecked(settings.floating_joystick)
@@ -919,7 +898,7 @@ class SettingsPage(QWidget):
             self.bezel_toggle_enabled_check.setChecked(settings.bezel_toggle_enabled)
 
             self.typematic_excluded_keys.set_sequence(
-                parse_seq(settings.typematic_excluded_keys)
+                parse_seq(settings.typematic_excluded_keys, ",")
             )
 
         except Exception:

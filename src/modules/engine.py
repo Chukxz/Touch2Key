@@ -21,7 +21,7 @@ from modules import (
     TwoFingerTapTracker,
     WheelMapper,
 )
-from modules.cli.key_capture import capture_keys, capture_performance_settings
+from modules.cli.key_capture import capture_sprint_key, capture_performance_settings
 from modules.database import store
 from modules.gui.overlays import virtual_keyboard_worker
 from modules.log_manager import AppLogManager
@@ -432,18 +432,15 @@ class Engine:
     def _on_reload(self) -> None:
         """Explicitly orchestrate full engine & submapper reload in a single lock transaction."""
         with self.lock:
-            # 1. Refresh layout snapshot first so all downstream components see consistent state.
+            # Refresh layout snapshot first so all downstream components see consistent state.
             if self.layout_loader is not None:
-                if hasattr(self.layout_loader, "reload"):
-                    self.layout_loader.reload()
-                elif hasattr(self.layout_loader, "_on_reload"):
-                    self.layout_loader._on_reload()
+                self.layout_loader.load_layout()
                 snap = self.layout_loader.snapshot
                 settings = snap.settings if snap is not None else store.settings.get()
             else:
                 settings = store.settings.get()
 
-            # 2. Update Engine & TouchReader settings.
+            # Update Engine & TouchReader settings.
             self.two_finger_tap_enabled = settings.two_finger_tap_enabled
             self.bezel_toggle_enabled = settings.bezel_toggle_enabled
 
@@ -454,21 +451,21 @@ class Engine:
                     self.pps = settings.pps_alert_threshold or DEFAULT_PPS
 
             if self.touch_reader is not None:
-                self.touch_reader._on_reload()
+                self.touch_reader.on_reload()
                 self.touch_reader.set_rate_cap(self.rate_cap)
 
-            # 3. Release any active touch ownership and held keys/buttons prior to rebuild.
+            # Release any active touch ownership and held keys/buttons prior to rebuild.
             self._release_active_inputs()
 
-            # 4. Explicitly rebuild Mapper and all Submapper pipelines in deterministic order.
+            # Explicitly rebuild Mapper and all Submapper pipelines in deterministic order.
             if self.mapper is not None:
-                self.mapper._reload()
+                self.mapper.reload()
             if self.bezel_mapper is not None:
                 self.bezel_mapper.rebuild_pipelines()
             if self.mouse_mapper is not None:
                 self.mouse_mapper.rebuild_pipeline()
             if self.key_mapper is not None:
-                self.key_mapper._update_bridge_typematics()
+                self.key_mapper.update_bridge_typematics()
                 self.key_mapper.rebuild_pipelines()
             if self.wheel_mapper is not None:
                 self.wheel_mapper.rebuild_pipeline()
@@ -716,16 +713,14 @@ class Engine:
     def start_headless(
         self,
         window_id: int | None,
-        toggle_key: str | None = None,
         sprint_key: str | None = None,
         rate_cap: float | None = None,
         pps: float | None = None,
         k_device_handle: int = 0,
         m_device_handle: int = 10,
-        **kwargs: Any,
     ) -> None:
         settings = store.settings.get()
-        toggle_key = toggle_key or settings.toggle_key
+        toggle_hotkeys = settings.toggle_hotkeys
         sprint_key = sprint_key or settings.sprint_key
         self.rate_cap = max(
             ADB_RATE_CAP_MIN,
@@ -751,7 +746,7 @@ class Engine:
             window_id,
             self.rate_cap,
             self.pps,
-            toggle_key,
+            toggle_hotkeys,
             sprint_key,
         )
         logger.info(
@@ -777,7 +772,6 @@ class Engine:
             self.touch_reader,
             self.bridge,
             self.pps,
-            {"toggle_key": toggle_key, "sprint_key": sprint_key},
             window_id,
             self,
         )
@@ -813,7 +807,6 @@ class Engine:
             store.settings.update(
                 adb_rate_cap=config["rate_cap"],
                 pps_alert_threshold=config["pps"],
-                toggle_key=config["toggle_key"],
                 sprint_key=config["sprint_key"],
             )
             self.start_headless(**config)
@@ -825,10 +818,9 @@ class Engine:
         if window_result is None:
             return
         selected_window_id, _ = window_result
-        captured_keys = capture_keys()
-        if captured_keys is None:
+        sprint_key = capture_sprint_key()
+        if sprint_key is None:
             return
-        toggle_key, sprint_key = captured_keys
         performance = capture_performance_settings()
         if performance is None:
             return
@@ -838,7 +830,6 @@ class Engine:
         store.settings.update(
             adb_rate_cap=rate_cap,
             pps_alert_threshold=pps,
-            toggle_key=toggle_key,
             sprint_key=sprint_key,
         )
 
@@ -853,7 +844,6 @@ class Engine:
                 k_device_handle, m_device_handle = result
         self.start_headless(
             window_id=selected_window_id,
-            toggle_key=toggle_key,
             sprint_key=sprint_key,
             rate_cap=rate_cap,
             pps=pps,
@@ -1015,7 +1005,7 @@ def parse_config_arg(config_str: str) -> dict:
     """Parse comma-separated settings and clamp performance values."""
     settings = store.settings.get()
     parts = [part.strip() for part in config_str.split(",")]
-    while len(parts) < 7:
+    while len(parts) < 6:
         parts.append("")
 
     def parse_value(value, target_type, default):
@@ -1027,20 +1017,18 @@ def parse_config_arg(config_str: str) -> dict:
             return default
 
     window_id = parse_value(parts[0], int, None)
-    toggle_key = parse_value(parts[1], str, settings.toggle_key or "")
-    sprint_key = parse_value(parts[2], str, settings.sprint_key or "")
+    sprint_key = parse_value(parts[1], str, settings.sprint_key or "")
     raw_rate = parse_value(
-        parts[3], float, settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP
+        parts[2], float, settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP
     )
     rate_cap = clamp(raw_rate, ADB_RATE_CAP_MIN, ADB_RATE_CAP_MAX)
-    raw_pps = parse_value(parts[4], float, settings.pps_alert_threshold or DEFAULT_PPS)
+    raw_pps = parse_value(parts[3], float, settings.pps_alert_threshold or DEFAULT_PPS)
     pps = clamp(raw_pps, PPS_ALERT_MIN, PPS_ALERT_MAX)
-    k_device_handle = parse_value(parts[5], int, 0)
-    m_device_handle = parse_value(parts[6], int, 10)
+    k_device_handle = parse_value(parts[4], int, 0)
+    m_device_handle = parse_value(parts[5], int, 10)
     logger.info(
-        "Parsed config: window_id=%s, toggle_key=%s, sprint_key=%s, rate_cap=%.1f, pps=%.1f, k_device_handle=%s, m_device_handle=%s",
+        "Parsed config: window_id=%s, sprint_key=%s, rate_cap=%.1f, pps=%.1f, k_device_handle=%s, m_device_handle=%s",
         window_id,
-        toggle_key,
         sprint_key,
         rate_cap,
         pps,
@@ -1049,7 +1037,6 @@ def parse_config_arg(config_str: str) -> dict:
     )
     return {
         "window_id": window_id,
-        "toggle_key": toggle_key,
         "sprint_key": sprint_key,
         "rate_cap": rate_cap,
         "pps": pps,

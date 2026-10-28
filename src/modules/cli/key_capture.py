@@ -54,20 +54,16 @@ def _prompt_validated_key_cli(label: str, default_key: str | None) -> str | None
         print(f"    [!] Unsupported key '{raw}'. Please enter a valid key name.")
 
 
-def capture_keys_cli() -> tuple[str | None, str | None] | None:
+def capture_sprint_key_cli() -> str | None:
     settings = store.settings.get()
 
     try:
-        toggle_key = _prompt_validated_key_cli(
-            "TOGGLE key for Camera/Menu mode", settings.toggle_key
-        )
         sprint_key = _prompt_validated_key_cli("SPRINT key", settings.sprint_key)
 
         store.settings.update(
-            toggle_key=toggle_key or "",
             sprint_key=sprint_key or "",
         )
-        return toggle_key, sprint_key
+        return sprint_key
 
     except KeyboardInterrupt:
         logger.info("Key capture cancelled.")
@@ -320,24 +316,14 @@ class NumericCaptureDialog(QDialog):
 # ==========================================
 
 
-def capture_keys() -> tuple[str | None, str | None] | None:
-    """Interactively captures toggle and sprint keys (GUI or CLI)."""
+def capture_sprint_key() -> str | None:
+    """Interactively captures sprint key (GUI or CLI)."""
     try:
         from PySide6.QtWidgets import QApplication
 
         if QApplication.instance() is not None:
             settings = store.settings.get()
-            default_toggle = settings.toggle_key
             default_sprint = settings.sprint_key
-
-            toggle_dialog = KeyCaptureDialog(
-                "Press the key to use as the TOGGLE key\nfor Camera/Menu mode toggle\n(or click Skip to use the default)",
-                skippable=True,
-                default_key=default_toggle,
-            )
-            if toggle_dialog.exec() == QDialog.DialogCode.Rejected:
-                return None
-            toggle_key = toggle_dialog.captured_key
 
             sprint_dialog = KeyCaptureDialog(
                 "Press the key to use as the SPRINT key\n(or click Skip to use the default)",
@@ -349,14 +335,13 @@ def capture_keys() -> tuple[str | None, str | None] | None:
             sprint_key = sprint_dialog.captured_key
 
             store.settings.update(
-                toggle_key=toggle_key or "",
                 sprint_key=sprint_key or "",
             )
-            return toggle_key, sprint_key
+            return sprint_key
     except ImportError:
         pass
 
-    return capture_keys_cli()
+    return capture_sprint_key_cli()
 
 
 def capture_performance_settings() -> tuple[float | None, float | None] | None:

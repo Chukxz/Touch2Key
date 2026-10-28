@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import threading
 from typing import TYPE_CHECKING, Any
 
 from modules.core.pipeline_factory import Button
@@ -32,7 +31,7 @@ class KeyMapper:
         self.dispatcher = mapper.dispatcher
         self.engine_ref = mapper.engine_ref
         self.pipelines: list[Any] = []
-        self._update_bridge_typematics()
+        self.update_bridge_typematics()
         self.rebuild_pipelines()
         
         self.dispatcher.register_callback(
@@ -55,7 +54,7 @@ class KeyMapper:
 
         return resolved_codes
 
-    def _update_bridge_typematics(self) -> None:
+    def update_bridge_typematics(self) -> None:
         snap = self._snapshot()
         settings = snap.settings if snap is not None else store.settings.get()
         resolved = self._resolve_scancode_set(settings.typematic_excluded_keys)
@@ -133,4 +132,4 @@ class KeyMapper:
     def _on_worker_respawn_key(self, worker_type: str) -> None:
         if worker_type == "keyboard":
             self.release_all()
-            self._update_bridge_typematics()
+            self.update_bridge_typematics()

@@ -80,7 +80,7 @@ class TouchReader:
             self.adb_rate_cap = float(hz)
             self.move_interval = 1.0 / self.adb_rate_cap
 
-    def _on_reload(self) -> None:
+    def on_reload(self) -> None:
         """Dynamically updates rate-limiting intervals and matrix transforms."""
         new_cap = store.settings.get().adb_rate_cap
         if new_cap > 0 and new_cap != self.adb_rate_cap:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import sys
-import threading
 from typing import TYPE_CHECKING
 
 from modules.core.pipeline import (

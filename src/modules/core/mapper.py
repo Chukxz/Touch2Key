@@ -41,13 +41,11 @@ class Mapper:
         touch_reader: TouchReader,
         bridge: AbstractBridge,
         pps: float,
-        emulator: dict[str, str | None],
         window_id: int | None,
         ref: Engine,
     ):
         self.touch_reader = touch_reader
         self.bridge = bridge
-        self.emulator = emulator
         self.pps = pps
         self.event_count = 0
         self.last_rate = 0.0
@@ -100,7 +98,7 @@ class Mapper:
             self.game_window_info = None
             self.window_lost = True
 
-        self._reload()
+        self.reload()
 
         self.dispatcher.register_callback(
             "ON_TARGET_WINDOW_CHANGE", self.rebind_target_window
@@ -122,7 +120,7 @@ class Mapper:
         )
         self.bridge.set_respawn_callback(self._on_worker_respawn)
 
-    def _reload(self) -> None:
+    def reload(self) -> None:
         settings = store.settings.get()
         layout = store.get_active_layout()
         if layout is None:
@@ -137,14 +135,6 @@ class Mapper:
 
         if settings.pps_alert_threshold > 0:
             self.pps = float(settings.pps_alert_threshold)
-
-        if settings.toggle_key is not None:
-            self.emulator["toggle_key"] = settings.toggle_key
-            scancode = get_scancode_from_key(settings.toggle_key)
-            self.toggle_key_scancode = scancode
-        else:
-            self.emulator["toggle_key"] = None
-            self.toggle_key_scancode = None
 
     def rebind_target_window(
         self,

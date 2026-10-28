@@ -74,7 +74,7 @@ VALID_SORT_ORDERS = ("Recently Modified", "Name (A-Z)", "Created (Newest)")
 
 def get_target_id(raw_id: str):
     target_id = None
-    
+
     if raw_id.isdigit():
         if store.layouts.get(int(raw_id)) is not None:
             target_id = int(raw_id)
@@ -82,9 +82,7 @@ def get_target_id(raw_id: str):
             print(f"Error: No layout with ID {int(raw_id)} found in the database.")
 
     elif raw_id == "":
-        print(
-            f"Warning: No layout ID was provided, falling back to active layout."
-        )
+        print(f"Warning: No layout ID was provided, falling back to active layout.")
         layout = store.get_active_layout()
         if layout:
             target_id = layout.id
@@ -99,6 +97,7 @@ def _guard_float(value: str) -> float | None:
         return float(value)
     except ValueError:
         return None
+
 
 def _prompt_float(prompt: str, current: float) -> float:
     """Asks for a float; blank or invalid input keeps `current`."""
@@ -533,7 +532,7 @@ def format_supported_keys(input_dict_list: list[dict[str, Any]]):
             suffix_len = max(0, KEY_WIDTH - key_len - 2)
             line += f"'{key}'" + " " * suffix_len
             line_len += key_len + suffix_len + 2
-    
+
     output += line + "\n"
     return output
 
@@ -548,9 +547,7 @@ def show_directional_keys(layout_id: int) -> None:
         (get_key_from_scancode(_d_s) or "").upper() for _d_s in directional_scancodes
     ]
     final_keys = str(norm_keys).replace("[", "").replace("]", "").replace("'", "")
-    print(
-        f"\n--- Directional Keys: {final_keys} ---"
-    )
+    print(f"\n--- Directional Keys: {final_keys} ---")
 
 
 def set_directional_key(layout_id: int, direction: str | None) -> bool:
@@ -800,7 +797,7 @@ def wipe_database() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Typematic Inspection & Configuration
+# Toggle Hotkeys & Typematic Inspection & Configuration
 # ---------------------------------------------------------------------------
 
 
@@ -1112,7 +1109,7 @@ def interactive_menu() -> None:
             target_id = get_target_id(raw_id)
 
             if target_id is not None and img_path:
-                    set_profile_image(target_id, img_path)
+                set_profile_image(target_id, img_path)
 
         if choice == "lk":
             list_supported_keys()

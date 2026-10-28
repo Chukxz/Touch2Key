@@ -143,16 +143,16 @@ class DiagnosticView(QGraphicsView):
 
         changed = False
         if self._adjust_curves["left"].check_input(now, left_pressed):
-            self.trail_width = clamp(self.trail_width - 1, 1, MAX_TRAIL_WIDTH)
+            self.trail_width = int(clamp(self.trail_width - 1, 1, MAX_TRAIL_WIDTH))
             changed = True
         if self._adjust_curves["right"].check_input(now, right_pressed):
-            self.trail_width = clamp(self.trail_width + 1, 1, MAX_TRAIL_WIDTH)
+            self.trail_width = int(clamp(self.trail_width + 1, 1, MAX_TRAIL_WIDTH))
             changed = True
         if self._adjust_curves["down"].check_input(now, down_pressed):
-            self.trail_height = clamp(self.trail_height - 1, 1, MAX_TRAIL_HEIGHT)
+            self.trail_height = int(clamp(self.trail_height - 1, 1, MAX_TRAIL_HEIGHT))
             changed = True
         if self._adjust_curves["up"].check_input(now, up_pressed):
-            self.trail_height = clamp(self.trail_height + 1, 1, MAX_TRAIL_HEIGHT)
+            self.trail_height = int(clamp(self.trail_height + 1, 1, MAX_TRAIL_HEIGHT))
             changed = True
 
         if changed:

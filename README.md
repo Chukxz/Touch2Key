@@ -201,7 +201,7 @@ Touch2Key installs system-level drivers and kernel rules, so **`pip uninstall To
 | `touch2key-visualizer` | Live event visualizer with your active layout and toggle key. |
 
 ### One-Line Config Flag
-Comma-separated: `window_id,toggle_key,sprint_key,rate_cap,pps,k_device,m_device`. Use empty values for defaults/database values, e.g. `,,,100,50,,`
+Comma-separated: `window_id,sprint_key,rate_cap,pps,k_device,m_device`. Use empty values for defaults/database values, e.g. `,,100,50,,`
 
 ```bash
 touch2key --config

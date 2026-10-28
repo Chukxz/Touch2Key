@@ -91,10 +91,9 @@ class LayoutLoader:
 
     def __init__(self, dispatcher: MapperEventDispatcher):
         self.dispatcher = dispatcher
-        self.snapshot: LayoutSnapshot | None = None
-
+        self.snapshot: LayoutSnapshot
         self.load_layout()
-        
+
     @staticmethod
     def _wheel_keys(zone: LayoutZone) -> tuple[int, int, int, int]:
         cfg = zone.CONFIG_HELPER.pipeline_config

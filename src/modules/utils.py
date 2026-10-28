@@ -1284,6 +1284,7 @@ def get_counts_per_dp(mouse_cpi: float = MOUSE_CPI) -> float:
     """Counts per dp of finger travel at sensitivity 1.0 (1 dp == 1/160 inch)."""
     return mouse_cpi / BASELINE_DPI
 
+
 def look_counts_per_px(sensitivity: float, dpi: int = BASELINE_DPI) -> float:
     """Mouse counts per device pixel: px -> dp (uniform) -> counts."""
     return (
@@ -1409,3 +1410,9 @@ def bresenham(
             y0 += sy
 
         k += 1
+
+
+def parse_seq(val: str | None, sep: str | None = None) -> list[str]:
+    if not val or not val.strip():
+        return []
+    return [k.strip().lower() for k in val.split(sep) if k.strip()]

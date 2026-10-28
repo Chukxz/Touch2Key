@@ -42,6 +42,8 @@ from modules.runtime_info import (
     snapshot_age,
 )
 
+from modules.utils import parse_seq
+
 if TYPE_CHECKING:
     from modules.utils import MapperEventDispatcher
     from modules.gui.main_window import EngineProcessController
@@ -248,9 +250,18 @@ class DashboardPage(QWidget):
 
     def _refresh_keys_label(self) -> None:
         settings = store.settings.get()
-        toggle = settings.toggle_key or "Not set"
+        toggle_hotkeys = ""
+
+        _parsed_toggle_hotkeys = parse_seq(settings.toggle_hotkeys, ",")
+        is_toggle_hotkey_set = len(_parsed_toggle_hotkeys) > 0
+        toggle_hotkeys = (
+            toggle_hotkeys.join(_parsed_toggle_hotkeys)
+            if is_toggle_hotkey_set
+            else "Not set"
+        )
+
         sprint = settings.sprint_key or "Not set"
-        self.keys_label.setText(f"Toggle: {toggle}   |   Sprint: {sprint}")
+        self.keys_label.setText(f"Toggle Hotkeys: {toggle_hotkeys}\nSprint: {sprint}")
 
     def _refresh_devices_label(self) -> None:
         if sys.platform != "win32":

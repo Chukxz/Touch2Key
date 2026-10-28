@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS app_settings (
     hysteresis REAL NOT NULL DEFAULT 5.0,
     sensitivity_x REAL NOT NULL DEFAULT 1.0,
     sensitivity_y REAL NOT NULL DEFAULT 1.0,
-    toggle_key TEXT,
+    toggle_hotkeys TEXT,
     sprint_key TEXT,
     adb_rate_cap REAL NOT NULL DEFAULT 250.0,
     pps_alert_threshold REAL NOT NULL DEFAULT 60.0,

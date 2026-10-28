@@ -95,7 +95,7 @@ class AppSettings:
     hysteresis: float
     sensitivity_x: float
     sensitivity_y: float
-    toggle_key: Optional[str]
+    toggle_hotkeys: Optional[str]
     sprint_key: Optional[str]
     adb_rate_cap: float
     pps_alert_threshold: float
@@ -212,7 +212,7 @@ class AppSettingsRepository:
         "hysteresis",
         "sensitivity_x",
         "sensitivity_y",
-        "toggle_key",
+        "toggle_hotkeys",
         "sprint_key",
         "adb_rate_cap",
         "pps_alert_threshold",
@@ -231,7 +231,10 @@ class AppSettingsRepository:
         row = conn.execute("SELECT * FROM app_settings WHERE id = 1;").fetchone()
         if row is None:
             with conn:
-                conn.execute("INSERT OR IGNORE INTO app_settings (id, typematic_excluded_keys) VALUES (1, ?);", (EXCLUDED_KEYS,)
+                conn.execute(
+                    "INSERT OR IGNORE INTO app_settings (id, typematic_excluded_keys) VALUES (1, ?);",
+                    (EXCLUDED_KEYS,),
+                )
             row = conn.execute("SELECT * FROM app_settings WHERE id = 1;").fetchone()
         return AppSettings.from_row(row)
 
@@ -1083,7 +1086,9 @@ class LayoutZonesRepository:
 
             return up, left, down, right
 
-    def set_mouse_wheel_directional_scancodes(self, layout: Optional[Layout], direction_id: int, direction_value: int) -> bool:
+    def set_mouse_wheel_directional_scancodes(
+        self, layout: Optional[Layout], direction_id: int, direction_value: int
+    ) -> bool:
         """`direction_map` {0: 'up', 1: 'left', 2: 'down', 3: 'right'}"""
         if layout is None:
             return False
@@ -1095,14 +1100,15 @@ class LayoutZonesRepository:
         direction_map = {0: "up", 1: "left", 2: "down", 3: "right"}
         mouse_wheel_zone.set_parsed_config_from_json()
         zone_json = mouse_wheel_zone.CONFIG_HELPER.pipeline_config
-        
+
         direction = direction_map.get(direction_id)
         if direction is None:
             return False
-        
-        zone_json.update(
-            {direction: direction_value}
+
+        zone_json.update({direction: direction_value})
+
+        self.update(
+            mouse_wheel_zone.id,
+            pipeline_json=mouse_wheel_zone.CONFIG_HELPER.get_pipeline_json_from_config(),
         )
-        
-        self.update(mouse_wheel_zone.id, pipeline_json=mouse_wheel_zone.CONFIG_HELPER.get_pipeline_json_from_config())
         return True
