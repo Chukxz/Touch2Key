@@ -532,11 +532,11 @@ class Engine:
                 allow_multi = bool(getattr(tier[0], "allow_multi_claim", False))
 
                 for pipeline in tier:
-                    if (
-                        getattr(pipeline, "is_bezel", False)
-                        and not self.bezel_toggle_enabled
-                    ):
+                    is_bezel = getattr(pipeline, "is_bezel", False)
+                    if is_bezel and not self.bezel_toggle_enabled:
                         continue
+                    if self.is_visible and not is_bezel:
+                        continue  # menu mode: HUD zones inactive
                     if not pipeline.claims(event):
                         continue
 
