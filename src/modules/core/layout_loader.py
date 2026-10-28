@@ -91,7 +91,7 @@ class LayoutLoader:
 
     def __init__(self, dispatcher: MapperEventDispatcher):
         self.dispatcher = dispatcher
-        self.snapshot: LayoutSnapshot
+        self.snapshot: LayoutSnapshot | None = None
 
         self.load_layout()
         self.dispatcher.register_callback("ON_RELOAD", self.load_layout)
