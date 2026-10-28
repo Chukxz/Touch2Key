@@ -1312,12 +1312,6 @@ def calculate_rect(
     return (cx, cy, min(xs), min(ys), max(xs), max(ys))
 
 
-def scale_coord(base: float, val: float | None = None) -> float:
-    if val is None:
-        return 0.0
-    return val * base if val <= 1.0 else val
-
-
 def clamp(value, lo, hi):
     return max(lo, min(hi, value))
 
