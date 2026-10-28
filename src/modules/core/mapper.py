@@ -102,7 +102,6 @@ class Mapper:
 
         self._reload()
 
-        self.dispatcher.register_callback("ON_RELOAD", self._reload)
         self.dispatcher.register_callback(
             "ON_TARGET_WINDOW_CHANGE", self.rebind_target_window
         )
