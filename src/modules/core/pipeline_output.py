@@ -12,6 +12,7 @@ from modules.utils import (
     M_LEFT,
     M_MIDDLE,
     M_RIGHT,
+    PACK_REL_STRUCT_SIZE,
 )
 
 if TYPE_CHECKING:
@@ -69,8 +70,11 @@ class BridgeOutputSink(OutputSink):
     def flush_mouse_move(self) -> None:
         """Dispatches aggregated whole pixels to the OS and retains the fractional remainder."""
         with self._lock:
-            idx = int(round(self._acc_x))
-            idy = int(round(self._acc_y))
+            pre_idx = int(round(self._acc_x))
+            pre_idy = int(round(self._acc_y))
+            
+            idx = int(clamp(pre_idx, -PACK_REL_STRUCT_SIZE, PACK_REL_STRUCT_SIZE))
+            idy = int(clamp(pre_idy, -PACK_REL_STRUCT_SIZE, PACK_REL_STRUCT_SIZE))
 
             if idx != 0 or idy != 0:
                 self.bridge.mouse_move_rel(idx, idy)
