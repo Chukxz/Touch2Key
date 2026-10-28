@@ -68,11 +68,6 @@ class TouchReader:
 
         self.touch_event_processor: Any = None
         self.process: subprocess.Popen | None = None
-
-        self.dispatcher.register_callback(
-            "ON_RELOAD", self._on_reload
-        )
-
         threading.Thread(target=self._update_rotation, daemon=True).start()
         threading.Thread(target=self._get_touches, daemon=True).start()
         self.wireless_thread = threading.Thread(
