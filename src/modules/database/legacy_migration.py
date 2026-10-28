@@ -22,6 +22,7 @@ from modules.utils import (
     CIRCLE,
     DEADZONE_MAX,
     DEADZONE_MIN,
+    EXCLUDED_KEYS,
     HYSTERESIS_MAX,
     HYSTERESIS_MIN,
     JSONS_FOLDER,
@@ -37,16 +38,51 @@ from modules.utils import (
     TYPEMATIC_RATE_MAX_HZ,
     TYPEMATIC_RATE_MIN_HZ,
     clamp,
+    get_scancode_from_key,
 )
 
 logger = logging.getLogger("modules.database.legacy_migration")
 
 
-def _read_keys(doc: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
+def _normalize_hotkeys(raw: Any) -> str:
+    """Comma-separated, lower-cased, de-duplicated key names ("" if none/invalid).
+
+    Accepts the current comma-separated string, a TOML array, or a legacy single
+    key / 'a+b' combo. All-or-nothing: one unsupported key drops the whole hotkey,
+    because a partial chord would fire the wrong keys in the game.
+    """
+    if raw is None:
+        return ""
+
+    if isinstance(raw, (list, tuple)):
+        tokens = [str(k) for k in raw]
+    else:
+        tokens = str(raw).replace("+", ",").split(",")
+
+    keys: list[str] = []
+    for token in tokens:
+        key = token.strip().lower()
+        if not key or key in keys:
+            continue
+        if get_scancode_from_key(key) is None:
+            logger.warning(
+                "Ignoring toggle hotkeys %r in imported config: unsupported key %r.",
+                raw,
+                key,
+            )
+            return ""
+        keys.append(key)
+
+    return ",".join(keys)
+
+
+def _read_keys(doc: dict[str, Any]) -> tuple[str, Optional[str]]:
+    """(toggle_hotkeys, sprint_key). Falls back to the legacy `toggle_key` field."""
     keys = doc.get("keys", {})
-    toggle_key = keys.get("toggle_key")
-    sprint_key = keys.get("sprint_key")
-    return toggle_key, sprint_key
+    raw_hotkeys = keys.get("toggle_hotkeys")
+    if raw_hotkeys is None:
+        raw_hotkeys = keys.get("toggle_key")
+    return _normalize_hotkeys(raw_hotkeys), keys.get("sprint_key")
 
 
 def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
@@ -69,7 +105,7 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
     performance = doc.get("performance", {})
     keys_table = doc.get("keys", {})
     typematic_table = doc.get("typematic", {})
-    toggle_key, sprint_key = _read_keys(doc)
+    toggle_hotkeys, sprint_key = _read_keys(doc)
 
     try:
         width, height = system.get(
@@ -93,12 +129,14 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
         typ_rate = typematic_table.get(
             "rate_hz", keys_table.get("typematic_rate_hz", 30.0)
         )
+        # A missing value means "factory default". An explicit "" means "no
+        # exclusions" (KeyMapper treats "" as an empty set, not as the default).
         typ_excludes = typematic_table.get(
             "exclude_keys",
-            keys_table.get("typematic_exclude_keys", ""),
+            keys_table.get("typematic_exclude_keys", EXCLUDED_KEYS),
         )
 
-        # Ranges come from modules.limits (same as the Settings page spin boxes).
+        # Ranges come from modules.utils (same as the Settings page spin boxes).
         fields: dict[str, Any] = {
             "left_handed": bool(system.get("left_handed", False)),
             "json_dev_width": int(width),
@@ -118,7 +156,7 @@ def migrate_toml_config(toml_path: Path | str = TOML_PATH) -> bool:
             "sensitivity_y": clamp(
                 float(mouse.get("sensitivity_y", 1.0)), SENSITIVITY_MIN, SENSITIVITY_MAX
             ),
-            "toggle_key": str(toggle_key) if toggle_key else "",
+            "toggle_hotkeys": toggle_hotkeys,
             "sprint_key": str(sprint_key) if sprint_key else "",
             "adb_rate_cap": clamp(
                 float(performance.get("adb_rate_cap", 250.0)),
@@ -280,11 +318,13 @@ def migrate_json_layout(
                     p_cfg.set_region_config(reg_idx, BEZEL_DP_THICKNESS, priority)
                     p_cfg.set_origin_config(orig_idx)
                     p_cfg.set_constraint_config(const_idx)
+                    # `deadzone` is a 0..1 ratio; WheelMapper multiplies it by the
+                    # wheel radius itself, so it must NOT be pre-multiplied here.
                     p_cfg.set_transform_config(
                         trans_idx,
                         app_settings.sensitivity_x,
                         app_settings.sensitivity_y,
-                        app_settings.deadzone * mouse_wheel_radius,
+                        app_settings.deadzone,
                         app_settings.hysteresis,
                     )
                     p_cfg.set_semantic_config(sem_idx, pointer)
