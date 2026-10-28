@@ -231,7 +231,7 @@ class AppSettingsRepository:
         row = conn.execute("SELECT * FROM app_settings WHERE id = 1;").fetchone()
         if row is None:
             with conn:
-                conn.execute("INSERT OR IGNORE INTO app_settings (id, typematic_excluded_keys) VALUES (1, ?);")
+                conn.execute("INSERT OR IGNORE INTO app_settings (id, typematic_excluded_keys) VALUES (1, ?);", (EXCLUDED_KEYS,)
             row = conn.execute("SELECT * FROM app_settings WHERE id = 1;").fetchone()
         return AppSettings.from_row(row)
 
