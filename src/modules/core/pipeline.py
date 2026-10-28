@@ -350,7 +350,7 @@ class JoystickTransform(Transformation[frozenset[int]]):
         if (
             self.sprint is not None
             and self.radius > 0.0
-            and dist_sq >= (self.radius * ((1 - 1e-6) ** 2))
+            and dist_sq >= (self.radius * (1 - 1e-6)) ** 2
         ):
             return base_keys | self._sprint_set
 
