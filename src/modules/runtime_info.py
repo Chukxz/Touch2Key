@@ -10,7 +10,7 @@ import os
 import threading
 import time
 from typing import Any, Callable
-
+from pathlib import Path
 import psutil
 
 from modules.utils import READ_ATTEMPTS, RUNTIME_FILE
@@ -54,6 +54,49 @@ def unregister() -> None:
             RUNTIME_FILE.unlink(missing_ok=True)
     except (OSError, ValueError):
         pass
+
+
+def register_process(path: Path) -> None:
+    """Writes this process's identity (pid + create_time) to `path`."""
+    proc = psutil.Process(os.getpid())
+    payload = {"pid": proc.pid, "create_time": proc.create_time()}
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload), encoding="utf-8")
+    os.replace(tmp, path)  # atomic: readers never see a torn file
+
+
+def unregister_process(path: Path) -> None:
+    """Removes `path`, but only if it still describes THIS process."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("pid") == os.getpid():
+            path.unlink(missing_ok=True)
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+def read_process(path: Path) -> psutil.Process | None:
+    """The live process `path` describes; None if missing, dead, or the PID was reused."""
+    for _ in range(READ_ATTEMPTS):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            break
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            time.sleep(0.01)  # writer is mid-replace; retry
+    else:
+        return None
+
+    try:
+        proc = psutil.Process(int(data["pid"]))
+        if abs(proc.create_time() - float(data["create_time"])) > _CREATE_TIME_TOLERANCE_S:
+            return None
+        if not proc.is_running() or proc.status() == psutil.STATUS_ZOMBIE:
+            return None
+        return proc
+    except (KeyError, TypeError, ValueError, psutil.Error):
+        return None
 
 
 # ---------------------------------------------------------------------------
