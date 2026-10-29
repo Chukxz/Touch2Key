@@ -30,7 +30,7 @@ from modules.database.legacy_migration import (
     migrate_toml_config,
 )
 from modules.database.repositories import DuplicateNameError
-from modules.cli.key_capture import capture_keys_cli, capture_performance_settings_cli
+from modules.cli.key_capture import capture_sprint_key_cli, capture_performance_settings_cli
 from modules.utils import (
     BEZEL,
     BOTTOM_BEZEL_ID,
@@ -1135,7 +1135,7 @@ def interactive_menu() -> None:
                 reset_input_controls_defaults()
 
         if choice == "ck":
-            capture_keys_cli()
+            capture_sprint_key_cli()
 
         if choice == "pf":
             capture_performance_settings_cli()
