@@ -374,7 +374,7 @@ class Mapper:
                 self.stop_event.wait(VKB_SLEEP_TIME)
 
     def _virtual_keyboard_sink(self, state: int, scancode: int):
-        is_toggle_key = scancode == TOP_BEZEL_ID
+        is_toggle_hotkeys = scancode == TOP_BEZEL_ID
         is_toggle_vkb = scancode == BOTTOM_BEZEL_ID
         is_mouse_left = scancode == M_LEFT
         is_mouse_middle = scancode == M_MIDDLE
@@ -385,7 +385,7 @@ class Mapper:
         if state == 0:  # DOWN / PRESS
             self.vkb_pressed_keys.add(scancode)
 
-            if is_toggle_key:
+            if is_toggle_hotkeys:
                 pass
             elif is_toggle_vkb:
                 pass
@@ -405,7 +405,7 @@ class Mapper:
         elif state == 1:  # UP / RELEASE
             self.vkb_pressed_keys.discard(scancode)
 
-            if is_toggle_key:
+            if is_toggle_hotkeys:
                 self.execute_toggle_hotkeys()
             elif is_toggle_vkb:
                 self.engine_ref.toggle_virtual_keyboard()
