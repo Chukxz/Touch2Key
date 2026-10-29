@@ -68,7 +68,7 @@ The first version (CLI only, basic GUI windows) is available [here](https://gith
   * **In-Game (cursor hidden):** HUD zones capture taps/drags to drive game controls.
   * **Menu (cursor visible):** game buttons deactivate and single touches become absolute desktop clicks, for lobby, map, and inventory navigation.
   * **Touchscreen-only switching:** *both are toggleable in settings, and the bezel zones are seeded in every layout automatically.*
-    * **Top Bezel:** toggles cursor visibility (Game Mode / Menu Mode).
+    * **Top Bezel:** toggles cursor visibility (Game Mode / Menu Mode) by executing the configured toggle hotkeys sequence.
     * **Bottom Bezel:** opens the Virtual Keyboard (direct IPC to the engine for low-latency typing).
     * **Two-Finger Tap:** in Menu Mode, tap two fingers anywhere to hide the cursor and return to Game Mode. Ignored while in-game.
 
@@ -82,7 +82,7 @@ The first version (CLI only, basic GUI windows) is available [here](https://gith
 
 * **Layout Editor (GUI):** PySide6/Matplotlib canvas for placing zones, adjusting priorities (`P`/`O` keys or the inspector), resizing, and saving to SQLite.
 
-* **Live Input Visualizer (`touch2key-visualizer`):** loads your active layout, highlights hitboxes as you trigger them, and respects your configured `toggle_key`, so you can test mappings outside a game.
+* **Live Input Visualizer (`touch2key-visualizer`):** loads your active layout, highlights hitboxes as you trigger them, and respects your configured toggle hotkeys, so you can test mappings outside a game.
 
 * **Anti-Cheat Safe:** humanized dwell times and randomized click durations for user-initiated actions only. No macros, scripts, or game-state tampering.
 
@@ -98,7 +98,7 @@ The first version (CLI only, basic GUI windows) is available [here](https://gith
 
 ## Key Customization & Storage
 
-* **Capture:** bind the core keys (**Toggle** and **Sprint**) and set performance limits (**ADB Rate Cap** and **PPS Alert Threshold**).
+* **Capture:** bind the **Sprint** key and set performance limits (**ADB Rate Cap** and **PPS Alert Threshold**).
 * **SQLite is the single source of truth** (`touch2key.db`): layout zones, priorities, hitboxes, and runtime defaults (system gestures, typematic rules), with foreign-key cascade protection.
 * **Import/Export bundles:** TOML and JSON are used only to import, export, and share configurations or legacy layouts, never for active runtime state.
 
@@ -207,10 +207,12 @@ Comma-separated: `window_id,sprint_key,rate_cap,pps,k_device,m_device`. Use empt
 touch2key --config
 ```
 
-### Typematic & System Commands (`touch2key-manage`)
-Configure auto-repeat, two-finger tap, bezel toggles, and left-handed mode:
+### Toggle Hotkeys, Typematic & System Commands (`touch2key-manage`)
+Configure toggle hotkeys, auto-repeat, two-finger tap, bezel toggles, and left-handed mode:
 
 ```bash
+touch2key-manage --show-toggle-hotkeys
+touch2key-manage --set-toggle-hotkeys "lctrl, lalt"
 touch2key-manage --show-typematic
 touch2key-manage --set-typematic on --typematic-delay 200 --typematic-rate 35
 touch2key-manage --typematic-excludes "lshift, lctrl, lalt"
@@ -245,12 +247,13 @@ In CLI mode these hotkeys tune the engine live. They only trigger while your ter
 | `Esc` | Shutdown | — | Gracefully stops the engine and its worker processes. |
 | `F5` | Handedness Toggle | `True` / `False` | Switches between left- and right-handed layouts, then reloads. |
 | `F6` | Reload | — | Reloads the layout, pipelines, and settings (including typematic) from SQLite. |
+| `F8` | Input Curve Cycle | Linear / Cubic / Exponential | Cycles through easing curves for arrow key incrementing speed. |
 | `Left` / `Right` | Rate Cap (Hz) | ±10.0 Hz `[30.0 – 1000.0]` | Tunes the mouse flush and touch reader polling rate. Hold to repeat. |
 | `Down` / `Up` | PPS Alert Threshold | ±5.0 PPS `[10.0 – 500.0]` | Tunes the touch monitoring threshold. Hold to repeat. |
 
 **Behavior**
 - **Arrow keys:** one step on press. After a 400 ms hold, repeat starts at 5 Hz and ramps along a cubic curve to 30 Hz over 1.5 s. OS key repeat is ignored, and releasing resets the ramp.
-- **F5 / F6:** one action per physical press, with a shared 350 ms cooldown.
+- **F5 / F6 / F8:** one action per physical press, with a shared 350 ms cooldown.
 - **Opposing keys cancel:** Left + Right (or Down + Up) together do nothing. Different axes work simultaneously.
 - **Live status line:** while an arrow key is held, one terminal line shows the current `Rate Cap` and `PPS`. Other log output is held and replayed on release.
 - **Persistence:** values change in memory on every step. The SQLite write and reload are batched to at most once every 250 ms, and the final value is always saved after release.
