@@ -738,15 +738,8 @@ class MainWindow(QMainWindow):
         self.sidebar_logs_btn.setText("Hide Logs" if is_visible else "Show Logs")
 
     def _start_visualizer(self) -> None:
-        toggle_key_scancode = None
-        toggle_key = store.settings.get().toggle_key
-
-        if toggle_key is not None:
-            toggle_key_scancode = get_scancode_from_key(toggle_key)
-
         multiprocessing.Process(
             target=run_visualizer,
-            args=(toggle_key_scancode,),
             name="Visualizer",
             daemon=True,
         ).start()
