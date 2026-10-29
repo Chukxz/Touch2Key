@@ -74,7 +74,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     parser.add_argument(
         "--config",
         type=str,
-        help="One-line comma-separated config: 'window_id,toggle_key,slogger.info_key,rate_cap,pps,k_device,m_device', use empty strings or omit commas for defaults/database values, e.g. ',,,100,50,,'",
+        help="One-line comma-separated config: 'window_id,sprint_key,rate_cap,pps,k_device,m_device', use empty strings or omit commas for defaults/database values, e.g. ',,,100,50,,'",
     )
 
     args = parser.parse_args()
