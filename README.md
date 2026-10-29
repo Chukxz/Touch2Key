@@ -138,7 +138,7 @@ Running setup from the GUI (`touch2key-gui`) or the terminal (`touch2key-setup`)
 Use a virtual environment to avoid package conflicts:
 
 ```bash
-git clone https://github.com/Chukxz/Touch2Key.git
+git clone [https://github.com/Chukxz/Touch2Key.git](https://github.com/Chukxz/Touch2Key.git)
 cd Touch2Key
 python -m venv .venv
 
