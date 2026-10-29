@@ -57,7 +57,7 @@ class BezelMapper:
             if zone.scancode == TOP_BEZEL_ID:
                 passed_callback = self.mapper.execute_toggle_hotkeys
 
-            if zone.scancode == BOTTOM_BEZEL_ID:
+            elif zone.scancode == BOTTOM_BEZEL_ID:
                 passed_callback = self.engine_ref.toggle_virtual_keyboard
 
             new_pipelines.append(
