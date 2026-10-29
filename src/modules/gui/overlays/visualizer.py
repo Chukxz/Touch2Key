@@ -307,10 +307,9 @@ class DiagnosticView(QGraphicsView):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, toggle_key_scancode: int | None) -> None:
+    def __init__(self) -> None:
         super().__init__()
 
-        self.toggle_key_scancode = toggle_key_scancode
         self.loc_dict: dict[int, tuple[float, float]] = {}
 
         self.cursor_visible = (
@@ -320,7 +319,7 @@ class MainWindow(QMainWindow):
         self.data: deque[dict] = deque(maxlen=MAX_EVENT_LOG)
         self.pressed_keys: dict[int, str] = {}
         self.pressed_mouse_buttons: set[str] = set()
-        self.pressed_scancodes: set[int] = set()
+        self.pressed_scancodes_list: list[int] = []
         self._hotkey_triggered = False
 
         self.setWindowTitle(VISUALIZER_NAME)
@@ -382,7 +381,7 @@ class MainWindow(QMainWindow):
     def _clear_pressed_state(self) -> None:
         self.pressed_keys.clear()
         self.pressed_mouse_buttons.clear()
-        self.pressed_scancodes.clear()
+        self.pressed_scancodes_list.clear()
         self._hotkey_triggered = False
         self._update_active_display()
 
@@ -483,18 +482,17 @@ class MainWindow(QMainWindow):
         scancode = get_scancode_from_key(key)
 
         if scancode is not None:
-            self.pressed_scancodes.add(scancode)
+            if scancode not in self.pressed_scancodes_list:
+                self.pressed_scancodes_list.append(scancode)
 
         settings = store.settings.get()
         hotkeys_str = settings.toggle_hotkeys or ""
-        expected_scancodes = {
+        expected_scancodes = [
             code for name in parse_seq(hotkeys_str, ",")
             if (code := get_scancode_from_key(name)) is not None
-        }
-        if not expected_scancodes and self.toggle_key_scancode is not None:
-            expected_scancodes = {self.toggle_key_scancode}
+        ]
 
-        if expected_scancodes and expected_scancodes.issubset(self.pressed_scancodes):
+        if expected_scancodes and self.pressed_scancodes_list == expected_scancodes:
             if not self._hotkey_triggered:
                 self._hotkey_triggered = True
                 if event.isAutoRepeat():
@@ -544,18 +542,17 @@ class MainWindow(QMainWindow):
         key = get_specific_qt_key(event)
         scancode = get_scancode_from_key(key)
         if scancode is not None:
-            self.pressed_scancodes.discard(scancode)
+            while scancode in self.pressed_scancodes_list:
+                self.pressed_scancodes_list.remove(scancode)
 
         settings = store.settings.get()
         hotkeys_str = settings.toggle_hotkeys or ""
-        expected_scancodes = {
+        expected_scancodes = [
             code for name in parse_seq(hotkeys_str, ",")
             if (code := get_scancode_from_key(name)) is not None
-        }
-        if not expected_scancodes and self.toggle_key_scancode is not None:
-            expected_scancodes = {self.toggle_key_scancode}
+        ]
 
-        if not expected_scancodes.issubset(self.pressed_scancodes):
+        if self.pressed_scancodes_list != expected_scancodes:
             self._hotkey_triggered = False
 
         self.pressed_keys.pop(self._key_identity(event), None)
@@ -577,7 +574,7 @@ def unregister_visualizer_file() -> None:
     unregister_process(VISUALIZER_RUNTIME_FILE)
 
 
-def run(toggle_key_scancode: int | None = None) -> None:
+def run() -> None:
     success, _ = check_single_instance(VISUALIZER_NAME)
     if not success:
         sys.exit(0)
@@ -599,7 +596,7 @@ def run(toggle_key_scancode: int | None = None) -> None:
         lambda *_: QCoreApplication.quit(),
     )
 
-    window = MainWindow(toggle_key_scancode)
+    window = MainWindow()
     window.activateWindow()
     sys.exit(app.exec())
 
