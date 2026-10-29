@@ -179,7 +179,7 @@ class KeySequenceRow(QWidget):
 
         if self.include_presets:
             self.wasd_preset_btn = QPushButton("+ WASD")
-            self.arrows_preset_btn = QPushButton("+ ←↑↓→")
+            self.arrows_preset_btn = QPushButton("+ Arrows")
             controls.addWidget(self.wasd_preset_btn)
             controls.addWidget(self.arrows_preset_btn)
             self.wasd_preset_btn.clicked.connect(self._apply_wasd_preset)
