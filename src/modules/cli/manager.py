@@ -126,63 +126,65 @@ def _prompt_int(prompt: str, current: int) -> int:
         return current
 
 
-def _normalize_toggle_hotkeys(
-    raw_csv: str, current_csv: Optional[str] = None
+def _normalize_key_seq(
+    raw_csv: str,
+    current_csv: Optional[str] = None,
+    *,
+    allow_presets: bool = False,
 ) -> str:
-    """Validates comma-separated toggle hotkeys (supports +key to append, or 'clear'/'none')."""
-    seq: list[str] = []
-    if current_csv:
-        seq.extend(k.strip().lower() for k in current_csv.split(",") if k.strip())
-
+    """Validates comma-separated keys (use 'k1, k2' to replace, '+k1, +k2' to append, 'clear'/'none' to wipe, and optional '+wasd'/'+arrows' presets)."""
+    existing = [k.strip().lower() for k in (current_csv or "").split(",") if k.strip()]
     tokens = [t.strip().lower() for t in raw_csv.split(",") if t.strip()]
+
+    if not tokens:
+        return ",".join(existing)
     if tokens in (["none"], ["clear"]):
         return ""
 
-    if not any(t.startswith("+") for t in tokens):
-        seq.clear()
+    is_append = any(t.startswith("+") for t in tokens)
+    seq: list[str] = list(existing) if is_append else []
+    added_any = False
 
     for token in tokens:
-        key = token.lstrip("+")
-        if not key:
-            continue
-        if get_scancode_from_key(key) is None:
-            print(f"Warning: Skipping unsupported key '{key}'.")
-            continue
-        if key not in seq:
-            seq.append(key)
-
-    return ",".join(seq)
-
-
-def _normalize_excluded_keys(raw_csv: str, current_csv: Optional[str] = None) -> str:
-    """Expands +wasd / +arrows presets and validates every key via get_scancode_from_key."""
-    seq: list[str] = []
-    if current_csv:
-        seq.extend(k.strip().lower() for k in current_csv.split(",") if k.strip())
-
-    tokens = [t.strip().lower() for t in raw_csv.split(",") if t.strip()]
-    if tokens in (["none"], ["clear"]):
-        return ""
-
-    if not any(t.startswith("+") for t in tokens):
-        seq.clear()
-
-    for token in tokens:
-        if token == "+wasd":
+        if allow_presets and token == "+wasd":
             candidates = ["w", "a", "s", "d"]
-        elif token == "+arrows":
+        elif allow_presets and token == "+arrows":
             candidates = ["left", "up", "down", "right"]
         else:
             candidates = [token.lstrip("+")]
 
         for key in candidates:
-            if get_scancode_from_key(key) is None:
-                print(f"Warning: Skipping unsupported key '{key}'.")
+            if not key:
                 continue
+            if get_scancode_from_key(key) is None:
+                print(
+                    f"Warning: Skipping unsupported key '{key}' (use --list-supported-keys to view valid keys)."
+                )
+                continue
+            added_any = True
             if key not in seq:
                 seq.append(key)
 
+    # If in replace mode and every single token was invalid/empty, keep existing keys
+    if not is_append and not added_any:
+        print("Warning: No valid keys provided; keeping existing key sequence.")
+        return ",".join(existing)
+
     return ",".join(seq)
+
+
+def _normalize_toggle_hotkeys(
+    raw_csv: str, current_csv: Optional[str] = None
+) -> str:
+    """Validates comma-separated toggle hotkeys ('k1, k2' replaces, '+k1, +k2' appends, 'clear'/'none' wipes)."""
+    return _normalize_key_seq(raw_csv, current_csv, allow_presets=False)
+
+
+def _normalize_excluded_keys(
+    raw_csv: str, current_csv: Optional[str] = None
+) -> str:
+    """Validates comma-separated excluded keys ('k1, k2' replaces, '+k1, +k2' appends, '+wasd'/'+arrows' expands presets, 'clear'/'none' wipes)."""
+    return _normalize_key_seq(raw_csv, current_csv, allow_presets=True)
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +279,7 @@ def show_input_controls() -> None:
 
 
 def configure_input_controls_interactive() -> None:
-    """Prompts for touch/input tuning knobs and global keybindings interactively."""
+    """Prompts for touch/input tuning knobs interactively."""
     s = store.settings.get()
     show_input_controls()
 
@@ -842,12 +844,14 @@ def show_toggle_hotkeys() -> None:
 
 
 def configure_toggle_hotkeys_interactive() -> None:
-    """Prompts for toggle hotkeys interactively (supports +key to append, or 'clear')."""
+    """Prompts for toggle hotkeys interactively using comma-separated values."""
     s = store.settings.get()
     show_toggle_hotkeys()
 
     th_in = input(
-        f"Toggle hotkeys comma-separated (use '+key' to append, or 'clear'; current: {s.toggle_hotkeys or ''}): "
+        f"Toggle hotkeys as comma-separated values "
+        f"(use 'k1, k2' to replace, '+k1, +k2' to append, 'clear'/'none' to wipe, or blank to keep; "
+        f"current: {s.toggle_hotkeys or 'None'}): "
     ).strip()
     toggle_hotkeys = (
         s.toggle_hotkeys
@@ -871,7 +875,7 @@ def show_typematic() -> None:
 
 
 def configure_typematic_interactive() -> None:
-    """Prompts for typematic fields interactively."""
+    """Prompts for typematic fields interactively using comma-separated values for excluded keys."""
     s = store.settings.get()
     show_typematic()
 
@@ -904,7 +908,9 @@ def configure_typematic_interactive() -> None:
     )
 
     ex_in = input(
-        f"Excluded keys comma-separated (supports +wasd, +arrows, or 'clear'; current: {s.typematic_excluded_keys or ''}): "
+        f"Excluded keys as comma-separated values "
+        f"(use 'k1, k2' to replace, '+k1, +k2' to append, presets '+wasd'/'+arrows', 'clear'/'none' to wipe, or blank to keep; "
+        f"current: {s.typematic_excluded_keys or 'None'}): "
     ).strip()
     excludes = (
         s.typematic_excluded_keys
@@ -1081,7 +1087,7 @@ def interactive_menu() -> None:
             "  [ic]   View / Configure Handedness, Touch, Input Controls & Global Keybindings"
         )
         print("  [ric]  Reset Input Controls to Defaults")
-        print("  [th]   View / Configure Toggle Hotkeys")
+        print("  [th]   View / Configure Toggle Hotkeys (Comma-Separated)")
         print("  [ck]   Capture Sprint Key")
         print("  [pf]   Configure ADB Rate Cap & PPS Alert Threshold")
         print("  [lz]   List Zones / Pipelines for Profile")
@@ -1096,7 +1102,9 @@ def interactive_menu() -> None:
         print("  [cz]   Clear Zones for Profile")
         print("  [rz]   Reset All Zones in Layout to App Settings")
         print("  [d]    Delete Profile")
-        print("  [ty]   View / Configure Typematic (Auto-Repeat) Settings")
+        print(
+            "  [ty]   View / Configure Typematic (Auto-Repeat & Comma-Separated Excluded Keys)"
+        )
         print("  [rty]  Reset Typematic Settings to Defaults")
         print("  [ss]   View / Configure two finger tap and Bezel Toggle Settings")
         print("  [rss]  Reset two finger tap and Bezel Toggle Settings to Defaults")
@@ -1553,7 +1561,10 @@ def run() -> None:
         "--set-toggle-hotkeys",
         type=str,
         metavar="KEYS",
-        help="Set comma-separated toggle hotkeys (use '+key' to append, or 'clear')",
+        help=(
+            "Set toggle hotkeys as comma-separated values "
+            "(use 'k1, k2' to replace, '+k1, +k2' to append, or 'clear'/'none' to wipe)"
+        ),
     )
     parser.add_argument(
         "--set-left-handed",
@@ -1743,7 +1754,10 @@ def run() -> None:
         "--typematic-excludes",
         type=str,
         metavar="KEYS",
-        help="Set comma-separated excluded keys (supports '+wasd', '+arrows', or 'clear')",
+        help=(
+            "Set typematic excluded keys as comma-separated values "
+            "(use 'k1, k2' to replace, '+k1, +k2' to append, presets '+wasd'/'+arrows', or 'clear'/'none' to wipe)"
+        ),
     )
     parser.add_argument(
         "--reset-typematic",
