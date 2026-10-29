@@ -107,7 +107,7 @@ class KeyCaptureFilter(QObject):
 
 
 class ContinuousSequenceFilter(QObject):
-    """Intercepts continuous sequential KeyPress events for exclusion lists."""
+    """Intercepts continuous sequential KeyPress events for key sequences."""
 
     def __init__(self, key_callback, parent=None):
         super().__init__(parent)
@@ -141,10 +141,16 @@ class ContinuousSequenceFilter(QObject):
 class KeySequenceRow(QWidget):
     """Encapsulates sequence preview, record toggle, pop/clear, and DB persistence."""
 
-    def __init__(self, target_field: str, page: SettingsPage):
+    def __init__(
+        self,
+        target_field: str,
+        page: SettingsPage,
+        include_presets: bool = True,
+    ):
         super().__init__(page)
         self.target_field = target_field
         self.page = page
+        self.include_presets = include_presets
         self.sequence: list[str] = []
 
         layout = QVBoxLayout(self)
@@ -164,16 +170,21 @@ class KeySequenceRow(QWidget):
 
         self.remove_btn = QPushButton("Remove Last")
         self.clear_btn = QPushButton("Clear")
-        self.wasd_preset_btn = QPushButton("+ WASD")
-        self.arrows_preset_btn = QPushButton("+ ←↑↓→")
 
         controls.addWidget(self.sequence_label)
         controls.addSpacing(10)
         controls.addWidget(self.record_btn)
         controls.addWidget(self.remove_btn)
         controls.addWidget(self.clear_btn)
-        controls.addWidget(self.wasd_preset_btn)
-        controls.addWidget(self.arrows_preset_btn)
+
+        if self.include_presets:
+            self.wasd_preset_btn = QPushButton("+ WASD")
+            self.arrows_preset_btn = QPushButton("+ Arrows")
+            controls.addWidget(self.wasd_preset_btn)
+            controls.addWidget(self.arrows_preset_btn)
+            self.wasd_preset_btn.clicked.connect(self._apply_wasd_preset)
+            self.arrows_preset_btn.clicked.connect(self._apply_arrows_preset)
+
         controls.addStretch()
 
         layout.addLayout(controls)
@@ -185,8 +196,6 @@ class KeySequenceRow(QWidget):
         self.record_btn.toggled.connect(self._on_toggle_recording)
         self.remove_btn.clicked.connect(self._remove_last_key)
         self.clear_btn.clicked.connect(self._clear_sequence)
-        self.wasd_preset_btn.clicked.connect(self._apply_wasd_preset)
-        self.arrows_preset_btn.clicked.connect(self._apply_arrows_preset)
 
     def set_sequence(self, sequence: list[str]) -> None:
         self.sequence = [k.strip().lower() for k in sequence if k.strip()]
@@ -355,11 +364,13 @@ class SettingsPage(QWidget):
         kb_group = QGroupBox("Global Key Bindings")
         kb_form = QFormLayout(kb_group)
 
-        self.toggle_hotkeys = KeySequenceRow("toggle_hotkeys", self)
+        self.toggle_hotkeys = KeySequenceRow(
+            "toggle_hotkeys", self, include_presets=False
+        )
         toggle_hotkeys_scroll_area = QScrollArea()
         toggle_hotkeys_scroll_area.setWidget(self.toggle_hotkeys)
         toggle_hotkeys_scroll_area.setWidgetResizable(True)
-        kb_form.addRow("Excluded Keys:", toggle_hotkeys_scroll_area)
+        kb_form.addRow("Toggle Hotkeys:", toggle_hotkeys_scroll_area)
 
         self.sprint_key_label = QLabel("Not set")
         self.sprint_key_btn = QPushButton("Capture")
@@ -465,7 +476,9 @@ class SettingsPage(QWidget):
         self.typematic_rate_spin.setSuffix(" Hz")
         typematic_form.addRow("Typematic Rate:", self.typematic_rate_spin)
 
-        self.typematic_excluded_keys = KeySequenceRow("typematic_excluded_keys", self)
+        self.typematic_excluded_keys = KeySequenceRow(
+            "typematic_excluded_keys", self, include_presets=True
+        )
         typematic_excluded_keys_scroll_area = QScrollArea()
         typematic_excluded_keys_scroll_area.setWidget(self.typematic_excluded_keys)
         typematic_excluded_keys_scroll_area.setWidgetResizable(True)

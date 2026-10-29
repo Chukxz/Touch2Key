@@ -134,7 +134,7 @@ def export_settings_toml(
 
     # Keys Section
     keys = tomlkit.table()
-    keys.add("toggle_key", s.toggle_key or "")
+    keys.add("toggle_hotkeys", s.toggle_hotkeys or "")
     keys.add("sprint_key", s.sprint_key or "")
     doc.add("keys", keys)
 

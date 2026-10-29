@@ -40,6 +40,7 @@ from modules.utils import (
     bresenham,
     clamp,
     get_scancode_from_key,
+    parse_seq,
 )
 from modules.runtime_info import register_process, unregister_process
 
@@ -306,10 +307,9 @@ class DiagnosticView(QGraphicsView):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, toggle_key_scancode: int | None) -> None:
+    def __init__(self) -> None:
         super().__init__()
 
-        self.toggle_key_scancode = toggle_key_scancode
         self.loc_dict: dict[int, tuple[float, float]] = {}
 
         self.cursor_visible = (
@@ -319,6 +319,8 @@ class MainWindow(QMainWindow):
         self.data: deque[dict] = deque(maxlen=MAX_EVENT_LOG)
         self.pressed_keys: dict[int, str] = {}
         self.pressed_mouse_buttons: set[str] = set()
+        self.pressed_scancodes_list: list[int] = []
+        self._hotkey_triggered = False
 
         self.setWindowTitle(VISUALIZER_NAME)
         self.setWindowOpacity(0.4)
@@ -379,6 +381,8 @@ class MainWindow(QMainWindow):
     def _clear_pressed_state(self) -> None:
         self.pressed_keys.clear()
         self.pressed_mouse_buttons.clear()
+        self.pressed_scancodes_list.clear()
+        self._hotkey_triggered = False
         self._update_active_display()
 
     def _instruction_text(self) -> str:
@@ -477,20 +481,30 @@ class MainWindow(QMainWindow):
         key = get_specific_qt_key(event)
         scancode = get_scancode_from_key(key)
 
-        if (
-            self.toggle_key_scancode is not None
-            and scancode == self.toggle_key_scancode
-        ):
-            if event.isAutoRepeat():
-                super().keyPressEvent(event)
-                return
+        if scancode is not None:
+            if scancode not in self.pressed_scancodes_list:
+                self.pressed_scancodes_list.append(scancode)
 
-            if self.cursor_visible:
-                self._force_cursor_hidden()
-                self.cursor_visible = False
-            else:
-                self._force_cursor_visible()
-                self.cursor_visible = True
+        settings = store.settings.get()
+        hotkeys_str = settings.toggle_hotkeys or ""
+        expected_scancodes = [
+            code for name in parse_seq(hotkeys_str, ",")
+            if (code := get_scancode_from_key(name)) is not None
+        ]
+
+        if expected_scancodes and self.pressed_scancodes_list == expected_scancodes:
+            if not self._hotkey_triggered:
+                self._hotkey_triggered = True
+                if event.isAutoRepeat():
+                    super().keyPressEvent(event)
+                    return
+
+                if self.cursor_visible:
+                    self._force_cursor_hidden()
+                    self.cursor_visible = False
+                else:
+                    self._force_cursor_visible()
+                    self.cursor_visible = True
 
         if (
             event.key() == Qt.Key.Key_Escape
@@ -525,6 +539,22 @@ class MainWindow(QMainWindow):
             super().keyReleaseEvent(event)
             return
 
+        key = get_specific_qt_key(event)
+        scancode = get_scancode_from_key(key)
+        if scancode is not None:
+            while scancode in self.pressed_scancodes_list:
+                self.pressed_scancodes_list.remove(scancode)
+
+        settings = store.settings.get()
+        hotkeys_str = settings.toggle_hotkeys or ""
+        expected_scancodes = [
+            code for name in parse_seq(hotkeys_str, ",")
+            if (code := get_scancode_from_key(name)) is not None
+        ]
+
+        if self.pressed_scancodes_list != expected_scancodes:
+            self._hotkey_triggered = False
+
         self.pressed_keys.pop(self._key_identity(event), None)
         self._update_active_display()
         super().keyReleaseEvent(event)
@@ -544,7 +574,7 @@ def unregister_visualizer_file() -> None:
     unregister_process(VISUALIZER_RUNTIME_FILE)
 
 
-def run(toggle_key_scancode: int | None = None) -> None:
+def run() -> None:
     success, _ = check_single_instance(VISUALIZER_NAME)
     if not success:
         sys.exit(0)
@@ -566,7 +596,7 @@ def run(toggle_key_scancode: int | None = None) -> None:
         lambda *_: QCoreApplication.quit(),
     )
 
-    window = MainWindow(toggle_key_scancode)
+    window = MainWindow()
     window.activateWindow()
     sys.exit(app.exec())
 

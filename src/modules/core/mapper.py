@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import threading
 import time
 from typing import TYPE_CHECKING, Any
@@ -22,6 +23,7 @@ from modules.utils import (
     MapperEvent,
     clamp,
     get_scancode_from_key,
+    parse_seq,
     rotate_resolution,
 )
 
@@ -67,7 +69,7 @@ class Mapper:
         self.device_width = 1920
         self.device_height = 1080
         self.dpi = 160
-        self.toggle_key_scancode: int | None = None
+        self.toggle_hotkeys_str: str = ""
         self.vkb_pressed_keys: set[int] = set()
 
         # Resolve target window (fallback to active foreground window)
@@ -94,7 +96,7 @@ class Mapper:
             else:
                 self.game_window_info = None
                 self.window_lost = True
-        except Exception:
+        except (ValueError, RuntimeError, OSError):
             self.game_window_info = None
             self.window_lost = True
 
@@ -132,9 +134,44 @@ class Mapper:
         self.device_width = layout.width
         self.device_height = layout.height
         self.dpi = layout.dpi
+        self.toggle_hotkeys_str = settings.toggle_hotkeys or ""
 
         if settings.pps_alert_threshold > 0:
             self.pps = float(settings.pps_alert_threshold)
+
+     def execute_toggle_hotkeys(self, hotkeys_str: str | None = None) -> None:
+        source_str = hotkeys_str if hotkeys_str is not None else self.toggle_hotkeys_str
+        key_names = parse_seq(source_str, ",")
+        if not key_names:
+            return
+
+        scancodes: list[int] = []
+        for name in key_names:
+            code = get_scancode_from_key(name)
+            if code is None:
+                exc = ValueError(f"Invalid or unsupported toggle hotkey: '{name}'")
+                logger.error("Failed to resolve toggle hotkey: %s", exc, exc_info=True)
+                return
+            scancodes.append(code)
+
+        pressed_so_far = []
+        try:
+            for code in scancodes:
+                self.bridge.key_down(code)
+                pressed_so_far.append(code)
+                time.sleep(random.uniform(0.015, 0.035))
+
+            for code in reversed(scancodes):
+                self.bridge.key_up(code)
+                time.sleep(random.uniform(0.015, 0.035))
+        except (ValueError, RuntimeError, OSError) as exc:
+            logger.error("Error during toggle hotkeys execution: %s", exc, exc_info=True)
+            # Emergency cleanup if interrupted mid-macro
+            for code in reversed(pressed_so_far):
+                try:
+                    self.bridge.key_up(code)
+                except (OSError, RuntimeError):
+                    pass
 
     def rebind_target_window(
         self,
@@ -229,7 +266,7 @@ class Mapper:
                             with self.lock:
                                 self.game_window_info = discovered
                                 self.window_lost = False
-                    except Exception:
+                    except (ValueError, RuntimeError, OSError):
                         now = time.perf_counter()
                         if now - last_log_time > log_interval:
                             logger.debug(
@@ -239,7 +276,7 @@ class Mapper:
                         with self.lock:
                             self.game_window_info = None
 
-            except Exception as e:
+            except (ValueError, RuntimeError, OSError) as e:
                 now = time.perf_counter()
                 if now - last_log_time > log_interval:
                     logger.debug("Window tracking exception: %s", e)
@@ -332,12 +369,12 @@ class Mapper:
 
             except EOFError:
                 self.stop_event.wait(VKB_SLEEP_TIME)
-            except Exception as e:
+            except (ValueError, RuntimeError, OSError) as e:
                 logger.warning("Virtual Keyboard worker exception: %s", e)
                 self.stop_event.wait(VKB_SLEEP_TIME)
 
     def _virtual_keyboard_sink(self, state: int, scancode: int):
-        is_toggle_key = scancode == TOP_BEZEL_ID
+        is_toggle_hotkeys = scancode == TOP_BEZEL_ID
         is_toggle_vkb = scancode == BOTTOM_BEZEL_ID
         is_mouse_left = scancode == M_LEFT
         is_mouse_middle = scancode == M_MIDDLE
@@ -348,10 +385,8 @@ class Mapper:
         if state == 0:  # DOWN / PRESS
             self.vkb_pressed_keys.add(scancode)
 
-            if is_toggle_key:
-                if self.toggle_key_scancode is None:
-                    return
-                self.bridge.key_down(self.toggle_key_scancode)
+            if is_toggle_hotkeys:
+                pass
             elif is_toggle_vkb:
                 pass
             elif is_mouse_left:
@@ -370,10 +405,8 @@ class Mapper:
         elif state == 1:  # UP / RELEASE
             self.vkb_pressed_keys.discard(scancode)
 
-            if is_toggle_key:
-                if self.toggle_key_scancode is None:
-                    return
-                self.bridge.key_up(self.toggle_key_scancode)
+            if is_toggle_hotkeys:
+                self.execute_toggle_hotkeys()
             elif is_toggle_vkb:
                 self.engine_ref.toggle_virtual_keyboard()
             elif is_mouse_left:
@@ -392,7 +425,7 @@ class Mapper:
     def release_vkb_keys(self):
         if self.vkb_pressed_keys:
             for code in list(self.vkb_pressed_keys):
-                if code != BOTTOM_BEZEL_ID:
+                if code not in (TOP_BEZEL_ID, BOTTOM_BEZEL_ID):
                     self._virtual_keyboard_sink(1, code)
             self.vkb_pressed_keys.clear()
 

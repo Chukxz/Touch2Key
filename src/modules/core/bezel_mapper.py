@@ -52,20 +52,17 @@ class BezelMapper:
             if region is None:
                 continue
 
-            passed_scancode = zone.scancode
             passed_callback = None
 
             if zone.scancode == TOP_BEZEL_ID:
-                if self.mapper.toggle_key_scancode is None:
-                    continue
-                passed_scancode = self.mapper.toggle_key_scancode
+                passed_callback = self.mapper.execute_toggle_hotkeys
 
-            if zone.scancode == BOTTOM_BEZEL_ID:
+            elif zone.scancode == BOTTOM_BEZEL_ID:
                 passed_callback = self.engine_ref.toggle_virtual_keyboard
 
             new_pipelines.append(
                 Bezel(
-                    scancode=passed_scancode,
+                    scancode=zone.scancode,
                     region=region,
                     priority=zone.priority,
                     callback=passed_callback,
