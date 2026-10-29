@@ -77,11 +77,9 @@ def _normalize_hotkeys(raw: Any) -> str:
 
 
 def _read_keys(doc: dict[str, Any]) -> tuple[str, Optional[str]]:
-    """(toggle_hotkeys, sprint_key). Falls back to the legacy `toggle_key` field."""
+    """(toggle_hotkeys, sprint_key)."""
     keys = doc.get("keys", {})
     raw_hotkeys = keys.get("toggle_hotkeys")
-    if raw_hotkeys is None:
-        raw_hotkeys = keys.get("toggle_key")
     return _normalize_hotkeys(raw_hotkeys), keys.get("sprint_key")
 
 
