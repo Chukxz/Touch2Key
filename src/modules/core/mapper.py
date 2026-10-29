@@ -139,10 +139,7 @@ class Mapper:
         if settings.pps_alert_threshold > 0:
             self.pps = float(settings.pps_alert_threshold)
 
-    def execute_toggle_hotkeys(self, hotkeys_str: str | None = None) -> None:
-        """Parses and executes toggle hotkeys in stack-like order (LIFO release) with randomized human-like intervals.
-        Logs an error and suppresses failure if any scancode is invalid or execution fails.
-        """
+     def execute_toggle_hotkeys(self, hotkeys_str: str | None = None) -> None:
         source_str = hotkeys_str if hotkeys_str is not None else self.toggle_hotkeys_str
         key_names = parse_seq(source_str, ",")
         if not key_names:
@@ -157,19 +154,24 @@ class Mapper:
                 return
             scancodes.append(code)
 
+        pressed_so_far = []
         try:
-            # Press down sequentially
             for code in scancodes:
                 self.bridge.key_down(code)
+                pressed_so_far.append(code)
                 time.sleep(random.uniform(0.015, 0.035))
 
-            # Release in reverse stack-like order (LIFO)
             for code in reversed(scancodes):
                 self.bridge.key_up(code)
                 time.sleep(random.uniform(0.015, 0.035))
         except (ValueError, RuntimeError, OSError) as exc:
             logger.error("Error during toggle hotkeys execution: %s", exc, exc_info=True)
-            pass
+            # Emergency cleanup if interrupted mid-macro
+            for code in reversed(pressed_so_far):
+                try:
+                    self.bridge.key_up(code)
+                except (OSError, RuntimeError):
+                    pass
 
     def rebind_target_window(
         self,
@@ -423,7 +425,7 @@ class Mapper:
     def release_vkb_keys(self):
         if self.vkb_pressed_keys:
             for code in list(self.vkb_pressed_keys):
-                if code != BOTTOM_BEZEL_ID:
+                if code not in (TOP_BEZEL_ID, BOTTOM_BEZEL_ID):
                     self._virtual_keyboard_sink(1, code)
             self.vkb_pressed_keys.clear()
 
