@@ -30,7 +30,10 @@ from modules.database.legacy_migration import (
     migrate_toml_config,
 )
 from modules.database.repositories import DuplicateNameError
-from modules.cli.key_capture import capture_keys_cli, capture_performance_settings_cli
+from modules.cli.key_capture import (
+    capture_sprint_key_cli,
+    capture_performance_settings_cli,
+)
 from modules.utils import (
     BEZEL,
     BOTTOM_BEZEL_ID,
@@ -82,12 +85,12 @@ def get_target_id(raw_id: str):
             print(f"Error: No layout with ID {int(raw_id)} found in the database.")
 
     elif raw_id == "":
-        print(f"Warning: No layout ID was provided, falling back to active layout.")
+        print("Warning: No layout ID was provided, falling back to active layout.")
         layout = store.get_active_layout()
         if layout:
             target_id = layout.id
         else:
-            print("Error: No active ayout found in the database")
+            print("Error: No active layout found in the database")
 
     return target_id
 
@@ -121,6 +124,34 @@ def _prompt_int(prompt: str, current: int) -> int:
     except ValueError:
         print(f"Invalid integer '{raw}'; keeping {current}.")
         return current
+
+
+def _normalize_toggle_hotkeys(
+    raw_csv: str, current_csv: Optional[str] = None
+) -> str:
+    """Validates comma-separated toggle hotkeys (supports +key to append, or 'clear'/'none')."""
+    seq: list[str] = []
+    if current_csv:
+        seq.extend(k.strip().lower() for k in current_csv.split(",") if k.strip())
+
+    tokens = [t.strip().lower() for t in raw_csv.split(",") if t.strip()]
+    if tokens in (["none"], ["clear"]):
+        return ""
+
+    if not any(t.startswith("+") for t in tokens):
+        seq.clear()
+
+    for token in tokens:
+        key = token.lstrip("+")
+        if not key:
+            continue
+        if get_scancode_from_key(key) is None:
+            print(f"Warning: Skipping unsupported key '{key}'.")
+            continue
+        if key not in seq:
+            seq.append(key)
+
+    return ",".join(seq)
 
 
 def _normalize_excluded_keys(raw_csv: str, current_csv: Optional[str] = None) -> str:
@@ -241,6 +272,8 @@ def show_input_controls() -> None:
     print(f"  Sensitivity X / Y: {s.sensitivity_x:.2f} / {s.sensitivity_y:.2f}")
     print(f"  Deadzone:          {s.deadzone:.2f}")
     print(f"  Hysteresis:        {s.hysteresis:.1f}°")
+    print(f"  Toggle Hotkeys:    {s.toggle_hotkeys or 'None'}")
+    print(f"  Sprint Key:        {s.sprint_key or 'None'}")
 
 
 def configure_input_controls_interactive() -> None:
@@ -316,7 +349,7 @@ def configure_input_controls_interactive() -> None:
     }
 
     store.settings.update(**updates)
-    print("Input controls and global keybindings updated successfully.")
+    print("Input controls updated successfully.")
     show_input_controls()
 
 
@@ -558,7 +591,7 @@ def set_directional_key(layout_id: int, direction: str | None) -> bool:
         return False
 
     if not direction:
-        print(f"Error: Direction not specified.")
+        print("Error: Direction not specified.")
         return False
 
     mouse_wheel_zone = store.zones.get_mouse_wheel_zone(layout)
@@ -801,6 +834,32 @@ def wipe_database() -> None:
 # ---------------------------------------------------------------------------
 
 
+def show_toggle_hotkeys() -> None:
+    """Prints current global toggle hotkeys configuration."""
+    s = store.settings.get()
+    print("\n--- Toggle Hotkeys Settings ---")
+    print(f"  Toggle Hotkeys: {s.toggle_hotkeys or 'None'}")
+
+
+def configure_toggle_hotkeys_interactive() -> None:
+    """Prompts for toggle hotkeys interactively (supports +key to append, or 'clear')."""
+    s = store.settings.get()
+    show_toggle_hotkeys()
+
+    th_in = input(
+        f"Toggle hotkeys comma-separated (use '+key' to append, or 'clear'; current: {s.toggle_hotkeys or ''}): "
+    ).strip()
+    toggle_hotkeys = (
+        s.toggle_hotkeys
+        if not th_in
+        else _normalize_toggle_hotkeys(th_in, s.toggle_hotkeys)
+    )
+
+    store.settings.update(toggle_hotkeys=toggle_hotkeys)
+    print("Toggle hotkeys updated successfully.")
+    show_toggle_hotkeys()
+
+
 def show_typematic() -> None:
     """Prints current typematic / auto-repeat configuration."""
     s = store.settings.get()
@@ -885,7 +944,7 @@ def show_system() -> None:
     s = store.settings.get()
     print("\n--- System Settings ---")
     print(f"  Two finger tap Enabled:  {'Yes' if s.two_finger_tap_enabled else 'No'}")
-    print(f"  Bezels Enabled:      {'Yes' if s.bezel_toggle_enabled else 'No'}")
+    print(f"  Bezels Enabled:          {'Yes' if s.bezel_toggle_enabled else 'No'}")
 
 
 def configure_system_interactive() -> None:
@@ -1022,7 +1081,8 @@ def interactive_menu() -> None:
             "  [ic]   View / Configure Handedness, Touch, Input Controls & Global Keybindings"
         )
         print("  [ric]  Reset Input Controls to Defaults")
-        print("  [ck]   Capture Global Keybindings (Toggle & Sprint)")
+        print("  [th]   View / Configure Toggle Hotkeys")
+        print("  [ck]   Capture Sprint Key")
         print("  [pf]   Configure ADB Rate Cap & PPS Alert Threshold")
         print("  [lz]   List Zones / Pipelines for Profile")
         print("  [bz]   Configure Bezel Thickness (Top / Bottom dp)")
@@ -1134,8 +1194,11 @@ def interactive_menu() -> None:
             if confirm == "y":
                 reset_input_controls_defaults()
 
+        if choice == "th":
+            configure_toggle_hotkeys_interactive()
+
         if choice == "ck":
-            capture_keys_cli()
+            capture_sprint_key_cli()
 
         if choice == "pf":
             capture_performance_settings_cli()
@@ -1358,10 +1421,8 @@ def interactive_menu() -> None:
             export_profile_toml(layout_id=linked_id)
 
         if choice == "lt":
-
             if migrate_toml_config():
                 print("Settings imported successfully from settings.toml.")
-
             else:
                 print("Failed to import settings.toml (file missing or invalid).")
 
@@ -1372,7 +1433,9 @@ def interactive_menu() -> None:
             target_id = get_target_id(raw_id)
 
             try:
-                target_layout = store.layouts.get(target_id)
+                target_layout = (
+                    store.layouts.get(target_id) if target_id is not None else None
+                )
                 if target_layout:
                     t_path, j_path = export_bundle(
                         profile_name=target_layout.name, layout_id=target_layout.id
@@ -1480,6 +1543,17 @@ def run() -> None:
         "--show-input",
         action="store_true",
         help="Display touch, joystick, sensitivity, deadzone, hysteresis, and keybinding settings",
+    )
+    parser.add_argument(
+        "--show-toggle-hotkeys",
+        action="store_true",
+        help="Display global toggle hotkeys configuration",
+    )
+    parser.add_argument(
+        "--set-toggle-hotkeys",
+        type=str,
+        metavar="KEYS",
+        help="Set comma-separated toggle hotkeys (use '+key' to append, or 'clear')",
     )
     parser.add_argument(
         "--set-left-handed",
@@ -1822,8 +1896,20 @@ def run() -> None:
 
         if input_updates:
             store.settings.update(**input_updates)
-            print("Input controls and keybindings updated successfully.")
+            print("Input controls updated successfully.")
             show_input_controls()
+
+        if args.set_toggle_hotkeys is not None:
+            has_args = True
+            current_th = store.settings.get().toggle_hotkeys
+            new_th = _normalize_toggle_hotkeys(args.set_toggle_hotkeys, current_th)
+            store.settings.update(toggle_hotkeys=new_th)
+            print("Toggle hotkeys updated successfully.")
+            show_toggle_hotkeys()
+
+        if args.show_toggle_hotkeys:
+            has_args = True
+            show_toggle_hotkeys()
 
         if args.reset_input:
             has_args = True
@@ -1961,7 +2047,6 @@ def run() -> None:
                 deadzone=args.zone_deadzone,
                 hysteresis=args.zone_hysteresis,
             )
-            has_args = True
 
         if args.reset_zone is not None:
             has_args = True
