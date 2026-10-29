@@ -328,4 +328,287 @@ class MainWindow(QMainWindow):
 
         self.view = DiagnosticView(self.loc_dict, self)
         self.view.mouse_pressed.connect(self._on_mouse_pressed)
-        self.view.mouse_
+        self.view.mouse_released.connect(self._on_mouse_released)
+        self.view.arrow_pressed.connect(self._update_instruction_text)
+        self.view.resized.connect(self._on_view_resized)
+        self.setCentralWidget(self.view)
+
+        self.instruction = self.view._scene.addText(
+            self._instruction_text(),
+            QFont("Arial", 15),
+        )
+        self.instruction.setDefaultTextColor(QColor("#cccccc"))
+
+        self.showFullScreen()
+        self._on_view_resized(
+            self.view.viewport().width(),
+            self.view.viewport().height(),
+        )
+        self._position_instruction()
+
+    # ------------------------------------------------------------------
+    # Cursor
+    # ------------------------------------------------------------------
+
+    def _force_cursor_hidden(self) -> None:
+        if sys.platform == "win32":
+            while ctypes.windll.user32.ShowCursor(False) >= 0:
+                pass
+        elif sys.platform == "linux":
+            while QGuiApplication.overrideCursor() is not None:
+                QGuiApplication.restoreOverrideCursor()
+            QGuiApplication.setOverrideCursor(Qt.CursorShape.BlankCursor)
+
+    def _force_cursor_visible(self) -> None:
+        if sys.platform == "win32":
+            while ctypes.windll.user32.ShowCursor(True) < 0:
+                pass
+        elif sys.platform == "linux":
+            while QGuiApplication.overrideCursor() is not None:
+                QGuiApplication.restoreOverrideCursor()
+
+    # ------------------------------------------------------------------
+    # Display
+    # ------------------------------------------------------------------
+
+    def _update_active_display(self) -> None:
+        parts = list(self.pressed_keys.values()) + sorted(
+            self.pressed_mouse_buttons
+        )
+        self.view.set_active_text(
+            f"[{' + '.join(parts)}]" if parts else ""
+        )
+
+    def _clear_pressed_state(self) -> None:
+        self.pressed_keys.clear()
+        self.pressed_mouse_buttons.clear()
+        self.pressed_scancodes.clear()
+        self._hotkey_triggered = False
+        self._update_active_display()
+
+    def _instruction_text(self) -> str:
+        curve_name = self.view.get_current_curve_name()
+        return (
+            "Press ESC to exit (when cursor is visible).\n"
+            f"[F8] Cycle Input Curve: [{curve_name}]\n"
+            f"(Left/Right: increase/decrease trail width "
+            f"({self.view.trail_width}) [1-{MAX_TRAIL_WIDTH}]).\n"
+            f"(Up/Down: increase/decrease trail height "
+            f"({self.view.trail_height}) [1-{MAX_TRAIL_HEIGHT}]).\n"
+            f"Maximum number of trails: {MAX_TRAIL_NUMBER}."
+        )
+
+    def _update_instruction_text(self) -> None:
+        self.instruction.setPlainText(self._instruction_text())
+        self._position_instruction()
+
+    def _position_instruction(self) -> None:
+        instruction = getattr(self, "instruction", None)
+        if instruction is None:
+            return
+
+        viewport = self.view.viewport()
+        bounds = instruction.boundingRect()
+
+        x = (viewport.width() - bounds.width()) * 0.5
+        y = (viewport.height() - bounds.height()) * 0.2
+        instruction.setPos(x, y)
+
+    def _on_view_resized(self, width: int, height: int) -> None:
+        self.loc_dict = self.get_locations_dict(width, height)
+        self.view.set_loc_dict(self.loc_dict)
+        self._position_instruction()
+
+    @staticmethod
+    def get_locations_dict(
+        width: int,
+        height: int,
+    ) -> dict[int, tuple[float, float]]:
+        loc_dict: dict[int, tuple[float, float]] = {}
+
+        layout = store.get_active_layout()
+        if layout is None:
+            return loc_dict
+
+        layout_width = float(layout.width or 0)
+        layout_height = float(layout.height or 0)
+
+        if layout_width <= 0.0 or layout_height <= 0.0:
+            return loc_dict
+
+        zones = store.get_active_layout_zones()
+        scale_x = width / layout_width
+        scale_y = height / layout_height
+
+        for zone in zones:
+            loc_dict[zone.scancode] = (
+                float(zone.cx or 0) * scale_x,
+                float(zone.cy or 0) * scale_y,
+            )
+
+        return loc_dict
+
+    # ------------------------------------------------------------------
+    # View slots
+    # ------------------------------------------------------------------
+
+    def _on_mouse_pressed(
+        self, btn_name: str, x: int, y: int
+    ) -> None:
+        self.pressed_mouse_buttons.add(btn_name)
+        self.data.append(
+            {
+                "x": x,
+                "y": y,
+                "type": f"{btn_name} Click",
+                "time": time.time(),
+            }
+        )
+        self._update_active_display()
+
+    def _on_mouse_released(self, btn_name: str) -> None:
+        self.pressed_mouse_buttons.discard(btn_name)
+        self._update_active_display()
+
+    # ------------------------------------------------------------------
+    # Events
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _key_identity(event: QKeyEvent) -> int:
+        return event.nativeScanCode() or int(event.key())
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        key = get_specific_qt_key(event)
+        scancode = get_scancode_from_key(key)
+
+        if scancode is not None:
+            self.pressed_scancodes.add(scancode)
+
+        settings = store.settings.get()
+        hotkeys_str = settings.toggle_hotkeys or ""
+        expected_scancodes = {
+            code for name in parse_seq(hotkeys_str, ",")
+            if (code := get_scancode_from_key(name)) is not None
+        }
+        if not expected_scancodes and self.toggle_key_scancode is not None:
+            expected_scancodes = {self.toggle_key_scancode}
+
+        if expected_scancodes and expected_scancodes.issubset(self.pressed_scancodes):
+            if not self._hotkey_triggered:
+                self._hotkey_triggered = True
+                if event.isAutoRepeat():
+                    super().keyPressEvent(event)
+                    return
+
+                if self.cursor_visible:
+                    self._force_cursor_hidden()
+                    self.cursor_visible = False
+                else:
+                    self._force_cursor_visible()
+                    self.cursor_visible = True
+
+        if (
+            event.key() == Qt.Key.Key_Escape
+            and self.cursor_visible
+        ):
+            self.close()
+            return
+
+        key_name = key.strip().upper()
+        self.pressed_keys[self._key_identity(event)] = key_name
+
+        cursor_pos = self.view.mapFromGlobal(self.cursor().pos())
+        mouse_x, mouse_y = cursor_pos.x(), cursor_pos.y()
+
+        self.data.append(
+            {
+                "x": mouse_x,
+                "y": mouse_y,
+                "type": f"Key: {key_name}",
+                "time": time.time(),
+            }
+        )
+
+        self.view.set_labelled_ripple(
+            mouse_x, mouse_y, key_name, scancode, "red"
+        )
+        self._update_active_display()
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event: QKeyEvent) -> None:
+        if event.isAutoRepeat():
+            super().keyReleaseEvent(event)
+            return
+
+        key = get_specific_qt_key(event)
+        scancode = get_scancode_from_key(key)
+        if scancode is not None:
+            self.pressed_scancodes.discard(scancode)
+
+        settings = store.settings.get()
+        hotkeys_str = settings.toggle_hotkeys or ""
+        expected_scancodes = {
+            code for name in parse_seq(hotkeys_str, ",")
+            if (code := get_scancode_from_key(name)) is not None
+        }
+        if not expected_scancodes and self.toggle_key_scancode is not None:
+            expected_scancodes = {self.toggle_key_scancode}
+
+        if not expected_scancodes.issubset(self.pressed_scancodes):
+            self._hotkey_triggered = False
+
+        self.pressed_keys.pop(self._key_identity(event), None)
+        self._update_active_display()
+        super().keyReleaseEvent(event)
+
+    def changeEvent(self, event: QEvent) -> None:
+        if event.type() == QEvent.Type.WindowDeactivate:
+            self._clear_pressed_state()
+
+        super().changeEvent(event)
+
+    def closeEvent(self, event) -> None:
+        self._force_cursor_visible()
+        super().closeEvent(event)
+
+
+def unregister_visualizer_file() -> None:
+    unregister_process(VISUALIZER_RUNTIME_FILE)
+
+
+def run(toggle_key_scancode: int | None = None) -> None:
+    success, _ = check_single_instance(VISUALIZER_NAME)
+    if not success:
+        sys.exit(0)
+
+    register_process(VISUALIZER_RUNTIME_FILE)
+    atexit.register(unregister_visualizer_file)
+
+    app = QApplication(sys.argv)
+    app_icon_path = ICONS_FOLDER / "app.png"
+    if app_icon_path.exists():
+        app.setWindowIcon(QIcon(str(app_icon_path)))
+
+    timer = QTimer()
+    timer.start(500)
+    timer.timeout.connect(lambda: None)
+
+    signal.signal(
+        signal.SIGINT,
+        lambda *_: QCoreApplication.quit(),
+    )
+
+    window = MainWindow(toggle_key_scancode)
+    window.activateWindow()
+    sys.exit(app.exec())
+
+
+def main() -> None:
+    """Dedicated entry point for touch2key-visualizer."""
+    AppLogManager.setup_logging(log_prefix="touch2key_visualizer")
+    run()
+
+
+if __name__ == "__main__":
+    main()
