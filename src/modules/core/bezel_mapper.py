@@ -52,7 +52,6 @@ class BezelMapper:
             if region is None:
                 continue
 
-            passed_scancode = zone.scancode
             passed_callback = None
 
             if zone.scancode == TOP_BEZEL_ID:
@@ -63,7 +62,7 @@ class BezelMapper:
 
             new_pipelines.append(
                 Bezel(
-                    scancode=passed_scancode,
+                    scancode=zone.scancode,
                     region=region,
                     priority=zone.priority,
                     callback=passed_callback,
