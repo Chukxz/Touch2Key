@@ -209,8 +209,9 @@ class UInputBridge(AbstractBridge):
             pass
 
     def mouse_move_abs(self, x: int, y: int) -> None:
-        abs_x = clamp(int((x / self.screen_w) * ABS_CONST), 0, ABS_CONST)
-        abs_y = clamp(int((y / self.screen_h) * ABS_CONST), 0, ABS_CONST)
+        # BUGFIX: Added round() so subpixel values don't permanently drift the cursor due to truncation
+        abs_x = clamp(int(round((x / self.screen_w) * ABS_CONST)), 0, ABS_CONST)
+        abs_y = clamp(int(round((y / self.screen_h) * ABS_CONST)), 0, ABS_CONST)
         try:
             self.m_pipe_write.send_bytes(
                 PACK_ABS_STRUCT.pack(TASK_ABS, int(abs_x), int(abs_y))
@@ -403,7 +404,6 @@ class UInputBridge(AbstractBridge):
 
                 old_proc = self.k_proc
                 try:
-                    self.k_pipe_read.close()
                     self.k_pipe_write.close()
                 except Exception:
                     pass
@@ -463,9 +463,7 @@ class UInputBridge(AbstractBridge):
 
                 old_proc = self.m_proc
                 try:
-                    self.m_pipe_read.close()
                     self.m_pipe_write.close()
-                    self.mb_pipe_read.close()
                     self.mb_pipe_write.close()
                 except Exception:
                     pass
@@ -514,7 +512,7 @@ class UInputBridge(AbstractBridge):
                 (self._mouse_button4_down, BUTTON_4_UP),
                 (self._mouse_button5_down, BUTTON_5_UP),
             ]
-            
+
             for is_down, release_flag in button_releases:
                 if is_down:
                     try:
