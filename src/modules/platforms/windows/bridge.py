@@ -152,6 +152,7 @@ class InterceptionBridge(AbstractBridge):
             )
             self.k_proc.start()
             self.system_config.set_high_priority(self.k_proc.pid, "Keyboard")
+            # Close the read end of the pipe in the main process (Worker holds it)
             self.k_pipe_read.close()
 
             self.m_proc = multiprocessing.Process(
@@ -203,8 +204,7 @@ class InterceptionBridge(AbstractBridge):
 
             if self.k_proc is not None:
                 try:
-                    self.k_pipe_read.close()
-                    self.k_pipe_write.close()
+                    self.k_pipe_write.close() # Safely drop the engine's write pipe
                 except Exception:
                     pass
                 if self.k_proc.is_alive():
@@ -233,9 +233,7 @@ class InterceptionBridge(AbstractBridge):
 
             if self.m_proc is not None:
                 try:
-                    self.m_pipe_read.close()
                     self.m_pipe_write.close()
-                    self.mb_pipe_read.close()
                     self.mb_pipe_write.close()
                 except Exception:
                     pass
@@ -293,8 +291,9 @@ class InterceptionBridge(AbstractBridge):
             pass
 
     def mouse_move_abs(self, x: int, y: int) -> None:
-        abs_x = clamp(int((x / self.screen_w) * ABS_CONST), 0, ABS_CONST)
-        abs_y = clamp(int((y / self.screen_h) * ABS_CONST), 0, ABS_CONST)
+        # BUGFIX: Added round() so subpixel values don't permanently drift the cursor due to truncation
+        abs_x = clamp(int(round((x / self.screen_w) * ABS_CONST)), 0, ABS_CONST)
+        abs_y = clamp(int(round((y / self.screen_h) * ABS_CONST)), 0, ABS_CONST)
         try:
             self.m_pipe_write.send_bytes(
                 PACK_ABS_STRUCT.pack(TASK_ABS, int(abs_x), int(abs_y))
@@ -487,12 +486,6 @@ class InterceptionBridge(AbstractBridge):
                     return
 
                 old_proc = self.k_proc
-                try:
-                    self.k_pipe_read.close()
-                    self.k_pipe_write.close()
-                except Exception:
-                    pass
-                self.k_pipe_read, self.k_pipe_write = multiprocessing.Pipe(duplex=False)
                 self.k_proc = multiprocessing.Process(
                     target=keyboard_worker,
                     args=(self.k_pipe_read, self.log_queue, self.k_device_handle),
@@ -502,7 +495,7 @@ class InterceptionBridge(AbstractBridge):
                 self.system_config.set_high_priority(
                     self.k_proc.pid, "Revived Keyboard"
                 )
-                self.k_pipe_read.close()
+                # The engine already closed k_pipe_read during initial start, so no need to close it here
 
                 self.update_typematic(
                     self._cached_typematic["enabled"],
@@ -547,17 +540,6 @@ class InterceptionBridge(AbstractBridge):
                     return
 
                 old_proc = self.m_proc
-                try:
-                    self.m_pipe_read.close()
-                    self.m_pipe_write.close()
-                    self.mb_pipe_read.close()
-                    self.mb_pipe_write.close()
-                except Exception:
-                    pass
-                self.m_pipe_read, self.m_pipe_write = multiprocessing.Pipe(duplex=False)
-                self.mb_pipe_read, self.mb_pipe_write = multiprocessing.Pipe(
-                    duplex=False
-                )
                 self.m_proc = multiprocessing.Process(
                     target=mouse_worker,
                     name="Mouse Worker",
@@ -571,8 +553,7 @@ class InterceptionBridge(AbstractBridge):
                 )
                 self.m_proc.start()
                 self.system_config.set_high_priority(self.m_proc.pid, "Revived Mouse")
-                self.mb_pipe_read.close()
-                self.m_pipe_read.close()
+                # The engine already closed the read ends during initial start, so no need to close them here
 
             if old_proc is not None:
                 old_proc.join(timeout=1.0)
@@ -604,7 +585,7 @@ class InterceptionBridge(AbstractBridge):
                 (self._mouse_button4_down, BUTTON_4_UP),
                 (self._mouse_button5_down, BUTTON_5_UP),
             ]
-            
+
             for is_down, release_flag in button_releases:
                 if is_down:
                     try:
