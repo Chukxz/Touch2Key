@@ -21,10 +21,8 @@ from modules.utils import (
     VKB_STRUCT,
     WINDOW_UPDATE_INTERVAL,
     MapperEvent,
-    clamp,
     get_scancode_from_key,
     parse_seq,
-    rotate_resolution,
 )
 
 if TYPE_CHECKING:
@@ -183,36 +181,40 @@ class Mapper:
     ) -> None:
         wid = target_window_id
 
-        with self.lock:
-            if wid and self.window_manager.is_window_valid(wid):
+        # Fetch window info outside the lock to prevent deadlock with Engine thread
+        if wid and self.window_manager.is_window_valid(wid):
+            cls_name = self.window_manager.get_window_class_name(wid)
+            info = self._get_window_info(wid)
+            with self.lock:
                 self.window_id = wid
-                self.game_window_class_name = self.window_manager.get_window_class_name(
-                    wid
-                )
-                self.game_window_info = self._get_window_info(wid)
+                self.game_window_class_name = cls_name
+                self.game_window_info = info
                 self.window_lost = False
-                logger.info(
-                    "Engine live-rebound to Window ID: %s (%s - %s)",
-                    self.window_id,
-                    self.game_window_class_name,
-                    target_window_title,
-                )
-            else:
-                self.window_id = self.window_manager.get_foreground_window()
-                self.game_window_class_name = (
-                    self.window_manager.get_window_class_name(self.window_id)
-                    if self.window_id
-                    else None
-                )
-                self.game_window_info = (
-                    self._get_window_info(self.window_id) if self.window_id else None
-                )
-                self.window_lost = self.window_id is None
-                logger.warning(
-                    "Target window invalidated. Rebound to foreground HWND: %s (%s)",
-                    self.window_id,
-                    self.game_window_class_name,
-                )
+            logger.info(
+                "Engine live-rebound to Window ID: %s (%s - %s)",
+                self.window_id,
+                self.game_window_class_name,
+                target_window_title,
+            )
+        else:
+            fallback_wid = self.window_manager.get_foreground_window()
+            cls_name = (
+                self.window_manager.get_window_class_name(fallback_wid)
+                if fallback_wid
+                else None
+            )
+            info = self._get_window_info(fallback_wid) if fallback_wid else None
+            
+            with self.lock:
+                self.window_id = fallback_wid
+                self.game_window_class_name = cls_name
+                self.game_window_info = info
+                self.window_lost = fallback_wid is None
+            logger.warning(
+                "Target window invalidated. Rebound to foreground HWND: %s (%s)",
+                self.window_id,
+                self.game_window_class_name,
+            )
 
     def _get_window_info(self, window_id: int) -> dict:
         width, height = self.window_manager.get_window_dimensions(window_id)
@@ -264,8 +266,10 @@ class Mapper:
                             self.game_window_info = None
 
                     try:
-                        if self.game_window_class_name:
-                            discovered = self._get_game_window_info()
+                        with self.lock:
+                            cls_name = self.game_window_class_name
+                        if cls_name:
+                            discovered = self._get_game_window_info(cls_name)
                             with self.lock:
                                 self.game_window_info = discovered
                                 self.window_lost = False
@@ -290,10 +294,8 @@ class Mapper:
             )
             self.stop_event.wait(sleep_duration)
 
-    def _get_game_window_info(self) -> dict:
-        window_ids = self.window_manager.find_window_ids_by_class(
-            self.game_window_class_name
-        )
+    def _get_game_window_info(self, class_name: str) -> dict:
+        window_ids = self.window_manager.find_window_ids_by_class(class_name)
         target_info = None
         max_diag = 0.0
 
@@ -309,32 +311,21 @@ class Mapper:
 
         if target_info is None:
             raise RuntimeError(
-                f"No visible window found for class: '{self.game_window_class_name}'."
+                f"No visible window found for class: '{class_name}'."
             )
         return target_info
 
-    def device_to_game_abs(self, x: float, y: float) -> tuple[float, float]:
-        rot = self.touch_reader.get_rotation()
-        rot_dev_w, rot_dev_h = rotate_resolution(
-            self.device_width, self.device_height, rot
-        )
-        rot_dev_w = max(1.0, float(rot_dev_w))
-        rot_dev_h = max(1.0, float(rot_dev_h))
-
-        norm_x = clamp(x / rot_dev_w, 0.0, 1.0)
-        norm_y = clamp(y / rot_dev_h, 0.0, 1.0)
-
+    def get_viewport_info(self) -> tuple[float, float, dict | None, int, int]:
+        """
+        Callback provided to BridgeOutputSink to map oriented device pixels
+        to target PC window client pixels.
+        """
+        dev_w, dev_h = self.touch_reader.get_oriented_dimensions()
+        
         with self.lock:
             win = self.game_window_info
-
-        if win and win["width"] > 0 and win["height"] > 0:
-            target_x = win["left"] + norm_x * win["width"]
-            target_y = win["top"] + norm_y * win["height"]
-        else:
-            target_x = norm_x * self.screen_w
-            target_y = norm_y * self.screen_h
-
-        return target_x, target_y
+            
+        return float(dev_w), float(dev_h), win, self.screen_w, self.screen_h
 
     def _pulse_status(self) -> None:
         with self._pulse_lock:
@@ -367,7 +358,8 @@ class Mapper:
                     continue
 
                 payload = reader.recv_bytes()
-                state, scancode = VKB_STRUCT.unpack(payload)
+                # BUGFIX: unpack_from guarantees safe reads even if OS padded the IPC packet
+                state, scancode = VKB_STRUCT.unpack_from(payload, 0)
                 self._virtual_keyboard_sink(state, scancode)
 
             except EOFError:
