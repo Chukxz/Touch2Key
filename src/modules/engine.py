@@ -34,6 +34,7 @@ from modules.utils import (
     DEFAULT_ADB_RATE_CAP,
     DEFAULT_PPS,
     IPC_CMD_START,
+    M_LEFT,
     PPS_ALERT_MAX,
     PPS_ALERT_MIN,
     VISUALIZER_RUNTIME_FILE,
@@ -393,8 +394,8 @@ class Engine:
         self._contact_owners.clear()
         self.two_finger_tap_tracker.reset()
 
-        if self._cursor_contacts and self.mapper:
-            self.mapper.bridge.left_click_up()
+        if self._cursor_contacts and self.output_sink:
+            self.output_sink.mouse_up(M_LEFT)
         self._cursor_contacts.clear()
 
         if self.output_sink:
@@ -545,17 +546,16 @@ class Engine:
                 break
 
     def _dispatch_cursor(self, event: TouchEvent) -> None:
-        if not self.mapper:
+        if not self.output_sink:
             return
-        gx, gy = self.mapper.device_to_game_abs(event.position.x, event.position.y)
-        self.mapper.bridge.mouse_move_abs(int(round(gx)), int(round(gy)))
+        self.output_sink.mouse_move_abs(event.position.x, event.position.y)
 
         if event.phase is TouchPhase.DOWN:
             self._cursor_contacts.add(event.contact_id)
-            self.mapper.bridge.left_click_down()
+            self.output_sink.mouse_down(M_LEFT)
 
         elif event.phase is TouchPhase.UP:
-            self.mapper.bridge.left_click_up()
+            self.output_sink.mouse_up(M_LEFT)
             self._cursor_contacts.discard(event.contact_id)
 
     def _dispatch_normal(self, event: TouchEvent) -> None:
@@ -611,7 +611,8 @@ class Engine:
                     return
 
             # Cursor fallback is lower than every configured pipeline.
-            if self.is_visible and cid == 0:
+            # Fix: Any unclaimed finger can grab the cursor if no other finger has it yet.
+            if self.is_visible and not self._cursor_contacts:
                 self._dispatch_cursor(event)
             return
 
@@ -767,8 +768,11 @@ class Engine:
         self.dispatcher.register_callback("ON_MENU_MODE_TOGGLE", self._apply_visibility)
         self.dispatcher.register_callback("ON_WORKER_RESPAWN", self._count_respawn)
 
-        self.layout_loader = LayoutLoader(self.dispatcher)
+        # 1. Instantiate TouchReader first so it can be passed to LayoutLoader
         self.touch_reader = TouchReader(self.dispatcher, self.rate_cap)
+        # 2. Pass touch_reader into LayoutLoader
+        self.layout_loader = LayoutLoader(self.dispatcher, self.touch_reader)
+        # 3. Instantiate Mapper
         self.mapper = Mapper(
             self.touch_reader,
             self.bridge,
@@ -776,9 +780,13 @@ class Engine:
             window_id,
             self,
         )
+        # 4. Instantiate OutputSink
         self.output_sink = BridgeOutputSink(
             bridge=self.mapper.bridge,
         )
+        # 5. Wire up the viewport callback for absolute PC coordinate mapping
+        self.output_sink.set_viewport_callback(self.mapper.get_viewport_info)
+
         self.bezel_mapper = BezelMapper(self.mapper, self.output_sink)
         self.mouse_mapper = MouseMapper(self.mapper, self.output_sink)
         self.key_mapper = KeyMapper(self.mapper, self.output_sink)
