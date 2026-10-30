@@ -27,6 +27,10 @@ class BridgeOutputSink(OutputSink):
     """Bridges Semantic stage outputs to the hardware driver Bridge."""
 
     bridge: AbstractBridge
+    
+    # Callback into the Mapper to retrieve: (dev_w, dev_h, win_info, screen_w, screen_h)
+    callback: Callable[[], tuple[float, float, dict | None, int, int]] | None = None 
+    
     # Accumulators for fractional mouse movements to prevent slow-aim pixel loss
     _acc_x: float = field(init=False, default=0.0)
     _acc_y: float = field(init=False, default=0.0)
@@ -61,6 +65,32 @@ class BridgeOutputSink(OutputSink):
             self.bridge.button4_up()
         elif scancode == M_FORWARD:
             self.bridge.button5_up()
+
+    def mouse_move_abs(self, dev_x: float, dev_y: float) -> None:
+        """Converts oriented device pixels into PC target window physical pixels using the callback."""
+        if self.callback is None:
+            # Fallback if the engine hasn't wired the callback yet
+            self.bridge.mouse_move_abs(int(round(dev_x)), int(round(dev_y)))
+            return
+
+        # Query the mapper for the current device dimensions and window offsets
+        dev_w, dev_h, win, screen_w, screen_h = self.callback()
+        
+        dev_w = max(1.0, float(dev_w))
+        dev_h = max(1.0, float(dev_h))
+
+        norm_x = clamp(dev_x / dev_w, 0.0, 1.0)
+        norm_y = clamp(dev_y / dev_h, 0.0, 1.0)
+
+        # Apply offsets if the target window is valid and visible
+        if win and win["width"] > 0 and win["height"] > 0:
+            target_x = win["left"] + norm_x * win["width"]
+            target_y = win["top"] + norm_y * win["height"]
+        else:
+            target_x = norm_x * screen_w
+            target_y = norm_y * screen_h
+
+        self.bridge.mouse_move_abs(int(round(target_x)), int(round(target_y)))
 
     def mouse_move(self, dx: float, dy: float) -> None:
         """Accumulates fractional deltas from ANY pipeline (WheelMapper, Pointer buttons, etc.)."""
