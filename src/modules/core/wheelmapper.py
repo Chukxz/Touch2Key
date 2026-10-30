@@ -59,10 +59,12 @@ class WheelMapper:
             return
 
         settings = snap.settings
-        inner_r = float(layout.mouse_wheel_radius)
-        outer_r = float(layout.sprint_distance)
-        w = float(layout.width)
-        h = float(layout.height)
+        
+        # Read pre-scaled device pixel boundaries directly from the snapshot
+        inner_r = snap.wheel_radius
+        outer_r = snap.sprint_distance
+        w = float(snap.width)
+        h = float(snap.height)
 
         if settings.left_handed:
             half_screen_region = RectangularRegion(Point(w / 2.0, 0.0), Point(w, h))
