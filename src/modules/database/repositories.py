@@ -450,10 +450,10 @@ class LayoutsRepository:
             if old_w > 0 and old_h > 0 and (old_w != width or old_h != height):
                 sx = width / old_w
                 sy = height / old_h
-                sa = (sx + sy) / 2.0
+                sr = min(sx, sy)
                 conn.execute(
                     "UPDATE layout_zones SET "
-                    "cx = ROUND(cx * :sx), cy = ROUND(cy * :sy), r = ROUND(r * :sa), "
+                    "cx = ROUND(cx * :sx), cy = ROUND(cy * :sy), r = ROUND(r * :sr), "
                     "x1 = ROUND(x1 * :sx), y1 = ROUND(y1 * :sy), "
                     "x2 = ROUND(x2 * :sx), y2 = ROUND(y2 * :sy), "
                     "updated_at = datetime('now') "
