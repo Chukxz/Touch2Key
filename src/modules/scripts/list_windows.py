@@ -144,8 +144,13 @@ def _poll_key_unix() -> tuple[Optional[str], Optional[str]]:
                 raise KeyboardInterrupt
             elif ch.isprintable():
                 return "char", ch
+    except (IOError, termios.error):
+        pass
     finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        try:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        except Exception:
+            pass
     return None, None
 
 
@@ -155,7 +160,6 @@ def _select_window_cli() -> Optional[tuple[int, str]]:
     is_typing = False
     table_str = ""
     last_warning = ""
-    # Logs already on screen (typically ~2 lines); captured before the first clear.
     base = AppLogManager.console_history()
 
     try:
@@ -203,7 +207,6 @@ def _select_window_cli() -> Optional[tuple[int, str]]:
                         break
 
                     title = rows[window_id][1]
-                    # Final screen: preserved logs + table, then the selection line.
                     _render(base, table_str, prompt=False)
                     logger.info("Window selected: %s (%s)\n", window_id, title)
                     return window_id, title
@@ -262,7 +265,6 @@ def _create_gui_dialog():
             self.table.setHorizontalHeaderLabels(WINDOWS_HEADERS)
             self.table.setFont(QFont("Courier", 10))
 
-            # Enable smooth pixel-based scrolling for both directions
             self.table.setVerticalScrollMode(
                 QAbstractItemView.ScrollMode.ScrollPerPixel
             )
@@ -270,7 +272,6 @@ def _create_gui_dialog():
                 QAbstractItemView.ScrollMode.ScrollPerPixel
             )
 
-            # Ensure scrollbars appear dynamically as needed
             self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             self.table.setHorizontalScrollBarPolicy(
                 Qt.ScrollBarPolicy.ScrollBarAsNeeded
