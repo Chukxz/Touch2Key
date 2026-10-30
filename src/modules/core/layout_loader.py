@@ -78,6 +78,9 @@ class LayoutSnapshot:
     width: int = 1920
     height: int = 1080
     dpi: int = 160
+    wheel_radius: float = 0.0
+    sprint_distance: float = 0.0
+
     keys: tuple[ZoneData, ...] = ()  # circle/rect zones, wheel and sprint excluded
     bezels: tuple[ZoneData, ...] = ()
     wheel: ZoneData | None = None
@@ -176,6 +179,9 @@ class LayoutLoader:
             return
 
         dev_w, dev_h, dev_dpi, sx, sy = self._resolve_target_space(layout)
+        sr = min(sx, sy)
+        scaled_wheel_radius = float(layout.mouse_wheel_radius) * sr
+        scaled_sprint_distance = float(layout.sprint_distance) * sr
 
         # list_for_layout auto-heals the bezels.
         zones = store.zones.list_for_layout(layout.id)
@@ -217,6 +223,8 @@ class LayoutLoader:
             width=dev_w,
             height=dev_h,
             dpi=dev_dpi,
+            wheel_radius=scaled_wheel_radius,
+            sprint_distance=scaled_sprint_distance,
             keys=tuple(keys),
             bezels=tuple(bezels),
             wheel=wheel,
