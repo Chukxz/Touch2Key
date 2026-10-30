@@ -3,7 +3,6 @@ from __future__ import annotations
 import atexit
 import ctypes
 import logging
-import os
 import signal
 import sys
 import time
@@ -56,9 +55,10 @@ VISUALIZER_NAME = "Touch2Key_Visualizer"
 
 RIPPLE_LIFETIME_MS = 5000
 MAX_EVENT_LOG = 10_000
-MAX_TRAIL_NUMBER = 1000
+MAX_TRAIL_NUMBER = 5000
 MAX_TRAIL_WIDTH = 100
 MAX_TRAIL_HEIGHT = 100
+
 
 MOUSE_BUTTON_INFO: dict[Qt.MouseButton, tuple[str, str]] = {
     Qt.MouseButton.LeftButton: ("Left", "cyan"),
@@ -78,11 +78,17 @@ class DiagnosticView(QGraphicsView):
     def __init__(
         self,
         loc_dict: dict[int, tuple[float, float]],
-        parent: QMainWindow | None = None,
+        parent: MainWindow | None = None,
     ) -> None:
         super().__init__(parent)
 
         self._loc_dict: dict[int, tuple[float, float]] = loc_dict
+        self.cursor_visible = _PLATFORM.WindowManager().is_cursor_visible(True, 0)[0]
+        self.data: deque[dict] = deque(maxlen=MAX_EVENT_LOG)
+        self.pressed_keys: dict[int, str] = {}
+        self.pressed_mouse_buttons: set[str] = set()
+        self.pressed_scancodes_list: list[int] = []
+        self._hotkey_triggered = False
         self.setMouseTracking(True)
 
         self._scene = QGraphicsScene(self)
@@ -100,7 +106,7 @@ class DiagnosticView(QGraphicsView):
         self.active_buttons.setZValue(100)
 
         self.trail_rects: list[QGraphicsItem] = []
-        self.max_trail_number = MAX_TRAIL_NUMBER
+        self.max_trail_number = 1000
         self.trail_width = 5
         self.trail_height = 5
         self.f_p_x: int | None = None
@@ -112,7 +118,8 @@ class DiagnosticView(QGraphicsView):
         self._current_curve: CurveType = self._curve_types[self._curve_idx]
 
         self._adjust_curves: dict[str, InputCurve] = {
-            key: InputCurve(self._current_curve) for key in ("left", "right", "down", "up")
+            key: InputCurve(self._current_curve)
+            for key in ("left", "right", "down", "up", "inc_num", "dec_num")
         }
         self._pressed_keys: set[int] = set()
         self._last_f8_time = 0.0
@@ -123,7 +130,26 @@ class DiagnosticView(QGraphicsView):
         self._poll_timer.timeout.connect(self._poll_hotkeys)
         self._poll_timer.start()
 
-        logger.info("[Visualizer Launch] Default Input Curve: %s", self._current_curve.name)
+        logger.info(
+            "[Visualizer Launch] Default Input Curve: %s", self._current_curve.name
+        )
+
+    def _force_cursor_hidden(self) -> None:
+        if sys.platform == "win32":
+            while ctypes.windll.user32.ShowCursor(False) >= 0:
+                pass
+        elif sys.platform == "linux":
+            while QGuiApplication.overrideCursor() is not None:
+                QGuiApplication.restoreOverrideCursor()
+            QGuiApplication.setOverrideCursor(Qt.CursorShape.BlankCursor)
+
+    def _force_cursor_visible(self) -> None:
+        if sys.platform == "win32":
+            while ctypes.windll.user32.ShowCursor(True) < 0:
+                pass
+        elif sys.platform == "linux":
+            while QGuiApplication.overrideCursor() is not None:
+                QGuiApplication.restoreOverrideCursor()
 
     def get_current_curve_name(self) -> str:
         return self._current_curve.name
@@ -131,16 +157,21 @@ class DiagnosticView(QGraphicsView):
     def _poll_hotkeys(self) -> None:
         now = time.perf_counter()
 
-        left_pressed = Qt.Key.Key_Left in self._pressed_keys
-        right_pressed = Qt.Key.Key_Right in self._pressed_keys
-        down_pressed = Qt.Key.Key_Down in self._pressed_keys
-        up_pressed = Qt.Key.Key_Up in self._pressed_keys
+        is_control = Qt.Key.Key_Control in self._pressed_keys
+        left_pressed = Qt.Key.Key_Left in self._pressed_keys and is_control
+        right_pressed = Qt.Key.Key_Right in self._pressed_keys and is_control
+        down_pressed = Qt.Key.Key_Down in self._pressed_keys and is_control
+        up_pressed = Qt.Key.Key_Up in self._pressed_keys and is_control
+        inc_num_pressed = Qt.Key.Key_F6 in self._pressed_keys and is_control
+        dec_num_pressed = Qt.Key.Key_F7 in self._pressed_keys and is_control
 
         # Opposing keys on the same axis cancel: treat both as released.
         if left_pressed and right_pressed:
             left_pressed = right_pressed = False
         if down_pressed and up_pressed:
             down_pressed = up_pressed = False
+        if inc_num_pressed and dec_num_pressed:
+            inc_num_pressed = dec_num_pressed = False
 
         changed = False
         if self._adjust_curves["left"].check_input(now, left_pressed):
@@ -155,6 +186,16 @@ class DiagnosticView(QGraphicsView):
         if self._adjust_curves["up"].check_input(now, up_pressed):
             self.trail_height = int(clamp(self.trail_height + 1, 1, MAX_TRAIL_HEIGHT))
             changed = True
+        if self._adjust_curves["dec_num"].check_input(now, dec_num_pressed):
+            self.max_trail_number = int(
+                clamp(self.max_trail_number + 1, 500, MAX_TRAIL_NUMBER)
+            )
+            changed = True
+        if self._adjust_curves["inc_num"].check_input(now, inc_num_pressed):
+            self.max_trail_number = int(
+                clamp(self.max_trail_number - 1, 500, MAX_TRAIL_NUMBER)
+            )
+            changed = True
 
         if changed:
             self.arrow_pressed.emit()
@@ -162,9 +203,7 @@ class DiagnosticView(QGraphicsView):
     def set_active_text(self, text: str) -> None:
         self.active_buttons.setPlainText(text)
 
-    def _add_trail_rect(
-        self, x: int, y: int, w: int = 5, h: int = 5
-    ) -> None:
+    def _add_trail_rect(self, x: int, y: int, w: int = 5, h: int = 5) -> None:
         rect = self._scene.addRect(
             x, y, w, h, QPen(QColor("#cccccc")), QBrush(QColor("#cccccc"))
         )
@@ -215,18 +254,25 @@ class DiagnosticView(QGraphicsView):
         if item.scene() is self._scene:
             self._scene.removeItem(item)
 
-    def set_loc_dict(
-        self, loc_dict: dict[int, tuple[float, float]]
-    ) -> None:
+    def set_loc_dict(self, loc_dict: dict[int, tuple[float, float]]) -> None:
         self._loc_dict = loc_dict
+
+    def _update_active_display(self) -> None:
+        parts = list(self.pressed_keys.values()) + sorted(self.pressed_mouse_buttons)
+        self.set_active_text(f"[{' + '.join(parts)}]" if parts else "")
+
+    def _clear_pressed_state(self) -> None:
+        self.pressed_keys.clear()
+        self.pressed_mouse_buttons.clear()
+        self.pressed_scancodes_list.clear()
+        self._hotkey_triggered = False
+        self._update_active_display()
 
     @staticmethod
     def _mouse_button_info(
         btn: Qt.MouseButton,
     ) -> tuple[str, str]:
-        return MOUSE_BUTTON_INFO.get(
-            btn, (f"Btn{int(btn.value)}", "white")
-        )
+        return MOUSE_BUTTON_INFO.get(btn, (f"Btn{int(btn.value)}", "white"))
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         pos = event.position().toPoint()
@@ -276,15 +322,48 @@ class DiagnosticView(QGraphicsView):
         self.setSceneRect(0.0, 0.0, float(width), float(height))
         self.resized.emit(width, height)
 
+    @staticmethod
+    def _key_identity(event: QKeyEvent) -> int:
+        return event.nativeScanCode() or int(event.key())
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.isAutoRepeat():
             super().keyPressEvent(event)
             return
 
-        key = event.key()
-        self._pressed_keys.add(key)
+        event_key = event.key()
+        self._pressed_keys.add(event_key)
 
-        if key == Qt.Key.Key_F8:
+        scancode_key = get_specific_qt_key(event)
+        scancode = get_scancode_from_key(scancode_key)
+
+        if scancode is not None:
+            if scancode not in self.pressed_scancodes_list:
+                self.pressed_scancodes_list.append(scancode)
+
+        settings = store.settings.get()
+        hotkeys_str = settings.toggle_hotkeys or ""
+        expected_scancodes = [
+            code
+            for name in parse_seq(hotkeys_str, ",")
+            if (code := get_scancode_from_key(name)) is not None
+        ]
+
+        if expected_scancodes and self.pressed_scancodes_list == expected_scancodes:
+            if not self._hotkey_triggered:
+                self._hotkey_triggered = True
+                if event.isAutoRepeat():
+                    super().keyPressEvent(event)
+                    return
+
+                if self.cursor_visible:
+                    self._force_cursor_hidden()
+                    self.cursor_visible = False
+                else:
+                    self._force_cursor_visible()
+                    self.cursor_visible = True
+
+        if event_key == Qt.Key.Key_F8:
             now = time.perf_counter()
             if now - self._last_f8_time >= 0.35:  # 350 ms debounce
                 self._last_f8_time = now
@@ -292,9 +371,29 @@ class DiagnosticView(QGraphicsView):
                 self._current_curve = self._curve_types[self._curve_idx]
                 for k in self._adjust_curves:
                     self._adjust_curves[k] = InputCurve(self._current_curve)
-                logger.info("Visualizer Input Curve cycled to %s", self._current_curve.name)
+                logger.info(
+                    "Visualizer Input Curve cycled to %s", self._current_curve.name
+                )
                 self.arrow_pressed.emit()
 
+        key_name = scancode_key.strip().upper()
+        self.pressed_keys[self._key_identity(event)] = key_name
+
+        cursor_pos = self.mapFromGlobal(self.cursor().pos())
+        mouse_x, mouse_y = cursor_pos.x(), cursor_pos.y()
+
+        self.data.append(
+            {
+                "x": mouse_x,
+                "y": mouse_y,
+                "type": f"Key: {key_name}",
+                "time": time.time(),
+            }
+        )
+
+        self.set_labelled_ripple(mouse_x, mouse_y, key_name, scancode, "red")
+
+        self._update_active_display()
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event: QKeyEvent) -> None:
@@ -303,6 +402,31 @@ class DiagnosticView(QGraphicsView):
             return
 
         self._pressed_keys.discard(event.key())
+
+        if event.isAutoRepeat():
+            super().keyReleaseEvent(event)
+            return
+
+        key = get_specific_qt_key(event)
+        scancode = get_scancode_from_key(key)
+        if scancode is not None:
+            while scancode in self.pressed_scancodes_list:
+                self.pressed_scancodes_list.remove(scancode)
+
+        settings = store.settings.get()
+        hotkeys_str = settings.toggle_hotkeys or ""
+        expected_scancodes = [
+            code
+            for name in parse_seq(hotkeys_str, ",")
+            if (code := get_scancode_from_key(name)) is not None
+        ]
+
+        if self.pressed_scancodes_list != expected_scancodes:
+            self._hotkey_triggered = False
+
+        self.pressed_keys.pop(self._key_identity(event), None)
+
+        self._update_active_display()
         super().keyReleaseEvent(event)
 
 
@@ -311,17 +435,6 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.loc_dict: dict[int, tuple[float, float]] = {}
-
-        self.cursor_visible = (
-            _PLATFORM.WindowManager().is_cursor_visible(True, 0)[0]
-        )
-
-        self.data: deque[dict] = deque(maxlen=MAX_EVENT_LOG)
-        self.pressed_keys: dict[int, str] = {}
-        self.pressed_mouse_buttons: set[str] = set()
-        self.pressed_scancodes_list: list[int] = []
-        self._hotkey_triggered = False
-
         self.setWindowTitle(VISUALIZER_NAME)
         self.setWindowOpacity(0.4)
 
@@ -345,56 +458,17 @@ class MainWindow(QMainWindow):
         )
         self._position_instruction()
 
-    # ------------------------------------------------------------------
-    # Cursor
-    # ------------------------------------------------------------------
-
-    def _force_cursor_hidden(self) -> None:
-        if sys.platform == "win32":
-            while ctypes.windll.user32.ShowCursor(False) >= 0:
-                pass
-        elif sys.platform == "linux":
-            while QGuiApplication.overrideCursor() is not None:
-                QGuiApplication.restoreOverrideCursor()
-            QGuiApplication.setOverrideCursor(Qt.CursorShape.BlankCursor)
-
-    def _force_cursor_visible(self) -> None:
-        if sys.platform == "win32":
-            while ctypes.windll.user32.ShowCursor(True) < 0:
-                pass
-        elif sys.platform == "linux":
-            while QGuiApplication.overrideCursor() is not None:
-                QGuiApplication.restoreOverrideCursor()
-
-    # ------------------------------------------------------------------
-    # Display
-    # ------------------------------------------------------------------
-
-    def _update_active_display(self) -> None:
-        parts = list(self.pressed_keys.values()) + sorted(
-            self.pressed_mouse_buttons
-        )
-        self.view.set_active_text(
-            f"[{' + '.join(parts)}]" if parts else ""
-        )
-
-    def _clear_pressed_state(self) -> None:
-        self.pressed_keys.clear()
-        self.pressed_mouse_buttons.clear()
-        self.pressed_scancodes_list.clear()
-        self._hotkey_triggered = False
-        self._update_active_display()
-
     def _instruction_text(self) -> str:
         curve_name = self.view.get_current_curve_name()
         return (
             "Press ESC to exit (when cursor is visible).\n"
             f"[F8] Cycle Input Curve: [{curve_name}]\n"
-            f"(Left/Right: increase/decrease trail width "
+            f"(CTRL + Left/Right: decrease/increase trail width "
             f"({self.view.trail_width}) [1-{MAX_TRAIL_WIDTH}]).\n"
-            f"(Up/Down: increase/decrease trail height "
+            f"(CTRL + Up/Down: increase/decrease trail height "
             f"({self.view.trail_height}) [1-{MAX_TRAIL_HEIGHT}]).\n"
-            f"Maximum number of trails: {MAX_TRAIL_NUMBER}."
+            f"(CTRL + F6/F7: decrease/increase max trail number) "
+            f"({self.view.max_trail_number}) [500-{MAX_TRAIL_NUMBER}]."
         )
 
     def _update_instruction_text(self) -> None:
@@ -447,15 +521,9 @@ class MainWindow(QMainWindow):
 
         return loc_dict
 
-    # ------------------------------------------------------------------
-    # View slots
-    # ------------------------------------------------------------------
-
-    def _on_mouse_pressed(
-        self, btn_name: str, x: int, y: int
-    ) -> None:
-        self.pressed_mouse_buttons.add(btn_name)
-        self.data.append(
+    def _on_mouse_pressed(self, btn_name: str, x: int, y: int) -> None:
+        self.view.pressed_mouse_buttons.add(btn_name)
+        self.view.data.append(
             {
                 "x": x,
                 "y": y,
@@ -463,110 +531,30 @@ class MainWindow(QMainWindow):
                 "time": time.time(),
             }
         )
-        self._update_active_display()
+        self.view._update_active_display()
 
     def _on_mouse_released(self, btn_name: str) -> None:
-        self.pressed_mouse_buttons.discard(btn_name)
-        self._update_active_display()
-
-    # ------------------------------------------------------------------
-    # Events
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _key_identity(event: QKeyEvent) -> int:
-        return event.nativeScanCode() or int(event.key())
+        self.view.pressed_mouse_buttons.discard(btn_name)
+        self.view._update_active_display()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        key = get_specific_qt_key(event)
-        scancode = get_scancode_from_key(key)
+        if event.isAutoRepeat():
+            super().keyPressEvent(event)
+            return
 
-        if scancode is not None:
-            if scancode not in self.pressed_scancodes_list:
-                self.pressed_scancodes_list.append(scancode)
-
-        settings = store.settings.get()
-        hotkeys_str = settings.toggle_hotkeys or ""
-        expected_scancodes = [
-            code for name in parse_seq(hotkeys_str, ",")
-            if (code := get_scancode_from_key(name)) is not None
-        ]
-
-        if expected_scancodes and self.pressed_scancodes_list == expected_scancodes:
-            if not self._hotkey_triggered:
-                self._hotkey_triggered = True
-                if event.isAutoRepeat():
-                    super().keyPressEvent(event)
-                    return
-
-                if self.cursor_visible:
-                    self._force_cursor_hidden()
-                    self.cursor_visible = False
-                else:
-                    self._force_cursor_visible()
-                    self.cursor_visible = True
-
-        if (
-            event.key() == Qt.Key.Key_Escape
-            and self.cursor_visible
-        ):
+        if event.key() == Qt.Key.Key_Escape and self.view.cursor_visible:
             self.close()
             return
-
-        key_name = key.strip().upper()
-        self.pressed_keys[self._key_identity(event)] = key_name
-
-        cursor_pos = self.view.mapFromGlobal(self.cursor().pos())
-        mouse_x, mouse_y = cursor_pos.x(), cursor_pos.y()
-
-        self.data.append(
-            {
-                "x": mouse_x,
-                "y": mouse_y,
-                "type": f"Key: {key_name}",
-                "time": time.time(),
-            }
-        )
-
-        self.view.set_labelled_ripple(
-            mouse_x, mouse_y, key_name, scancode, "red"
-        )
-        self._update_active_display()
-        super().keyPressEvent(event)
-
-    def keyReleaseEvent(self, event: QKeyEvent) -> None:
-        if event.isAutoRepeat():
-            super().keyReleaseEvent(event)
-            return
-
-        key = get_specific_qt_key(event)
-        scancode = get_scancode_from_key(key)
-        if scancode is not None:
-            while scancode in self.pressed_scancodes_list:
-                self.pressed_scancodes_list.remove(scancode)
-
-        settings = store.settings.get()
-        hotkeys_str = settings.toggle_hotkeys or ""
-        expected_scancodes = [
-            code for name in parse_seq(hotkeys_str, ",")
-            if (code := get_scancode_from_key(name)) is not None
-        ]
-
-        if self.pressed_scancodes_list != expected_scancodes:
-            self._hotkey_triggered = False
-
-        self.pressed_keys.pop(self._key_identity(event), None)
-        self._update_active_display()
-        super().keyReleaseEvent(event)
+        return super().keyPressEvent(event)
 
     def changeEvent(self, event: QEvent) -> None:
         if event.type() == QEvent.Type.WindowDeactivate:
-            self._clear_pressed_state()
+            self.view._clear_pressed_state()
 
         super().changeEvent(event)
 
     def closeEvent(self, event) -> None:
-        self._force_cursor_visible()
+        self.view._force_cursor_visible()
         super().closeEvent(event)
 
 

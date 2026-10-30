@@ -112,6 +112,10 @@ def keyboard_worker(
         log_queue.put("Keyboard worker has an invalid Interception keyboard handle.")
         return
 
+    ctypes.windll.ntdll.NtSetTimerResolution(
+        NT_TIMER_RES, 1, ctypes.byref(ctypes.c_ulong())
+    )
+
     from interception.interception import Interception
     from interception.strokes import KeyStroke
 

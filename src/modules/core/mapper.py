@@ -139,7 +139,7 @@ class Mapper:
         if settings.pps_alert_threshold > 0:
             self.pps = float(settings.pps_alert_threshold)
 
-     def execute_toggle_hotkeys(self, hotkeys_str: str | None = None) -> None:
+    def execute_toggle_hotkeys(self, hotkeys_str: str | None = None) -> None:
         source_str = hotkeys_str if hotkeys_str is not None else self.toggle_hotkeys_str
         key_names = parse_seq(source_str, ",")
         if not key_names:
