@@ -200,7 +200,7 @@ class KeyCaptureDialog(QDialog):
 
         else:
             self.captured_key = captured_key
-            self.key_label.setText(f"Captured: {captured_key.upper}")
+            self.key_label.setText(f"Captured: {captured_key.upper()}")
             self._listening = False
 
         self.retry_btn.setEnabled(True)
