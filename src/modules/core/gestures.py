@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from modules.utils import Point, TouchEvent, TouchPhase
+from modules.utils import BASELINE_DPI, Point, TouchEvent, TouchPhase, dp_to_px
 
 
 class GestureStatus(str, Enum):
@@ -48,6 +48,10 @@ class TwoFingerTapTracker:
     _candidate_ids: set[int] = field(default_factory=set, init=False)
     _pending_since: float | None = field(default=None, init=False)
     _recognized: bool = field(default=False, init=False)
+
+    def update_dpi(self, dpi: int, max_drift_dp: float = 25.0) -> None:
+        """Scales the maximum drift tolerance to the physical device DPI."""
+        self.max_drift_px = float(dp_to_px(max_drift_dp, dpi if dpi > 0 else BASELINE_DPI))
 
     def reset(self) -> None:
         self._contacts.clear()
@@ -175,18 +179,4 @@ class TwoFingerTapTracker:
                 return self._reject()
 
             # If only one finger was used and it lifted, a two-finger tap is impossible.
-            # Reject immediately so single-finger taps never get swallowed.
-            if len(self._candidate_ids) < 2:
-                return self._reject()
-
-            if len(self._candidate_ids) == 2 and all(
-                self._contacts[c].up_time is not None for c in self._candidate_ids
-            ):
-                if self._valid_pair():
-                    self.reset()
-                    return GestureDecision(GestureStatus.RECOGNIZED)
-                return self._reject()
-
-            return GestureDecision(GestureStatus.PENDING)
-
-        return GestureDecision(GestureStatus.PENDING)
+            # Reject immediately so
