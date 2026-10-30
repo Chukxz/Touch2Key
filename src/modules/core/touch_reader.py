@@ -21,6 +21,7 @@ from modules.utils import (
     clamp,
     get_adb_device,
     get_screen_size,
+    get_dpi,
     is_device_online,
     wireless_connect,
 )
@@ -52,13 +53,17 @@ class TouchReader:
         self.device_lock = threading.Lock()
         self.running = True
 
-        # Device screen resolution (pixels)
+        # Internal raw dimensions for getevent matrix math
         self.width = 1080
         self.height = 1920
-        # Hardware digitizer max bounds (scaled into width x height by self.matrix)
         self.max_x = 1080
         self.max_y = 1920
         self.matrix = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+
+        # Public canonical dimensions for higher-level mapping (LayoutLoader/OutputSink)
+        self.portrait_w = 1080
+        self.portrait_h = 1920
+        self.dpi = 160
 
         self.adb_rate_cap = rate_cap
         self.move_interval = (
@@ -106,8 +111,11 @@ class TouchReader:
                 if success:
                     connecting = False
                     with self.device_lock:
+                        # Only stop the running process if the device identity actually changed
+                        changed = self.device is not None and self.device != dev
                         self.device = dev
-                    self._stop_process(clear_device=False)
+                    if changed:
+                        self._stop_process(clear_device=False)
                 else:
                     time.sleep(LONG_DELAY)
             else:
@@ -242,6 +250,20 @@ class TouchReader:
     def get_rotation(self) -> int:
         with self.rotation_lock:
             return self.rotation
+            
+    def get_oriented_dimensions(self) -> tuple[int, int]:
+        """
+        Returns the current dimensions of the device's touch output,
+        orienting the base portrait dimensions to match the current rotation.
+        Returns: (oriented_width, oriented_height)
+        """
+        with self.rotation_lock:
+            rot = self.rotation
+            
+        # rot 1 and 3 are landscape; 0 and 2 are portrait
+        if rot in (1, 3):
+            return self.portrait_h, self.portrait_w
+        return self.portrait_w, self.portrait_h
 
     def _ensure_slot(self, slot: int) -> None:
         if slot not in self.slots:
@@ -276,6 +298,10 @@ class TouchReader:
         res = get_screen_size(self.device)
         if res:
             self.width, self.height = res
+            self.portrait_w = min(res)
+            self.portrait_h = max(res)
+            
+        self.dpi = get_dpi(self.device)
 
         real_slots, self.max_x, self.max_y = self._get_device_bounds_and_slots()
         if real_slots > len(self.last_dispatch_times):
@@ -402,14 +428,10 @@ class TouchReader:
 
             if data["x"] is None or data["y"] is None:
                 if data["phase"] is TouchPhase.UP:
-                    self.slots[slot] = {
-                        "x": None,
-                        "y": None,
-                        "tid": -1,
-                        "phase": None,
-                        "timestamp": 0.0,
-                        "dirty": False,
-                    }
+                    data["tid"] = -1
+                    data["phase"] = None
+                    data["timestamp"] = 0.0
+                    data["dirty"] = False
                 continue
 
             if data["phase"] is TouchPhase.MOVE:
@@ -441,14 +463,11 @@ class TouchReader:
             elif data["phase"] is TouchPhase.MOVE:
                 data["dirty"] = False
             elif data["phase"] is TouchPhase.UP:
-                self.slots[slot] = {
-                    "x": None,
-                    "y": None,
-                    "tid": -1,
-                    "phase": None,
-                    "timestamp": 0.0,
-                    "dirty": False,
-                }
+                # Do not wipe x/y here, retain them for Linux slot deduplication
+                data["tid"] = -1
+                data["phase"] = None
+                data["timestamp"] = 0.0
+                data["dirty"] = False
 
         if lift_up:
             self.active_touches = 0
