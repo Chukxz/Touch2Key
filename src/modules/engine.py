@@ -936,6 +936,13 @@ class Engine:
         if mapper is not None:
             mapper._pulse_status()  # keep the rate fresh when window tracking is idle
 
+        touch_reader = self.touch_reader
+        if touch_reader is not None:
+            dev_w, dev_h = touch_reader.get_oriented_dimensions()
+            rotation = touch_reader.get_rotation()
+        else:
+            dev_w, dev_h, rotation = 1920, 1080, 0
+
         def alive_pid(proc) -> int | None:
             try:
                 return proc.pid if proc is not None and proc.is_alive() else None
@@ -954,6 +961,9 @@ class Engine:
             "moves": self.touch_event_counter.event_count_move,
             "ups": self.touch_event_counter.event_count_up,
             "all": self.touch_event_counter.event_count,
+            "device_width": dev_w,
+            "device_height": dev_h,
+            "device_rotation": rotation,
             "workers": {
                 "keyboard": alive_pid(getattr(bridge, "k_proc", None)),
                 "mouse": alive_pid(getattr(bridge, "m_proc", None)),
