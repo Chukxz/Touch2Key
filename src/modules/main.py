@@ -5,7 +5,6 @@ import multiprocessing
 import argparse
 import cProfile
 import datetime
-import signal
 import logging
 from typing import TYPE_CHECKING, cast
 
@@ -15,13 +14,12 @@ from modules.scripts.preflight import run as run_preflight
 from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER, ICONS_FOLDER
 from modules.log_manager import AppLogManager, initialize_cleanup, modify_qt_logging_rules_on_win32
 
-from PySide6.QtCore import QTimer, QCoreApplication
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 
 if TYPE_CHECKING:
     from cProfile import Profile
-    
+
 logger = logging.getLogger("modules.main")
 
 cli_profiler: Profile | None = None
@@ -68,7 +66,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     parser.add_argument(
         "--use-gui",
         action="store_true",
-        help="Initialize QApplication context",
+        help="Initialize QApplication context for background resources",
     )
 
     parser.add_argument(
@@ -78,7 +76,7 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     )
 
     args = parser.parse_args()
-    
+
     modify_qt_logging_rules_on_win32()
 
     if args.profile:
@@ -90,20 +88,13 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     # Boot Sequence
     # -----------------------------------------------------------------------
     if args.use_gui:
+        # Instantiates the background Qt Context but does not start the event loop.
         app = cast(QApplication, QApplication.instance() or QApplication(sys.argv))
         app.setApplicationName(APP_NAME)
 
         app_icon_path = ICONS_FOLDER / "app.png"
         if app_icon_path.exists():
             app.setWindowIcon(QIcon(str(app_icon_path)))
-
-        # Allow Python signals to be processed periodically by running a dummy timer
-        timer = QTimer()
-        timer.start(500)
-        timer.timeout.connect(lambda: None)  # Kickstarts the Python interpreter loop
-
-        # Handle Ctrl+C cleanly
-        signal.signal(signal.SIGINT, lambda *_: QCoreApplication.quit())
 
     if not run_preflight():
         profiler_cleanup(cli_profiler)
@@ -134,7 +125,6 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
             engine._start()
     except KeyboardInterrupt:
         logger.info("Engine received shutdown signal, exiting cleanly.")
-        engine._shutdown()
     finally:
         engine._shutdown()
         profiler_cleanup(cli_profiler)
