@@ -36,6 +36,13 @@ class BridgeOutputSink(OutputSink):
     _acc_y: float = field(init=False, default=0.0)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
+    def set_viewport_callback(
+        self, 
+        callback: Callable[[], tuple[float, float, dict | None, int, int]] | None
+    ) -> None:
+        """Dynamically binds or unbinds the viewport info provider from the Mapper."""
+        self.callback = callback
+
     def key_down(self, scancode: int) -> None:
         self.bridge.key_down(scancode)
 
