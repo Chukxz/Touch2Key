@@ -253,119 +253,124 @@ def migrate_json_layout(
         )
         layout_id = layout.id
 
-        try:
-            has_explicit_bezels = any(
-                str(item.get("type", "")).upper() == BEZEL for item in content
-            )
-            if has_explicit_bezels:
-                store.zones.delete_all_for_layout(layout_id)
+    # BUGFIX: Move this outside the `else` block so we can also 
+    # update zones on existing layouts if desired (un-indented)
+    try:
+        has_explicit_bezels = any(
+            str(item.get("type", "")).upper() == BEZEL for item in content
+        )
+        if has_explicit_bezels:
+            store.zones.delete_all_for_layout(layout_id)
 
-            app_settings = store.settings.get()
-            imported = 0
+        app_settings = store.settings.get()
+        imported = 0
 
-            for item in content:
-                scancode = item.get("scancode")
-                if scancode is None:
-                    continue
+        for item in content:
+            scancode = item.get("scancode")
+            if scancode is None:
+                continue
 
-                zone_type = str(item.get("type", "")).upper()
-                if zone_type not in (CIRCLE, RECTANGLE, BEZEL):
-                    logger.warning(
-                        "Skipping zone with unrecognized type %r for scancode %s.",
-                        zone_type,
-                        scancode,
-                    )
-                    continue
-
-                priority = int(item.get("priority", 0))
-                pointer = bool(item.get("pointer", False))
-                zone_name = str(item.get("name", ""))
-                ignore_app_settings = bool(item.get("ignore_app_settings", False))
-
-                existing_pipeline_json = item.get("pipeline_json")
-                if existing_pipeline_json and isinstance(existing_pipeline_json, str):
-                    pipeline_json = existing_pipeline_json
-                else:
-                    p_cfg = PipelineConfig()
-                    reg_idx = 1 if zone_type == CIRCLE else 2
-                    orig_idx = 1
-                    const_idx = 0
-                    trans_idx = 1
-                    sem_idx = 0
-
-                    # Compare scancodes, not names (name is a str, the code an int).
-                    if int(scancode) == MOUSE_WHEEL_SIMULATOR_CODE:
-                        sem_idx = 1
-                        trans_idx = 2
-                        if app_settings.anchored_joystick:
-                            orig_idx = 2
-                            const_idx = 2
-                        elif app_settings.floating_joystick:
-                            orig_idx = 1
-                            const_idx = 2
-                        else:
-                            orig_idx = 0
-                            const_idx = 1
-
-                    elif zone_type == BEZEL:
-                        orig_idx = 0
-                        const_idx = 0
-                        trans_idx = 0
-                        sem_idx = 3
-
-                    p_cfg.set_region_config(reg_idx, BEZEL_DP_THICKNESS, priority)
-                    p_cfg.set_origin_config(orig_idx)
-                    p_cfg.set_constraint_config(const_idx)
-                    # `deadzone` is a 0..1 ratio; WheelMapper multiplies it by the
-                    # wheel radius itself, so it must NOT be pre-multiplied here.
-                    p_cfg.set_transform_config(
-                        trans_idx,
-                        app_settings.sensitivity_x,
-                        app_settings.sensitivity_y,
-                        app_settings.deadzone,
-                        app_settings.hysteresis,
-                    )
-                    p_cfg.set_semantic_config(sem_idx, pointer)
-                    pipeline_json = p_cfg.get_pipeline_json_from_config()
-
-                store.zones.create(
-                    layout_id=layout_id,
-                    scancode=int(scancode),
-                    name=str(zone_name),
-                    zone_type=zone_type,
-                    cx=float(item.get("cx")),
-                    cy=float(item.get("cy")),
-                    r=float(item.get("val1")) if zone_type == CIRCLE else None,
-                    x1=float(item.get("val1")),
-                    y1=float(item.get("val2")),
-                    x2=float(item.get("val3")),
-                    y2=float(item.get("val4")),
-                    ignore_app_settings=ignore_app_settings,
-                    pipeline_json=pipeline_json,
+            zone_type = str(item.get("type", "")).upper()
+            if zone_type not in (CIRCLE, RECTANGLE, BEZEL):
+                logger.warning(
+                    "Skipping zone with unrecognized type %r for scancode %s.",
+                    zone_type,
+                    scancode,
                 )
-                imported += 1
+                continue
 
-            logger.info(
-                "Migrated JSON layout %s into layouts.id=%s (%d/%d zones imported).",
-                path,
-                layout_id,
-                imported,
-                len(content),
+            priority = int(item.get("priority", 0))
+            pointer = bool(item.get("pointer", False))
+            zone_name = str(item.get("name", ""))
+            ignore_app_settings = bool(item.get("ignore_app_settings", False))
+
+            existing_pipeline_json = item.get("pipeline_json")
+            if existing_pipeline_json and isinstance(existing_pipeline_json, str):
+                pipeline_json = existing_pipeline_json
+            else:
+                p_cfg = PipelineConfig()
+                reg_idx = 1 if zone_type == CIRCLE else 2
+                orig_idx = 1
+                const_idx = 0
+                trans_idx = 1
+                sem_idx = 0
+
+                # Compare scancodes, not names (name is a str, the code an int).
+                if int(scancode) == MOUSE_WHEEL_SIMULATOR_CODE:
+                    sem_idx = 1
+                    trans_idx = 2
+                    if app_settings.anchored_joystick:
+                        orig_idx = 2
+                        const_idx = 2
+                    elif app_settings.floating_joystick:
+                        orig_idx = 1
+                        const_idx = 2
+                    else:
+                        orig_idx = 0
+                        const_idx = 1
+
+                elif zone_type == BEZEL:
+                    orig_idx = 0
+                    const_idx = 0
+                    trans_idx = 0
+                    sem_idx = 3
+
+                p_cfg.set_region_config(reg_idx, BEZEL_DP_THICKNESS, priority)
+                p_cfg.set_origin_config(orig_idx)
+                p_cfg.set_constraint_config(const_idx)
+                # `deadzone` is a 0..1 ratio; WheelMapper multiplies it by the
+                # wheel radius itself, so it must NOT be pre-multiplied here.
+                p_cfg.set_transform_config(
+                    trans_idx,
+                    app_settings.sensitivity_x,
+                    app_settings.sensitivity_y,
+                    app_settings.deadzone,
+                    app_settings.hysteresis,
+                )
+                p_cfg.set_semantic_config(sem_idx, pointer)
+                pipeline_json = p_cfg.get_pipeline_json_from_config()
+
+            store.zones.create(
+                layout_id=layout_id,
+                scancode=int(scancode),
+                name=str(zone_name),
+                zone_type=zone_type,
+                # BUGFIX: Added 0.0 fallbacks to prevent float(None) crashes on legacy imports
+                cx=float(item.get("cx", 0.0)),
+                cy=float(item.get("cy", 0.0)),
+                r=float(item.get("val1", 0.0)) if zone_type == CIRCLE else None,
+                x1=float(item.get("val1", 0.0)),
+                y1=float(item.get("val2", 0.0)),
+                x2=float(item.get("val3", 0.0)),
+                y2=float(item.get("val4", 0.0)),
+                ignore_app_settings=ignore_app_settings,
+                pipeline_json=pipeline_json,
             )
+            imported += 1
 
-            layout_record = store.layouts.get(layout_id)
-            if layout_record:
-                store.zones.ensure_bezels(layout_record)
+        logger.info(
+            "Migrated JSON layout %s into layouts.id=%s (%d/%d zones imported).",
+            path,
+            layout_id,
+            imported,
+            len(content),
+        )
 
-        except Exception:
-            logger.exception(
-                "Import of %s failed; removing the partially imported layout.", path
-            )
-            try:
+        layout_record = store.layouts.get(layout_id)
+        if layout_record:
+            store.zones.ensure_bezels(layout_record)
+
+    except Exception:
+        logger.exception(
+            "Import of %s failed; removing the partially imported layout.", path
+        )
+        try:
+            # Avoid deleting the layout if it was preexisting and we just failed to add zones
+            if existing is None:
                 store.layouts.delete(layout_id)
-            except Exception:
-                logger.exception("Could not remove partial layout id=%s", layout_id)
-            return None
+        except Exception:
+            logger.exception("Could not remove partial layout id=%s", layout_id)
+        return None
 
     if set_active:
         store.settings.update(active_layout_id=layout_id)
