@@ -370,11 +370,8 @@ class Semantic(ABC, Generic[T]):
 @dataclass(slots=True)
 class ButtonSemantic(Semantic[T]):
     scancode: int
-    _down: bool = field(init=False, default_factory=bool)
+    _down: bool = field(init=False, default=False)
     mouse_button: bool = False
-    
-    def __post_init__(self) -> None:
-       self._down = False   
 
     def process(
         self, context: PipelineContext, value: T, output_sink: OutputSink
@@ -384,7 +381,7 @@ class ButtonSemantic(Semantic[T]):
                 self.scancode
             )
             self._down = True
-            
+
         elif context.event.phase is TouchPhase.UP:
             (output_sink.mouse_up if self.mouse_button else output_sink.key_up)(
                 self.scancode
@@ -441,7 +438,7 @@ class PointerSemantic(Semantic[Vector]):
 class ToggleSemantic(Semantic[Unit]):
     callback: Callable[..., None]
     max_duration_s: float = 0.3
-    max_drift_px: float = 30.0
+    max_drift_px: float = 25.0
 
     _start_time: float | None = field(init=False, default=None)
     _start_pos: Point | None = field(init=False, default=None)
