@@ -1,3 +1,8 @@
+"""
+touch2key-visualizer: standalone diagnostic overlay rendering live touch ripples,
+event traces, and dynamic input curve telemetry from the running engine.
+"""
+
 from __future__ import annotations
 
 import atexit
@@ -11,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QCoreApplication, QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import (
+    QBrush,
     QColor,
     QFont,
     QGuiApplication,
@@ -19,18 +25,18 @@ from PySide6.QtGui import (
     QMouseEvent,
     QPainter,
     QPen,
-    QBrush,
     QResizeEvent,
 )
 from PySide6.QtWidgets import QApplication, QGraphicsScene, QGraphicsView, QMainWindow
 
-from modules.log_manager import AppLogManager, modify_qt_logging_rules_on_win32
 from modules.database import store
+from modules.log_manager import AppLogManager, modify_qt_logging_rules_on_win32
 from modules.platforms import (
     check_single_instance,
     get_platform,
     get_specific_qt_key,
 )
+from modules.runtime_info import attach, register_process, unregister_process
 from modules.utils import (
     ICONS_FOLDER,
     VISUALIZER_RUNTIME_FILE,
@@ -41,7 +47,6 @@ from modules.utils import (
     get_scancode_from_key,
     parse_seq,
 )
-from modules.runtime_info import register_process, unregister_process
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QGraphicsItem
@@ -133,8 +138,9 @@ class DiagnosticView(QGraphicsView):
         }
         self._pressed_keys: set[int] = set()
         self._last_f8_time = 0.0
+        self._last_dim_check = 0.0
 
-        # Poll timer for smooth typematic curve evaluation on held arrow keys (5 ms interval)
+        # Poll timer for smooth typematic curve evaluation & live engine sync (5 ms interval)
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(5)
         self._poll_timer.timeout.connect(self._poll_hotkeys)
@@ -203,6 +209,18 @@ class DiagnosticView(QGraphicsView):
         if changed:
             self.arrow_pressed.emit()
 
+        # Silently sync live device dimensions from the engine every 2.0 seconds
+        if now - self._last_dim_check > 2.0:
+            self._last_dim_check = now
+            viewport_size = self.viewport().size()
+            new_locs = MainWindow.get_locations_dict(
+                viewport_size.width(), viewport_size.height()
+            )
+            if new_locs and new_locs != self._loc_dict:
+                self._loc_dict = new_locs
+                if isinstance(self.parent(), MainWindow):
+                    self.parent().loc_dict = new_locs
+
     def set_active_text(self, text: str) -> None:
         self.active_buttons.setPlainText(text)
 
@@ -212,7 +230,6 @@ class DiagnosticView(QGraphicsView):
         )
         self.trail_rects.append(rect)
 
-        # while, not if: max_trail_number can drop by many in one burst.
         while len(self.trail_rects) > self.max_trail_number:
             old_rect = self.trail_rects.pop(0)
             self._remove_scene_item(old_rect)
@@ -502,15 +519,25 @@ class MainWindow(QMainWindow):
         if layout is None:
             return loc_dict
 
-        layout_width = float(layout.width or 0)
-        layout_height = float(layout.height or 0)
+        # Default fallback to static layout dimensions
+        dev_w = float(layout.width or 0)
+        dev_h = float(layout.height or 0)
 
-        if layout_width <= 0.0 or layout_height <= 0.0:
+        # Silently check for live engine telemetry snapshot dimensions (the engine & visualizer's little secret)
+        attached = attach()
+        if attached is not None:
+            _, snap = attached
+            live_w = snap.get("device_width")
+            live_h = snap.get("device_height")
+            if live_w and live_h:
+                dev_w, dev_h = float(live_w), float(live_h)
+
+        if dev_w <= 0.0 or dev_h <= 0.0:
             return loc_dict
 
         zones = store.get_active_layout_zones()
-        scale_x = width / layout_width
-        scale_y = height / layout_height
+        scale_x = width / dev_w
+        scale_y = height / dev_h
 
         for zone in zones:
             loc_dict[zone.scancode] = (
@@ -568,7 +595,7 @@ def run() -> None:
 
     register_process(VISUALIZER_RUNTIME_FILE)
     atexit.register(unregister_visualizer_file)
-    
+
     modify_qt_logging_rules_on_win32()
 
     app = QApplication(sys.argv)
@@ -592,7 +619,6 @@ def run() -> None:
 
 def main() -> None:
     """Dedicated entry point for touch2key-visualizer."""
-
     AppLogManager.setup_logging(log_prefix="touch2key_visualizer")
     run()
 
