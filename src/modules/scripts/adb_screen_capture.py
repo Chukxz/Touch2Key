@@ -117,11 +117,10 @@ def capture_android_screen(custom_img_name: str | None = None, parent=None) -> P
     actual_width, actual_height = width, height
     try:
         with Image.open(full_save_path) as img:
-            img_copy = img.copy()
-            actual_width, actual_height = img_copy.size
+            actual_width, actual_height = img.size
+            img.load()
+            img.save(full_save_path, dpi=(dpi, dpi))
 
-        # Save detached copy outside the with block so the original handle is closed
-        img_copy.save(full_save_path, dpi=(dpi, dpi))
         logger.info(
             "Embedded DPI (%s) into PNG header. Dimensions: %dx%d.",
             dpi,
