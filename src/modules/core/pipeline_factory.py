@@ -71,8 +71,8 @@ def FixedJoystick(
     down: int,
     left: int,
     right: int,
-    inner_radius: float = 80.0,
-    outer_radius: float = 120.0,
+    inner_radius: float = 0.0,
+    outer_radius: float = 0.0,
     sprint: int | None = None,
     hysteresis_deg: float = 5.0,
     priority: int = 0,
@@ -106,8 +106,8 @@ def FloatingJoystick(
     down: int,
     left: int,
     right: int,
-    inner_radius: float = 80.0,
-    outer_radius: float = 120.0,
+    inner_radius: float = 0.0,
+    outer_radius: float = 0.0,
     sprint: int | None = None,
     hysteresis_deg: float = 5.0,
     priority: int = 0,
@@ -149,8 +149,8 @@ def AnchoredJoystick(
     down: int,
     left: int,
     right: int,
-    inner_radius: float = 80.0,
-    outer_radius: float = 120.0,
+    inner_radius: float = 0.0,
+    outer_radius: float = 0.0,
     sprint: int | None = None,
     hysteresis_deg: float = 5.0,
     priority: int = 0,
@@ -206,11 +206,16 @@ def MousePointer(
 def Bezel(
     scancode: int,
     region: Region,
+    dpi: int = BASELINE_DPI,
     priority: int = 100,
     callback: Callable[..., None] | None = None,
+    max_drift_dp: float = 25.0,
     creation_id: int = 0,
 ) -> Pipeline[Unit]:
     """Factory for standardizing Bezel/System boundary zones defined in the layout."""
+    
+    max_drift_px = float(dp_to_px(max_drift_dp, dpi))
+    
     return Pipeline(
         region=region,
         origin=FixedOrigin(Point(0.0, 0.0)),
@@ -218,7 +223,7 @@ def Bezel(
         transformation=IdentityTransform(),
         semantics=[
             (
-                ToggleSemantic(callback)
+                ToggleSemantic(callback, max_drift_px=max_drift_px)
                 if callback is not None
                 else ButtonSemantic(scancode)
             )
