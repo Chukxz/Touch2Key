@@ -2605,7 +2605,7 @@ class LayoutsPlotterWidget(QWidget):
                 self.bottom_bezel_dp,
                 zone_rows,
             )
-            store.set_active_layout(saved_layout.id)
+            store.settings.update(active_layout_id=saved_layout.id)
         except DuplicateNameError:
             self.send_message.emit(
                 "Name Conflict", f"A layout named '{user_name}' already exists."
