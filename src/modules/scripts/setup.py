@@ -1,11 +1,6 @@
 """
 Platform setup and driver configuration bootstrap.
 Executable in both interactive CLI and GUI application modes.
-
-GUI mode: the launcher spawns `python -m modules.scripts.setup --gui -y`.
-The child owns its own QApplication, shows dialogs instead of reading stdin,
-and elevates via PolicyKit (Linux) or a UAC relaunch (Windows), so it works
-with no console/tty (desktop shortcut, pythonw.exe, Terminal=false).
 """
 
 from __future__ import annotations
@@ -26,10 +21,9 @@ logger = logging.getLogger("modules.scripts.setup")
 
 
 def create_desktop_shortcut() -> None:
-    """Creates a desktop shortcut for the Touch2Key application."""
     desktop = Path.home() / "Desktop"
     if not desktop.exists():
-        return  # Headless or containerized environment without a desktop
+        return
 
     exe = Path(sys.executable)
 
@@ -70,7 +64,6 @@ Categories=Utility;Application;
 
 
 def _is_admin() -> bool:
-    """Checks for Windows Administrator privileges."""
     try:
         return ctypes.windll.shell32.IsUserAnAdmin() != 0
     except Exception:
@@ -78,8 +71,6 @@ def _is_admin() -> bool:
 
 
 def _relaunch_elevated() -> bool:
-    """Relaunches this module through UAC, preserving the current CLI args
-    (including --gui), so the elevated copy also gets its own QApplication."""
     params = subprocess.list2cmdline(["-m", "modules.scripts.setup", *sys.argv[1:]])
     res = ctypes.windll.shell32.ShellExecuteW(
         None, "runas", sys.executable, params, str(PROJECT_ROOT), 1
@@ -88,8 +79,7 @@ def _relaunch_elevated() -> bool:
 
 
 def run(parent=None) -> bool:
-    """Main setup routine, compatible with GUI and CLI modes."""
-    is_gui = QApplication.instance() is not None
+    is_gui = "--gui" in sys.argv or QApplication.instance() is not None
 
     parser = argparse.ArgumentParser(description="Touch2Key Setup Utility")
     parser.add_argument(
@@ -106,12 +96,10 @@ def run(parent=None) -> bool:
     parser.add_argument(
         "--gui",
         action="store_true",
-        help="Use dialogs and graphical elevation (passed by the GUI launcher)",
+        help="Use dialogs and graphical elevation",
     )
 
-    args = parser.parse_args()
-
-    # If --yes is passed, force interactive to False so scripts don't block
+    args, _ = parser.parse_known_args()
     interactive_mode = not is_gui and not args.yes
 
     logger.info("Starting automated platform configuration for %s", sys.platform)
@@ -125,8 +113,6 @@ def run(parent=None) -> bool:
             from modules.platforms.windows import setup_windows
 
             if is_gui and not _is_admin():
-                # setup_windows() only elevates in interactive mode, so in GUI
-                # mode relaunch ourselves through UAC and let that copy finish.
                 if _relaunch_elevated():
                     return True
                 raise PermissionError("UAC elevation prompt was rejected.")
@@ -180,15 +166,12 @@ def run(parent=None) -> bool:
 
 
 def main() -> None:
-    """Dedicated entry point for touch2key-setup script execution."""
     gui = "--gui" in sys.argv[1:]
     console = "auto" if gui else "on"
     AppLogManager.setup_logging(log_prefix="touch2key_setup", console=console)
-    
+
     modify_qt_logging_rules_on_win32()
 
-    # run() infers GUI mode from QApplication.instance(), so a --gui child
-    # must create the QApplication before calling it.
     app = (
         QApplication(sys.argv[:1]) if gui and QApplication.instance() is None else None
     )
@@ -199,6 +182,5 @@ def main() -> None:
             app.quit()
 
 
-# Allows running directly
 if __name__ == "__main__":
     main()
