@@ -27,7 +27,13 @@ from PySide6.QtGui import (
     QPen,
     QResizeEvent,
 )
-from PySide6.QtWidgets import QApplication, QGraphicsScene, QGraphicsView, QMainWindow
+from PySide6.QtWidgets import (
+    QApplication,
+    QGraphicsScene,
+    QGraphicsView,
+    QMainWindow,
+    QGraphicsDropShadowEffect,
+)
 
 from modules.database import store
 from modules.log_manager import AppLogManager, modify_qt_logging_rules_on_win32
@@ -75,6 +81,15 @@ MOUSE_BUTTON_INFO: dict[Qt.MouseButton, tuple[str, str]] = {
 }
 
 
+def _create_high_visibility_shadow() -> QGraphicsDropShadowEffect:
+    """Creates a hard, opaque black outline for text legibility over any background."""
+    effect = QGraphicsDropShadowEffect()
+    effect.setBlurRadius(4.0)
+    effect.setColor(QColor(0, 0, 0, 255))
+    effect.setOffset(1.0, 1.0)
+    return effect
+
+
 class DiagnosticView(QGraphicsView):
     mouse_pressed = Signal(str, int, int)  # (button name, x, y)
     mouse_released = Signal(str)  # (button name)
@@ -108,7 +123,8 @@ class DiagnosticView(QGraphicsView):
         self.active_buttons = self._scene.addText(
             "", QFont("Courier", 16, QFont.Weight.Bold)
         )
-        self.active_buttons.setDefaultTextColor(QColor("lime"))
+        self.active_buttons.setDefaultTextColor(QColor("#00FF00"))  # Lime Green
+        self.active_buttons.setGraphicsEffect(_create_high_visibility_shadow())
         self.active_buttons.setZValue(100)
 
         self.trail_rects: list[QGraphicsItem] = []
@@ -255,6 +271,7 @@ class DiagnosticView(QGraphicsView):
         )
         label = self._scene.addText(name, QFont("Arial", 8))
         label.setDefaultTextColor(QColor(color))
+        label.setGraphicsEffect(_create_high_visibility_shadow())
         label.setPos(pos_x, pos_y + 15)
 
         self._expire_later([ripple, label], RIPPLE_LIFETIME_MS)
@@ -463,9 +480,10 @@ class MainWindow(QMainWindow):
 
         self.instruction = self.view._scene.addText(
             self._instruction_text(),
-            QFont("Arial", 15),
+            QFont("Arial", 15, QFont.Weight.Bold),
         )
-        self.instruction.setDefaultTextColor(QColor("#cccccc"))
+        self.instruction.setDefaultTextColor(QColor("#00FFFF"))  # Cyan
+        self.instruction.setGraphicsEffect(_create_high_visibility_shadow())
 
         self.showFullScreen()
         self._on_view_resized(
