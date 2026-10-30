@@ -104,10 +104,11 @@ def connect_wireless_gui(parent: QWidget | None = None) -> None:
     dialog = WirelessConnectDialog(parent)
     dialog.exec()
 
-    # Ensure background thread is fully stopped before proceeding
-    dialog.worker.stop()
-    dialog.worker_thread.quit()
-    dialog.worker_thread.wait(500)
+    # Ensure background thread is fully stopped if closed prematurely (e.g., user cancellation)
+    if dialog.worker_thread.isRunning():
+        dialog.worker.stop()
+        dialog.worker_thread.quit()
+        dialog.worker_thread.wait(500)
 
     # Show alert dialogs ONLY after the modal progress dialog has closed
     if dialog.endpoint:
