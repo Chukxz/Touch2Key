@@ -216,7 +216,10 @@ class DashboardPage(QWidget):
     def showEvent(self, event) -> None:
         super().showEvent(event)
         if self._running:
-            self._update_telemetry()
+            try:
+                self._update_telemetry()
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError, RuntimeError):
+                pass
             self._telemetry_timer.start()
 
     def hideEvent(self, event) -> None:
@@ -391,7 +394,7 @@ class DashboardPage(QWidget):
                 threshold_note = (
                     f" <span style='color:{_WARN}'>(settings: {cfg_pps:g})</span>"
                 )
-        except Exception:
+        except (KeyError, ValueError, sqlite3.Error, AttributeError):
             logger.debug("Could not compare telemetry with settings", exc_info=True)
 
         rate = snap.get("rate_hz")
