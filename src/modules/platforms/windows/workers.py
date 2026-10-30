@@ -194,7 +194,8 @@ def keyboard_worker(
                 payload = k_pipe_read.recv_bytes()
 
                 if len(payload) == 3:
-                    win_code, k_state = PACK_KEY_STRUCT.unpack(payload)
+                    # BUGFIX: Use unpack_from to safely ignore O/S pipe padding bytes
+                    win_code, k_state = PACK_KEY_STRUCT.unpack_from(payload, 0)
                     if k_state == KEY_PING:
                         continue
                     if k_state == 0:
@@ -274,7 +275,8 @@ def mouse_worker(
             try:
                 if mb_pipe_read.poll(15.0):
                     payload = mb_pipe_read.recv_bytes()
-                    _, data = PACK_BUTTON_STRUCT.unpack(payload)
+                    # BUGFIX: Use unpack_from
+                    _, data = PACK_BUTTON_STRUCT.unpack_from(payload, 0)
 
                     if data == BUTTON_PING:
                         continue
@@ -358,7 +360,7 @@ def mouse_worker(
                     continue
 
             if task_id == TASK_REL:
-                _, dx, dy = PACK_REL_STRUCT.unpack(payload)
+                _, dx, dy = PACK_REL_STRUCT.unpack_from(payload, 0)
                 acc_dx += dx
                 acc_dy += dy
 
@@ -368,7 +370,7 @@ def mouse_worker(
                     next_task_id = next_payload[0]
 
                     if next_task_id == TASK_REL:
-                        _, next_dx, next_dy = PACK_REL_STRUCT.unpack(next_payload)
+                        _, next_dx, next_dy = PACK_REL_STRUCT.unpack_from(next_payload, 0)
                         acc_dx += next_dx
                         acc_dy += next_dy
                         coalesce_count += 1
@@ -390,13 +392,13 @@ def mouse_worker(
                 _sleep(_uniform(MIN_MOUSE_DWELL, MAX_MOUSE_DWELL))
 
             elif task_id == TASK_ABS:
-                _, x, y = PACK_ABS_STRUCT.unpack(payload)
+                _, x, y = PACK_ABS_STRUCT.unpack_from(payload, 0)
                 with send_lock:
                     m_ctx.send(
                         m_device_handle,
                         MouseStroke(
-                            MOUSE_MOVE_ABSOLUTE | MOUSE_VIRTUAL_DESKTOP,
-                            MOUSE_MOVE_ABSOLUTE,
+                            0, # BUGFIX: State goes here (usually button presses)
+                            MOUSE_MOVE_ABSOLUTE | MOUSE_VIRTUAL_DESKTOP, # BUGFIX: Flags go here
                             0,
                             int(x),
                             int(y),
@@ -405,7 +407,7 @@ def mouse_worker(
                 _sleep(CONSTANT_DWELL)
 
             elif task_id == TASK_WHEEL:
-                _, dw_x, dw_y = PACK_WHEEL_STRUCT.unpack(payload)
+                _, dw_x, dw_y = PACK_WHEEL_STRUCT.unpack_from(payload, 0)
                 acc_dw_x += dw_x
                 acc_dw_y += dw_y
 
@@ -415,7 +417,7 @@ def mouse_worker(
                     next_task_id = next_payload[0]
 
                     if next_task_id == TASK_WHEEL:
-                        _, next_wx, next_wy = PACK_WHEEL_STRUCT.unpack(next_payload)
+                        _, next_wx, next_wy = PACK_WHEEL_STRUCT.unpack_from(next_payload, 0)
                         acc_dw_x += next_wx
                         acc_dw_y += next_wy
                         coalesce_count += 1
