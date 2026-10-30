@@ -64,7 +64,7 @@ def _summary_lines(snap: dict[str, Any]) -> tuple[str, ...]:
     ]
 
     parts_2 = [
-        f"Touch Events Count: DOWN {snap.get("downs", 0)}, MOVE {snap.get("moves", 0)}, UP {snap.get("ups", 0)}, ALL {snap.get("all", 0)}",
+        f"Touch Events Count: DOWN {snap.get('downs', 0)}, MOVE {snap.get('moves', 0)}, UP {snap.get('ups', 0)}, ALL {snap.get('all', 0)}",
     ]
 
     parts_3 = [
@@ -130,26 +130,27 @@ def main() -> None:
             announced_waiting = False
 
             engine, snap = attached
+
+            # Wait before gathering stats to establish baseline
+            time.sleep(args.interval)
+
+            # Get the freshest snapshot and resolve processes AFTER the sleep
+            snap = read_snapshot(engine.pid) or snap
             procs = labeled_processes(engine, snap)
 
             live = {p.pid for _, p in procs}
             for pid in list(tracked):
                 if pid not in live:
                     del tracked[pid]
+                    
             for _, p in procs:
                 cached = tracked.get(p.pid)
                 if cached is None or cached != p:  # new, or PID reused
                     try:
                         p.cpu_percent(interval=None)  # prime the baseline
-                    except psutil.NoSuchProcess:
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
                         continue
-                    except psutil.AccessDenied:
-                        pass
                     tracked[p.pid] = p
-
-            time.sleep(args.interval)
-
-            snap = read_snapshot(engine.pid) or snap  # fresh values after the wait
 
             rows = [
                 _proc_stats(role, tracked[p.pid])
