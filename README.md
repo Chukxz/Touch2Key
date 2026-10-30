@@ -229,7 +229,13 @@ Touch2Key installs system-level drivers and kernel rules, so **`pip uninstall To
 Running setup from the GUI (`touch2key-gui`) or the terminal (`touch2key-setup`) also creates a desktop shortcut that launches the GUI. Uninstalling always removes it.
 
 ## Contributing
-Use `black` for formatting (recommended), `pytest` for tests (optional), and `snakeviz` to view profiles (optional). Install them with `pip install .[dev]`, or `pip install -e .[dev]` for editable mode. Contributions to the main repository likely require the author's permission.
+Use `black` for formatting (recommended), `pytest` for tests, and `snakeviz` to view profiles. Install the Python dev packages with `pip install -e .[dev]` (installs `build`). 
+
+To modify and regenerate the architecture diagram (`assets/generate_full_architecture_pdf.py`), you must also install the system-level Graphviz binaries:
+* **Windows:** `choco install graphviz` or download from [graphviz.org](https://graphviz.org/download/)
+* **Linux:** `sudo apt install graphviz` (or your distribution's equivalent)
+
+Contributions to the main repository likely require the author's permission.
 
 ## License
 MIT License.
