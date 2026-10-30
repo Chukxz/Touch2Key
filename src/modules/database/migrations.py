@@ -41,8 +41,9 @@ class Migration_001_AddHudImagePath(Migration):
         return "Add hud_image_path column to layouts table"
 
     def apply(self, conn: sqlite3.Connection) -> None:
-        # We use executescript for raw SQL schema changes
-        conn.executescript("""
+        # BUGFIX: Use conn.execute() for DDL to prevent implicit COMMITs 
+        # from breaking the run_migrations rollback wrapper!
+        conn.execute("""
             ALTER TABLE layouts ADD COLUMN hud_image_path TEXT;
         """)
 
