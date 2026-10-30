@@ -446,6 +446,11 @@ class Engine:
             self.two_finger_tap_enabled = settings.two_finger_tap_enabled
             self.bezel_toggle_enabled = settings.bezel_toggle_enabled
 
+            # Dynamically scale the two-finger tap drift threshold to the active device's DPI
+            if snap is not None:
+                self.two_finger_tap_tracker.update_dpi(snap.dpi)
+
+
             with self._adjust_lock:
                 # Uncommitted hotkey steps are newer than the DB; keep them.
                 if not self._settings_dirty:
@@ -472,7 +477,7 @@ class Engine:
             if self.wheel_mapper is not None:
                 self.wheel_mapper.rebuild_pipeline()
 
-            # 5. Rebuild sorted routing tiers from the newly constructed pipelines.
+            # Rebuild sorted routing tiers from the newly constructed pipelines.
             self._tiers = self._build_pipeline_tiers()
 
         logger.info(
@@ -768,11 +773,13 @@ class Engine:
         self.dispatcher.register_callback("ON_MENU_MODE_TOGGLE", self._apply_visibility)
         self.dispatcher.register_callback("ON_WORKER_RESPAWN", self._count_respawn)
 
-        # 1. Instantiate TouchReader first so it can be passed to LayoutLoader
+        # Instantiate TouchReader first so it can be passed to LayoutLoader
         self.touch_reader = TouchReader(self.dispatcher, self.rate_cap)
-        # 2. Pass touch_reader into LayoutLoader
+        # Pass touch_reader into LayoutLoader
         self.layout_loader = LayoutLoader(self.dispatcher, self.touch_reader)
-        # 3. Instantiate Mapper
+        # Apply the initial DPI to the gesture tracker
+        self.two_finger_tap_tracker.update_dpi(self.layout_loader.snapshot.dpi)
+        # Instantiate Mapper
         self.mapper = Mapper(
             self.touch_reader,
             self.bridge,
@@ -780,11 +787,11 @@ class Engine:
             window_id,
             self,
         )
-        # 4. Instantiate OutputSink
+        # Instantiate OutputSink
         self.output_sink = BridgeOutputSink(
             bridge=self.mapper.bridge,
         )
-        # 5. Wire up the viewport callback for absolute PC coordinate mapping
+        # Wire up the viewport callback for absolute PC coordinate mapping
         self.output_sink.set_viewport_callback(self.mapper.get_viewport_info)
 
         self.bezel_mapper = BezelMapper(self.mapper, self.output_sink)
