@@ -39,7 +39,7 @@ class WirelessConnectWorker(QObject):
             if not self._is_running:
                 self.failed.emit("Wireless connection cancelled by user.")
 
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             self.failed.emit(str(exc))
         finally:
             self.finished.emit()
