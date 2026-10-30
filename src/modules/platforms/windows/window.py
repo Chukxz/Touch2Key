@@ -25,6 +25,17 @@ class _POINT(ctypes.Structure):
 class WindowManager(AbstractWindowManager):
     _EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 
+    def __init__(self):
+        super().__init__()
+        # BUGFIX: Ensure process is DPI-aware before caching screen metrics
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
+
     def get_foreground_window(self) -> int:
         return win32gui.GetForegroundWindow()
 
