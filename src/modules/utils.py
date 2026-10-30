@@ -10,7 +10,6 @@ import subprocess
 import time
 import threading
 import math
-from enum import Enum, auto
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
@@ -875,7 +874,7 @@ def unpack_ipc_start_cmd(payload: bytes) -> dict[str, Any]:
     (
         _,
         window_id,
-    ) = PACK_IPC_START_STRUCT.unpack(payload)
+    ) = PACK_IPC_START_STRUCT.unpack_from(payload, 0)
 
     return {"window_id": _unpack_opt_int(window_id)}
 
@@ -895,7 +894,7 @@ def pack_ipc_devices_change_cmd(k_id: int | None, m_id: int | None) -> bytes:
 
 
 def unpack_ipc_devices_change_cmd(payload: bytes) -> tuple[int | None, int | None]:
-    _, k_id, m_id = PACK_IPC_DEVICES_CHANGE_STRUCT.unpack(payload)
+    _, k_id, m_id = PACK_IPC_DEVICES_CHANGE_STRUCT.unpack_from(payload, 0)
     return _unpack_opt_int(k_id), _unpack_opt_int(m_id)
 
 
@@ -1139,6 +1138,7 @@ def is_device_online(device: str):
 
 
 def wireless_connect(device: str | None = None, continuous: bool = True):
+    requested_device = device
     while True:
         if not device:
             try:
@@ -1188,6 +1188,10 @@ def wireless_connect(device: str | None = None, continuous: bool = True):
         except Exception:
             if continuous:
                 time.sleep(SHORT_DELAY)
+                # If the caller didn't ask for a specific device, clear it 
+                # so we can auto-discover the new one instead of loop-failing
+                if requested_device is None:
+                    device = None
                 continue
             return False, ""
 
