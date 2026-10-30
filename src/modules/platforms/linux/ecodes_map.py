@@ -137,6 +137,7 @@ KEYBOARD_CAP = {ecodes.EV_KEY: sorted(set(range(1, 256)) | set(LINUX_KEY_MAP.val
 
 MOUSE_CAP = {
     ecodes.EV_KEY: [
+        ecodes.BTN_MOUSE,
         ecodes.BTN_LEFT,
         ecodes.BTN_RIGHT,
         ecodes.BTN_MIDDLE,
