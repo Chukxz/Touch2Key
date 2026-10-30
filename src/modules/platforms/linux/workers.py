@@ -168,7 +168,8 @@ def keyboard_worker(k_pipe_read: Connection, log_queue: Queue):
                 payload = k_pipe_read.recv_bytes()
 
                 if len(payload) == 3:
-                    win_code, k_state = PACK_KEY_STRUCT.unpack(payload)
+                    # BUGFIX: Use unpack_from for memory safety
+                    win_code, k_state = PACK_KEY_STRUCT.unpack_from(payload, 0)
                     if k_state == KEY_PING:
                         continue
                     linux_code = LINUX_KEY_MAP.get(win_code)
@@ -232,7 +233,8 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Q
             try:
                 if mb_pipe_read.poll(15.0):
                     payload = mb_pipe_read.recv_bytes()
-                    _, data = PACK_BUTTON_STRUCT.unpack(payload)
+                    # BUGFIX: Use unpack_from
+                    _, data = PACK_BUTTON_STRUCT.unpack_from(payload, 0)
 
                     if data == BUTTON_PING:
                         continue
@@ -315,7 +317,7 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Q
                     continue
 
             if task_id == TASK_REL:
-                _, dx, dy = PACK_REL_STRUCT.unpack(payload)
+                _, dx, dy = PACK_REL_STRUCT.unpack_from(payload, 0)
                 acc_dx += dx
                 acc_dy += dy
 
@@ -325,7 +327,7 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Q
                     next_task_id = next_payload[0]
 
                     if next_task_id == TASK_REL:
-                        _, next_dx, next_dy = PACK_REL_STRUCT.unpack(next_payload)
+                        _, next_dx, next_dy = PACK_REL_STRUCT.unpack_from(next_payload, 0)
                         acc_dx += next_dx
                         acc_dy += next_dy
                         coalesce_count += 1
@@ -344,7 +346,7 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Q
                 _sleep(_uniform(MIN_MOUSE_DWELL, MAX_MOUSE_DWELL))
 
             elif task_id == TASK_ABS:
-                _, x, y = PACK_ABS_STRUCT.unpack(payload)
+                _, x, y = PACK_ABS_STRUCT.unpack_from(payload, 0)
                 with send_lock:
                     ui_device.write(ecodes.EV_ABS, ecodes.ABS_X, int(x))
                     ui_device.write(ecodes.EV_ABS, ecodes.ABS_Y, int(y))
@@ -352,7 +354,7 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Q
                 _sleep(CONSTANT_DWELL)
 
             elif task_id == TASK_WHEEL:
-                _, dw_x, dw_y = PACK_WHEEL_STRUCT.unpack(payload)
+                _, dw_x, dw_y = PACK_WHEEL_STRUCT.unpack_from(payload, 0)
                 acc_dw_x += dw_x
                 acc_dw_y += dw_y
 
@@ -362,7 +364,7 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Q
                     next_task_id = next_payload[0]
 
                     if next_task_id == TASK_WHEEL:
-                        _, next_wx, next_wy = PACK_WHEEL_STRUCT.unpack(next_payload)
+                        _, next_wx, next_wy = PACK_WHEEL_STRUCT.unpack_from(next_payload, 0)
                         acc_dw_x += next_wx
                         acc_dw_y += next_wy
                         coalesce_count += 1
