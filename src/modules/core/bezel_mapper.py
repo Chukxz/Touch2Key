@@ -64,6 +64,7 @@ class BezelMapper:
                 Bezel(
                     scancode=zone.scancode,
                     region=region,
+                    dpi=snap.dpi,
                     priority=zone.priority,
                     callback=passed_callback,
                     creation_id=zone.id,
