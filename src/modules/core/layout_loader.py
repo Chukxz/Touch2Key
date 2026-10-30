@@ -18,6 +18,7 @@ from modules.utils import (
 if TYPE_CHECKING:
     from modules.database import AppSettings, Layout, LayoutZone
     from modules.utils import MapperEventDispatcher
+    from .touch_reader import TouchReader
 
 logger = logging.getLogger("modules.core.layout_loader")
 
@@ -68,10 +69,15 @@ class ZoneData:
 
 @dataclass(frozen=True, slots=True)
 class LayoutSnapshot:
-    """Everything the mappers need for one reload, read once and never mutated."""
+    """Everything the mappers need for one reload, read once and never mutated.
+    Coordinates are normalized into oriented DEVICE PIXELS at device DPI.
+    """
 
     settings: AppSettings
     layout: Layout | None = None
+    width: int = 1920
+    height: int = 1080
+    dpi: int = 160
     keys: tuple[ZoneData, ...] = ()  # circle/rect zones, wheel and sprint excluded
     bezels: tuple[ZoneData, ...] = ()
     wheel: ZoneData | None = None
@@ -89,10 +95,34 @@ class LayoutLoader:
     before any mapper, so the snapshot is always fresh when they rebuild.
     """
 
-    def __init__(self, dispatcher: MapperEventDispatcher):
+    def __init__(self, dispatcher: MapperEventDispatcher, touch_reader: TouchReader):
         self.dispatcher = dispatcher
+        self.touch_reader = touch_reader
         self.snapshot: LayoutSnapshot
         self.load_layout()
+
+    def _resolve_target_space(self, layout: Layout) -> tuple[int, int, int, float, float]:
+        """Resolves target dimensions and scale factors, falling back to layout properties."""
+        layout_is_landscape = layout.width >= layout.height
+
+        # Fallback to layout bounds if TouchReader hasn't fetched device specs yet
+        pw = getattr(self.touch_reader, "portrait_w", 0)
+        ph = getattr(self.touch_reader, "portrait_h", 0)
+        dev_dpi = getattr(self.touch_reader, "dpi", 0)
+
+        if pw and ph and dev_dpi:
+            if layout_is_landscape:
+                dev_w, dev_h = ph, pw
+            else:
+                dev_w, dev_h = pw, ph
+        else:
+            dev_w, dev_h = layout.width, layout.height
+            dev_dpi = layout.dpi
+
+        sx = dev_w / float(layout.width) if layout.width > 0 else 1.0
+        sy = dev_h / float(layout.height) if layout.height > 0 else 1.0
+
+        return dev_w, dev_h, dev_dpi, sx, sy
 
     @staticmethod
     def _wheel_keys(zone: LayoutZone) -> tuple[int, int, int, int]:
@@ -107,12 +137,14 @@ class LayoutLoader:
             return _DEFAULT_WHEEL_KEYS
 
     @staticmethod
-    def _to_zone_data(zone: LayoutZone) -> ZoneData:
+    def _to_zone_data(zone: LayoutZone, sx: float, sy: float) -> ZoneData:
         zone.set_parsed_config_from_json()
         helper = zone.CONFIG_HELPER
         _, _, _, priority = helper.get_region_config()
         sem_idx, _, pointer = helper.get_semantic_config()
         _, _, sens_x, sens_y, deadzone, hysteresis = helper.get_transform_config()
+        
+        sr = min(sx, sy)
         return ZoneData(
             id=zone.id,
             scancode=zone.scancode,
@@ -126,13 +158,13 @@ class LayoutLoader:
             sensitivity_y=sens_y,
             deadzone=deadzone,
             hysteresis=hysteresis,
-            cx=float(zone.cx or 0.0),
-            cy=float(zone.cy or 0.0),
-            r=float(zone.r or 0.0),
-            x1=float(zone.x1 or 0.0),
-            y1=float(zone.y1 or 0.0),
-            x2=float(zone.x2 or 0.0),
-            y2=float(zone.y2 or 0.0),
+            cx=float(zone.cx or 0.0) * sx,
+            cy=float(zone.cy or 0.0) * sy,
+            r=float(zone.r or 0.0) * sr,
+            x1=float(zone.x1 or 0.0) * sx,
+            y1=float(zone.y1 or 0.0) * sy,
+            x2=float(zone.x2 or 0.0) * sx,
+            y2=float(zone.y2 or 0.0) * sy,
         )
 
     def load_layout(self) -> None:
@@ -142,6 +174,8 @@ class LayoutLoader:
             logger.warning("No active layout found in SQLite database.")
             self.snapshot = LayoutSnapshot(settings=settings)
             return
+
+        dev_w, dev_h, dev_dpi, sx, sy = self._resolve_target_space(layout)
 
         # list_for_layout auto-heals the bezels.
         zones = store.zones.list_for_layout(layout.id)
@@ -156,7 +190,7 @@ class LayoutLoader:
             if zone.scancode == SPRINT_DISTANCE_CODE:
                 continue
 
-            data = self._to_zone_data(zone)
+            data = self._to_zone_data(zone, sx, sy)
 
             if zone.zone_type == BEZEL:
                 bezels.append(data)
@@ -170,13 +204,19 @@ class LayoutLoader:
                     wheel_keys = self._wheel_keys(zone)
                 continue
 
+            if data.semantic_idx == POINTER_SEMANTIC_IDX:
+                if look_zone is None:
+                    look_zone = data
+                continue
+
             keys.append(data)
-            if look_zone is None and data.semantic_idx == POINTER_SEMANTIC_IDX:
-                look_zone = data
 
         self.snapshot = LayoutSnapshot(
             settings=settings,
             layout=layout,
+            width=dev_w,
+            height=dev_h,
+            dpi=dev_dpi,
             keys=tuple(keys),
             bezels=tuple(bezels),
             wheel=wheel,
@@ -185,10 +225,13 @@ class LayoutLoader:
         )
 
         logger.info(
-            "Active layout '%s' loaded. (%dx%d @ %d DPI, %d zones)",
+            "Active layout '%s' loaded. "
+            "(Mapped %dx%d to Device %dx%d @ %d DPI, %d zones)",
             layout.name,
             layout.width,
             layout.height,
-            layout.dpi,
+            dev_w,
+            dev_h,
+            dev_dpi,
             len(zones),
         )
