@@ -60,10 +60,10 @@ class TouchReader:
         self.max_y = 1920
         self.matrix = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
 
-        # Public canonical dimensions for higher-level mapping (LayoutLoader/OutputSink)
-        self.portrait_w = 1080
-        self.portrait_h = 1920
-        self.dpi = 160
+        # Public canonical dimensions for higher-level mapping
+        self.portrait_w = 0
+        self.portrait_h = 0
+        self.dpi = 0
 
         self.adb_rate_cap = rate_cap
         self.move_interval = (
