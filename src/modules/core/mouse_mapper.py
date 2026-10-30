@@ -56,8 +56,9 @@ class MouseMapper:
             return
 
         settings = snap.settings
-        dev_w = float(layout.width)
-        dev_h = float(layout.height)
+        # BUGFIX: Use the resolved device boundaries, not the raw layout space
+        dev_w = float(snap.width)
+        dev_h = float(snap.height)
 
         sens_x = settings.sensitivity_x
         sens_y = settings.sensitivity_y
@@ -104,12 +105,11 @@ class MouseMapper:
                 "Left" if settings.left_handed else "Right",
             )
 
-        # finger px -> dp (layout DPI) -> mouse counts; uniform on X and Y and
-        # independent of both the phone and the PC resolution.
+        # BUGFIX: Use the physical device DPI to scale sensitivity
         pipeline = MousePointer(
             region=look_region,
-            sensitivity_x=look_counts_per_px(sens_x, layout.dpi),
-            sensitivity_y=look_counts_per_px(sens_y, layout.dpi),
+            sensitivity_x=look_counts_per_px(sens_x, snap.dpi),
+            sensitivity_y=look_counts_per_px(sens_y, snap.dpi),
             priority=zone_priority,
             creation_id=zone_creation_id,
         )
