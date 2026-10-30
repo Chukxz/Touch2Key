@@ -33,7 +33,7 @@ class KeyMapper:
         self.pipelines: list[Any] = []
         self.update_bridge_typematics()
         self.rebuild_pipelines()
-        
+
         self.dispatcher.register_callback(
             "ON_WORKER_RESPAWN", self._on_worker_respawn_key
         )
@@ -110,9 +110,9 @@ class KeyMapper:
                     scancode=zone.scancode,
                     region=region,
                     pointer=zone.pointer,
-                    # finger px -> dp -> mouse counts, same scale as the look area
-                    sensitivity_x=look_counts_per_px(sens_x, layout.dpi),
-                    sensitivity_y=look_counts_per_px(sens_y, layout.dpi),
+                    # BUGFIX: Use the mapped physical device DPI rather than raw layout DPI
+                    sensitivity_x=look_counts_per_px(sens_x, snap.dpi),
+                    sensitivity_y=look_counts_per_px(sens_y, snap.dpi),
                     mouse_button=zone.scancode in MOUSE_SCANCODES,
                     priority=zone.priority,
                     creation_id=zone.id,
