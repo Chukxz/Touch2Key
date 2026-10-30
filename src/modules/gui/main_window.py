@@ -41,7 +41,6 @@ from modules.utils import (
     APP_NAME,
     MapperEventDispatcher,
     QtIpcMapperEventDispatcher,
-    get_scancode_from_key,
 )
 
 logger = logging.getLogger("modules.gui.main_window")
@@ -1037,10 +1036,7 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        preflight_success = run_preflight(
-            verbose=True,
-            parent=self,
-        )
+        preflight_success = run_preflight(verbose=True)
 
         if preflight_success:
             QMessageBox.information(

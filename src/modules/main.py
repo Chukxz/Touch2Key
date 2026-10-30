@@ -9,11 +9,11 @@ import signal
 import logging
 from typing import TYPE_CHECKING, cast
 
-from modules.engine import Engine, shutdown_engine_process
+from modules.engine import Engine
 from modules.platforms import check_single_instance
 from modules.scripts.preflight import run as run_preflight
 from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER, ICONS_FOLDER
-from modules.log_manager import AppLogManager, initialize_cleanup
+from modules.log_manager import AppLogManager, initialize_cleanup, modify_qt_logging_rules_on_win32
 
 from PySide6.QtCore import QTimer, QCoreApplication
 from PySide6.QtWidgets import QApplication
@@ -78,6 +78,8 @@ def run(parser: argparse.ArgumentParser | None = None) -> None:
     )
 
     args = parser.parse_args()
+    
+    modify_qt_logging_rules_on_win32()
 
     if args.profile:
         cli_profiler = cProfile.Profile()

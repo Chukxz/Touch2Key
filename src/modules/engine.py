@@ -148,11 +148,12 @@ class Engine:
         self._adjust_curves: dict[str, InputCurve] = {
             key: InputCurve(self._current_curve) for key in _ADJUST_KEYS
         }
+        # Each action receives n = increments due this poll (see InputCurve.check_input).
         self._adjust_actions = {
-            "left": lambda: self._adjust_rate_cap_cli(-10.0),
-            "right": lambda: self._adjust_rate_cap_cli(10.0),
-            "down": lambda: self._adjust_pps_cli(-5.0),
-            "up": lambda: self._adjust_pps_cli(5.0),
+            "left": lambda n: self._adjust_rate_cap_cli(-10.0 * n),
+            "right": lambda n: self._adjust_rate_cap_cli(10.0 * n),
+            "down": lambda n: self._adjust_pps_cli(-5.0 * n),
+            "up": lambda n: self._adjust_pps_cli(5.0 * n),
         }
 
         self._terminal_window_handle = None
@@ -243,9 +244,9 @@ class Engine:
 
         # Typematic: active InputCurve drives repeat timing (OS auto-repeat ignored).
         for key, curve in self._adjust_curves.items():
-            if curve.check_input(now, pressed[key]):
-                if self._adjust_actions[key]():
-                    self._settings_dirty = True
+            count = curve.check_input(now, pressed[key])
+            if count and self._adjust_actions[key](count):
+                self._settings_dirty = True
 
         # Live status line: only after a key has been held past the curve's
         # initial delay (taps never enter live mode), until all keys release.

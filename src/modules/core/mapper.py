@@ -4,7 +4,7 @@ import logging
 import random
 import threading
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from modules.database import store
 from modules.platforms import get_platform
@@ -164,8 +164,11 @@ class Mapper:
             for code in reversed(scancodes):
                 self.bridge.key_up(code)
                 time.sleep(random.uniform(0.015, 0.035))
+
         except (ValueError, RuntimeError, OSError) as exc:
-            logger.error("Error during toggle hotkeys execution: %s", exc, exc_info=True)
+            logger.error(
+                "Error during toggle hotkeys execution: %s", exc, exc_info=True
+            )
             # Emergency cleanup if interrupted mid-macro
             for code in reversed(pressed_so_far):
                 try:

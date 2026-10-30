@@ -740,10 +740,6 @@ class TouchEventCount:
         self.event_count = 0
 
 
-import math
-from enum import Enum, auto
-
-
 class CurveType(Enum):
     LINEAR = auto()
     CUBIC = auto()
@@ -752,23 +748,28 @@ class CurveType(Enum):
 
 
 class InputCurve:
-    def __init__(self, curve_type=CurveType.CUBIC, log_strength=30.0):
-        # Configuration
+    def __init__(
+        self,
+        curve_type=CurveType.LOGARITHMIC,
+        max_hz=120.0,
+        start_hz=5.0,
+        log_strength=30.0,
+        max_burst=8,
+    ):
         self.curve_type = curve_type
-        self.initial_delay = 0.400  # 400ms wait before auto-repeat begins
-        self.start_delay = 0.200    # 5 Hz starting speed
-        self.min_delay = 0.033      # 30 Hz maximum speed
+        self.initial_delay = 0.400  # wait before auto-repeat begins
+        self.start_delay = 1.0 / start_hz
+        self.min_delay = 1.0 / max_hz
         self.log_strength = log_strength  # higher = steeper early ramp
+        self.max_burst = max_burst  # cap increments per call (lag spikes)
 
-        # Ramp duration per curve
         if self.curve_type == CurveType.EXPONENTIAL:
             self.ramp_duration = 1.0
         elif self.curve_type == CurveType.LOGARITHMIC:
-            self.ramp_duration = 0.8  # reaches near-max speed quickly
+            self.ramp_duration = 0.8
         else:
             self.ramp_duration = 1.5
 
-        # State tracking
         self.is_held = False
         self.hold_start_time = 0.0
         self.last_fire_time = 0.0
@@ -777,50 +778,48 @@ class InputCurve:
         if self.curve_type == CurveType.LINEAR:
             return progress
         if self.curve_type == CurveType.CUBIC:
-            return progress ** 3
+            return progress**3
         if self.curve_type == CurveType.EXPONENTIAL:
             return 0.0 if progress == 0.0 else math.pow(2, 10 * (progress - 1))
         if self.curve_type == CurveType.LOGARITHMIC:
-            # Normalized log ease-out: f(0)=0, f(1)=1, steep at start
             k = self.log_strength
             return math.log1p(k * progress) / math.log1p(k)
-        return progress  # fallback
+        return progress
 
     def check_input(self, current_time_sec, is_key_down):
-        # Reset state if the key is released
+        """Returns the number of increments due this call (0 = none)."""
         if not is_key_down:
             self.is_held = False
-            return False
+            return 0
 
-        # Initial press
         if not self.is_held:
             self.is_held = True
             self.hold_start_time = current_time_sec
             self.last_fire_time = current_time_sec
-            return True
+            return 1
 
         time_held = current_time_sec - self.hold_start_time
-
-        # Wait for the initial delay to pass
         if time_held < self.initial_delay:
-            return False
+            return 0
 
-        # Progress (0.0 to 1.0)
-        ramp_active_time = time_held - self.initial_delay
-        progress = min(ramp_active_time / self.ramp_duration, 1.0)
+        progress = min((time_held - self.initial_delay) / self.ramp_duration, 1.0)
+        eased = self._ease(progress)
+        current_delay = self.start_delay - eased * (self.start_delay - self.min_delay)
 
-        eased_progress = self._ease(progress)
+        count = int((current_time_sec - self.last_fire_time) / current_delay)
+        if count <= 0:
+            return 0
 
-        # Interpolate the delay and check if it's time to fire
-        current_delay = self.start_delay - (
-            eased_progress * (self.start_delay - self.min_delay)
-        )
-
-        if (current_time_sec - self.last_fire_time) >= current_delay:
+        if count > self.max_burst:
+            # Fell behind (lag spike): drop the backlog instead of bursting
+            count = self.max_burst
             self.last_fire_time = current_time_sec
-            return True
+        else:
+            # Advance by whole intervals so the remainder carries over (no drift)
+            self.last_fire_time += count * current_delay
 
-        return False
+        return count
+
 
 # ---------------------------------------------------------------------------
 # Engine <-> GUI process IPC protocol

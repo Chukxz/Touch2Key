@@ -22,7 +22,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from modules.database import store
-from modules.log_manager import AppLogManager
+from modules.log_manager import AppLogManager, modify_qt_logging_rules_on_win32
 from modules.utils import (
     BIN_FOLDER,
     DATA_FOLDER,
@@ -328,6 +328,8 @@ def main() -> None:
     gui = "--gui" in sys.argv[1:]
     console = "auto" if gui else "on"
     AppLogManager.setup_logging(log_prefix="touch2key_uninstall", console=console)
+
+    modify_qt_logging_rules_on_win32()
 
     # run() infers GUI mode from QApplication.instance(), so a --gui child
     # must create the QApplication before calling it.

@@ -15,6 +15,11 @@ from modules.utils import LOGS_FOLDER, DIAGNOSTICS_FOLDER, prune_directory
 
 _CONSOLE_MODES = ("auto", "on", "off")
 
+    
+def modify_qt_logging_rules_on_win32():
+    if sys.platform == "win32":
+        os.environ["QT_LOGGING_RULES"] = "qt.qpa.window=false"
+    
 
 def initialize_cleanup() -> None:
     """Prunes old log and diagnostics files based on age and count limits."""

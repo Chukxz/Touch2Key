@@ -41,9 +41,6 @@ from modules.utils import (
 
 from modules.core.pipeline import PipelineConfig
 
-if sys.platform == "win32":
-    os.environ["QT_LOGGING_RULES"] = "qt.qpa.window=false"
-
 import matplotlib
 
 matplotlib.use("qtagg")
@@ -1256,7 +1253,7 @@ class LayoutsPlotterWidget(QWidget):
         self.mode = None
         self.state = PlotterState.IDLE
         self.input_buffer = ""
-        
+
         self.buffer_default = True
         self.shapes: dict[int, Any] = {}
         self.count = 0
@@ -1615,7 +1612,11 @@ class LayoutsPlotterWidget(QWidget):
             return
 
         self.reset_state()
-        self.mode, self.artists_points, self.state = mode, num_points, PlotterState.COLLECTING
+        self.mode, self.artists_points, self.state = (
+            mode,
+            num_points,
+            PlotterState.COLLECTING,
+        )
         self.update_title(f"MODE: {mode}. Click {num_points} points on the image.")
 
     def _load_active_layout_zones(self) -> None:
@@ -2153,7 +2154,10 @@ class LayoutsPlotterWidget(QWidget):
             else:
                 self.reset_state()
             return
-        if self.state is PlotterState.CONFIRM_EXIT or self.state is PlotterState.COLLECTING:
+        if (
+            self.state is PlotterState.CONFIRM_EXIT
+            or self.state is PlotterState.COLLECTING
+        ):
             if key == "escape":
                 self.reset_state()
             return
@@ -2196,7 +2200,9 @@ class LayoutsPlotterWidget(QWidget):
                 eid = self.current_draggable.entry_id
                 if eid in self.shapes:
                     delta = 1 if key == "p" else -1
-                    self.shapes[eid]["priority"] = clamp(self.shapes[eid]["priority"] + delta, MIN_PRIORITY, MAX_PRIORITY)
+                    self.shapes[eid]["priority"] = clamp(
+                        self.shapes[eid]["priority"] + delta, MIN_PRIORITY, MAX_PRIORITY
+                    )
                     self.mark_dirty()
                     self.update_title(
                         f"Priority {'increased' if key == 'p' else 'decreased'}: {self.shapes[eid]['priority']} (ID: {eid})",

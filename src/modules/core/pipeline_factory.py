@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import sys
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Callable
 
 from modules.core.pipeline import (
     AlwaysRegion,
@@ -20,25 +20,17 @@ from modules.core.pipeline import (
     Pipeline,
     PointerSemantic,
     RadialConstraint,
-    RectangularRegion,
     Region,
     ToggleSemantic,
     Unit,
     Vector,
 )
 from modules.utils import (
-    ALLOWED_PIPELINE_FIELDS,
     BASELINE_DPI,
     MIN_PRIORITY,
-    MOUSE_SCANCODES,
-    clamp,
     dp_to_px,
-    InvalidFieldError,
     Point,
 )
-
-if TYPE_CHECKING:
-    from modules.database import LayoutZone
 
 
 # ---------------------------------------------------------------------------

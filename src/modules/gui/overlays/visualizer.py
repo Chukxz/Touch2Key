@@ -24,7 +24,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QApplication, QGraphicsScene, QGraphicsView, QMainWindow
 
-from modules import AppLogManager
+from modules.log_manager import AppLogManager, modify_qt_logging_rules_on_win32
 from modules.database import store
 from modules.platforms import (
     check_single_instance,
@@ -56,6 +56,7 @@ VISUALIZER_NAME = "Touch2Key_Visualizer"
 RIPPLE_LIFETIME_MS = 5000
 MAX_EVENT_LOG = 10_000
 MAX_TRAIL_NUMBER = 5000
+MIN_TRAIL_NUMBER = 500
 MAX_TRAIL_WIDTH = 100
 MAX_TRAIL_HEIGHT = 100
 
@@ -121,6 +122,15 @@ class DiagnosticView(QGraphicsView):
             key: InputCurve(self._current_curve)
             for key in ("left", "right", "down", "up", "inc_num", "dec_num")
         }
+        # key -> (attribute, sign, lo, hi); applied as sign * count per poll.
+        self._adjust_specs: dict[str, tuple[str, int, int, int]] = {
+            "left": ("trail_width", -1, 1, MAX_TRAIL_WIDTH),
+            "right": ("trail_width", +1, 1, MAX_TRAIL_WIDTH),
+            "down": ("trail_height", -1, 1, MAX_TRAIL_HEIGHT),
+            "up": ("trail_height", +1, 1, MAX_TRAIL_HEIGHT),
+            "dec_num": ("max_trail_number", -1, MIN_TRAIL_NUMBER, MAX_TRAIL_NUMBER),
+            "inc_num": ("max_trail_number", +1, MIN_TRAIL_NUMBER, MAX_TRAIL_NUMBER),
+        }
         self._pressed_keys: set[int] = set()
         self._last_f8_time = 0.0
 
@@ -154,48 +164,41 @@ class DiagnosticView(QGraphicsView):
     def get_current_curve_name(self) -> str:
         return self._current_curve.name
 
+    def _adjust(self, attr: str, delta: int, lo: int, hi: int) -> bool:
+        """Apply delta with clamping. Returns True only if the value changed."""
+        old = getattr(self, attr)
+        new = int(clamp(old + delta, lo, hi))
+        if new == old:
+            return False
+        setattr(self, attr, new)
+        return True
+
     def _poll_hotkeys(self) -> None:
         now = time.perf_counter()
 
         is_control = Qt.Key.Key_Control in self._pressed_keys
-        left_pressed = Qt.Key.Key_Left in self._pressed_keys and is_control
-        right_pressed = Qt.Key.Key_Right in self._pressed_keys and is_control
-        down_pressed = Qt.Key.Key_Down in self._pressed_keys and is_control
-        up_pressed = Qt.Key.Key_Up in self._pressed_keys and is_control
-        inc_num_pressed = Qt.Key.Key_F6 in self._pressed_keys and is_control
-        dec_num_pressed = Qt.Key.Key_F7 in self._pressed_keys and is_control
+        pressed = {
+            "left": Qt.Key.Key_Left in self._pressed_keys and is_control,
+            "right": Qt.Key.Key_Right in self._pressed_keys and is_control,
+            "down": Qt.Key.Key_Down in self._pressed_keys and is_control,
+            "up": Qt.Key.Key_Up in self._pressed_keys and is_control,
+            "dec_num": Qt.Key.Key_F6 in self._pressed_keys and is_control,
+            "inc_num": Qt.Key.Key_F7 in self._pressed_keys and is_control,
+        }
 
         # Opposing keys on the same axis cancel: treat both as released.
-        if left_pressed and right_pressed:
-            left_pressed = right_pressed = False
-        if down_pressed and up_pressed:
-            down_pressed = up_pressed = False
-        if inc_num_pressed and dec_num_pressed:
-            inc_num_pressed = dec_num_pressed = False
+        for a, b in (("left", "right"), ("down", "up"), ("dec_num", "inc_num")):
+            if pressed[a] and pressed[b]:
+                pressed[a] = pressed[b] = False
 
         changed = False
-        if self._adjust_curves["left"].check_input(now, left_pressed):
-            self.trail_width = int(clamp(self.trail_width - 1, 1, MAX_TRAIL_WIDTH))
-            changed = True
-        if self._adjust_curves["right"].check_input(now, right_pressed):
-            self.trail_width = int(clamp(self.trail_width + 1, 1, MAX_TRAIL_WIDTH))
-            changed = True
-        if self._adjust_curves["down"].check_input(now, down_pressed):
-            self.trail_height = int(clamp(self.trail_height - 1, 1, MAX_TRAIL_HEIGHT))
-            changed = True
-        if self._adjust_curves["up"].check_input(now, up_pressed):
-            self.trail_height = int(clamp(self.trail_height + 1, 1, MAX_TRAIL_HEIGHT))
-            changed = True
-        if self._adjust_curves["dec_num"].check_input(now, dec_num_pressed):
-            self.max_trail_number = int(
-                clamp(self.max_trail_number + 1, 500, MAX_TRAIL_NUMBER)
-            )
-            changed = True
-        if self._adjust_curves["inc_num"].check_input(now, inc_num_pressed):
-            self.max_trail_number = int(
-                clamp(self.max_trail_number - 1, 500, MAX_TRAIL_NUMBER)
-            )
-            changed = True
+        for key, curve in self._adjust_curves.items():
+            count = curve.check_input(now, pressed[key])
+            if not count:
+                continue
+            attr, sign, lo, hi = self._adjust_specs[key]
+            if self._adjust(attr, sign * count, lo, hi):
+                changed = True
 
         if changed:
             self.arrow_pressed.emit()
@@ -209,7 +212,8 @@ class DiagnosticView(QGraphicsView):
         )
         self.trail_rects.append(rect)
 
-        if len(self.trail_rects) > self.max_trail_number:
+        # while, not if: max_trail_number can drop by many in one burst.
+        while len(self.trail_rects) > self.max_trail_number:
             old_rect = self.trail_rects.pop(0)
             self._remove_scene_item(old_rect)
 
@@ -331,8 +335,7 @@ class DiagnosticView(QGraphicsView):
             super().keyPressEvent(event)
             return
 
-        event_key = event.key()
-        self._pressed_keys.add(event_key)
+        self._pressed_keys.add(event.key())
 
         scancode_key = get_specific_qt_key(event)
         scancode = get_scancode_from_key(scancode_key)
@@ -352,9 +355,6 @@ class DiagnosticView(QGraphicsView):
         if expected_scancodes and self.pressed_scancodes_list == expected_scancodes:
             if not self._hotkey_triggered:
                 self._hotkey_triggered = True
-                if event.isAutoRepeat():
-                    super().keyPressEvent(event)
-                    return
 
                 if self.cursor_visible:
                     self._force_cursor_hidden()
@@ -363,7 +363,10 @@ class DiagnosticView(QGraphicsView):
                     self._force_cursor_visible()
                     self.cursor_visible = True
 
-        if event_key == Qt.Key.Key_F8:
+        if (
+            Qt.Key.Key_F8 in self._pressed_keys
+            and Qt.Key.Key_Control in self._pressed_keys
+        ):
             now = time.perf_counter()
             if now - self._last_f8_time >= 0.35:  # 350 ms debounce
                 self._last_f8_time = now
@@ -402,10 +405,6 @@ class DiagnosticView(QGraphicsView):
             return
 
         self._pressed_keys.discard(event.key())
-
-        if event.isAutoRepeat():
-            super().keyReleaseEvent(event)
-            return
 
         key = get_specific_qt_key(event)
         scancode = get_scancode_from_key(key)
@@ -462,13 +461,13 @@ class MainWindow(QMainWindow):
         curve_name = self.view.get_current_curve_name()
         return (
             "Press ESC to exit (when cursor is visible).\n"
-            f"[F8] Cycle Input Curve: [{curve_name}]\n"
+            f"[CTRL + F8] Cycle Input Curve: [{curve_name}]\n"
             f"(CTRL + Left/Right: decrease/increase trail width "
             f"({self.view.trail_width}) [1-{MAX_TRAIL_WIDTH}]).\n"
             f"(CTRL + Up/Down: increase/decrease trail height "
             f"({self.view.trail_height}) [1-{MAX_TRAIL_HEIGHT}]).\n"
             f"(CTRL + F6/F7: decrease/increase max trail number) "
-            f"({self.view.max_trail_number}) [500-{MAX_TRAIL_NUMBER}]."
+            f"({self.view.max_trail_number}) [{MIN_TRAIL_NUMBER}-{MAX_TRAIL_NUMBER}]."
         )
 
     def _update_instruction_text(self) -> None:
@@ -569,6 +568,8 @@ def run() -> None:
 
     register_process(VISUALIZER_RUNTIME_FILE)
     atexit.register(unregister_visualizer_file)
+    
+    modify_qt_logging_rules_on_win32()
 
     app = QApplication(sys.argv)
     app_icon_path = ICONS_FOLDER / "app.png"
@@ -591,6 +592,7 @@ def run() -> None:
 
 def main() -> None:
     """Dedicated entry point for touch2key-visualizer."""
+
     AppLogManager.setup_logging(log_prefix="touch2key_visualizer")
     run()
 

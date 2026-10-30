@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 import subprocess
 
-from modules import AppLogManager
+from modules.log_manager import AppLogManager, modify_qt_logging_rules_on_win32
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 from modules.utils import PROJECT_ROOT, ICONS_FOLDER
@@ -184,13 +184,13 @@ def main() -> None:
     gui = "--gui" in sys.argv[1:]
     console = "auto" if gui else "on"
     AppLogManager.setup_logging(log_prefix="touch2key_setup", console=console)
+    
+    modify_qt_logging_rules_on_win32()
 
     # run() infers GUI mode from QApplication.instance(), so a --gui child
     # must create the QApplication before calling it.
     app = (
-        QApplication(sys.argv[:1])
-        if gui and QApplication.instance() is None
-        else None
+        QApplication(sys.argv[:1]) if gui and QApplication.instance() is None else None
     )
     try:
         run()

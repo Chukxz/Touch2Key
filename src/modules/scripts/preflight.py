@@ -8,7 +8,7 @@ import sys
 import logging
 import shutil
 from pathlib import Path
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication
 
 from modules import ADB
 from modules import AppLogManager
@@ -44,12 +44,11 @@ def check_driver() -> bool:
     return False
 
 
-def run(verbose: bool = True, parent=None) -> bool:
+def run(verbose: bool = True) -> bool:
     """
     Executes pre-flight checks.
     Returns True if all pass, False otherwise.
     """
-    is_gui = QApplication.instance() is not None
 
     checks = {
         "ADB": check_adb(),
