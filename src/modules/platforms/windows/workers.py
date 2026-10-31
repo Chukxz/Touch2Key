@@ -370,7 +370,9 @@ def mouse_worker(
                     next_task_id = next_payload[0]
 
                     if next_task_id == TASK_REL:
-                        _, next_dx, next_dy = PACK_REL_STRUCT.unpack_from(next_payload, 0)
+                        _, next_dx, next_dy = PACK_REL_STRUCT.unpack_from(
+                            next_payload, 0
+                        )
                         acc_dx += next_dx
                         acc_dy += next_dy
                         coalesce_count += 1
@@ -397,8 +399,8 @@ def mouse_worker(
                     m_ctx.send(
                         m_device_handle,
                         MouseStroke(
-                            0, # BUGFIX: State goes here (usually button presses)
-                            MOUSE_MOVE_ABSOLUTE | MOUSE_VIRTUAL_DESKTOP, # BUGFIX: Flags go here
+                            MOUSE_MOVE_ABSOLUTE | MOUSE_VIRTUAL_DESKTOP,
+                            MOUSE_MOVE_ABSOLUTE,
                             0,
                             int(x),
                             int(y),
@@ -417,7 +419,9 @@ def mouse_worker(
                     next_task_id = next_payload[0]
 
                     if next_task_id == TASK_WHEEL:
-                        _, next_wx, next_wy = PACK_WHEEL_STRUCT.unpack_from(next_payload, 0)
+                        _, next_wx, next_wy = PACK_WHEEL_STRUCT.unpack_from(
+                            next_payload, 0
+                        )
                         acc_dw_x += next_wx
                         acc_dw_y += next_wy
                         coalesce_count += 1

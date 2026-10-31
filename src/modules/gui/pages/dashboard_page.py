@@ -5,17 +5,26 @@ quick navigation.
 Wrapped in a scroll area like SettingsPage so this page never pins the window's
 minimum height (which would stop the log dock from growing).
 
-Telemetry has two sources, both read once a second while the page is visible:
-  * the engine process tree, via psutil (CPU / memory / threads per process);
+Telemetry has two sources, both read once a second while the engine runs (the
+GUI process itself is sampled even when the engine is stopped):
+  * the GUI process and the engine process tree, via psutil (CPU / memory /
+    threads per process);
   * the snapshot the engine publishes (runtime_info): measured touch rate, ADB
     rate cap and PPS threshold as the engine is *actually* running with them,
     worker roles and respawn counts. Same data as `touch2key-stats`.
+
+The UI is only re-rendered while the page is visible. A compact one-line
+summary of each Nth sample is also written to the `telemetry` logger (see
+_LOG_TELEMETRY / _LOG_INTERVAL_S), so it keeps logging while the page is hidden,
+the window is minimized, or the engine is stopped.
 """
 
 from __future__ import annotations
 
 import datetime
 import logging
+import os
+import sqlite3
 import sys
 import time
 from typing import TYPE_CHECKING, Any
@@ -49,9 +58,16 @@ if TYPE_CHECKING:
     from modules.gui.main_window import EngineProcessController
 
 logger = logging.getLogger("modules.gui.dashboard_page")
+# Child logger: inherits the parent's handlers (file, log dock), but can be
+# filtered or routed separately, e.g. logging.getLogger(
+# "modules.gui.dashboard_page.telemetry").setLevel(logging.WARNING)
+telemetry_logger = logging.getLogger("modules.gui.dashboard_page.telemetry")
 
 _MB = 1024 * 1024
 _TELEMETRY_INTERVAL_MS = 1000
+_LOG_TELEMETRY = True  # False restores the old behavior (no logging, sample only while visible)
+_LOG_INTERVAL_S = 5  # one log line per this many seconds
+_LOG_EVERY_N_TICKS = max(1, round(_LOG_INTERVAL_S * 1000 / _TELEMETRY_INTERVAL_MS))
 _DOT_RUNNING = "#43a047"
 _DOT_STOPPED = "#9e9e9e"
 _WARN = "#fb8c00"
@@ -86,6 +102,9 @@ class DashboardPage(QWidget):
         self.dispatcher = dispatcher
 
         self._running = False
+        # The GUI process itself: parent of the engine, so not in the engine's tree.
+        self._gui_proc = psutil.Process(os.getpid())
+        self._tick = 0  # telemetry samples since the engine started (log throttle)
         # Reused psutil objects: cpu_percent() needs a previous call as baseline.
         self._procs: dict[int, psutil.Process] = {}
 
@@ -194,6 +213,8 @@ class DashboardPage(QWidget):
         self._show_idle_telemetry()
         self._register_dispatcher_events()
         self.refresh_state()
+        if _LOG_TELEMETRY:
+            self._telemetry_timer.start()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -213,18 +234,24 @@ class DashboardPage(QWidget):
     def on_page_shown(self) -> None:
         self.refresh_state()
 
+    def _telemetry_wanted(self) -> bool:
+        """Sample while the page is visible (UI) or logging is on (which must
+        keep going while hidden / minimized / engine stopped)."""
+        return self.isVisible() or _LOG_TELEMETRY
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        if self._running:
-            try:
-                self._update_telemetry()
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError, RuntimeError):
-                pass
-            self._telemetry_timer.start()
+        try:
+            self._update_telemetry()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError, RuntimeError):
+            pass
+        self._telemetry_timer.start()
 
     def hideEvent(self, event) -> None:
-        # Sample only while visible (also stops when the window is minimized).
-        self._telemetry_timer.stop()
+        # Stop sampling while hidden (also when the window is minimized), unless
+        # telemetry logging needs the timer to keep running.
+        if not _LOG_TELEMETRY:
+            self._telemetry_timer.stop()
         super().hideEvent(event)
 
     # ------------------------------------------------------------------
@@ -253,14 +280,10 @@ class DashboardPage(QWidget):
 
     def _refresh_keys_label(self) -> None:
         settings = store.settings.get()
-        toggle_hotkeys = ""
 
-        _parsed_toggle_hotkeys = parse_seq(settings.toggle_hotkeys, ",")
-        is_toggle_hotkey_set = len(_parsed_toggle_hotkeys) > 0
+        parsed_toggle_hotkeys = parse_seq(settings.toggle_hotkeys, ",")
         toggle_hotkeys = (
-            toggle_hotkeys.join(_parsed_toggle_hotkeys)
-            if is_toggle_hotkey_set
-            else "Not set"
+            ", ".join(parsed_toggle_hotkeys) if parsed_toggle_hotkeys else "Not set"
         )
 
         sprint = settings.sprint_key or "Not set"
@@ -316,13 +339,17 @@ class DashboardPage(QWidget):
         self._apply_status(running)
         self._refresh_target_label()
 
-        self._procs.clear()
-        if not running:
-            self._telemetry_timer.stop()
-            self._show_idle_telemetry()
-        elif self.isVisible():
+        # Engine processes changed; keep the GUI process's CPU baseline.
+        self._procs = {
+            k: v for k, v in self._procs.items() if k == self._gui_proc.pid
+        }
+        self._tick = 0
+        if self._telemetry_wanted():
             self._update_telemetry()
             self._telemetry_timer.start()
+        else:
+            self._telemetry_timer.stop()
+            self._show_idle_telemetry()
 
     # ------------------------------------------------------------------
     # Telemetry
@@ -424,22 +451,17 @@ class DashboardPage(QWidget):
             lines.append(f"<span style='color:{_WARN}'>No target window found</span>")
         self.rate_label.setText("<br>".join(lines))
 
-    def _update_telemetry(self) -> None:
-        pid = self._engine_pid()
-        if pid is None:
-            self._show_idle_telemetry()
-            return
-
-        try:
-            engine = psutil.Process(pid)
-            snap = read_snapshot(expected_pid=pid)
-            procs = labeled_processes(engine, snap)
-        except psutil.Error:
-            self._show_idle_telemetry()
-            return
-
-        self._render_rate(snap)
-
+    def _build_rows(
+        self,
+        engine: psutil.Process | None,
+        procs: list[tuple[str, psutil.Process]],
+    ) -> tuple[str, list[str]]:
+        """Header line and one row per process (shared by the UI and the log).
+        The GUI process is always the first row."""
+        procs = [
+            ("gui", self._gui_proc),
+            *[(role, p) for role, p in procs if p.pid != self._gui_proc.pid],
+        ]
         live = {p.pid for _, p in procs}
         self._procs = {k: v for k, v in self._procs.items() if k in live}
 
@@ -460,16 +482,106 @@ class DashboardPage(QWidget):
                 f"rss {rss_mb:7.1f} MB  thr {threads:3d}"
             )
 
+        # Engine uptime when it runs; otherwise how long the GUI has been up.
         try:
             uptime = str(
-                datetime.timedelta(seconds=int(time.time() - engine.create_time()))
+                datetime.timedelta(
+                    seconds=int(time.time() - (engine or self._gui_proc).create_time())
+                )
             )
         except psutil.Error:
             uptime = "n/a"
 
         header = (
-            f"Uptime {uptime}   Processes {len(procs)}   "
+            f"{'Uptime' if engine else 'GUI uptime'} {uptime}   "
+            f"Processes {len(procs)}   "
             f"CPU {total_cpu:.1f}%   RSS {total_rss:.1f} MB"
         )
-        self.telemetry_label.setStyleSheet("font-family: monospace;")
-        self.telemetry_label.setText("\n".join([header, *rows]))
+        return header, rows
+
+    def _log_telemetry(
+        self,
+        engine_running: bool,
+        snap: dict[str, Any] | None,
+        header: str,
+        rows: list[str],
+    ) -> None:
+        """One plain-text line per call (no HTML, whitespace collapsed)."""
+        summary = " ".join(header.split())
+        if not engine_running:
+            procs_txt = "; ".join(" ".join(row.split()) for row in rows)
+            telemetry_logger.info(
+                "Engine not running | %s | %s", summary, procs_txt
+            )
+            return
+        if snap is None:
+            telemetry_logger.info("No engine snapshot yet | %s", summary)
+            return
+
+        age = snapshot_age(snap)
+        if age > STALE_AFTER_S:
+            telemetry_logger.warning(
+                "Snapshot stale (%.0fs since last update), engine may be "
+                "unresponsive | %s",
+                age,
+                summary,
+            )
+            return
+
+        rate = snap.get("rate_hz")
+        resp = snap.get("respawns") or {}
+        workers = snap.get("workers") or {}
+        procs_txt = "; ".join(" ".join(row.split()) for row in rows)
+        telemetry_logger.info(
+            "rate=%s Hz status=%s cap=%s Hz pps_alert=%s cursor=%s "
+            "events(down/move/up/all)=%s/%s/%s/%s respawns(kb/mouse)=%s/%s "
+            "vkb=%s visualizer=%s window_lost=%s | %s | %s",
+            "--" if rate is None else f"{rate:.1f}",
+            snap.get("rate_status") or "n/a",
+            _num(snap.get("rate_cap_hz")),
+            _num(snap.get("pps_threshold")),
+            "visible" if snap.get("menu_mode") else "hidden",
+            snap.get("downs", 0),
+            snap.get("moves", 0),
+            snap.get("ups", 0),
+            snap.get("all", 0),
+            resp.get("keyboard", 0),
+            resp.get("mouse", 0),
+            "on" if workers.get("vkb") is not None else "off",
+            "on" if workers.get("visualizer") is not None else "off",
+            bool(snap.get("window_lost")),
+            summary,
+            procs_txt,
+        )
+
+    def _update_telemetry(self) -> None:
+        pid = self._engine_pid()
+        engine: psutil.Process | None = None
+        snap: dict[str, Any] | None = None
+        procs: list[tuple[str, psutil.Process]] = []
+        if pid is not None:
+            try:
+                engine = psutil.Process(pid)
+                snap = read_snapshot(expected_pid=pid)
+                procs = labeled_processes(engine, snap)
+            except psutil.Error:
+                # Engine vanished mid-sample: fall back to the GUI process only.
+                engine, snap, procs = None, None, []
+
+        header, rows = self._build_rows(engine, procs)
+
+        # Skip the widget work while hidden (the timer may only be running for
+        # the log); showEvent refreshes the labels as soon as the page returns.
+        if self.isVisible():
+            if engine is None:
+                self.rate_label.setVisible(False)
+                body = ["Engine is not running.", header, *rows]
+            else:
+                self._render_rate(snap)
+                body = [header, *rows]
+            self.telemetry_label.setStyleSheet("font-family: monospace;")
+            self.telemetry_label.setText("\n".join(body))
+
+        self._tick += 1
+        if _LOG_TELEMETRY and self._tick % _LOG_EVERY_N_TICKS == 0:
+            self._log_telemetry(engine is not None, snap, header, rows)

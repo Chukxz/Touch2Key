@@ -450,7 +450,6 @@ class Engine:
             if snap is not None:
                 self.two_finger_tap_tracker.update_dpi(snap.dpi)
 
-
             with self._adjust_lock:
                 # Uncommitted hotkey steps are newer than the DB; keep them.
                 if not self._settings_dirty:

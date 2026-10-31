@@ -27,18 +27,17 @@ class BridgeOutputSink(OutputSink):
     """Bridges Semantic stage outputs to the hardware driver Bridge."""
 
     bridge: AbstractBridge
-    
+
     # Callback into the Mapper to retrieve: (dev_w, dev_h, win_info, screen_w, screen_h)
-    callback: Callable[[], tuple[float, float, dict | None, int, int]] | None = None 
-    
+    callback: Callable[[], tuple[float, float, dict | None, int, int]] | None = None
+
     # Accumulators for fractional mouse movements to prevent slow-aim pixel loss
     _acc_x: float = field(init=False, default=0.0)
     _acc_y: float = field(init=False, default=0.0)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def set_viewport_callback(
-        self, 
-        callback: Callable[[], tuple[float, float, dict | None, int, int]] | None
+        self, callback: Callable[[], tuple[float, float, dict | None, int, int]] | None
     ) -> None:
         """Dynamically binds or unbinds the viewport info provider from the Mapper."""
         self.callback = callback
@@ -82,7 +81,7 @@ class BridgeOutputSink(OutputSink):
 
         # Query the mapper for the current device dimensions and window offsets
         dev_w, dev_h, win, screen_w, screen_h = self.callback()
-        
+
         dev_w = max(1.0, float(dev_w))
         dev_h = max(1.0, float(dev_h))
 
@@ -108,8 +107,12 @@ class BridgeOutputSink(OutputSink):
     def flush_mouse_move(self) -> None:
         """Dispatches aggregated whole pixels to the OS and retains the fractional remainder."""
         with self._lock:
-            idx = int(clamp(round(self._acc_x), -PACK_REL_STRUCT_SIZE, PACK_REL_STRUCT_SIZE))
-            idy = int(clamp(round(self._acc_y), -PACK_REL_STRUCT_SIZE, PACK_REL_STRUCT_SIZE))
+            idx = int(
+                clamp(round(self._acc_x), -PACK_REL_STRUCT_SIZE, PACK_REL_STRUCT_SIZE)
+            )
+            idy = int(
+                clamp(round(self._acc_y), -PACK_REL_STRUCT_SIZE, PACK_REL_STRUCT_SIZE)
+            )
 
             if idx != 0 or idy != 0:
                 self.bridge.mouse_move_rel(idx, idy)

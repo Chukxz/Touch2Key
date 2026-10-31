@@ -458,10 +458,10 @@ class LayoutsRepository:
                     "x2 = ROUND(x2 * :sx), y2 = ROUND(y2 * :sy), "
                     "updated_at = datetime('now') "
                     "WHERE layout_id = :id AND zone_type != 'BEZEL';",
-                    {"sx": sx, "sy": sy, "sa": sa, "id": layout_id},
+                    {"sx": sx, "sy": sy, "sr": sr, "id": layout_id},
                 )
-                radius = round(radius * sa)
-                sprint = round(sprint * sa)
+                radius = round(radius * sr)
+                sprint = round(sprint * sr)
 
             self._update_layout(
                 conn,

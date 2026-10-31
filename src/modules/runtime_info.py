@@ -13,7 +13,7 @@ from typing import Any, Callable
 from pathlib import Path
 import psutil
 
-from modules.utils import READ_ATTEMPTS, RUNTIME_FILE
+from modules.utils import READ_ATTEMPTS, RUNTIME_FILE, VISUALIZER_RUNTIME_FILE
 
 logger = logging.getLogger("modules.runtime_info")
 
@@ -23,6 +23,10 @@ STALE_AFTER_S = 5.0  # no update for this long: the publisher (engine) is stuck
 # create_time() comes from the same psutil source on both sides, so this only
 # has to absorb float rounding; a reused PID differs by far more.
 _CREATE_TIME_TOLERANCE_S = 1.0
+
+# Snapshot worker names that are shown under a different (shorter) role, so the
+# 8-character role column in the dashboard / touch2key-stats stays aligned.
+_ROLE_LABELS = {"visualizer": "visual"}
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +94,10 @@ def read_process(path: Path) -> psutil.Process | None:
 
     try:
         proc = psutil.Process(int(data["pid"]))
-        if abs(proc.create_time() - float(data["create_time"])) > _CREATE_TIME_TOLERANCE_S:
+        if (
+            abs(proc.create_time() - float(data["create_time"]))
+            > _CREATE_TIME_TOLERANCE_S
+        ):
             return None
         if not proc.is_running() or proc.status() == psutil.STATUS_ZOMBIE:
             return None
@@ -228,16 +235,49 @@ def worker_processes(engine: psutil.Process) -> list[psutil.Process]:
 
 
 def labeled_processes(
-    engine: psutil.Process, snapshot: dict[str, Any] | None
+    engine: psutil.Process | None, snapshot: dict[str, Any] | None
 ) -> list[tuple[str, psutil.Process]]:
-    """[("engine", proc), ("keyboard", proc), ("mouse", proc), ...].
+    """[("engine", proc), ("keyboard", proc), ("mouse", proc), ("vkb", proc),
+    ("visual", proc)] -- whichever of them are alive.
 
-    The set of children is live; roles come from the snapshot (a child that is
-    not in it yet, e.g. just respawned, is labelled "other" until the next tick).
+    * engine, keyboard, mouse, vkb: the engine's live process tree. Roles come
+      from the snapshot (a child that is not in it yet, e.g. just respawned, is
+      labelled "other" until the next tick). A worker the snapshot names that
+      the tree walk missed is looked up directly, but only if the engine is
+      its parent, so a reused PID can't be picked up.
+    * visual: the visualizer is NOT an engine child (the GUI button or
+      touch2key-visualizer starts it), so it is found through its own registry
+      file. That makes it listed even when `engine` is None (engine stopped).
     """
     workers = (snapshot or {}).get("workers") or {}
+    _ROLE_LABELS.update(workers)
     roles = {pid: name for name, pid in workers.items() if pid}
-    out: list[tuple[str, psutil.Process]] = [("engine", engine)]
-    for child in worker_processes(engine):
-        out.append((roles.get(child.pid, "other"), child))
+
+    out: list[tuple[str, psutil.Process]] = []
+    seen: set[int] = set()
+
+    if engine is not None:
+        out.append(("engine", engine))
+        seen.add(engine.pid)
+
+        for child in worker_processes(engine):
+            out.append((roles.get(child.pid, "other"), child))
+            seen.add(child.pid)
+
+        for name, pid in workers.items():
+            if not pid or pid in seen or name == "visualizer":
+                continue
+            try:
+                proc = psutil.Process(int(pid))
+                if proc.ppid() != engine.pid:
+                    continue
+            except (TypeError, ValueError, psutil.Error):
+                continue
+            out.append((_ROLE_LABELS.get(name, "other"), proc))
+            seen.add(proc.pid)
+
+    visualizer = read_process(VISUALIZER_RUNTIME_FILE)
+    if visualizer is not None and visualizer.pid not in seen:
+        out.append((_ROLE_LABELS["visualizer"], visualizer))
+
     return out
