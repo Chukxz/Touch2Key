@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from modules.core.pipeline import (
     AlwaysRegion,
@@ -10,7 +10,7 @@ from modules.core.pipeline import (
     RectangularRegion,
 )
 from modules.core.pipeline_factory import MousePointer
-from modules.utils import MIN_PRIORITY, look_counts_per_px
+from modules.utils import BASELINE_DPI, MIN_PRIORITY, look_counts_per_px
 
 if TYPE_CHECKING:
     from modules.core.pipeline import Pipeline
@@ -26,7 +26,7 @@ class MouseMapper:
         self.output_sink = output_sink
         self.dispatcher = mapper.dispatcher
         self.engine_ref = mapper.engine_ref
-        self.pipeline: Pipeline | None = None
+        self.pipeline: Optional[Pipeline] = None
         self.rebuild_pipeline()
 
         self.dispatcher.register_callback(
@@ -38,6 +38,28 @@ class MouseMapper:
         self.touch_up()
         with self.engine_ref.lock:
             self.pipeline = None
+
+    def get_fallback_mouse_pipeline(self) -> Pipeline:
+        """Generates a fallback pipeline for the menu mode (works with or without a layout)"""
+
+        loader = self.engine_ref.layout_loader
+
+        dpi = BASELINE_DPI
+        zone_priority = MIN_PRIORITY
+        zone_creation_id = sys.maxsize
+
+        if loader is not None and loader.snapshot is not None:
+            dpi = loader.snapshot.dpi
+
+        pipeline = MousePointer(
+            region=AlwaysRegion(),
+            sensitivity_x=look_counts_per_px(1.0, dpi),
+            sensitivity_y=look_counts_per_px(1.0, dpi),
+            priority=zone_priority,
+            creation_id=zone_creation_id,
+        )
+
+        return pipeline
 
     def rebuild_pipeline(self) -> None:
         loader = self.engine_ref.layout_loader
@@ -56,7 +78,6 @@ class MouseMapper:
             return
 
         settings = snap.settings
-        # BUGFIX: Use the resolved device boundaries, not the raw layout space
         dev_w = float(snap.width)
         dev_h = float(snap.height)
 
@@ -105,7 +126,6 @@ class MouseMapper:
                 "Left" if settings.left_handed else "Right",
             )
 
-        # BUGFIX: Use the physical device DPI to scale sensitivity
         pipeline = MousePointer(
             region=look_region,
             sensitivity_x=look_counts_per_px(sens_x, snap.dpi),

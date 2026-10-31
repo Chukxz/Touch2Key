@@ -6,7 +6,7 @@ import os
 import sys
 import threading
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 from modules import (
     BezelMapper,
@@ -31,6 +31,9 @@ from modules.scripts.list_windows import select_window
 from modules.utils import (
     ADB_RATE_CAP_MAX,
     ADB_RATE_CAP_MIN,
+    BASELINE_DPI,
+    CURSOR_SLOP_DP,
+    CURSOR_SLOP_PX,
     DEFAULT_ADB_RATE_CAP,
     DEFAULT_PPS,
     IPC_CMD_START,
@@ -43,6 +46,7 @@ from modules.utils import (
     IpcMapperEventDispatcher,
     MapperEvent,
     MapperEventDispatcher,
+    Point,
     TouchEvent,
     TouchEventCount,
     TouchPhase,
@@ -66,8 +70,8 @@ class Engine:
     def __init__(
         self,
         headless: bool = False,
-        dispatcher: MapperEventDispatcher | IpcMapperEventDispatcher | None = None,
-        conn: Connection | None = None,
+        dispatcher: Optional[MapperEventDispatcher | IpcMapperEventDispatcher] = None,
+        conn: Optional[Connection] = None,
     ):
         platform_mod = get_platform()
         self.headless = headless
@@ -84,23 +88,26 @@ class Engine:
         self.bridge = platform_mod.Bridge(self.window_manager, self.system_config)
 
         self.touch_event_counter = TouchEventCount()
-        self._publisher: TelemetryPublisher | None = None
+        self._publisher: Optional[TelemetryPublisher] = None
         self._respawns: dict[str, int] = {"keyboard": 0, "mouse": 0}
 
-        self.touch_reader: TouchReader | None = None
-        self.layout_loader: LayoutLoader | None = None
-        self.mapper: Mapper | None = None
-        self.output_sink: BridgeOutputSink | None = None
-        self.bezel_mapper: BezelMapper | None = None
-        self.mouse_mapper: MouseMapper | None = None
-        self.key_mapper: KeyMapper | None = None
-        self.wheel_mapper: WheelMapper | None = None
+        self.touch_reader: Optional[TouchReader] = None
+        self.layout_loader: Optional[LayoutLoader] = None
+        self.mapper: Optional[Mapper] = None
+        self.output_sink: Optional[BridgeOutputSink] = None
+        self.bezel_mapper: Optional[BezelMapper] = None
+        self.mouse_mapper: Optional[MouseMapper] = None
+        self.key_mapper: Optional[KeyMapper] = None
+        self.wheel_mapper: Optional[WheelMapper] = None
         self.two_finger_tap_tracker = TwoFingerTapTracker()
 
+        self.fallback_mouse_pipeline: Optional[Pipeline] = None
+        self._cursor_down_pos: Optional[Point] = None
+        self._cursor_drag_started: bool = False
+        self._cursor_down_time: float = 0.0
         self._tiers: list[list[Pipeline]] = []
         # Ownership is fixed at DOWN; MOVE/UP never get offered to a new tier.
         self._contact_owners: dict[int, tuple[Pipeline, ...]] = {}
-        self._cursor_contacts: set[int] = set()
         self._dispatch_generation = 0
 
         self.is_visible = False
@@ -110,11 +117,11 @@ class Engine:
         self._stop_event = threading.Event()
 
         self.vkb_reader, self.vkb_writer = multiprocessing.Pipe(duplex=False)
-        self.vkb_process: multiprocessing.Process | None = None
+        self.vkb_process: Optional[multiprocessing.Process] = None
 
         self.two_finger_tap_enabled = True
         self.bezel_toggle_enabled = True
-        self._mouse_flush_thread: threading.Thread | None = None
+        self._mouse_flush_thread: Optional[threading.Thread] = None
 
         # --- CLI hotkey state ---
         self.rate_cap: float = ADB_RATE_CAP_MIN
@@ -158,7 +165,7 @@ class Engine:
         }
 
         self._terminal_window_handle = None
-        self._hotkey_thread: threading.Thread | None = None
+        self._hotkey_thread: Optional[threading.Thread] = None
 
         if not self.headless:
             try:
@@ -375,11 +382,11 @@ class Engine:
 
     def _on_devices_change(
         self,
-        k_id: int | None = None,
-        m_id: int | None = None,
+        k_id: Optional[int] = None,
+        m_id: Optional[int] = None,
         *,
-        keyboard_device_id: int | None = None,
-        mouse_device_id: int | None = None,
+        keyboard_device_id: Optional[int] = None,
+        mouse_device_id: Optional[int] = None,
     ) -> None:
         if not self.bridge or self.bridge.k_proc is None:
             return
@@ -393,10 +400,11 @@ class Engine:
         self._dispatch_generation += 1
         self._contact_owners.clear()
         self.two_finger_tap_tracker.reset()
+        self._cursor_down_pos = None
+        self._cursor_drag_started = False
 
-        if self._cursor_contacts and self.output_sink:
-            self.output_sink.mouse_up(M_LEFT)
-        self._cursor_contacts.clear()
+        if self.fallback_mouse_pipeline and self.output_sink:
+            self.fallback_mouse_pipeline.reset(self.output_sink)
 
         if self.output_sink:
             for tier in self._tiers:
@@ -470,6 +478,7 @@ class Engine:
                 self.bezel_mapper.rebuild_pipelines()
             if self.mouse_mapper is not None:
                 self.mouse_mapper.rebuild_pipeline()
+
             if self.key_mapper is not None:
                 self.key_mapper.update_bridge_typematics()
                 self.key_mapper.rebuild_pipelines()
@@ -501,6 +510,14 @@ class Engine:
             all_pipelines.append(self.wheel_mapper.pipeline)
         if self.mouse_mapper and self.mouse_mapper.pipeline:
             all_pipelines.append(self.mouse_mapper.pipeline)
+            if (
+                self.fallback_mouse_pipeline is not None
+                and self.output_sink is not None
+            ):
+                self.fallback_mouse_pipeline.reset(self.output_sink)
+            self.fallback_mouse_pipeline = (
+                self.mouse_mapper.get_fallback_mouse_pipeline()
+            )
         if self.bezel_mapper:
             all_pipelines.extend(self.bezel_mapper.pipelines)
 
@@ -552,15 +569,51 @@ class Engine:
     def _dispatch_cursor(self, event: TouchEvent) -> None:
         if not self.output_sink:
             return
-        self.output_sink.mouse_move_abs(event.position.x, event.position.y)
 
+        # On DOWN: Record baseline coordinates and timestamp, emit absolute placement and press
         if event.phase is TouchPhase.DOWN:
-            self._cursor_contacts.add(event.contact_id)
+            self._cursor_down_pos = event.position
+            self._cursor_drag_started = False
+            self._cursor_down_time = event.timestamp
+            self.output_sink.mouse_move_abs(event.position.x, event.position.y)
             self.output_sink.mouse_down(M_LEFT)
+            return
 
+        # On MOVE: Apply touch slop deadzone before streaming deltas
+        elif event.phase is TouchPhase.MOVE:
+            if self._cursor_down_pos is not None and not self._cursor_drag_started:
+                # Calculate pixel distance from touch origin
+                drift = (event.position - self._cursor_down_pos).magnitude
+
+                # Use dynamic DPI slop if available (slop_dp), or fallback to default slop_px
+                slop_px = CURSOR_SLOP_PX
+                if self.layout_loader and self.layout_loader.snapshot:
+                    slop_px = (
+                        self.layout_loader.snapshot.dpi / BASELINE_DPI
+                    ) * CURSOR_SLOP_DP
+
+                # Suppress move if within slop radius
+                if drift < slop_px:
+                    return
+
+                # Slop threshold crossed: unlock drag movements
+                self._cursor_drag_started = True
+
+            # Forward movement to fallback pipeline once drag is verified
+            if self.fallback_mouse_pipeline is not None:
+                self.fallback_mouse_pipeline.process(event, self.output_sink)
+
+        # On UP: Release button and reset tracking state
         elif event.phase is TouchPhase.UP:
+            # If the finger barely moved, clamp the release to the original click origin
+            if not self._cursor_drag_started and self._cursor_down_pos is not None:
+                self.output_sink.mouse_move_abs(
+                    self._cursor_down_pos.x, self._cursor_down_pos.y
+                )
+
             self.output_sink.mouse_up(M_LEFT)
-            self._cursor_contacts.discard(event.contact_id)
+            self._cursor_down_pos = None
+            self._cursor_drag_started = False
 
     def _dispatch_normal(self, event: TouchEvent) -> None:
         """Dispatch one event without running gesture recognition."""
@@ -583,10 +636,9 @@ class Engine:
                 self._contact_owners.pop(cid, None)
             return
 
-        # A cursor contact owns its entire lifecycle once the fallback claims DOWN.
-        if cid in self._cursor_contacts:
+        # Cursor fallback is lower than every configured pipeline.
+        if self.is_visible:
             self._dispatch_cursor(event)
-            return
 
         if event.phase is TouchPhase.DOWN:
             for tier in self._tiers or self._build_pipeline_tiers():
@@ -598,7 +650,7 @@ class Engine:
                     if is_bezel and not self.bezel_toggle_enabled:
                         continue
                     if self.is_visible and not is_bezel:
-                        continue  # menu mode: HUD zones inactive
+                        continue  # menu mode: all zones inactive except bezel zones
                     if not pipeline.claims(event):
                         continue
 
@@ -613,11 +665,6 @@ class Engine:
                 if claimed:
                     self._contact_owners[cid] = tuple(claimed)
                     return
-
-            # Cursor fallback is lower than every configured pipeline.
-            # Fix: Any unclaimed finger can grab the cursor if no other finger has it yet.
-            if self.is_visible and not self._cursor_contacts:
-                self._dispatch_cursor(event)
             return
 
         # Unowned MOVE/UP are ignored.
@@ -718,10 +765,10 @@ class Engine:
 
     def start_headless(
         self,
-        window_id: int | None,
-        sprint_key: str | None = None,
-        rate_cap: float | None = None,
-        pps: float | None = None,
+        window_id: int,
+        sprint_key: Optional[str] = None,
+        rate_cap: Optional[float] = None,
+        pps: Optional[float] = None,
         k_device_handle: int = 0,
         m_device_handle: int = 10,
     ) -> None:
@@ -816,7 +863,7 @@ class Engine:
 
         self.touch_reader.bind_touch_event(self._process_touch_event)
 
-    def _start(self, config_str: str | None = None) -> None:
+    def _start(self, config_str: Optional[str] = None) -> None:
         if config_str is not None:
             config = parse_config_arg(config_str)
             store.settings.update(
@@ -926,7 +973,7 @@ class Engine:
         else:
             self._shutdown()
 
-    def _count_respawn(self, worker_type: str | None = None) -> None:
+    def _count_respawn(self, worker_type: Optional[str] = None) -> None:
         if worker_type:
             self._respawns[worker_type] = self._respawns.get(worker_type, 0) + 1
 
@@ -942,7 +989,7 @@ class Engine:
         else:
             dev_w, dev_h, rotation = 1920, 1080, 0
 
-        def alive_pid(proc) -> int | None:
+        def alive_pid(proc) -> Optional[int]:
             try:
                 return proc.pid if proc is not None and proc.is_alive() else None
             except (ValueError, OSError):
@@ -973,7 +1020,7 @@ class Engine:
         }
 
 
-def _read_visualizer() -> int | None:
+def _read_visualizer() -> Optional[int]:
     proc = read_process(VISUALIZER_RUNTIME_FILE)
     return proc.pid if proc is not None else None
 
@@ -983,7 +1030,7 @@ def run_engine_process(conn: Connection, log_queue: Queue) -> None:
         log_prefix="engine", log_queue=log_queue, console="auto"
     )
     dispatcher = IpcMapperEventDispatcher(conn)
-    engine: Engine | None = None
+    engine: Optional[Engine] = None
     try:
         start_payload = conn.recv_bytes()
         if not start_payload or start_payload[0] != IPC_CMD_START:
@@ -1011,7 +1058,7 @@ def run_engine_process(conn: Connection, log_queue: Queue) -> None:
 
 
 def shutdown_engine_process(
-    engine: Engine | None, dispatcher: IpcMapperEventDispatcher, conn: Connection
+    engine: Optional[Engine], dispatcher: IpcMapperEventDispatcher, conn: Connection
 ) -> None:
     try:
         if engine is not None:

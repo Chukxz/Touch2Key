@@ -234,6 +234,16 @@ def worker_processes(engine: psutil.Process) -> list[psutil.Process]:
     return workers
 
 
+def get_process(process_id: int):
+    process: psutil.Process | None = None
+    try:
+        process = psutil.Process(process_id)
+    except psutil.Error:
+        pass
+
+    return process
+
+
 def labeled_processes(
     engine: psutil.Process | None, snapshot: dict[str, Any] | None
 ) -> list[tuple[str, psutil.Process]]:
@@ -250,10 +260,7 @@ def labeled_processes(
       file. That makes it listed even when `engine` is None (engine stopped).
     """
     workers = (snapshot or {}).get("workers") or {}
-    _ROLE_LABELS.update(workers)
-    roles = {
-        pid: _ROLE_LABELS.get(name, "other") for name, pid in workers.items() if pid
-    }
+    roles = {pid: name for name, pid in workers.items() if pid}
 
     out: list[tuple[str, psutil.Process]] = []
     seen: set[int] = set()
@@ -263,11 +270,19 @@ def labeled_processes(
         seen.add(engine.pid)
 
         for child in worker_processes(engine):
-            out.append((roles.get(child.pid, "other"), child))
-            seen.add(child.pid)
+            role = roles.get(child.pid)
+            if role is not None:
+                out.append((roles.get(child.pid, role), child))
+                seen.add(child.pid)
+
+        if "visualizer" in workers.keys():
+            visualizer_process = get_process(workers["visualizer"])
+            if visualizer_process is not None:
+                out.append(("visualizer", visualizer_process))
+                seen.add(visualizer_process.pid)
 
         for name, pid in workers.items():
-            if not pid or pid in seen or name == "visualizer":
+            if not pid or pid in seen:
                 continue
             try:
                 proc = psutil.Process(int(pid))
@@ -275,11 +290,7 @@ def labeled_processes(
                     continue
             except (TypeError, ValueError, psutil.Error):
                 continue
-            out.append((_ROLE_LABELS.get(name, "other"), proc))
+            out.append((roles.get(proc.pid, name), proc))
             seen.add(proc.pid)
-
-    visualizer = read_process(VISUALIZER_RUNTIME_FILE)
-    if visualizer is not None and visualizer.pid not in seen:
-        out.append((_ROLE_LABELS["visualizer"], visualizer))
 
     return out
