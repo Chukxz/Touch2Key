@@ -251,7 +251,9 @@ def labeled_processes(
     """
     workers = (snapshot or {}).get("workers") or {}
     _ROLE_LABELS.update(workers)
-    roles = {pid: name for name, pid in workers.items() if pid}
+    roles = {
+        pid: _ROLE_LABELS.get(name, "other") for name, pid in workers.items() if pid
+    }
 
     out: list[tuple[str, psutil.Process]] = []
     seen: set[int] = set()
