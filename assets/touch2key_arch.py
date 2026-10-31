@@ -9,6 +9,7 @@ cairo never has to downscale the bitmap).
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -71,7 +72,6 @@ def build_architecture_digraph(
 ) -> graphviz.Digraph:
     dot = graphviz.Digraph(name="Touch2Key_Full_Architecture")
 
-    # splines="polyline" eliminates ortho edge-label warnings and routes 5x faster
     dot.attr(
         rankdir="TB",
         fontname="Helvetica,Arial,sans-serif",
@@ -293,11 +293,11 @@ def build_architecture_digraph(
                         ),
                         (
                             "Snapshot Telemetry",
-                            "read_snapshot(expected_pid) -&gt; checks snapshot_age() &gt; STALE_AFTER_S; renders rate_hz, rate_status, cap/pps drift warnings, DOWN/MOVE/UP/ALL counts",
+                            "read_snapshot(expected_pid) -&gt; checks snapshot_age() &gt; STALE_AFTER_S; renders rate_hz, rate_status, cap/pps drift warnings, counts",
                         ),
                         (
-                            "Process Tree Sampler",
-                            "labeled_processes(engine, snap) -&gt; cached psutil.Process.oneshot() sampling CPU %, RSS MB, thread count, worker respawns, VKB/Visualizer status",
+                            "Decoupled Process Discovery",
+                            "labeled_processes(engine, snap): Engine running -&gt; samples workers &amp; visualizer from snapshot; Engine stopped -&gt; directly reads VISUALIZER_RUNTIME_FILE",
                         ),
                     ],
                     header_bg="#0369a1",
@@ -397,24 +397,20 @@ def build_architecture_digraph(
             c.node(
                 "VisualizerOverlay",
                 _card(
-                    "3A. Live Touch &amp; Input Curve Visualizer",
+                    "3A. Live Touch &amp; Active Layout Visualizer",
                     "touch2key-visualizer (visualizer.py) — Single-Instance Fullscreen Translucent QGraphicsView",
                     [
                         (
                             "Process Registration",
-                            "check_single_instance('Touch2Key_Visualizer') -&gt; register_process(VISUALIZER_RUNTIME_FILE) -&gt; atexit unregister",
+                            "check_single_instance('Touch2Key_Visualizer') -&gt; register_process(VISUALIZER_RUNTIME_FILE) -&gt; atexit unregister_process",
                         ),
                         (
-                            "5ms Poll &amp; InputCurve",
-                            "Polls Ctrl+Arrows (trail width/height 1..100) &amp; Ctrl+F6/F7 (max trail 500..5000) via InputCurve (LINEAR/CUBIC/EXPONENTIAL cycled via Ctrl+F8)",
+                            "Visual Feedback",
+                            "mouseMoveEvent draws interpolated bresenham() trail rects; key/mouse press triggers active hitbox highlights and expiring touch ripples",
                         ),
                         (
-                            "Bresenham &amp; Ripples",
-                            "mouseMoveEvent draws interpolated bresenham() trail rects; key/mouse press spawns 5000ms expiring ripples + #00FF00/#00FFFF text with QGraphicsDropShadowEffect",
-                        ),
-                        (
-                            "Live Engine Secret Sync",
-                            "Monitors toggle_hotkeys scancodes to flip ShowCursor/BlankCursor; every 2.0s calls attach() to read live device_width/height and rescale zone coordinates",
+                            "Live Coordinate Sync",
+                            "Monitors toggle_hotkeys to toggle cursor visibility; every 2.0s inspects telemetry snapshot to dynamically calibrate layout geometry to device DPI",
                         ),
                     ],
                     header_bg="#0891b2",
@@ -439,76 +435,76 @@ def build_architecture_digraph(
                 ),
             )
 
-        # =======================================================================
-        # LAYER 4: SQLITE STORAGE, CONFIG I/O & RUNTIME TELEMETRY SNAPSHOT
-        # =======================================================================
-        cluster_layer4_data_diagraph = dot.subgraph(name="cluster_layer4_data")
-        if cluster_layer4_data_diagraph is not None:
-            with cluster_layer4_data_diagraph as c:
-                c.attr(
-                    label="<<B>LAYER 4: SQLITE SINGLE SOURCE OF TRUTH, CONFIG I/O &amp; TELEMETRY SNAPSHOT (modules.database.* &amp; modules.runtime_info)</B>>",
-                    style="rounded,filled",
-                    fillcolor="#ffedd5",
-                    color="#fb923c",
-                )
-                c.node(
-                    "SqliteStore",
-                    _card(
-                        "4A. SQLite Relational Store (touch2key.db)",
-                        "modules/database/ — Foreign-Key Cascaded Repositories (store.settings, store.layouts, store.zones)",
-                        [
-                            (
-                                "SettingsRepository",
-                                "Singleton AppSettings row: handedness, joystick modes, sens_x/y, deadzone, hysteresis, rate_cap, pps, typematic_*, toggle_hotkeys, active_layout_id",
-                            ),
-                            (
-                                "LayoutsRepository",
-                                "Layout rows (width, height, dpi, mouse_wheel_radius, sprint_distance, image_path); apply_image_params() atomically rescales all non-bezel zones on resolution change",
-                            ),
-                            (
-                                "ZonesRepository",
-                                "Zone rows (scancode, zone_type, cx, cy, r, x1..y2, priority, pointer, ignore_app_settings, pipeline_json); auto-heals Top (0x9905) &amp; Bottom (0x9906) Bezels",
-                            ),
-                        ],
-                        header_bg="#ea580c",
-                    ),
-                )
-                c.node(
-                    "ConfigIOAndMigration",
-                    _card(
-                        "4B. Config I/O &amp; Legacy Migration Engine",
-                        "modules/database/config_io.py &amp; legacy_migration.py",
-                        [
-                            (
-                                "Import Pipeline",
-                                "import_any() auto-detects .json layouts (migrate_json_layout), .toml settings (migrate_toml_config), or bundle directories",
-                            ),
-                            (
-                                "Export Pipeline",
-                                "export_layout_json(), export_settings_toml(linked_json_path), export_bundle() writing portable TOML + JSON pairs to data/profiles/",
-                            ),
-                        ],
-                        header_bg="#c2410c",
-                    ),
-                )
-                c.node(
-                    "RuntimeSnapshot",
-                    _card(
-                        "4C. Runtime Telemetry Snapshot &amp; CLI Stats",
-                        "modules/runtime_info.py | touch2key-stats (stats.py)",
-                        [
-                            (
-                                "Snapshot Payload",
-                                "JSON file (.touch2key_runtime): pid, timestamp, rate_hz, rate_status, rate_cap_hz, pps_threshold, menu_mode, downs/moves/ups/all, respawns, workers, device_width/height, window_lost",
-                            ),
-                            (
-                                "Consumers",
-                                "Read every 1.0s by DashboardPage (_update_telemetry), every 2.0s by Visualizer (attach), and by touch2key-stats (-i, --once, --json, --clear)",
-                            ),
-                        ],
-                        header_bg="#9a3412",
-                    ),
-                )
+    # =======================================================================
+    # LAYER 4: SQLITE STORAGE, CONFIG I/O & RUNTIME TELEMETRY SNAPSHOT
+    # =======================================================================
+    cluster_layer4_data_diagraph = dot.subgraph(name="cluster_layer4_data")
+    if cluster_layer4_data_diagraph is not None:
+        with cluster_layer4_data_diagraph as c:
+            c.attr(
+                label="<<B>LAYER 4: SQLITE SINGLE SOURCE OF TRUTH, CONFIG I/O &amp; TELEMETRY SNAPSHOT (modules.database.* &amp; modules.runtime_info)</B>>",
+                style="rounded,filled",
+                fillcolor="#ffedd5",
+                color="#fb923c",
+            )
+            c.node(
+                "SqliteStore",
+                _card(
+                    "4A. SQLite Relational Store (touch2key.db)",
+                    "modules/database/ — Foreign-Key Cascaded Repositories (store.settings, store.layouts, store.zones)",
+                    [
+                        (
+                            "SettingsRepository",
+                            "Singleton AppSettings row: handedness, joystick modes, sens_x/y, deadzone, hysteresis, rate_cap, pps, typematic_*, toggle_hotkeys, active_layout_id",
+                        ),
+                        (
+                            "LayoutsRepository",
+                            "Layout rows (width, height, dpi, mouse_wheel_radius, sprint_distance, image_path); apply_image_params() atomically rescales all non-bezel zones on resolution change",
+                        ),
+                        (
+                            "ZonesRepository",
+                            "Zone rows (scancode, zone_type, cx, cy, r, x1..y2, priority, pointer, ignore_app_settings, pipeline_json); auto-heals Top (0x9905) &amp; Bottom (0x9906) Bezels",
+                        ),
+                    ],
+                    header_bg="#ea580c",
+                ),
+            )
+            c.node(
+                "ConfigIOAndMigration",
+                _card(
+                    "4B. Config I/O &amp; Legacy Migration Engine",
+                    "modules/database/config_io.py &amp; legacy_migration.py",
+                    [
+                        (
+                            "Import Pipeline",
+                            "import_any() auto-detects .json layouts (migrate_json_layout), .toml settings (migrate_toml_config), or bundle directories",
+                        ),
+                        (
+                            "Export Pipeline",
+                            "export_layout_json(), export_settings_toml(linked_json_path), export_bundle() writing portable TOML + JSON pairs to data/profiles/",
+                        ),
+                    ],
+                    header_bg="#c2410c",
+                ),
+            )
+            c.node(
+                "RuntimeSnapshot",
+                _card(
+                    "4C. Runtime Telemetry Snapshot &amp; CLI Stats",
+                    "modules/runtime_info.py | touch2key-stats (stats.py)",
+                    [
+                        (
+                            "Snapshot Payload",
+                            "JSON file (.touch2key_runtime): pid, timestamp, rate_hz, rate_status, rate_cap_hz, pps_threshold, menu_mode, downs/moves/ups/all, respawns, workers, device_width/height, window_lost",
+                        ),
+                        (
+                            "Consumers",
+                            "Read every 1.0s by DashboardPage (_update_telemetry), every 2.0s by Visualizer (attach), and by touch2key-stats (-i, --once, --json, --clear)",
+                        ),
+                    ],
+                    header_bg="#9a3412",
+                ),
+            )
 
     # =======================================================================
     # PHASE 1: PIPELINE CONSTRUCTION, RELOAD TRANSACTION & 5-KEY TIER SORTING
@@ -564,7 +560,7 @@ def build_architecture_digraph(
                         ),
                         (
                             "_release_active_inputs()",
-                            "_dispatch_generation += 1 | clears _contact_owners &amp; _cursor_contacts | resets all pipelines &amp; releases held keys/buttons",
+                            "_dispatch_generation += 1 | clears _contact_owners | resets all active pipelines &amp; releases held keys/buttons",
                         ),
                     ],
                     header_bg="#1d4ed8",
@@ -574,7 +570,7 @@ def build_architecture_digraph(
                 "Submappers",
                 _card(
                     "5.3 Submapper Pipeline Reconstruction",
-                    "Deterministic Rebuild Sequence",
+                    "Deterministic Rebuild Sequence &amp; Pointer Generation",
                     [
                         (
                             "Mapper.reload()",
@@ -585,8 +581,12 @@ def build_architecture_digraph(
                             "TOP_BEZEL (0x9905) -&gt; execute_toggle_hotkeys | BOTTOM_BEZEL (0x9906) -&gt; toggle_virtual_keyboard (Prec: 4)",
                         ),
                         (
-                            "MouseMapper",
-                            "Camera Look Pipeline: Always/Half-Screen Region -&gt; DeltaTransform -&gt; PointerSemantic (Prec: 0)",
+                            "MouseMapper (Game)",
+                            "Game Mode Camera Pipeline: Custom Look Zone or Handedness Half-Screen / AlwaysRegion -&gt; DeltaTransform -&gt; PointerSemantic (Prec: 0)",
+                        ),
+                        (
+                            "MouseMapper (Fallback)",
+                            "get_fallback_mouse_pipeline(): Universal AlwaysRegion + MousePointer fallback created for Menu Mode cursor dispatch",
                         ),
                         (
                             "KeyMapper",
@@ -612,7 +612,7 @@ def build_architecture_digraph(
                         ),
                         (
                             "Stage 2: Origin",
-                            "FixedOrigin (static) | DynamicOrigin (touch DOWN) | AnchoredOrigin (snap_radius=80.0 - default)",
+                            "FixedOrigin (static) | DynamicOrigin (touch DOWN) | AnchoredOrigin (snap_radius=80.0 default)",
                         ),
                         (
                             "Stage 3: Constraint",
@@ -741,7 +741,7 @@ def build_architecture_digraph(
                 "OwnedCheck",
                 _decision(
                     "1. Is cid in self._contact_owners?",
-                    "Ownership is locked at DOWN; MOVE/UP never re-evaluate tiers",
+                    "Ownership is locked at DOWN; MOVE/UP route exclusively to owning pipelines",
                 ),
             )
             c.node(
@@ -767,24 +767,17 @@ def build_architecture_digraph(
                 ),
             )
             c.node(
-                "CursorContactCheck",
-                _decision(
-                    "2. Is cid in self._cursor_contacts?",
-                    "Active Menu Mode Desktop Cursor Contact",
-                ),
-            )
-            c.node(
                 "DownPhaseCheck",
                 _decision(
-                    "3. Is event.phase == TouchPhase.DOWN?",
-                    "Unowned MOVE / UP events are ignored",
+                    "2. Is event.phase == TouchPhase.DOWN?",
+                    "New contact arrivals evaluate sorted tiers; unowned MOVE/UP fall through to cursor fallback",
                 ),
             )
             c.node(
                 "IterateTiers",
                 _card(
                     "6.4 Evaluate Sorted self._tiers (DOWN Phase Only)",
-                    "Deterministic Tier Claim Loop",
+                    "Strict Deterministic Precedence Claims",
                     [
                         (
                             "Mode Filters",
@@ -795,152 +788,163 @@ def build_architecture_digraph(
                             "pipeline.claims(event) -&gt; _owned_contact is None and region.activates(event)",
                         ),
                         (
+                            "Game Look Claim",
+                            "In Game Mode, MouseMapper's Look Pipeline (Prec: 0) claims camera look contacts",
+                        ),
+                        (
                             "Multi-Claim Rule",
                             "If allow_multi_claim: claim all matching in tier | Else: break on first claim in tier",
                         ),
                         (
                             "Lock Ownership",
-                            "If claimed: self._contact_owners[cid] = tuple(claimed) &amp; return",
+                            "If claimed: self._contact_owners[cid] = tuple(claimed) &amp; returns immediately",
                         ),
                     ],
                     header_bg="#166534",
                 ),
             )
             c.node(
+                "FallbackGate",
+                _decision(
+                    "3. Universal Fallback (self.is_visible)?",
+                    "Unclaimed contact or unowned MOVE/UP: evaluate desktop cursor fallback",
+                ),
+            )
+            c.node(
                 "DispatchCursor",
                 _card(
                     "6.5 Engine._dispatch_cursor(event)",
-                    "Menu Mode Absolute Cursor Fallback (self.is_visible and cid == 0)",
+                    "Menu Mode Absolute Desktop Cursor Fallback",
                     [
                         (
-                            "Coordinate Map",
-                            "gx, gy = mapper.device_to_game_abs(x, y) (rotation-aware window/screen normalization)",
+                            "Absolute Coordinates",
+                            "output_sink.mouse_move_abs(x, y) + DOWN: mouse_down(M_LEFT) | UP: mouse_up(M_LEFT)",
                         ),
                         (
-                            "Driver Output",
-                            "bridge.mouse_move_abs(round(gx), round(gy)) | DOWN: left_click_down() | UP: left_click_up()",
+                            "Fallback Pipeline",
+                            "fallback_mouse_pipeline.process(event, output_sink): AlwaysRegion + MousePointer fallback",
                         ),
                     ],
                     header_bg="#0f766e",
                 ),
             )
 
-        # =======================================================================
-        # PHASE 3: 5-STAGE PIPELINE EXECUTION, OUTPUT SINK & HARDWARE BRIDGE
-        # =======================================================================
-        cluster_phase3_execution_diagraph = dot.subgraph(name="cluster_phase3_execution")
-        if cluster_phase3_execution_diagraph is not None:
-            with cluster_phase3_execution_diagraph as c:
-                c.attr(
-                    label="<<B>ENGINE PHASE 3: 5-STAGE PIPELINE EXECUTION, FRACTIONAL MOUSE FLUSH &amp; HARDWARE BRIDGE WORKERS</B>>",
-                    style="rounded,filled",
-                    fillcolor="#faf5ff",
-                    color="#d8b4fe",
-                )
-                c.node(
-                    "PipelineProcess",
-                    _card(
-                        "7.1 Pipeline.process(event, output_sink)",
-                        "Isolated 5-Stage Per-Contact Execution",
-                        [
-                            (
-                                "Stages 1 &amp; 2",
-                                "DOWN: _owned_contact = cid; origin.begin(pos) | All: origin.update(pos, constraint); origin_pt = origin.get()",
-                            ),
-                            (
-                                "Stage 3: Constraint",
-                                "constrained = constraint.apply(origin_pt, pos) | Computes delta &amp; frame_delta in PipelineContext",
-                            ),
-                            (
-                                "Stage 4: Transform",
-                                "value = transformation.apply(context) -&gt; UNIT | Vector(dx,dy) | frozenset[scancodes]",
-                            ),
-                            (
-                                "Stage 5: Semantics",
-                                "For semantic in semantics: semantic.process(context, value, output_sink)",
-                            ),
-                            (
-                                "UP Teardown",
-                                "If phase is UP: origin.end(), transformation.reset(), clears _owned_contact &amp; _prev_position",
-                            ),
-                        ],
-                        header_bg="#6b21a8",
-                    ),
-                )
-                c.node(
-                    "BridgeOutputSinkNode",
-                    _card(
-                        "7.2 BridgeOutputSink &amp; Bezel Callbacks",
-                        "Sub-Pixel Mouse Accumulator &amp; Action Router",
-                        [
-                            (
-                                "Keys &amp; Clicks",
-                                "key_down/up(scancode) | mouse_down/up(0x9900..0x9904) -&gt; immediate Bridge call",
-                            ),
-                            (
-                                "Fractional Move",
-                                "mouse_move(dx, dy) -&gt; under _lock: accumulates _acc_x += dx, _acc_y += dy",
-                            ),
-                            (
-                                "Top Bezel Callback",
-                                "Mapper.execute_toggle_hotkeys(): parse_seq -&gt; key_down stack -&gt; 15-35ms sleep -&gt; LIFO key_up",
-                            ),
-                            (
-                                "Bottom Bezel Callback",
-                                "Engine.toggle_virtual_keyboard(): spawns/stops VKB process -&gt; VKB_STRUCT (&lt;BH) pipe to Mapper",
-                            ),
-                        ],
-                        header_bg="#1d4ed8",
-                    ),
-                )
-                c.node(
-                    "MouseFlushThreadNode",
-                    _card(
-                        "7.3 MouseFlushThread (Engine._mouse_flush_loop)",
-                        "Rate-Capped Whole-Pixel Dispatcher (1.0 / max(rate_cap, 30.0) s)",
-                        [
-                            (
-                                "flush_mouse_move()",
-                                "idx, idy = clamp(round(_acc_x), -32767, 32767) -&gt; bridge.mouse_move_rel(idx, idy)",
-                            ),
-                            (
-                                "Remainder &amp; Reset",
-                                "Retains fractional _acc_x -= idx, _acc_y -= idy | Resets to 0.0 when active_touches == 0",
-                            ),
-                        ],
-                        header_bg="#1e40af",
-                    ),
-                )
-                c.node(
-                    "HardwareBridge",
-                    _card(
-                        "7.4 AbstractBridge -&gt; OS Driver Worker Processes (k_proc &amp; m_proc)",
-                        "3 Dedicated IPC Pipes + 2 Threads Per Worker Process + Watchdog Respawner",
-                        [
-                            (
-                                "Platform Signatures",
-                                "Win32: keyboard_worker(k_pipe, log_q, k_handle), mouse_worker(m_pipe, mb_pipe, log_q, m_handle), NtSetTimerResolution | Linux: UInput(KEYBOARD_CAP / MOUSE_CAP)",
-                            ),
-                            (
-                                "k_proc Main Thread",
-                                "Polls k_pipe (15s timeout -&gt; _release_all_keys): unpacks PACK_KEY (&lt;HB, maps E0/LINUX_KEY_MAP) -&gt; key_queue | unpacks KEY_CONFIG (&lt;B?IfH)",
-                            ),
-                            (
-                                "k_proc Injector Thread",
-                                "Drains key_queue: DOWN sleeps 40-70ms dwell, UP sleeps 1ms (stretches fast taps) | Outer loop fires typematic repeat_key after delay_ns at repeat_rate",
-                            ),
-                            (
-                                "m_proc Main Thread",
-                                "Polls m_pipe: coalesces up to MAX_COALESCE=20 TASK_REL (&lt;Bhh, 0.8-1.2ms dwell) or TASK_WHEEL (&lt;Bhh, 1ms dwell) + TASK_ABS (&lt;Bii, MOUSE_VIRTUAL_DESKTOP) via send_lock",
-                            ),
-                            (
-                                "m_proc Button Thread",
-                                "Polls mb_pipe (15s timeout -&gt; _release_all_buttons): injects PACK_BUTTON (&lt;Bi) under send_lock, then sleeps 25-40ms DOWN / 1ms UP outside lock (never blocks moves)",
-                            ),
-                        ],
-                        header_bg="#713f12",
-                    ),
-                )
+    # =======================================================================
+    # PHASE 3: 5-STAGE PIPELINE EXECUTION, OUTPUT SINK & HARDWARE BRIDGE
+    # =======================================================================
+    cluster_phase3_execution_diagraph = dot.subgraph(name="cluster_phase3_execution")
+    if cluster_phase3_execution_diagraph is not None:
+        with cluster_phase3_execution_diagraph as c:
+            c.attr(
+                label="<<B>ENGINE PHASE 3: 5-STAGE PIPELINE EXECUTION, FRACTIONAL MOUSE FLUSH &amp; HARDWARE BRIDGE WORKERS</B>>",
+                style="rounded,filled",
+                fillcolor="#faf5ff",
+                color="#d8b4fe",
+            )
+            c.node(
+                "PipelineProcess",
+                _card(
+                    "7.1 Pipeline.process(event, output_sink)",
+                    "Isolated 5-Stage Per-Contact Execution",
+                    [
+                        (
+                            "Stages 1 &amp; 2",
+                            "DOWN: _owned_contact = cid; origin.begin(pos) | All: origin.update(pos, constraint); origin_pt = origin.get()",
+                        ),
+                        (
+                            "Stage 3: Constraint",
+                            "constrained = constraint.apply(origin_pt, pos) | Computes delta &amp; frame_delta in PipelineContext",
+                        ),
+                        (
+                            "Stage 4: Transform",
+                            "value = transformation.apply(context) -&gt; UNIT | Vector(dx,dy) | frozenset[scancodes]",
+                        ),
+                        (
+                            "Stage 5: Semantics",
+                            "For semantic in semantics: semantic.process(context, value, output_sink)",
+                        ),
+                        (
+                            "UP Teardown",
+                            "If phase is UP: origin.end(), transformation.reset(), clears _owned_contact &amp; _prev_position",
+                        ),
+                    ],
+                    header_bg="#6b21a8",
+                ),
+            )
+            c.node(
+                "BridgeOutputSinkNode",
+                _card(
+                    "7.2 BridgeOutputSink &amp; Bezel Callbacks",
+                    "Sub-Pixel Mouse Accumulator &amp; Action Router",
+                    [
+                        (
+                            "Keys &amp; Clicks",
+                            "key_down/up(scancode) | mouse_down/up(0x9900..0x9904) -&gt; immediate Bridge call",
+                        ),
+                        (
+                            "Fractional Move",
+                            "mouse_move(dx, dy) -&gt; under _lock: accumulates _acc_x += dx, _acc_y += dy",
+                        ),
+                        (
+                            "Top Bezel Callback",
+                            "Mapper.execute_toggle_hotkeys(): parse_seq -&gt; key_down stack -&gt; 15-35ms sleep -&gt; LIFO key_up",
+                        ),
+                        (
+                            "Bottom Bezel Callback",
+                            "Engine.toggle_virtual_keyboard(): spawns/stops VKB process -&gt; VKB_STRUCT (&lt;BH) pipe to Mapper",
+                        ),
+                    ],
+                    header_bg="#1d4ed8",
+                ),
+            )
+            c.node(
+                "MouseFlushThreadNode",
+                _card(
+                    "7.3 MouseFlushThread (Engine._mouse_flush_loop)",
+                    "Rate-Capped Whole-Pixel Dispatcher (1.0 / max(rate_cap, 30.0) s)",
+                    [
+                        (
+                            "flush_mouse_move()",
+                            "idx, idy = clamp(round(_acc_x), -32767, 32767) -&gt; bridge.mouse_move_rel(idx, idy)",
+                        ),
+                        (
+                            "Remainder &amp; Reset",
+                            "Retains fractional _acc_x -= idx, _acc_y -= idy | Resets to 0.0 when active_touches == 0",
+                        ),
+                    ],
+                    header_bg="#1e40af",
+                ),
+            )
+            c.node(
+                "HardwareBridge",
+                _card(
+                    "7.4 AbstractBridge -&gt; OS Driver Worker Processes (k_proc &amp; m_proc)",
+                    "3 Dedicated IPC Pipes + 2 Threads Per Worker Process + Watchdog Respawner",
+                    [
+                        (
+                            "Platform Signatures",
+                            "Win32: keyboard_worker(k_pipe, log_q, k_handle), mouse_worker(m_pipe, mb_pipe, log_q, m_handle), NtSetTimerResolution | Linux: UInput(KEYBOARD_CAP / MOUSE_CAP)",
+                        ),
+                        (
+                            "k_proc Main Thread",
+                            "Polls k_pipe (15s timeout -&gt; _release_all_keys): unpacks PACK_KEY (&lt;HB, maps E0/LINUX_KEY_MAP) -&gt; key_queue | unpacks KEY_CONFIG (&lt;B?IfH)",
+                        ),
+                        (
+                            "k_proc Injector Thread",
+                            "Drains key_queue: DOWN sleeps 40-70ms dwell, UP sleeps 1ms (stretches fast taps) | Outer loop fires typematic repeat_key after delay_ns at repeat_rate",
+                        ),
+                        (
+                            "m_proc Main Thread",
+                            "Polls m_pipe: coalesces up to MAX_COALESCE=20 TASK_REL (&lt;Bhh, 0.8-1.2ms dwell) or TASK_WHEEL (&lt;Bhh, 1ms dwell) + TASK_ABS (&lt;Bii, MOUSE_VIRTUAL_DESKTOP) via send_lock",
+                        ),
+                        (
+                            "m_proc Button Thread",
+                            "Polls mb_pipe (15s timeout -&gt; _release_all_buttons): injects PACK_BUTTON (&lt;Bi) under send_lock, then sleeps 25-40ms DOWN / 1ms UP outside lock (never blocks moves)",
+                        ),
+                    ],
+                    header_bg="#713f12",
+                ),
+            )
 
     # =======================================================================
     # CROSS-LAYER & INTER-PHASE EDGES
@@ -1048,18 +1052,22 @@ def build_architecture_digraph(
         color="#b45309",
     )
 
+    # Dispatch flow
     dot.edge("TouchIngest", "MenuGate")
     dot.edge("MenuGate", "TFTTracker", label=" True (Menu Mode)")
-    dot.edge("MenuGate", "OwnedCheck", label=" False (In-Game: two-finger tap ignored)")
+    dot.edge("MenuGate", "OwnedCheck", label=" False (In-Game: 2-finger tap ignored)")
     dot.edge("TFTTracker", "OwnedCheck", label=" IDLE / REJECTED (Replay)")
 
-    dot.edge("OwnedCheck", "RouteOwned", label=" Yes (MOVE/UP)")
-    dot.edge("OwnedCheck", "CursorContactCheck", label=" No")
-    dot.edge("CursorContactCheck", "DispatchCursor", label=" Yes")
-    dot.edge("CursorContactCheck", "DownPhaseCheck", label=" No")
+    dot.edge("OwnedCheck", "RouteOwned", label=" Yes (Active Owner)")
+    dot.edge("OwnedCheck", "DownPhaseCheck", label=" No (Unowned Contact)")
     dot.edge("DownPhaseCheck", "IterateTiers", label=" Yes (DOWN)")
+    dot.edge("DownPhaseCheck", "FallbackGate", label=" No (Unowned MOVE/UP)")
+
     dot.edge("IterateTiers", "PipelineProcess", label=" Claimed on DOWN")
-    dot.edge("IterateTiers", "DispatchCursor", label=" Unclaimed (Menu &amp; cid==0)")
+    dot.edge("IterateTiers", "FallbackGate", label=" Unclaimed on DOWN")
+
+    dot.edge("FallbackGate", "DispatchCursor", label=" Yes (Menu Mode: self.is_visible)")
+    dot.edge("FallbackGate", "HardwareBridge", label=" No (Game Mode: ignored)", style="invis")
 
     dot.edge("RouteOwned", "PipelineProcess", label=" pipeline.process()")
     dot.edge("PipelineProcess", "BridgeOutputSinkNode")
@@ -1111,12 +1119,10 @@ def generate_all(
     )
     print(f"[OK] Generated PNG: {results['png']}")
 
-    # Remove the intermediate .gv source
+    # Remove intermediate .gv source
     Path(str(base)).unlink(missing_ok=True)
     return results
 
-
-import re
 
 SPLIT_NAMES = {
     "cluster_layer1_scripts": "01_layer1_cli_bootstrap",
