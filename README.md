@@ -180,7 +180,7 @@ In **GUI mode** the arrow keys belong to Qt. Change the same values on the **Set
 
 * **Layout Editor (GUI):** PySide6/Matplotlib canvas for placing zones, adjusting priorities (`P`/`O` keys or the inspector), resizing, and saving to SQLite.
 
-* **Live Input Visualizer (`touch2key-visualizer`):** loads your active layout, highlights hitboxes as you trigger them, and respects your configured toggle hotkeys, so you can test mappings outside a game.
+* **Live Input Visualizer (`touch2key-visualizer`):** loads your active layout, highlights hitboxes as you trigger them, and respects your configured toggle hotkeys, so you can test mappings outside a game (also has its own hotkeys that are displayed in an overlaid diagnostics text).
 
 * **Anti-Cheat Safe:** humanized dwell times and randomized click durations for user-initiated actions only. No macros, scripts, or game-state tampering.
 
