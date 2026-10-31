@@ -747,51 +747,38 @@ class Engine:
         cid = event.contact_id
         generation = self._dispatch_generation
 
-        # Existing contacts are routed only to pipelines that claimed DOWN.
+        # Existing contacts are routed only to the pipelines that claimed DOWN.
         owners = self._contact_owners.get(cid)
-
         if owners:
             for pipeline in owners:
                 pipeline.process(event, output_sink)
-
                 if generation != self._dispatch_generation:
                     return
 
             if event.phase is TouchPhase.UP:
                 self._contact_owners.pop(cid, None)
-
             return
 
-        # Cursor fallback is lower than every configured pipeline.
-        if self.is_visible:
-            self._dispatch_cursor(event)
-
+        # DOWN Phase: evaluate sorted tiers in strict precedence order.
         if event.phase is TouchPhase.DOWN:
             for tier in self._tiers or self._build_pipeline_tiers():
                 claimed: list[Pipeline] = []
-                allow_multi = bool(
-                    getattr(tier[0], "allow_multi_claim", False)
-                )
+                allow_multi = bool(getattr(tier[0], "allow_multi_claim", False))
 
                 for pipeline in tier:
                     is_bezel = getattr(pipeline, "is_bezel", False)
-
                     if is_bezel and not self.bezel_toggle_enabled:
                         continue
-
                     if self.is_visible and not is_bezel:
-                        continue
-
+                        continue  # Menu mode: HUD controls inactive; only bezels can claim
                     if not pipeline.claims(event):
                         continue
 
                     pipeline.process(event, output_sink)
-
                     if generation != self._dispatch_generation:
                         return
 
                     claimed.append(pipeline)
-
                     if not allow_multi:
                         break
 
@@ -799,9 +786,10 @@ class Engine:
                     self._contact_owners[cid] = tuple(claimed)
                     return
 
-            return
-
-        # Unowned MOVE/UP are ignored.
+        # Universal Fallback: only runs when no tier/pipeline claimed the touch.
+        # In Menu Mode (cursor visible), unclaimed touches become desktop clicks.
+        if self.is_visible:
+            self._dispatch_cursor(event)
 
     def _process_touch_event(self, touch_event: TouchEvent) -> None:
         should_shutdown = False
