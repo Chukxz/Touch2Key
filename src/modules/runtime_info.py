@@ -259,7 +259,7 @@ def labeled_processes(
     out: list[tuple[str, psutil.Process]] = []
     seen: set[int] = set()
 
-    # --- 1. Engine is Running: Source info from the Engine & Snapshot ---
+    # --- Engine is Running: Source info from the Engine & Snapshot ---
     if engine is not None:
         out.append(("engine", engine))
         seen.add(engine.pid)
@@ -301,7 +301,7 @@ def labeled_processes(
             out.append((role_label, proc))
             seen.add(proc.pid)
 
-    # --- 2. Engine is NOT Running: Query Visualizer Registry Directly ---
+    # --- Engine is NOT Running: Query Visualizer Registry Directly ---
     else:
         visual_proc = read_process(VISUALIZER_RUNTIME_FILE)
         if visual_proc is not None:
