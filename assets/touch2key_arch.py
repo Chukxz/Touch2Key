@@ -476,18 +476,18 @@ def build_architecture_digraph(
             "MenuGate",
             _decision(
                 "Menu Mode Gesture Gate?",
-                "self.is_visible and self.two_finger_tap_enabled",
+                "self.is_visible (cursor visible = Menu Mode only) and self.two_finger_tap_enabled",
             ),
         )
         c.node(
             "TFTTracker",
             _card(
                 "6.2 TwoFingerTapTracker.observe(touch_event)",
-                "Ambiguity Buffer FSM (duration &lt;= 0.25s, drift &lt;= 25px, sync &lt;= 0.12s)",
+                "Menu Mode only (cursor visible) | Ambiguity Buffer FSM (duration &lt;= 0.25s, drift &lt;= 25px, sync &lt;= 0.12s)",
                 [
                     ("PENDING", "Buffers candidate event in _buffer and returns early (prevents single-tap leak)"),
                     ("REJECTED", "Replays all buffered events in decision.replay through _dispatch_normal() in order"),
-                    ("RECOGNIZED", "Valid synchronized 2-finger tap -&gt; executes toggle_hotkeys to hide cursor &amp; return to Game Mode"),
+                    ("RECOGNIZED", "Valid synchronized 2-finger tap -&gt; gracefully shuts down the engine process"),
                     ("IDLE", "Unbuffered non-DOWN event -&gt; proceeds to _dispatch_normal(touch_event)"),
                 ],
                 header_bg="#b91c1c",
@@ -669,7 +669,7 @@ def build_architecture_digraph(
 
     dot.edge("TouchIngest", "MenuGate")
     dot.edge("MenuGate", "TFTTracker", label=" True (Menu Mode)")
-    dot.edge("MenuGate", "OwnedCheck", label=" False (In-Game)")
+    dot.edge("MenuGate", "OwnedCheck", label=" False (In-Game: two-finger tap ignored)")
     dot.edge("TFTTracker", "OwnedCheck", label=" IDLE / REJECTED (Replay)")
 
     dot.edge("OwnedCheck", "RouteOwned", label=" Yes (MOVE/UP)")
