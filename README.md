@@ -168,11 +168,11 @@ In **GUI mode** the arrow keys belong to Qt. Change the same values on the **Set
   * **Touchscreen-only switching:** *both are toggleable in settings, and the bezel zones are seeded in every layout automatically.*
     * **Top Bezel:** toggles cursor visibility (Game Mode / Menu Mode) by executing the configured toggle hotkeys sequence.
     * **Bottom Bezel:** opens the Virtual Keyboard (direct IPC to the engine for low-latency typing).
-    * **Two-Finger Tap:** in Menu Mode, tap two fingers anywhere to hide the cursor and return to Game Mode. Ignored while in-game.
+    * **Two-Finger Tap:** taps with two fingers anywhere on the screen to gracefully shut down the engine process.
 
 * **Camera & Joysticks:**
   * **Buttons:** `pointer` zones emit keypresses and camera deltas together (e.g. aiming while shooting).
-  * **Fixed joysticks** leave the rest of the screen free for camera look. **Anchored** and **Floating** joysticks split the screen by handedness. Anchored joysticks snap (within the snap radius) to the fixed HUD position; Floating joysticks start where you touch.
+  * **Fixed joysticks** leave the rest of the screen free for camera look. **Anchored** and **Floating** joysticks split the screen by handedness. Anchored joysticks snap (within the snap radius of 80.0 pixels by default) to the fixed HUD position; Floating joysticks start where you touch.
 
 * **Platform-Native Injection:** Windows via the Interception driver, Linux via `evdev`/`uinput` (X11 supported).
 
