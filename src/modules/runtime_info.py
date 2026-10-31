@@ -250,37 +250,44 @@ def labeled_processes(
     """[("engine", proc), ("keyboard", proc), ("mouse", proc), ("vkb", proc),
     ("visual", proc)] -- whichever of them are alive.
 
-    * engine, keyboard, mouse, vkb: the engine's live process tree. Roles come
-      from the snapshot (a child that is not in it yet, e.g. just respawned, is
-      labelled "other" until the next tick). A worker the snapshot names that
-      the tree walk missed is looked up directly, but only if the engine is
-      its parent, so a reused PID can't be picked up.
-    * visual: the visualizer is NOT an engine child (the GUI button or
-      touch2key-visualizer starts it), so it is found through its own registry
-      file. That makes it listed even when `engine` is None (engine stopped).
+    * When engine is RUNNING:
+      Workers and visualizer PID are obtained from the engine's telemetry snapshot.
+    * When engine is NOT RUNNING:
+      Queries VISUALIZER_RUNTIME_FILE directly so the dashboard can still report
+      the visualizer's process info.
     """
-    workers = (snapshot or {}).get("workers") or {}
-    roles = {pid: name for name, pid in workers.items() if pid}
-
     out: list[tuple[str, psutil.Process]] = []
     seen: set[int] = set()
 
+    # --- 1. Engine is Running: Source info from the Engine & Snapshot ---
     if engine is not None:
         out.append(("engine", engine))
         seen.add(engine.pid)
 
+        workers: dict[str, int | None] = (snapshot or {}).get("workers") or {}
+        # Map worker PID -> role name (applying _ROLE_LABELS formatting)
+        roles = {
+            pid: _ROLE_LABELS.get(name, name)
+            for name, pid in workers.items()
+            if pid
+        }
+
+        # Match active children in the process tree
         for child in worker_processes(engine):
             role = roles.get(child.pid)
             if role is not None:
-                out.append((roles.get(child.pid, role), child))
+                out.append((role, child))
                 seen.add(child.pid)
 
-        if "visualizer" in workers.keys():
-            visualizer_process = get_process(workers["visualizer"])
-            if visualizer_process is not None:
-                out.append(("visualizer", visualizer_process))
-                seen.add(visualizer_process.pid)
+        # Inspect visualizer reported by the engine's snapshot
+        visualizer_pid = workers.get("visualizer")
+        if visualizer_pid and visualizer_pid not in seen:
+            visual_proc = get_process(visualizer_pid)
+            if visual_proc is not None:
+                out.append((_ROLE_LABELS.get("visualizer", "visual"), visual_proc))
+                seen.add(visual_proc.pid)
 
+        # Catch-up for remaining workers missed during tree walk
         for name, pid in workers.items():
             if not pid or pid in seen:
                 continue
@@ -290,7 +297,14 @@ def labeled_processes(
                     continue
             except (TypeError, ValueError, psutil.Error):
                 continue
-            out.append((roles.get(proc.pid, name), proc))
+            role_label = _ROLE_LABELS.get(name, name)
+            out.append((role_label, proc))
             seen.add(proc.pid)
+
+    # --- 2. Engine is NOT Running: Query Visualizer Registry Directly ---
+    else:
+        visual_proc = read_process(VISUALIZER_RUNTIME_FILE)
+        if visual_proc is not None:
+            out.append((_ROLE_LABELS.get("visualizer", "visual"), visual_proc))
 
     return out
