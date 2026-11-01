@@ -30,7 +30,7 @@ The first version (CLI only, basic GUI windows) is available [here](https://gith
 Use a virtual environment to avoid package conflicts:
 
 ```bash
-git clone [https://github.com/Chukxz/Touch2Key.git](https://github.com/Chukxz/Touch2Key.git)
+git clone https://github.com/Chukxz/Touch2Key.git
 cd Touch2Key
 python -m venv .venv
 ```
@@ -172,7 +172,7 @@ In **GUI mode** the arrow keys belong to Qt. Change the same values on the **Set
 
 * **Camera & Joysticks:**
   * **Buttons:** `pointer` zones emit keypresses and camera deltas together (e.g. aiming while shooting).
-  * **Fixed joysticks** leave the rest of the screen free for camera look. **Anchored** and **Floating** joysticks split the screen by handedness. Anchored joysticks snap (within the snap radius of 80.0 pixels by default) to the fixed HUD position; Floating joysticks start where you touch.
+  * **Fixed joysticks** leave the rest of the screen free for camera look. **Anchored** and **Floating** joysticks split the screen by handedness. Anchored joysticks snap (within the snap radius of `80.0` pixels by default) to the fixed HUD position; Floating joysticks start where you touch.
 
 * **Platform-Native Injection:** Windows via the Interception driver, Linux via `evdev`/`uinput` (X11 supported).
 
@@ -182,7 +182,7 @@ In **GUI mode** the arrow keys belong to Qt. Change the same values on the **Set
 
 * **Live Input Visualizer (`touch2key-visualizer`):** loads your active layout, highlights hitboxes as you trigger them, and respects your configured toggle hotkeys, so you can test mappings outside a game (also has its own hotkeys that are displayed in an overlaid diagnostics text).
 
-* **Anti-Cheat Safe:** humanized dwell times and randomized click durations for user-initiated actions only. No macros, scripts, or game-state tampering.
+* **Anti-Cheat Safe:** humanized dwell times and randomized click durations for user-initiated actions only. No gameplay automation macros, bots, or game-state tampering (toggle shortcuts operate strictly as system-level mode switches).
 
 ## 📐 Architecture Diagram
 
@@ -269,7 +269,7 @@ python assets/touch2key_arch.py              # writes next to the script (assets
 python assets/touch2key_arch.py path/to/out  # or into a folder of your choice
 ```
 
-A single run writes the PDF, SVG, full PNG, and the split `PNG/` folder described in [Architecture Diagram](#-architecture-diagram). Notes:
+A single run writes the PDF, SVG, full PNG, and the split `SPLIT_ARCHITECTURE_PNGS/` folder described in [Architecture Diagram](#-architecture-diagram). Notes:
 * **PNG size:** the full PNG uses tighter spacing (`nodesep`/`ranksep`) and an automatically chosen DPI, so Graphviz's cairo renderer never has to downscale it ("graph is too large for cairo-renderer bitmaps"). Tune `PNG_MAX_PIXELS` and `PNG_TARGET_DPI` at the top of the script for a lighter or sharper file.
 * **Split PNGs:** each section is laid out on its own at `SPLIT_DPI` (default 200). Adjust `SPLIT_NAMES`, `SPLIT_DPI`, `SPLIT_MAX_PIXELS`, or `EXTRA_CHAINS` (which stacks cards into one column) to change the split output.
 * **Vector output:** the PDF and SVG keep the original spacing and have no bitmap size limit.

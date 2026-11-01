@@ -65,7 +65,7 @@ telemetry_logger = logging.getLogger("modules.gui.dashboard_page.telemetry")
 
 _MB = 1024 * 1024
 _TELEMETRY_INTERVAL_MS = 1000
-_LOG_TELEMETRY = True  # False restores the old behavior (no logging, sample only while visible)
+_LOG_TELEMETRY = False  # False (no logging, sample only while visible)
 _LOG_INTERVAL_S = 5  # one log line per this many seconds
 _LOG_EVERY_N_TICKS = max(1, round(_LOG_INTERVAL_S * 1000 / _TELEMETRY_INTERVAL_MS))
 _DOT_RUNNING = "#43a047"
@@ -243,7 +243,13 @@ class DashboardPage(QWidget):
         super().showEvent(event)
         try:
             self._update_telemetry()
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError, RuntimeError):
+        except (
+            psutil.NoSuchProcess,
+            psutil.AccessDenied,
+            psutil.ZombieProcess,
+            OSError,
+            RuntimeError,
+        ):
             pass
         self._telemetry_timer.start()
 
@@ -340,9 +346,7 @@ class DashboardPage(QWidget):
         self._refresh_target_label()
 
         # Engine processes changed; keep the GUI process's CPU baseline.
-        self._procs = {
-            k: v for k, v in self._procs.items() if k == self._gui_proc.pid
-        }
+        self._procs = {k: v for k, v in self._procs.items() if k == self._gui_proc.pid}
         self._tick = 0
         if self._telemetry_wanted():
             self._update_telemetry()
@@ -471,14 +475,14 @@ class DashboardPage(QWidget):
         for role, proc in procs:
             sample = self._sample(proc)
             if sample is None:
-                rows.append(f"{role:<8} pid {proc.pid:<7} n/a")
+                rows.append(f"{role:<34} pid {proc.pid:>15} n/a")
                 continue
             cpu, rss_mb, threads = sample
             cpu_txt = "--" if cpu is None else f"{cpu:.1f}%"
             total_cpu += cpu or 0.0
             total_rss += rss_mb
             rows.append(
-                f"{role:<8} pid {proc.pid:<7} cpu {cpu_txt:>6}  "
+                f"{role:<34} pid {proc.pid:>15} cpu {cpu_txt:>6}  "
                 f"rss {rss_mb:7.1f} MB  thr {threads:3d}"
             )
 
@@ -493,8 +497,7 @@ class DashboardPage(QWidget):
             uptime = "n/a"
 
         header = (
-            f"{'Uptime' if engine else 'GUI uptime'} {uptime}   "
-            f"Processes {len(procs)}   "
+            f"{'Uptime' if engine else 'GUI uptime'} {uptime:<15} Processes {len(procs):8} "
             f"CPU {total_cpu:.1f}%   RSS {total_rss:.1f} MB"
         )
         return header, rows
@@ -510,9 +513,7 @@ class DashboardPage(QWidget):
         summary = " ".join(header.split())
         if not engine_running:
             procs_txt = "; ".join(" ".join(row.split()) for row in rows)
-            telemetry_logger.info(
-                "Engine not running | %s | %s", summary, procs_txt
-            )
+            telemetry_logger.info("Engine not running | %s | %s", summary, procs_txt)
             return
         if snap is None:
             telemetry_logger.info("No engine snapshot yet | %s", summary)
@@ -570,8 +571,7 @@ class DashboardPage(QWidget):
 
         header, rows = self._build_rows(engine, procs)
 
-        # Skip the widget work while hidden (the timer may only be running for
-        # the log); showEvent refreshes the labels as soon as the page returns.
+
         if self.isVisible():
             if engine is None:
                 self.rate_label.setVisible(False)
