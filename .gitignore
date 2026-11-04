@@ -55,3 +55,11 @@ diagnostics/
 *.sqlite
 *.sqlite3
 *.db
+
+# Ignore generated architecture bitmaps and vectors
+assets/*.png
+assets/*.svg
+assets/SPLIT_ARCHITECTURE_PNGS/
+
+# (Optional) Explicitly allow the PDF to be tracked
+!assets/touch2key_full_architecture.pdf
