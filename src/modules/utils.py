@@ -140,6 +140,8 @@ M_BACK = 0x9904
 TOP_BEZEL_ID = 0x9905
 BOTTOM_BEZEL_ID = 0x9906
 
+CLOSE_VKB_ID = 0x9999
+
 # Unified tuple for mouse scancode checks across pipeline & key mappers
 MOUSE_SCANCODES: tuple[int, ...] = (
     M_LEFT,

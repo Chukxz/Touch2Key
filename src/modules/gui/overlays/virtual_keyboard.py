@@ -17,6 +17,7 @@ from PySide6.QtCore import Qt, QTimer, QCoreApplication
 from PySide6.QtGui import QIcon
 
 from modules.utils import (
+    CLOSE_VKB_ID,
     LOCK_KEYS,
     M_LEFT,
     M_MIDDLE,
@@ -146,7 +147,8 @@ NAV_LAYOUT = [
 
 # --- Numpad Block ---
 NUMPAD_LAYOUT = [
-    ("Toggle Key", TOP_BEZEL_ID, 0, 0, 1, 4),
+    ("Toggle", TOP_BEZEL_ID, 0, 0, 1, 2),
+    ("Close", CLOSE_VKB_ID, 0, 2, 1, 2),
     ("7", 0x47, 1, 0, 1, 1),
     ("8", 0x48, 1, 1, 1, 1),
     ("9", 0x49, 1, 2, 1, 1),
@@ -320,6 +322,7 @@ class VirtualKeyboard(QWidget):
             Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
             | Qt.WindowType.WindowDoesNotAcceptFocus
+            | Qt.WindowType.FramelessWindowHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, True)
@@ -371,6 +374,13 @@ class VirtualKeyboard(QWidget):
         )
         if btn.is_lock_key:
             self.lock_buttons[key_code] = btn
+
+        if key_code == CLOSE_VKB_ID:
+            btn.setStyleSheet(btn.styleSheet() + """
+                QPushButton { background-color: #7f1d1d; border: 1px solid #450a0a; }
+                QPushButton:pressed { background-color: #991b1b; }
+            """)
+
         return btn
 
     def _poll_lock_states(self) -> None:
@@ -382,6 +392,11 @@ class VirtualKeyboard(QWidget):
                     btn.set_active(states.get(name, False))
 
     def _send_key(self, state: int, key_code: int, key_name: str):
+        if key_code == CLOSE_VKB_ID:
+            if state == 0:
+                self.close()
+            return
+
         if self.conn is None:
             action = "DOWN" if state == 0 else "UP"
             _platform = "Unsupported Platform"
@@ -411,6 +426,23 @@ class VirtualKeyboard(QWidget):
             self.conn.send_bytes(VKB_STRUCT.pack(state, int(key_code)))
         except OSError:
             self.close()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if hasattr(self, "_drag_pos") and event.buttons() == Qt.MouseButton.LeftButton:
+            diff = event.globalPosition().toPoint() - self._drag_pos
+            self.move(self.pos() + diff)
+            self._drag_pos = event.globalPosition().toPoint()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if hasattr(self, "_drag_pos"):
+            del self._drag_pos
+        super().mouseReleaseEvent(event)
 
     def closeEvent(self, event):
         self.lock_state_timer.stop()

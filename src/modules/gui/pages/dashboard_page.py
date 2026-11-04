@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 
 import psutil
 from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
@@ -64,6 +65,7 @@ logger = logging.getLogger("modules.gui.dashboard_page")
 telemetry_logger = logging.getLogger("modules.gui.dashboard_page.telemetry")
 
 _MB = 1024 * 1024
+_LOGICAL_CORES = psutil.cpu_count() or 1
 _TELEMETRY_INTERVAL_MS = 1000
 _LOG_TELEMETRY = False  # False (no logging, sample only while visible)
 _LOG_INTERVAL_S = 5  # one log line per this many seconds
@@ -183,7 +185,14 @@ class DashboardPage(QWidget):
         telemetry_layout.addWidget(self.rate_label)
 
         self.telemetry_label = QLabel()
-        self.telemetry_label.setStyleSheet("font-family: monospace;")
+        # Ask the OS for its native fixed-pitch font (Consolas on Windows, DejaVu Sans Mono / monospace on Linux)
+        self.telemetry_label.setFont(
+            QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        )
+        # Fallback font stack in stylesheet
+        self.telemetry_label.setStyleSheet(
+            'font-family: "Consolas", "Courier New", monospace;'
+        )
         self.telemetry_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
@@ -359,10 +368,9 @@ class DashboardPage(QWidget):
     # Telemetry
     # ------------------------------------------------------------------
     def _show_idle_telemetry(self) -> None:
-        self.rate_label.setVisible(False)
         self.telemetry_label.setText("Engine is not running.")
         self.telemetry_label.setStyleSheet(
-            "font-family: monospace; color: palette(placeholder-text);"
+            'font-family: "Consolas", "Courier New", monospace;'
         )
 
     def _engine_pid(self) -> int | None:
@@ -374,9 +382,11 @@ class DashboardPage(QWidget):
         except (ValueError, OSError):  # process handle already closed
             return None
 
-    def _sample(self, proc: psutil.Process) -> tuple[float | None, float, int] | None:
-        """(cpu %, rss MB, threads); cpu is None on the first sample of a process
-        (its baseline is being primed). None if the process is gone/inaccessible."""
+    def _sample(
+        self, proc: psutil.Process
+    ) -> tuple[float | None, float, float, int] | None:
+        """(cpu %, rss MB, private MB, threads); cpu is None on the first sample
+        of a process (its baseline is being primed). None if the process is gone/inaccessible."""
         cached = self._procs.get(proc.pid)
         first = cached is None or cached != proc
         if first:
@@ -384,36 +394,49 @@ class DashboardPage(QWidget):
         try:
             if cached is not None:
                 with cached.oneshot():
-                    cpu = cached.cpu_percent(interval=None)
-                    rss_mb = cached.memory_info().rss / _MB
+                    raw_cpu = cached.cpu_percent(interval=None)
+                    full_mem = cached.memory_full_info()
+                    rss_mb = full_mem.rss / _MB
+                    priv_mb = getattr(full_mem, "uss", full_mem.rss) / _MB
                     threads = cached.num_threads()
+
+                    # Normalize across total logical cores
+                    cpu = (raw_cpu / _LOGICAL_CORES) if raw_cpu is not None else None
             else:
                 return None
         except psutil.Error:
             return None
-        return (None if first else cpu), rss_mb, threads
+        return (None if first else cpu), rss_mb, priv_mb, threads
+    
+    def _render_rate(
+        self, engine_running: bool, snap: dict[str, Any] | None, has_visualizer: bool
+    ) -> None:
 
-    def _render_rate(self, snap: dict[str, Any] | None) -> None:
-        self.rate_label.setVisible(True)
+        if not engine_running:
+            self.rate_label.setText(
+                f"Visualizer: {'Active' if has_visualizer else 'Not Active'}"
+            )
+            return
+
         if snap is None:
-            self.rate_label.setText("Waiting for engine telemetry...")
+            self.rate_label.setText(
+                f"Waiting for engine telemetry...<br>Visualizer: {'Active' if has_visualizer else 'Not Active'}"
+            )
             return
 
         age = snapshot_age(snap)
         if age > STALE_AFTER_S:
-            self.rate_label.setText(
-                f"<span style='color:{_WARN}'>Telemetry stale ({age:.0f}s since "
-                f"last update) - engine may be unresponsive</span>"
-            )
+            lines = [
+                f"<span style='color:{_WARN}'>Telemetry stale ({age:.0f}s since last update) - engine may be unresponsive</span>",
+                f"Visualizer: {'Active' if has_visualizer else 'Not Active'}",
+            ]
+            self.rate_label.setText("<br>".join(lines))
             return
 
         cap = snap.get("rate_cap_hz")
         threshold = snap.get("pps_threshold")
         cap_note = threshold_note = ""
         try:
-            # The engine's effective values can differ from the database: another
-            # process may have edited it without the engine reloading, and the
-            # engine clamps what it reads.
             settings = store.settings.get()
             cfg_cap = float(settings.adb_rate_cap or 0)
             cfg_pps = float(settings.pps_alert_threshold or 0)
@@ -434,7 +457,7 @@ class DashboardPage(QWidget):
         color = _STATUS_COLORS.get(status, _DOT_STOPPED)
         resp = snap.get("respawns") or {}
         vkb_pid = snap.get("workers", {}).get("vkb")
-        visualizer_pid = snap.get("workers", {}).get("visualizer")
+
         lines = [
             f"Rate (5 s avg): <b>{rate_txt}</b> "
             f"<span style='color:{color}'>{status}</span> "
@@ -448,8 +471,8 @@ class DashboardPage(QWidget):
             f"    ALL {snap.get('all', 0)}",
             f"Worker respawns: Keyboard {resp.get('keyboard', 0)}, "
             f"Mouse {resp.get('mouse', 0)}",
-            f"Virtual Kbd {'Not Active' if vkb_pid is None else 'Active'}",
-            f"Visualizer {'Not Active' if visualizer_pid is None else 'Active'}",
+            f"Virtual Kbd: {'Active' if vkb_pid else 'Not Active'}",
+            f"Visualizer: {'Active' if has_visualizer else 'Not Active'}",
         ]
         if snap.get("window_lost"):
             lines.append(f"<span style='color:{_WARN}'>No target window found</span>")
@@ -472,35 +495,64 @@ class DashboardPage(QWidget):
         rows: list[str] = []
         total_cpu = 0.0
         total_rss = 0.0
+        total_priv = 0.0
+
         for role, proc in procs:
             sample = self._sample(proc)
             if sample is None:
-                rows.append(f"{role:<34} pid {proc.pid:>15} n/a")
+                rows.append(
+                    f"{role:<12} {proc.pid:>7}  {'--':>7}  {'--':>10}  {'n/a':>10}  {'--':>4}"
+                )
                 continue
-            cpu, rss_mb, threads = sample
+
+            cpu, rss_mb, priv_mb, threads = sample
             cpu_txt = "--" if cpu is None else f"{cpu:.1f}%"
+            rss_txt = f"{rss_mb:.1f} MB"
+            priv_txt = f"{priv_mb:.1f} MB"
             total_cpu += cpu or 0.0
             total_rss += rss_mb
+            total_priv += priv_mb
+
             rows.append(
-                f"{role:<34} pid {proc.pid:>15} cpu {cpu_txt:>6}  "
-                f"rss {rss_mb:7.1f} MB  thr {threads:3d}"
+                f"{role:<12} {proc.pid:>7}  {cpu_txt:>7}  {rss_txt:>10}  {priv_txt:>10}  {threads:>4}"
             )
 
-        # Engine uptime when it runs; otherwise how long the GUI has been up.
+        now = time.time()
+
+        # GUI uptime
         try:
-            uptime = str(
-                datetime.timedelta(
-                    seconds=int(time.time() - (engine or self._gui_proc).create_time())
-                )
+            gui_uptime = str(
+                datetime.timedelta(seconds=int(now - self._gui_proc.create_time()))
             )
         except psutil.Error:
-            uptime = "n/a"
+            gui_uptime = "n/a"
 
-        header = (
-            f"{'Uptime' if engine else 'GUI uptime'} {uptime:<15} Processes {len(procs):8} "
-            f"CPU {total_cpu:.1f}%   RSS {total_rss:.1f} MB"
+        # Engine uptime (when running)
+        engine_uptime = None
+        if engine is not None:
+            try:
+                engine_uptime = str(
+                    datetime.timedelta(seconds=int(now - engine.create_time()))
+                )
+            except psutil.Error:
+                engine_uptime = "n/a"
+
+        # Display both if running; show GUI uptime if engine is stopped
+        if engine_uptime is not None:
+            uptime_str = f"Engine: {engine_uptime} | GUI: {gui_uptime}"
+        else:
+            uptime_str = f"GUI: {gui_uptime}"
+
+        summary_bar = (
+            f"Uptime [{uptime_str}] | Procs: {len(procs)} | "
+            f"CPU: {total_cpu:.1f}% | RSS: {total_rss:.1f} MB | PRIV: {total_priv:.1f} MB"
         )
-        return header, rows
+
+        header_cols = f"{'ROLE':<12} {'PID':>7}  {'CPU':>7}  {'RSS':>10}  {'PRIV':>10}  {'THR':>4}"
+        divider = f"{'-'*12} {'-'*7}  {'-'*7}  {'-'*10}  {'-'*10}  {'-'*4}"
+        table_header = f"{summary_bar}\n{header_cols}\n{divider}"
+
+        return table_header, rows
 
     def _log_telemetry(
         self,
@@ -508,6 +560,7 @@ class DashboardPage(QWidget):
         snap: dict[str, Any] | None,
         header: str,
         rows: list[str],
+        has_visualizer: bool,
     ) -> None:
         """One plain-text line per call (no HTML, whitespace collapsed)."""
         summary = " ".join(header.split())
@@ -549,7 +602,7 @@ class DashboardPage(QWidget):
             resp.get("keyboard", 0),
             resp.get("mouse", 0),
             "on" if workers.get("vkb") is not None else "off",
-            "on" if workers.get("visualizer") is not None else "off",
+            "on" if has_visualizer else "off",
             bool(snap.get("window_lost")),
             summary,
             procs_txt,
@@ -560,28 +613,34 @@ class DashboardPage(QWidget):
         engine: psutil.Process | None = None
         snap: dict[str, Any] | None = None
         procs: list[tuple[str, psutil.Process]] = []
+
         if pid is not None:
             try:
                 engine = psutil.Process(pid)
                 snap = read_snapshot(expected_pid=pid)
                 procs = labeled_processes(engine, snap)
             except psutil.Error:
-                # Engine vanished mid-sample: fall back to the GUI process only.
-                engine, snap, procs = None, None, []
+                # Engine vanished mid-sample:
+                # fall back to GUI-only telemetry and query procs for processes like visualizer that can run independently of the engine.
+                engine, snap, procs = None, None, labeled_processes(None, None)
+
+        else:
+            # Engine is not running: query procs for processes like visualizer that can run independently of the engine.
+            engine, snap, procs = None, None, labeled_processes(None, None)
 
         header, rows = self._build_rows(engine, procs)
-
+        has_visualizer = any(role == "visualizer" for role, _ in procs)
 
         if self.isVisible():
+            self._render_rate(engine is not None, snap, has_visualizer)
+
             if engine is None:
-                self.rate_label.setVisible(False)
                 body = ["Engine is not running.", header, *rows]
             else:
-                self._render_rate(snap)
                 body = [header, *rows]
             self.telemetry_label.setStyleSheet("font-family: monospace;")
             self.telemetry_label.setText("\n".join(body))
 
         self._tick += 1
         if _LOG_TELEMETRY and self._tick % _LOG_EVERY_N_TICKS == 0:
-            self._log_telemetry(engine is not None, snap, header, rows)
+            self._log_telemetry(engine is not None, snap, header, rows, has_visualizer)

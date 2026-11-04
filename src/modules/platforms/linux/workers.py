@@ -168,7 +168,6 @@ def keyboard_worker(k_pipe_read: Connection, log_queue: Queue):
                 payload = k_pipe_read.recv_bytes()
 
                 if len(payload) == 3:
-                    # BUGFIX: Use unpack_from for memory safety
                     win_code, k_state = PACK_KEY_STRUCT.unpack_from(payload, 0)
                     if k_state == KEY_PING:
                         continue
@@ -233,7 +232,6 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Q
             try:
                 if mb_pipe_read.poll(15.0):
                     payload = mb_pipe_read.recv_bytes()
-                    # BUGFIX: Use unpack_from
                     _, data = PACK_BUTTON_STRUCT.unpack_from(payload, 0)
 
                     if data == BUTTON_PING:
@@ -327,7 +325,9 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Q
                     next_task_id = next_payload[0]
 
                     if next_task_id == TASK_REL:
-                        _, next_dx, next_dy = PACK_REL_STRUCT.unpack_from(next_payload, 0)
+                        _, next_dx, next_dy = PACK_REL_STRUCT.unpack_from(
+                            next_payload, 0
+                        )
                         acc_dx += next_dx
                         acc_dy += next_dy
                         coalesce_count += 1
@@ -364,7 +364,9 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Q
                     next_task_id = next_payload[0]
 
                     if next_task_id == TASK_WHEEL:
-                        _, next_wx, next_wy = PACK_WHEEL_STRUCT.unpack_from(next_payload, 0)
+                        _, next_wx, next_wy = PACK_WHEEL_STRUCT.unpack_from(
+                            next_payload, 0
+                        )
                         acc_dw_x += next_wx
                         acc_dw_y += next_wy
                         coalesce_count += 1

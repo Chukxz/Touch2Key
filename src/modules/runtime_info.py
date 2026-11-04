@@ -26,7 +26,7 @@ _CREATE_TIME_TOLERANCE_S = 1.0
 
 # Snapshot worker names that are shown under a different (shorter) role, so the
 # 8-character role column in the dashboard / touch2key-stats stays aligned.
-_ROLE_LABELS = {"visualizer": "visual"}
+# _ROLE_LABELS = {"visualizer": "visual"}
 
 
 # ---------------------------------------------------------------------------
@@ -234,14 +234,14 @@ def worker_processes(engine: psutil.Process) -> list[psutil.Process]:
     return workers
 
 
-def get_process(process_id: int):
-    process: psutil.Process | None = None
+def get_process(process_id: int) -> psutil.Process | None:
     try:
-        process = psutil.Process(process_id)
+        proc = psutil.Process(process_id)
+        if not proc.is_running() or proc.status() == psutil.STATUS_ZOMBIE:
+            return None
+        return proc
     except psutil.Error:
-        pass
-
-    return process
+        return None
 
 
 def labeled_processes(
@@ -265,26 +265,20 @@ def labeled_processes(
         seen.add(engine.pid)
 
         workers: dict[str, int | None] = (snapshot or {}).get("workers") or {}
-        # Map worker PID -> role name (applying _ROLE_LABELS formatting)
-        roles = {
-            pid: _ROLE_LABELS.get(name, name)
-            for name, pid in workers.items()
-            if pid
-        }
+        roles = {pid: name for name, pid in workers.items() if pid}
 
         # Match active children in the process tree
         for child in worker_processes(engine):
-            role = roles.get(child.pid)
-            if role is not None:
-                out.append((role, child))
-                seen.add(child.pid)
-
+            role = roles.get(child.pid, "other")
+            out.append((role, child))
+            seen.add(child.pid)
+    
         # Inspect visualizer reported by the engine's snapshot
         visualizer_pid = workers.get("visualizer")
         if visualizer_pid and visualizer_pid not in seen:
             visual_proc = get_process(visualizer_pid)
             if visual_proc is not None:
-                out.append((_ROLE_LABELS.get("visualizer", "visual"), visual_proc))
+                out.append(("visualizer", visual_proc))
                 seen.add(visual_proc.pid)
 
         # Catch-up for remaining workers missed during tree walk
@@ -297,14 +291,13 @@ def labeled_processes(
                     continue
             except (TypeError, ValueError, psutil.Error):
                 continue
-            role_label = _ROLE_LABELS.get(name, name)
-            out.append((role_label, proc))
+            out.append((name, proc))
             seen.add(proc.pid)
 
     # --- Engine is NOT Running: Query Visualizer Registry Directly ---
     else:
         visual_proc = read_process(VISUALIZER_RUNTIME_FILE)
         if visual_proc is not None:
-            out.append((_ROLE_LABELS.get("visualizer", "visual"), visual_proc))
+            out.append(("visualizer", visual_proc))
 
     return out

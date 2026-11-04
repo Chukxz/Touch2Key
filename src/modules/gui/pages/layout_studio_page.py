@@ -1474,7 +1474,6 @@ class LayoutStudioPage(QWidget):
             return
 
         try:
-            # NOTE: capture_android_screen blocks the UI thread while adb runs.
             img_path = capture_android_screen(parent=self)
             if not img_path:
                 return  # cancelled / nothing captured: leave everything untouched

@@ -110,7 +110,6 @@ class KeyMapper:
                     scancode=zone.scancode,
                     region=region,
                     pointer=zone.pointer,
-                    # BUGFIX: Use the mapped physical device DPI rather than raw layout DPI
                     sensitivity_x=look_counts_per_px(sens_x, snap.dpi),
                     sensitivity_y=look_counts_per_px(sens_y, snap.dpi),
                     mouse_button=zone.scancode in MOUSE_SCANCODES,

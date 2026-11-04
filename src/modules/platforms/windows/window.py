@@ -27,7 +27,6 @@ class WindowManager(AbstractWindowManager):
 
     def __init__(self):
         super().__init__()
-        # BUGFIX: Ensure process is DPI-aware before caching screen metrics
         try:
             ctypes.windll.shcore.SetProcessDpiAwareness(2)
         except Exception:

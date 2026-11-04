@@ -358,7 +358,6 @@ class Mapper:
                     continue
 
                 payload = reader.recv_bytes()
-                # BUGFIX: unpack_from guarantees safe reads even if OS padded the IPC packet
                 state, scancode = VKB_STRUCT.unpack_from(payload, 0)
                 self._virtual_keyboard_sink(state, scancode)
 

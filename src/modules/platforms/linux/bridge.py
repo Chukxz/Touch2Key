@@ -209,7 +209,6 @@ class UInputBridge(AbstractBridge):
             pass
 
     def mouse_move_abs(self, x: int, y: int) -> None:
-        # BUGFIX: Added round() so subpixel values don't permanently drift the cursor due to truncation
         abs_x = clamp(int(round((x / self.screen_w) * ABS_CONST)), 0, ABS_CONST)
         abs_y = clamp(int(round((y / self.screen_h) * ABS_CONST)), 0, ABS_CONST)
         try:

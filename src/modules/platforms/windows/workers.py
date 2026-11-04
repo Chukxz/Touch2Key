@@ -194,7 +194,6 @@ def keyboard_worker(
                 payload = k_pipe_read.recv_bytes()
 
                 if len(payload) == 3:
-                    # BUGFIX: Use unpack_from to safely ignore O/S pipe padding bytes
                     win_code, k_state = PACK_KEY_STRUCT.unpack_from(payload, 0)
                     if k_state == KEY_PING:
                         continue
@@ -275,7 +274,6 @@ def mouse_worker(
             try:
                 if mb_pipe_read.poll(15.0):
                     payload = mb_pipe_read.recv_bytes()
-                    # BUGFIX: Use unpack_from
                     _, data = PACK_BUTTON_STRUCT.unpack_from(payload, 0)
 
                     if data == BUTTON_PING:

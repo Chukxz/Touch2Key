@@ -253,8 +253,6 @@ def migrate_json_layout(
         )
         layout_id = layout.id
 
-    # BUGFIX: Move this outside the `else` block so we can also 
-    # update zones on existing layouts if desired (un-indented)
     try:
         has_explicit_bezels = any(
             str(item.get("type", "")).upper() == BEZEL for item in content
@@ -335,7 +333,6 @@ def migrate_json_layout(
                 scancode=int(scancode),
                 name=str(zone_name),
                 zone_type=zone_type,
-                # BUGFIX: Added 0.0 fallbacks to prevent float(None) crashes on legacy imports
                 cx=float(item.get("cx", 0.0)),
                 cy=float(item.get("cy", 0.0)),
                 r=float(item.get("val1", 0.0)) if zone_type == CIRCLE else None,

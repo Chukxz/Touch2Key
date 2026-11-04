@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import logging
@@ -373,9 +372,7 @@ class Engine:
         else:
             logger.info("Rate Cap %.1f Hz | PPS %.1f\n", rate, pps)
 
-        self.dispatcher.dispatch(
-            MapperEvent(action="ON_RELOAD", cooldown=1.0)
-        )
+        self.dispatcher.dispatch(MapperEvent(action="ON_RELOAD", cooldown=1.0))
 
     # ------------------------------------------------------------------
     # One-shot: handedness / reload / input curve
@@ -415,9 +412,7 @@ class Engine:
             return
 
         with self._adjust_lock:
-            self._curve_idx = (
-                self._curve_idx + 1
-            ) % len(self._curve_types)
+            self._curve_idx = (self._curve_idx + 1) % len(self._curve_types)
             self._current_curve = self._curve_types[self._curve_idx]
 
             for key in _ADJUST_KEYS:
@@ -506,11 +501,7 @@ class Engine:
             if self.layout_loader is not None:
                 self.layout_loader.load_layout()
                 snap = self.layout_loader.snapshot
-                settings = (
-                    snap.settings
-                    if snap is not None
-                    else store.settings.get()
-                )
+                settings = snap.settings if snap is not None else store.settings.get()
             else:
                 settings = store.settings.get()
 
@@ -525,12 +516,8 @@ class Engine:
             with self._adjust_lock:
                 # Uncommitted hotkey steps are newer than the DB; keep them.
                 if not self._settings_dirty:
-                    self.rate_cap = (
-                        settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP
-                    )
-                    self.pps = (
-                        settings.pps_alert_threshold or DEFAULT_PPS
-                    )
+                    self.rate_cap = settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP
+                    self.pps = settings.pps_alert_threshold or DEFAULT_PPS
 
             if self.touch_reader is not None:
                 self.touch_reader.on_reload()
@@ -565,13 +552,6 @@ class Engine:
 
     @staticmethod
     def _pipeline_precedence(pipeline: Pipeline) -> int:
-        # System status is authoritative even if a factory forgot metadata.
-        if getattr(pipeline, "is_bezel", False):
-            return max(
-                4,
-                int(getattr(pipeline, "type_precedence", 0)),
-            )
-
         return int(getattr(pipeline, "type_precedence", 0))
 
     def _build_pipeline_tiers(self) -> list[list[Pipeline]]:
@@ -852,10 +832,7 @@ class Engine:
 
     def start_virtual_keyboard(self) -> None:
         with self.vkb_lock:
-            if (
-                self.vkb_process is not None
-                and self.vkb_process.is_alive()
-            ):
+            if self.vkb_process is not None and self.vkb_process.is_alive():
                 return
 
             while self.vkb_reader.poll():
@@ -888,10 +865,7 @@ class Engine:
                 self.mapper.release_vkb_keys()
 
     def toggle_virtual_keyboard(self) -> None:
-        if (
-            self.vkb_process is not None
-            and self.vkb_process.is_alive()
-        ):
+        if self.vkb_process is not None and self.vkb_process.is_alive():
             self.close_virtual_keyboard()
         else:
             self.start_virtual_keyboard()
@@ -914,11 +888,7 @@ class Engine:
             ADB_RATE_CAP_MIN,
             min(
                 ADB_RATE_CAP_MAX,
-                float(
-                    rate_cap
-                    or settings.adb_rate_cap
-                    or DEFAULT_ADB_RATE_CAP
-                ),
+                float(rate_cap or settings.adb_rate_cap or DEFAULT_ADB_RATE_CAP),
             ),
         )
 
@@ -926,11 +896,7 @@ class Engine:
             PPS_ALERT_MIN,
             min(
                 PPS_ALERT_MAX,
-                float(
-                    pps
-                    or settings.pps_alert_threshold
-                    or DEFAULT_PPS
-                ),
+                float(pps or settings.pps_alert_threshold or DEFAULT_PPS),
             ),
         )
 
@@ -988,9 +954,7 @@ class Engine:
         )
 
         # Apply initial DPI to the gesture tracker.
-        self.two_finger_tap_tracker.update_dpi(
-            self.layout_loader.snapshot.dpi
-        )
+        self.two_finger_tap_tracker.update_dpi(self.layout_loader.snapshot.dpi)
 
         self.mapper = Mapper(
             self.touch_reader,
@@ -1004,9 +968,7 @@ class Engine:
             bridge=self.mapper.bridge,
         )
 
-        self.output_sink.set_viewport_callback(
-            self.mapper.get_viewport_info
-        )
+        self.output_sink.set_viewport_callback(self.mapper.get_viewport_info)
 
         self.bezel_mapper = BezelMapper(
             self.mapper,
@@ -1049,16 +1011,12 @@ class Engine:
         )
 
         try:
-            self._publisher = TelemetryPublisher(
-                self._telemetry_snapshots
-            )
+            self._publisher = TelemetryPublisher(self._telemetry_snapshots)
             self._publisher.start()
         except Exception:
             logger.exception("Telemetry publisher failed to start.")
 
-        self.touch_reader.bind_touch_event(
-            self._process_touch_event
-        )
+        self.touch_reader.bind_touch_event(self._process_touch_event)
 
     def _start(self, config_str: Optional[str] = None) -> None:
         if config_str is not None:
@@ -1116,16 +1074,8 @@ class Engine:
             sprint_key=sprint_key,
             rate_cap=rate_cap,
             pps=pps,
-            k_device_handle=(
-                k_device_handle
-                if k_device_handle is not None
-                else 0
-            ),
-            m_device_handle=(
-                m_device_handle
-                if m_device_handle is not None
-                else 10
-            ),
+            k_device_handle=(k_device_handle if k_device_handle is not None else 0),
+            m_device_handle=(m_device_handle if m_device_handle is not None else 10),
         )
 
         if not self.headless:
@@ -1167,9 +1117,7 @@ class Engine:
                 thread.join(timeout=2.0)
 
                 if thread.is_alive():
-                    logger.warning(
-                        "Mouse flush thread did not stop within timeout"
-                    )
+                    logger.warning("Mouse flush thread did not stop within timeout")
 
             self.close_virtual_keyboard()
 
@@ -1202,12 +1150,9 @@ class Engine:
             store.close()
 
     def _request_engine_shutdown(self):
-        if (
-            self.conn is not None
-            and isinstance(
-                self.dispatcher,
-                IpcMapperEventDispatcher,
-            )
+        if self.conn is not None and isinstance(
+            self.dispatcher,
+            IpcMapperEventDispatcher,
         ):
             shutdown_engine_process(
                 self,
@@ -1219,9 +1164,7 @@ class Engine:
 
     def _count_respawn(self, worker_type: Optional[str] = None) -> None:
         if worker_type:
-            self._respawns[worker_type] = (
-                self._respawns.get(worker_type, 0) + 1
-            )
+            self._respawns[worker_type] = self._respawns.get(worker_type, 0) + 1
 
     def _telemetry_snapshots(self) -> dict[str, Any]:
         mapper = self.mapper
@@ -1239,11 +1182,7 @@ class Engine:
 
         def alive_pid(proc) -> Optional[int]:
             try:
-                return (
-                    proc.pid
-                    if proc is not None and proc.is_alive()
-                    else None
-                )
+                return proc.pid if proc is not None and proc.is_alive() else None
             except (ValueError, OSError):
                 return None
 
@@ -1264,12 +1203,8 @@ class Engine:
             "device_height": dev_h,
             "device_rotation": rotation,
             "workers": {
-                "keyboard": alive_pid(
-                    getattr(bridge, "k_proc", None)
-                ),
-                "mouse": alive_pid(
-                    getattr(bridge, "m_proc", None)
-                ),
+                "keyboard": alive_pid(getattr(bridge, "k_proc", None)),
+                "mouse": alive_pid(getattr(bridge, "m_proc", None)),
                 "vkb": alive_pid(self.vkb_process),
                 "visualizer": _read_visualizer(),
             },
@@ -1300,9 +1235,7 @@ def run_engine_process(
 
         if not start_payload or start_payload[0] != IPC_CMD_START:
             got = start_payload[0] if start_payload else None
-            dispatcher.send_error(
-                f"Expected IPC_CMD_START, got {got!r}"
-            )
+            dispatcher.send_error(f"Expected IPC_CMD_START, got {got!r}")
             return
 
         config = unpack_ipc_start_cmd(start_payload)
@@ -1317,9 +1250,7 @@ def run_engine_process(
         dispatcher.send_started()
 
     except KeyboardInterrupt:
-        logger.info(
-            "Engine received shutdown signal, exiting cleanly."
-        )
+        logger.info("Engine received shutdown signal, exiting cleanly.")
         shutdown_engine_process(
             engine,
             dispatcher,
@@ -1380,10 +1311,7 @@ def shutdown_engine_process(
 def parse_config_arg(config_str: str) -> dict:
     """Parse comma-separated settings and clamp performance values."""
     settings = store.settings.get()
-    parts = [
-        part.strip()
-        for part in config_str.split(",")
-    ]
+    parts = [part.strip() for part in config_str.split(",")]
 
     while len(parts) < 6:
         parts.append("")

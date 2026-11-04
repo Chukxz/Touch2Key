@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import logging
 import math
-import os
-import sys
 from pathlib import Path
 from PIL import Image
 from typing import TYPE_CHECKING, Optional, Any
@@ -13,8 +11,6 @@ from modules.utils import clamp
 from modules.platforms import get_platform, get_specific_mt_key
 from modules.database import store
 from modules.database.repositories import DuplicateNameError
-
-get_platform().SystemConfig().set_dpi_awareness()
 
 from modules.utils import (
     BASELINE_DPI,
@@ -263,8 +259,7 @@ class _DraggableLabel(_Draggable):
         self.canvas.draw()
         self.plotter.bg_cache = self.canvas.copy_from_bbox(self.plotter.ax.bbox)
         self.plotter.captured = True
-        # NOTE: dragging a label never moves the wheel indicators, so they stay in the
-        # cached background (capturing them here used to make them vanish mid-drag).
+
 
     def _on_motion(self, event):
         if not self.plotter.fire_on_motion or self.label_artist.axes is None:

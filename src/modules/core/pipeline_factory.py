@@ -58,7 +58,7 @@ def Button(
             PointerSemantic(pointer),
         ],
         priority=priority,
-        type_precedence=2,
+        type_precedence=3,
         creation_id=creation_id,
         allow_multi_claim=True,
     )
@@ -229,7 +229,7 @@ def Bezel(
             )
         ],
         priority=priority,
-        type_precedence=4,
+        type_precedence=2,
         creation_id=creation_id,
         is_bezel=True,
     )
