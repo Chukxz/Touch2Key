@@ -701,7 +701,7 @@ class SettingsPage(QWidget):
         self.delete_all_btn.clicked.connect(self._on_delete_all)
         
         # Anchored overrides floating, so if anchored is checked, floating must be unchecked.
-        self._on_anchored_joystick_changed(self.anchored_check.isChecked())
+        self._on_anchored_joystick_changed(store.settings.get().anchored_joystick)
 
     def _refresh_hw_ui(self) -> None:
         w_id = self.w_id if self.w_id is not None else "Unassigned"
