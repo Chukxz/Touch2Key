@@ -193,8 +193,8 @@ def build_architecture_digraph(
             c.node(
                 "WindowAndKeyCapture",
                 _card(
-                    "1D. Dual-Mode Window Selector &amp; Key/Numeric Capture",
-                    "select_window() (list_windows.py) | capture_sprint_key() &amp; capture_performance_settings() (key_capture.py)",
+                    "1D. Dual-Mode Window Selector &amp; Key Capture",
+                    "select_window() | capture_sprint_key() &amp; capture_toggle_hotkeys()",
                     [
                         (
                             "Window Enumeration",
@@ -209,8 +209,8 @@ def build_architecture_digraph(
                             "ListApp(QDialog): QTableWidget with 1000ms QTimer diff-sync (added_ids, removed_ids, current_ids) &amp; UserRole wid storage",
                         ),
                         (
-                            "Capture Dialogs",
-                            "KeyCaptureDialog(QDialog) (get_specific_qt_key -&gt; get_scancode_from_key) &amp; NumericCaptureDialog(QDialog) vs CLI input() prompts",
+                            "Capture Key/Toggles",
+                            "GUI: KeyCaptureDialog &amp; KeySequenceRow vs. CLI: capture_toggle_hotkeys() using blocking msvcrt/tty prompt inputs",
                         ),
                     ],
                     header_bg="#0369a1",
@@ -293,11 +293,11 @@ def build_architecture_digraph(
                         ),
                         (
                             "Snapshot Telemetry",
-                            "read_snapshot(expected_pid) -&gt; checks snapshot_age() &gt; STALE_AFTER_S; renders rate_hz, rate_status, cap/pps drift warnings, counts",
+                            "read_snapshot() -&gt; renders rate_hz, cap drift, event counts | labeled_processes() links PIDs",
                         ),
                         (
-                            "Decoupled Process Discovery",
-                            "labeled_processes(engine, snap): Engine running -&gt; samples workers &amp; visualizer from snapshot; Engine stopped -&gt; directly reads VISUALIZER_RUNTIME_FILE",
+                            "Accurate Memory",
+                            "psutil.cpu_percent() normalized by cpu_count(); psutil.memory_full_info().uss extracted to perfectly match Task Manager Private Working Set",
                         ),
                     ],
                     header_bg="#0369a1",
@@ -367,11 +367,11 @@ def build_architecture_digraph(
                         ),
                         (
                             "Event Filter Captures",
-                            "KeyCaptureFilter (single stroke for sprint_key) &amp; ContinuousSequenceFilter (KeySequenceRow for toggle_hotkeys &amp; typematic_excluded_keys; blocks Tab focus traversal)",
+                            "KeyCaptureFilter (single stroke) &amp; ContinuousSequenceFilter (KeySequenceRow for toggle_hotkeys &amp; typematic exclusions; intercepts OS events &amp; blocks Tab focus)",
                         ),
                         (
                             "Debounced SpinBoxes",
-                            "_queue_save() batches sensitivity_x/y, deadzone, hysteresis, adb_rate_cap, pps_alert_threshold, typematic_delay_ms/rate_hz -&gt; _flush_pending() every 250ms",
+                            "_queue_save() batches sensitivity_x/y, deadzone, hysteresis, adb_rate_cap, pps, typematic_delay_ms/rate_hz -&gt; _flush_pending() every 250ms",
                         ),
                         (
                             "Immediate Toggles",
@@ -638,7 +638,7 @@ def build_architecture_digraph(
                     [
                         (
                             "Key 1: -precedence",
-                            "Bezel (4) &gt; Button (2) &gt; Joystick (1) &gt; Mouse/Pointer (0) [is_bezel forces max(4, prec)]",
+                            "Button (3) &gt; Bezel (2) &gt; Joystick (1) &gt; Mouse/Pointer (0) [allows overlapping buttons to claim touches over bezel zones]",
                         ),
                         (
                             "Key 2: -priority",
