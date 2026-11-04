@@ -699,6 +699,9 @@ class SettingsPage(QWidget):
         self.export_bundle_btn.clicked.connect(self._on_export_bundle)
         self.reset_defaults_btn.clicked.connect(self._on_reset_defaults)
         self.delete_all_btn.clicked.connect(self._on_delete_all)
+        
+        # Anchored overrides floating, so if anchored is checked, floating must be unchecked.
+        self._on_anchored_joystick_changed(self.anchored_check.isChecked())
 
     def _refresh_hw_ui(self) -> None:
         w_id = self.w_id if self.w_id is not None else "Unassigned"
@@ -942,6 +945,12 @@ class SettingsPage(QWidget):
             logger.exception("Failed to update floating_joystick setting")
 
     def _on_anchored_joystick_changed(self, checked: bool) -> None:
+        """Grays out floating if anchored is checked, since anchored overrides floating."""
+        
+        self.floating_check.setEnabled(not checked)
+        if checked:
+            self.floating_check.setChecked(False)
+            
         try:
             store.settings.update(anchored_joystick=checked)
             self._notify_reload()
