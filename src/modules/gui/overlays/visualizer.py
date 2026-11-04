@@ -60,8 +60,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("modules.gui.overlays.visualizer")
 
-_PLATFORM = get_platform()
-
 VISUALIZER_NAME = "Touch2Key_Visualizer"
 
 RIPPLE_LIFETIME_MS = 5000
@@ -104,7 +102,7 @@ class DiagnosticView(QGraphicsView):
         super().__init__(parent)
 
         self._loc_dict: dict[int, tuple[float, float]] = loc_dict
-        self.cursor_visible = _PLATFORM.WindowManager().is_cursor_visible(True, 0)[0]
+        self.cursor_visible = True
         self.data: deque[dict] = deque(maxlen=MAX_EVENT_LOG)
         self.pressed_keys: dict[int, str] = {}
         self.pressed_mouse_buttons: set[str] = set()
@@ -234,8 +232,9 @@ class DiagnosticView(QGraphicsView):
             )
             if new_locs and new_locs != self._loc_dict:
                 self._loc_dict = new_locs
-                if isinstance(self.parent(), MainWindow):
-                    self.parent().loc_dict = new_locs
+                _parent = self.parent()
+                if isinstance(_parent, MainWindow):
+                    _parent.loc_dict = new_locs
 
     def set_active_text(self, text: str) -> None:
         self.active_buttons.setPlainText(text)
@@ -301,6 +300,7 @@ class DiagnosticView(QGraphicsView):
 
     def _clear_pressed_state(self) -> None:
         self.pressed_keys.clear()
+        self._pressed_keys.clear()
         self.pressed_mouse_buttons.clear()
         self.pressed_scancodes_list.clear()
         self._hotkey_triggered = False
@@ -433,6 +433,10 @@ class DiagnosticView(QGraphicsView):
         self._update_active_display()
         super().keyPressEvent(event)
 
+    def focusOutEvent(self, event) -> None:
+        self._clear_pressed_state()
+        super().focusOutEvent(event)
+
     def keyReleaseEvent(self, event: QKeyEvent) -> None:
         if event.isAutoRepeat():
             super().keyReleaseEvent(event)
@@ -495,7 +499,7 @@ class MainWindow(QMainWindow):
     def _instruction_text(self) -> str:
         curve_name = self.view.get_current_curve_name()
         return (
-            "Press ESC to exit (when cursor is visible).\n"
+            "[SHIFT + ESC] Exit Visualizer\n"
             f"[CTRL + F8] Cycle Input Curve: [{curve_name}]\n"
             f"(CTRL + Left/Right: decrease/increase trail width "
             f"({self.view.trail_width}) [1-{MAX_TRAIL_WIDTH}]).\n"
@@ -586,15 +590,22 @@ class MainWindow(QMainWindow):
             super().keyPressEvent(event)
             return
 
-        if event.key() == Qt.Key.Key_Escape and self.view.cursor_visible:
-            self.close()
-            return
+        if event.key() == Qt.Key.Key_Escape:
+            if event.modifiers() == Qt.KeyboardModifier.ShiftModifier:
+                mashed_keys = self.view._pressed_keys - {
+                    Qt.Key.Key_Shift,
+                    Qt.Key.Key_Escape,
+                }
+                if not mashed_keys:
+                    self.close()
+                    return
+
         return super().keyPressEvent(event)
 
     def changeEvent(self, event: QEvent) -> None:
-        if event.type() == QEvent.Type.WindowDeactivate:
-            self.view._clear_pressed_state()
-
+        if event.type() in (QEvent.Type.ActivationChange, QEvent.Type.WindowDeactivate):
+            if not self.isActiveWindow():
+                self.view._clear_pressed_state()
         super().changeEvent(event)
 
     def closeEvent(self, event) -> None:
