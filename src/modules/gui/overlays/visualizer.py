@@ -545,7 +545,7 @@ class MainWindow(QMainWindow):
         dev_w = float(layout.width or 0)
         dev_h = float(layout.height or 0)
 
-        # Silently check for live engine telemetry snapshot dimensions (the engine & visualizer's little secret)
+        # Silently check for live engine telemetry snapshot dimensions
         attached = attach()
         if attached is not None:
             _, snap = attached
