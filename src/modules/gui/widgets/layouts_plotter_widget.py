@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Optional, Any
 from enum import Enum, auto
 
 from modules.utils import clamp
-from modules.platforms import get_platform, get_specific_mt_key
+from modules.platforms import get_specific_qt_key
 from modules.database import store
 from modules.database.repositories import DuplicateNameError
 
@@ -259,7 +259,6 @@ class _DraggableLabel(_Draggable):
         self.canvas.draw()
         self.plotter.bg_cache = self.canvas.copy_from_bbox(self.plotter.ax.bbox)
         self.plotter.captured = True
-
 
     def _on_motion(self, event):
         if not self.plotter.fire_on_motion or self.label_artist.axes is None:
@@ -1173,6 +1172,45 @@ class LayoutsPlotterWidget(QWidget):
         self.canvas = FigureCanvasQTAgg(self.fig)
         self.canvas.setMinimumSize(1, 1)
         self.canvas.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.canvas.focusNextPrevChild = lambda next: False
+
+        original_focus_out = self.canvas.focusOutEvent
+
+        def custom_focus_out(event):
+            # Instantly drop any active drag, resize, or hover states
+            self._partial_release_all()
+
+            # Flush Matplotlib's internal key cache so e.g. Shift/Ctrl don't ghost
+            if hasattr(self.canvas, "_key"):
+                self.canvas._key = None
+
+            # Resume normal Matplotlib focus loss behavior
+            original_focus_out(event)
+
+        self.canvas.focusOutEvent = custom_focus_out
+
+        original_key_press = self.canvas.keyPressEvent
+
+        def custom_key_press(event):
+            # Intercept binds before Matplotlib sees them to capture key like NumLock/OEM keys natively
+            if self.state is PlotterState.WAITING_FOR_KEY:
+                if not event.isAutoRepeat():
+                    raw_key = get_specific_qt_key(event)
+                    self.calculate_shape(raw_key)
+                return
+
+            if self.state is PlotterState.WAITING_FOR_WHEEL_INDICATOR:
+                if not event.isAutoRepeat():
+                    raw_key = get_specific_qt_key(event)
+                    self.mouse_wheel_indicators.update_mouse_wheel_indicator_from_key(
+                        raw_key
+                    )
+                return
+
+            # Let Matplotlib handle standard UI keys (Esc, Arrows, F-keys)
+            original_key_press(event)
+
+        self.canvas.keyPressEvent = custom_key_press
 
         self.ax = self.fig.add_subplot(1, 1, 1)
         self._reset_axes()
@@ -1223,9 +1261,6 @@ class LayoutsPlotterWidget(QWidget):
 
         self.reload_active_layout()
 
-    # ------------------------------------------------------------------
-    # State / dirty tracking
-    # ------------------------------------------------------------------
     @property
     def is_dirty(self) -> bool:
         return self._dirty
@@ -1612,7 +1647,7 @@ class LayoutsPlotterWidget(QWidget):
             num_points,
             PlotterState.COLLECTING,
         )
-        self.update_title(f"MODE: {mode}. Click {num_points} points on the image.")
+        self.update_title(f"MODE: {mode}. Click {num_points} points on the image (Esc to Cancel).")
 
     def _load_active_layout_zones(self) -> None:
         if not self.active_layout:
@@ -2155,14 +2190,6 @@ class LayoutsPlotterWidget(QWidget):
         ):
             if key == "escape":
                 self.reset_state()
-            return
-        if self.state is PlotterState.WAITING_FOR_KEY:
-            self.calculate_shape(get_specific_mt_key(event))
-            return
-        if self.state is PlotterState.WAITING_FOR_WHEEL_INDICATOR:
-            self.mouse_wheel_indicators.update_mouse_wheel_indicator_from_key(
-                get_specific_mt_key(event)
-            )
             return
 
         if self.state is PlotterState.IDLE:
