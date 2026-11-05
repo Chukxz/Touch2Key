@@ -3,11 +3,11 @@ from __future__ import annotations
 import logging
 import signal
 import sys
+from enum import Enum, auto
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QCoreApplication, QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import (
-    QCursor,
     QIcon,
     QMouseEvent,
     QPainter,
@@ -48,6 +48,12 @@ VKB_NAME = "Touch2Key_VKB"
 RESIZE_MARGIN = 8
 MIN_VKB_WIDTH = 550
 MIN_VKB_HEIGHT = 160
+
+# Window move/resize begins only after the pointer has remained nearly still
+# for this long. Button presses do not use this delay.
+WINDOW_HOLD_INTERVAL_MS = 300
+WINDOW_HOLD_TOLERANCE_PX = 8
+
 
 # --- Main Alphanumeric Block ---
 MAIN_LAYOUT = [
@@ -179,8 +185,191 @@ NUMPAD_LAYOUT = [
 ]
 
 
+class InteractionState(Enum):
+    IDLE = auto()
+    BUTTON = auto()
+    WINDOW_MOVE_PENDING = auto()
+    WINDOW_RESIZE_PENDING = auto()
+    WINDOW_MOVING = auto()
+    WINDOW_RESIZING = auto()
+
+
+class InteractionController:
+    """
+    Owns the single mouse interaction currently in progress.
+
+    A button, window move, or window resize owns the pointer from DOWN until
+    UP/cancellation. Ownership is never reassigned in the middle of a press.
+    """
+
+    def __init__(self, keyboard: VirtualKeyboard):
+        self.keyboard = keyboard
+        self.state = InteractionState.IDLE
+
+        self.button: VirtualKeyButton | None = None
+        self.start_global: QPoint | None = None
+        self.start_geometry: QRect | None = None
+        self.resize_edges = Qt.Edge(0)
+
+        self.hold_timer = QTimer(keyboard)
+        self.hold_timer.setSingleShot(True)
+        self.hold_timer.setInterval(WINDOW_HOLD_INTERVAL_MS)
+        self.hold_timer.timeout.connect(self._activate_window_gesture)
+
+    @property
+    def is_idle(self) -> bool:
+        return self.state is InteractionState.IDLE
+
+    def begin_button(self, button: VirtualKeyButton) -> bool:
+        if not self.is_idle:
+            return False
+
+        self.state = InteractionState.BUTTON
+        self.button = button
+        button._begin_press()
+        return True
+
+    def finish_button(self, button: VirtualKeyButton, inside: bool) -> None:
+        if self.state is not InteractionState.BUTTON or self.button is not button:
+            return
+
+        # Clear ownership before invoking button behaviour. A close action can
+        # destroy the window, and must not leave this controller half-active.
+        self.button = None
+        self.state = InteractionState.IDLE
+        button._finish_press(inside)
+
+    def begin_window_gesture(
+        self,
+        global_pos: QPoint,
+        resize_edges: Qt.Edge,
+    ) -> bool:
+        if not self.is_idle:
+            return False
+
+        self.start_global = QPoint(global_pos)
+        self.start_geometry = QRect(self.keyboard.geometry())
+        self.resize_edges = resize_edges
+
+        if resize_edges:
+            self.state = InteractionState.WINDOW_RESIZE_PENDING
+        else:
+            self.state = InteractionState.WINDOW_MOVE_PENDING
+
+        self.hold_timer.start()
+        return True
+
+    def move_window_gesture(self, global_pos: QPoint) -> None:
+        if self.state is InteractionState.IDLE:
+            return
+
+        if self.state in (
+            InteractionState.WINDOW_MOVE_PENDING,
+            InteractionState.WINDOW_RESIZE_PENDING,
+        ):
+            assert self.start_global is not None
+            delta = global_pos - self.start_global
+
+            if (
+                abs(delta.x()) > WINDOW_HOLD_TOLERANCE_PX
+                or abs(delta.y()) > WINDOW_HOLD_TOLERANCE_PX
+            ):
+                # Moving before the hold threshold cancels the gesture. It
+                # does not turn into a normal drag or a pointer movement.
+                self.cancel()
+            return
+
+        if self.state is InteractionState.WINDOW_MOVING:
+            assert self.start_global is not None
+            assert self.start_geometry is not None
+
+            delta = global_pos - self.start_global
+            self.keyboard.move(self.start_geometry.topLeft() + delta)
+            return
+
+        if self.state is InteractionState.WINDOW_RESIZING:
+            self._apply_resize(global_pos)
+
+    def finish_window_gesture(self) -> None:
+        if self.state not in (
+            InteractionState.WINDOW_MOVE_PENDING,
+            InteractionState.WINDOW_RESIZE_PENDING,
+            InteractionState.WINDOW_MOVING,
+            InteractionState.WINDOW_RESIZING,
+        ):
+            return
+
+        self._reset()
+
+    def cancel(self) -> None:
+        if self.state is InteractionState.BUTTON:
+            button = self.button
+            self._reset()
+
+            if button is not None:
+                button._finish_press(False)
+            return
+
+        self._reset()
+
+    def _activate_window_gesture(self) -> None:
+        if self.state is InteractionState.WINDOW_MOVE_PENDING:
+            self.state = InteractionState.WINDOW_MOVING
+        elif self.state is InteractionState.WINDOW_RESIZE_PENDING:
+            self.state = InteractionState.WINDOW_RESIZING
+
+    def _apply_resize(self, global_pos: QPoint) -> None:
+        assert self.start_global is not None
+        assert self.start_geometry is not None
+
+        delta = global_pos - self.start_global
+        start = self.start_geometry
+
+        left = start.left()
+        top = start.top()
+        right = start.left() + start.width()
+        bottom = start.top() + start.height()
+
+        if self.resize_edges & Qt.Edge.LeftEdge:
+            left = min(
+                start.left() + delta.x(),
+                right - self.keyboard.minimumWidth(),
+            )
+        elif self.resize_edges & Qt.Edge.RightEdge:
+            right = max(
+                start.left() + start.width() + delta.x(),
+                left + self.keyboard.minimumWidth(),
+            )
+
+        if self.resize_edges & Qt.Edge.TopEdge:
+            top = min(
+                start.top() + delta.y(),
+                bottom - self.keyboard.minimumHeight(),
+            )
+        elif self.resize_edges & Qt.Edge.BottomEdge:
+            bottom = max(
+                start.top() + start.height() + delta.y(),
+                top + self.keyboard.minimumHeight(),
+            )
+
+        self.keyboard.setGeometry(
+            left,
+            top,
+            right - left,
+            bottom - top,
+        )
+
+    def _reset(self) -> None:
+        self.hold_timer.stop()
+        self.state = InteractionState.IDLE
+        self.button = None
+        self.start_global = None
+        self.start_geometry = None
+        self.resize_edges = Qt.Edge(0)
+
+
 class VirtualKeyButton(QPushButton):
-    """Custom button that emits key_codes and explicitly ignores OS focus."""
+    """A virtual key with explicit press, release, and cancellation semantics."""
 
     LONG_PRESS_INTERVAL_MS = 300
 
@@ -193,16 +382,27 @@ class VirtualKeyButton(QPushButton):
         lock_codes: list[int],
     ):
         super().__init__(key_label, parent_ref)
+
         self.key_code = key_code
         self.parent_ref = parent_ref
         self.is_lock_key = key_code in lock_codes
         self.is_mod_key = key_code in mod_codes
+
+        # These internal actions must only execute after a valid release.
+        self.is_action_key = key_code in (TOP_BEZEL_ID, CLOSE_VKB_ID)
+
+        self._locked = False
+        self._long_press_fired = False
+        self._unlock_pending = False
+        self._press_active = False
+        self._pointer_inside = False
 
         self.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setMouseTracking(True)
 
         self.setStyleSheet("""
             QPushButton {
@@ -227,92 +427,155 @@ class VirtualKeyButton(QPushButton):
             }
         """)
 
-        if self.is_mod_key:
-            self.setCheckable(True)
-            self.toggled.connect(self._on_modifier_toggled)
-        else:
-            self._locked = False
-            self._long_press_fired = False
-            self._suppress_release = False
+        # We manage pointer handling ourselves so an outside release can be
+        # distinguished from a normal QPushButton click.
+        self.setCheckable(self.is_mod_key)
 
-            self._timer = QTimer(self)
-            self._timer.setSingleShot(True)
-            self._timer.setInterval(self.LONG_PRESS_INTERVAL_MS)
-
-            self.pressed.connect(self._on_standard_pressed)
-            self.released.connect(self._on_standard_released)
-            self._timer.timeout.connect(self._on_long_press_threshold)
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(self.LONG_PRESS_INTERVAL_MS)
+        self._timer.timeout.connect(self._on_long_press_threshold)
 
     def was_pressed(self, key_code: int) -> bool:
-        """Check whether a key is currently held."""
         return key_code in self.parent_ref._pressed_keys
 
-    def _on_modifier_toggled(self, checked: bool):
-        self.set_active(checked)
-        self.parent_ref._set_key_state(
-            self.key_code,
-            checked,
-            self.text().upper(),
-        )
+    def _key_name(self) -> str:
+        return self.text().replace("\n", " ").upper()
 
-    def _on_standard_pressed(self):
-        if self.is_lock_key:
-            self.parent_ref._set_key_state(
-                self.key_code,
-                True,
-                self.text().upper(),
-            )
+    def _begin_press(self) -> None:
+        self._press_active = True
+        self._pointer_inside = True
+        self._long_press_fired = False
+        self._unlock_pending = False
+        self.setDown(True)
+
+        if self.is_mod_key:
+            # Modifiers are toggled only on a valid release.
+            return
+
+        if self.is_action_key:
+            # TOP_BEZEL is a release-triggered action in the mapper. CLOSE is
+            # executed locally on a valid release. Neither needs a held key.
+            if self.key_code == TOP_BEZEL_ID:
+                self.parent_ref._set_key_state(
+                    self.key_code,
+                    True,
+                    self._key_name(),
+                )
             return
 
         if self._locked:
-            self.parent_ref._set_key_state(
-                self.key_code,
-                False,
-                self.text().upper(),
-            )
-            self._locked = False
-            self._suppress_release = True
-            self.set_active(False)
+            # Do not unlock on DOWN: an outside release must leave the
+            # previously locked key locked.
+            self._unlock_pending = True
             return
-
-        self._suppress_release = False
-        self._long_press_fired = False
 
         self.parent_ref._set_key_state(
             self.key_code,
             True,
-            self.text().upper(),
+            self._key_name(),
         )
 
-        self._timer.start()
+        if not self.is_lock_key:
+            self._timer.start()
 
-    def _on_standard_released(self):
+    def _finish_press(self, inside: bool) -> None:
+        if not self._press_active:
+            return
+
+        self._press_active = False
+        self._timer.stop()
+        self.setDown(False)
+
+        valid_release = inside
+
+        if self.is_mod_key:
+            if valid_release:
+                self.setChecked(not self.isChecked())
+                self.set_active(self.isChecked())
+                self.parent_ref._set_key_state(
+                    self.key_code,
+                    self.isChecked(),
+                    self._key_name(),
+                )
+            return
+
+        if self.key_code == CLOSE_VKB_ID:
+            if valid_release:
+                self.parent_ref._send_key(
+                    0,
+                    self.key_code,
+                    self._key_name(),
+                )
+            return
+
+        if self.key_code == TOP_BEZEL_ID:
+            if valid_release:
+                self.parent_ref._set_key_state(
+                    self.key_code,
+                    False,
+                    self._key_name(),
+                )
+            else:
+                # Mapper ignores TOP_BEZEL DOWN. Discard its local pending
+                # state without sending UP, because UP performs the action.
+                self.parent_ref._discard_key_state(self.key_code)
+            return
+
         if self.is_lock_key:
+            # Lock keys are momentary virtual keys. The OS lock indicator is
+            # independently polled and updates the button's active property.
             self.parent_ref._set_key_state(
                 self.key_code,
                 False,
-                self.text().upper(),
+                self._key_name(),
             )
             return
 
-        if self._suppress_release:
-            self._suppress_release = False
+        if self._unlock_pending:
+            if valid_release:
+                self._locked = False
+                self.set_active(False)
+                self.parent_ref._set_key_state(
+                    self.key_code,
+                    False,
+                    self._key_name(),
+                )
+            # A cancelled unlock attempt leaves the key locked and held.
+            self._unlock_pending = False
             return
 
-        self._timer.stop()
+        if not valid_release:
+            # A long press released outside is cancelled, not locked.
+            self.parent_ref._set_key_state(
+                self.key_code,
+                False,
+                self._key_name(),
+            )
+            self._long_press_fired = False
+            return
 
         if self._long_press_fired:
             self._locked = True
             self.set_active(True)
+            # Intentionally leave the emitted key DOWN.
         else:
             self.parent_ref._set_key_state(
                 self.key_code,
                 False,
-                self.text().upper(),
+                self._key_name(),
             )
 
-    def _on_long_press_threshold(self):
-        self._long_press_fired = True
+        self._long_press_fired = False
+
+    def _on_long_press_threshold(self) -> None:
+        if (
+            self._press_active
+            and self._pointer_inside
+            and not self._locked
+            and not self._unlock_pending
+        ):
+            self._long_press_fired = True
 
     def set_active(self, active: bool) -> None:
         if self.property("active") == active:
@@ -321,12 +584,49 @@ class VirtualKeyButton(QPushButton):
         self.setProperty("active", active)
         self.style().unpolish(self)
         self.style().polish(self)
+        self.update()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self.parent_ref._interactions.begin_button(self):
+                event.accept()
+            else:
+                event.ignore()
+            return
+
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._press_active:
+            self._pointer_inside = self.rect().contains(
+                event.position().toPoint()
+            )
+            self.setDown(self._pointer_inside)
+            event.accept()
+            return
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._press_active:
+            inside = self.rect().contains(event.position().toPoint())
+            self.parent_ref._interactions.finish_button(self, inside)
+            event.accept()
+            return
+
+        super().mouseReleaseEvent(event)
+
+    def cancel_press(self) -> None:
+        if self._press_active:
+            self.parent_ref._interactions.finish_button(self, False)
+
 
 class VirtualKeyboard(QWidget):
     LOCK_POLL_INTERVAL_MS = 250
 
     def __init__(self, conn: Connection | None):
         super().__init__()
+
         self.conn = conn
         self._pressed_keys: set[int] = set()
 
@@ -356,10 +656,7 @@ class VirtualKeyboard(QWidget):
 
             self._linux_key_map = LINUX_KEY_MAP
 
-        self._drag_offset: QPoint | None = None
-        self._resize_edges: Qt.Edge = Qt.Edge(0)
-        self._resize_start_geom: QRect | None = None
-        self._resize_start_mouse: QPoint | None = None
+        self._interactions = InteractionController(self)
 
         self.setWindowTitle("Touch2Key - Virtual Keyboard")
         self.setMinimumSize(MIN_VKB_WIDTH, MIN_VKB_HEIGHT)
@@ -370,7 +667,6 @@ class VirtualKeyboard(QWidget):
         self.setWindowFlags(
             Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
-            | Qt.WindowType.WindowDoesNotAcceptFocus
             | Qt.WindowType.FramelessWindowHint
         )
 
@@ -471,20 +767,24 @@ class VirtualKeyboard(QWidget):
         pressed: bool,
         key_name: str,
     ) -> None:
-        """Send key transitions only when the logical state changes."""
+        """Send key transitions only when the local logical state changes."""
         if pressed:
             if key_code in self._pressed_keys:
                 return
 
             self._pressed_keys.add(key_code)
             self._send_key(0, key_code, key_name)
+            return
 
-        else:
-            if key_code not in self._pressed_keys:
-                return
+        if key_code not in self._pressed_keys:
+            return
 
-            self._pressed_keys.remove(key_code)
-            self._send_key(1, key_code, key_name)
+        self._pressed_keys.remove(key_code)
+        self._send_key(1, key_code, key_name)
+
+    def _discard_key_state(self, key_code: int) -> None:
+        """Discard a pending local state without emitting an UP event."""
+        self._pressed_keys.discard(key_code)
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
@@ -526,15 +826,13 @@ class VirtualKeyboard(QWidget):
         return edges
 
     def _update_cursor_for_edges(self, edges: Qt.Edge) -> None:
-        if edges in (
-            Qt.Edge.TopEdge | Qt.Edge.LeftEdge,
-            Qt.Edge.BottomEdge | Qt.Edge.RightEdge,
+        if edges == (Qt.Edge.TopEdge | Qt.Edge.LeftEdge) or edges == (
+            Qt.Edge.BottomEdge | Qt.Edge.RightEdge
         ):
             self.setCursor(Qt.CursorShape.SizeFDiagCursor)
 
-        elif edges in (
-            Qt.Edge.TopEdge | Qt.Edge.RightEdge,
-            Qt.Edge.BottomEdge | Qt.Edge.LeftEdge,
+        elif edges == (Qt.Edge.TopEdge | Qt.Edge.RightEdge) or edges == (
+            Qt.Edge.BottomEdge | Qt.Edge.LeftEdge
         ):
             self.setCursor(Qt.CursorShape.SizeBDiagCursor)
 
@@ -550,12 +848,14 @@ class VirtualKeyboard(QWidget):
     def _poll_lock_states(self) -> None:
         states = get_lock_states()
 
-        if states is not None:
-            for name, key_code in self.lock_name_to_key_code.items():
-                btn = self.lock_buttons.get(key_code)
+        if states is None:
+            return
 
-                if btn is not None:
-                    btn.set_active(states.get(name, False))
+        for name, key_code in self.lock_name_to_key_code.items():
+            btn = self.lock_buttons.get(key_code)
+
+            if btn is not None:
+                btn.set_active(states.get(name, False))
 
     def _send_key(self, state: int, key_code: int, key_name: str) -> None:
         if key_code == CLOSE_VKB_ID:
@@ -565,7 +865,7 @@ class VirtualKeyboard(QWidget):
 
         if self.conn is None:
             action = "DOWN" if state == 0 else "UP"
-            _platform = "Unsupported Platform"
+            platform = "Unsupported Platform"
 
             if key_code in (TOP_BEZEL_ID, M_LEFT, M_RIGHT, M_MIDDLE):
                 key_code_hex = "Internal"
@@ -573,10 +873,10 @@ class VirtualKeyboard(QWidget):
                 key_code_hex = hex(key_code)
 
             if sys.platform == "win32":
-                _platform = "Windows"
+                platform = "Windows"
 
             elif sys.platform == "linux":
-                _platform = "Linux"
+                platform = "Linux"
                 linux_code = self._linux_key_map.get(key_code)
 
                 if linux_code is None:
@@ -586,7 +886,7 @@ class VirtualKeyboard(QWidget):
 
             logger.info(
                 "[VirtualKeyboard] %s %s: %s | key_code: %s",
-                _platform,
+                platform,
                 key_name,
                 action,
                 key_code_hex,
@@ -595,76 +895,35 @@ class VirtualKeyboard(QWidget):
 
         try:
             self.conn.send_bytes(VKB_STRUCT.pack(state, int(key_code)))
-        except OSError:
+        except (BrokenPipeError, EOFError, OSError):
+            logger.exception("Virtual keyboard IPC connection failed")
             self.close()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            local_pos = event.position().toPoint()
-            global_pos = QCursor.pos()
-            edges = self._hit_test_edges(local_pos)
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
 
-            if edges:
-                win_handle = self.windowHandle()
+        local_pos = event.position().toPoint()
+        global_pos = event.globalPosition().toPoint()
+        edges = self._hit_test_edges(local_pos)
 
-                if win_handle is not None and win_handle.startSystemResize(edges):
-                    event.accept()
-                    return
-
-                self._resize_edges = edges
-                self._resize_start_geom = self.geometry()
-                self._resize_start_mouse = global_pos
-                event.accept()
-                return
-
-            self._drag_offset = global_pos - self.frameGeometry().topLeft()
+        if self._interactions.begin_window_gesture(global_pos, edges):
             event.accept()
             return
 
-        super().mousePressEvent(event)
+        event.ignore()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        global_pos = QCursor.pos()
-
-        if (
-            self._resize_edges
-            and self._resize_start_geom
-            and self._resize_start_mouse
+        if self._interactions.state in (
+            InteractionState.WINDOW_MOVE_PENDING,
+            InteractionState.WINDOW_RESIZE_PENDING,
+            InteractionState.WINDOW_MOVING,
+            InteractionState.WINDOW_RESIZING,
         ):
-            delta = global_pos - self._resize_start_mouse
-            geom = QRect(self._resize_start_geom)
-
-            if self._resize_edges & Qt.Edge.LeftEdge:
-                new_left = geom.left() + delta.x()
-
-                if geom.right() - new_left >= self.minimumWidth():
-                    geom.setLeft(new_left)
-
-            elif self._resize_edges & Qt.Edge.RightEdge:
-                geom.setWidth(
-                    max(self.minimumWidth(), geom.width() + delta.x())
-                )
-
-            if self._resize_edges & Qt.Edge.TopEdge:
-                new_top = geom.top() + delta.y()
-
-                if geom.bottom() - new_top >= self.minimumHeight():
-                    geom.setTop(new_top)
-
-            elif self._resize_edges & Qt.Edge.BottomEdge:
-                geom.setHeight(
-                    max(self.minimumHeight(), geom.height() + delta.y())
-                )
-
-            self.setGeometry(geom)
-            event.accept()
-            return
-
-        if (
-            self._drag_offset is not None
-            and event.buttons() & Qt.MouseButton.LeftButton
-        ):
-            self.move(global_pos - self._drag_offset)
+            self._interactions.move_window_gesture(
+                event.globalPosition().toPoint()
+            )
             event.accept()
             return
 
@@ -675,24 +934,28 @@ class VirtualKeyboard(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_offset = None
-            self._resize_edges = Qt.Edge(0)
-            self._resize_start_geom = None
-            self._resize_start_mouse = None
-            self.unsetCursor()
-            event.accept()
-            return
+            if self._interactions.state in (
+                InteractionState.WINDOW_MOVE_PENDING,
+                InteractionState.WINDOW_RESIZE_PENDING,
+                InteractionState.WINDOW_MOVING,
+                InteractionState.WINDOW_RESIZING,
+            ):
+                self._interactions.finish_window_gesture()
+                self.unsetCursor()
+                event.accept()
+                return
 
         super().mouseReleaseEvent(event)
 
     def closeEvent(self, event) -> None:
         self.lock_state_timer.stop()
+        self._interactions.cancel()
 
         if self.conn:
             try:
                 self.conn.close()
             except Exception:
-                pass
+                logger.debug("Error closing virtual keyboard IPC connection", exc_info=True)
 
         event.accept()
 
@@ -724,7 +987,6 @@ def run(
 
     window = VirtualKeyboard(conn)
     window.show()
-    window.raise_()
 
     sys.exit(app.exec())
 
