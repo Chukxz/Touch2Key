@@ -4,7 +4,7 @@ import logging
 import random
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from modules.database import store
 from modules.platforms import get_platform
@@ -41,7 +41,7 @@ class Mapper:
         touch_reader: TouchReader,
         bridge: AbstractBridge,
         pps: float,
-        window_id: int | None,
+        window_id: Optional[int],
         ref: Engine,
     ):
         self.touch_reader = touch_reader
@@ -79,7 +79,7 @@ class Mapper:
                 "Defaulting to foreground target window: HWND %s", self.window_id
             )
 
-        self.game_window_class_name: str | None = (
+        self.game_window_class_name: Optional[str] = (
             self.window_manager.get_window_class_name(self.window_id)
             if self.window_id
             else None
@@ -87,7 +87,7 @@ class Mapper:
 
         try:
             if self.window_id and self.window_manager.is_window_valid(self.window_id):
-                self.game_window_info: dict | None = self._get_window_info(
+                self.game_window_info: Optional[dict] = self._get_window_info(
                     self.window_id
                 )
                 self.window_lost = False
@@ -137,7 +137,7 @@ class Mapper:
         if settings.pps_alert_threshold > 0:
             self.pps = float(settings.pps_alert_threshold)
 
-    def execute_toggle_hotkeys(self, hotkeys_str: str | None = None) -> None:
+    def execute_toggle_hotkeys(self, hotkeys_str: Optional[str] = None) -> None:
         source_str = hotkeys_str if hotkeys_str is not None else self.toggle_hotkeys_str
         key_names = parse_seq(source_str, ",")
         if not key_names:
@@ -176,7 +176,7 @@ class Mapper:
 
     def rebind_target_window(
         self,
-        target_window_id: int | None = None,
+        target_window_id: Optional[int] = None,
         target_window_title: str = "",
     ) -> None:
         wid = target_window_id
@@ -204,7 +204,7 @@ class Mapper:
                 else None
             )
             info = self._get_window_info(fallback_wid) if fallback_wid else None
-            
+
             with self.lock:
                 self.window_id = fallback_wid
                 self.game_window_class_name = cls_name
@@ -310,22 +310,29 @@ class Mapper:
                 target_info = info
 
         if target_info is None:
-            raise RuntimeError(
-                f"No visible window found for class: '{class_name}'."
-            )
+            raise RuntimeError(f"No visible window found for class: '{class_name}'.")
         return target_info
 
-    def get_viewport_info(self) -> tuple[float, float, dict | None, int, int]:
-        """
-        Callback provided to BridgeOutputSink to map oriented device pixels
-        to target PC window client pixels.
-        """
-        dev_w, dev_h = self.touch_reader.get_oriented_dimensions()
-        
+    def get_viewport_info(
+        self,
+    ) -> tuple[int, int, Optional[dict[str, int]], int, int]:
+        vkb_proc = getattr(self.engine_ref, "vkb_process", None)
+        vkb_active = False
+        if vkb_proc is not None:
+            try:
+                vkb_active = vkb_proc.is_alive()
+            except (ValueError, OSError):
+                vkb_active = False
+
         with self.lock:
-            win = self.game_window_info
-            
-        return float(dev_w), float(dev_h), win, self.screen_w, self.screen_h
+            win = None if vkb_active else self.game_window_info
+            return (
+                self.device_width,
+                self.device_height,
+                win,
+                self.screen_w,
+                self.screen_h,
+            )
 
     def _pulse_status(self) -> None:
         with self._pulse_lock:

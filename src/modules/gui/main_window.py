@@ -380,8 +380,9 @@ class EngineProcessController(QObject):
     def _emit_stopped_once(self) -> None:
         if self._stopped_signal_emitted:
             return
-
+        
         self._stopped_signal_emitted = True
+        self.stop_engine()
         self.stopped.emit()
 
     def _reap_finished_process(self) -> None:

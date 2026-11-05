@@ -509,7 +509,9 @@ def build_architecture_digraph(
     # =======================================================================
     # PHASE 1: PIPELINE CONSTRUCTION, RELOAD TRANSACTION & 5-KEY TIER SORTING
     # =======================================================================
-    cluster_phase1_construction_diagraph = dot.subgraph(name="cluster_phase1_construction")
+    cluster_phase1_construction_diagraph = dot.subgraph(
+        name="cluster_phase1_construction"
+    )
     if cluster_phase1_construction_diagraph is not None:
         with cluster_phase1_construction_diagraph as c:
             c.attr(
@@ -714,7 +716,7 @@ def build_architecture_digraph(
             c.node(
                 "TFTTracker",
                 _card(
-                    "6.2 TwoFingerTapTracker.observe(touch_event)",
+                    "6.2 TwoFingerTapTracker.observe(touch_event) - uses time-driven polling to avoid stationary holds",
                     "Menu Mode only (cursor visible) | Ambiguity Buffer FSM (duration &lt;= 0.25s, drift &lt;= 25px, sync &lt;= 0.12s)",
                     [
                         (
@@ -1066,8 +1068,15 @@ def build_architecture_digraph(
     dot.edge("IterateTiers", "PipelineProcess", label=" Claimed on DOWN")
     dot.edge("IterateTiers", "FallbackGate", label=" Unclaimed on DOWN")
 
-    dot.edge("FallbackGate", "DispatchCursor", label=" Yes (Menu Mode: self.is_visible)")
-    dot.edge("FallbackGate", "HardwareBridge", label=" No (Game Mode: ignored)", style="invis")
+    dot.edge(
+        "FallbackGate", "DispatchCursor", label=" Yes (Menu Mode: self.is_visible)"
+    )
+    dot.edge(
+        "FallbackGate",
+        "HardwareBridge",
+        label=" No (Game Mode: ignored)",
+        style="invis",
+    )
 
     dot.edge("RouteOwned", "PipelineProcess", label=" pipeline.process()")
     dot.edge("PipelineProcess", "BridgeOutputSinkNode")

@@ -5,7 +5,7 @@ import logging
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Generic, TypeVar, Callable
+from typing import Any, Generic, TypeVar, Callable
 
 from modules.utils import (
     BEZEL_DP_THICKNESS,

@@ -1,23 +1,35 @@
 from __future__ import annotations
 
-import sys
 import logging
-from typing import TYPE_CHECKING
 import signal
+import sys
+from typing import TYPE_CHECKING
 
+from PySide6.QtCore import QCoreApplication, QPoint, QRect, Qt, QTimer
+from PySide6.QtGui import (
+    QCursor,
+    QGuiApplication,
+    QIcon,
+    QMouseEvent,
+    QPainter,
+    QColor,
+    QPen,
+)
 from PySide6.QtWidgets import (
     QApplication,
-    QWidget,
-    QPushButton,
     QGridLayout,
     QHBoxLayout,
+    QPushButton,
     QSizePolicy,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt, QTimer, QCoreApplication
-from PySide6.QtGui import QIcon
 
+from modules import AppLogManager
+from modules.platforms import check_single_instance, get_lock_states, get_platform
 from modules.utils import (
     CLOSE_VKB_ID,
+    ICONS_FOLDER,
     LOCK_KEYS,
     M_LEFT,
     M_MIDDLE,
@@ -25,13 +37,8 @@ from modules.utils import (
     MODIFIER_KEYS,
     TOP_BEZEL_ID,
     VKB_STRUCT,
-    ICONS_FOLDER,
     get_scancode_from_key,
 )
-
-from modules import AppLogManager
-
-from modules.platforms import get_lock_states, check_single_instance
 
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection
@@ -39,6 +46,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger("modules.gui.overlays.virtual_keyboard")
 
 VKB_NAME = "Touch2Key_VKB"
+RESIZE_MARGIN = 8
+MIN_VKB_WIDTH = 550
+MIN_VKB_HEIGHT = 160
 
 # --- Main Alphanumeric Block ---
 MAIN_LAYOUT = [
@@ -228,6 +238,12 @@ class VirtualKeyButton(QPushButton):
             self.pressed.connect(self._on_standard_pressed)
             self.released.connect(self._on_standard_released)
             self._timer.timeout.connect(self._on_long_press_threshold)
+    
+    def was_pressed(self, key_code: int) -> bool:
+        """Check if the button was pressed and is currently active."""
+        if self.key_code in self.parent_ref._pressed_keys:
+            return True
+        return False
 
     def _on_modifier_toggled(self, checked: bool):
         self.set_active(checked)
@@ -289,7 +305,8 @@ class VirtualKeyboard(QWidget):
     def __init__(self, conn: Connection | None):
         super().__init__()
         self.conn = conn
-
+        self._pressed_keys: set[int] = set()
+        
         self.modifier_key_codes = [
             code
             for key in MODIFIER_KEYS.split(",")
@@ -314,8 +331,15 @@ class VirtualKeyboard(QWidget):
 
             self._linux_key_map = LINUX_KEY_MAP
 
+        self._drag_offset: QPoint | None = None
+        self._resize_edges: Qt.Edge = Qt.Edge(0)
+        self._resize_start_geom: QRect | None = None
+        self._resize_start_mouse: QPoint | None = None
+
         self.setWindowTitle("Touch2Key - Virtual Keyboard")
+        self.setMinimumSize(MIN_VKB_WIDTH, MIN_VKB_HEIGHT)
         self.resize(1100, 300)
+        self.setMouseTracking(True)
         self.setStyleSheet("background-color: #121212;")
 
         self.setWindowFlags(
@@ -334,10 +358,16 @@ class VirtualKeyboard(QWidget):
         self.lock_state_timer.timeout.connect(self._poll_lock_states)
         self.lock_state_timer.start(self.LOCK_POLL_INTERVAL_MS)
 
-    def _setup_ui(self):
-        master_layout = QHBoxLayout(self)
-        master_layout.setContentsMargins(10, 10, 10, 10)
-        master_layout.setSpacing(15)
+    def _setup_ui(self) -> None:
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(
+            RESIZE_MARGIN, RESIZE_MARGIN, RESIZE_MARGIN, RESIZE_MARGIN
+        )
+        outer_layout.setSpacing(0)
+
+        master_layout = QHBoxLayout()
+        master_layout.setContentsMargins(2, 2, 2, 2)
+        master_layout.setSpacing(12)
 
         main_grid = QGridLayout()
         main_grid.setSpacing(2)
@@ -364,6 +394,8 @@ class VirtualKeyboard(QWidget):
         master_layout.addLayout(nav_grid, 6)
         master_layout.addLayout(numpad_grid, 4)
 
+        outer_layout.addLayout(master_layout)
+
     def _create_btn(self, label: str, key_code: int) -> VirtualKeyButton:
         btn = VirtualKeyButton(
             label,
@@ -378,10 +410,59 @@ class VirtualKeyboard(QWidget):
         if key_code == CLOSE_VKB_ID:
             btn.setStyleSheet(btn.styleSheet() + """
                 QPushButton { background-color: #7f1d1d; border: 1px solid #450a0a; }
-                QPushButton:pressed { background-color: #991b1b; }
+                QPushButton:pressed, QPushButton[pressed_state="true"] { background-color: #991b1b; }
             """)
 
         return btn
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        # Draw a subtle border and bottom-right resize grip indicator
+        painter = QPainter(self)
+        pen = QPen(QColor("#333333"), 1)
+        painter.setPen(pen)
+        painter.drawRect(0, 0, self.width() - 1, self.height() - 1)
+
+        grip_pen = QPen(QColor("#666666"), 2)
+        painter.setPen(grip_pen)
+        w, h = self.width(), self.height()
+        for offset in (4, 8, 12):
+            painter.drawLine(w - offset, h - 2, w - 2, h - offset)
+
+    def _hit_test_edges(self, local_pos: QPoint) -> Qt.Edge:
+        edges = Qt.Edge(0)
+        w, h = self.width(), self.height()
+        x, y = local_pos.x(), local_pos.y()
+
+        if x <= RESIZE_MARGIN:
+            edges |= Qt.Edge.LeftEdge
+        elif x >= w - RESIZE_MARGIN:
+            edges |= Qt.Edge.RightEdge
+
+        if y <= RESIZE_MARGIN:
+            edges |= Qt.Edge.TopEdge
+        elif y >= h - RESIZE_MARGIN:
+            edges |= Qt.Edge.BottomEdge
+
+        return edges
+
+    def _update_cursor_for_edges(self, edges: Qt.Edge) -> None:
+        if edges in (
+            Qt.Edge.TopEdge | Qt.Edge.LeftEdge,
+            Qt.Edge.BottomEdge | Qt.Edge.RightEdge,
+        ):
+            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        elif edges in (
+            Qt.Edge.TopEdge | Qt.Edge.RightEdge,
+            Qt.Edge.BottomEdge | Qt.Edge.LeftEdge,
+        ):
+            self.setCursor(Qt.CursorShape.SizeBDiagCursor)
+        elif edges in (Qt.Edge.LeftEdge, Qt.Edge.RightEdge):
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+        elif edges in (Qt.Edge.TopEdge, Qt.Edge.BottomEdge):
+            self.setCursor(Qt.CursorShape.SizeVerCursor)
+        else:
+            self.unsetCursor()
 
     def _poll_lock_states(self) -> None:
         states = get_lock_states()
@@ -391,7 +472,7 @@ class VirtualKeyboard(QWidget):
                 if btn is not None:
                     btn.set_active(states.get(name, False))
 
-    def _send_key(self, state: int, key_code: int, key_name: str):
+    def _send_key(self, state: int, key_code: int, key_name: str) -> None:
         if key_code == CLOSE_VKB_ID:
             if state == 0:
                 self.close()
@@ -418,7 +499,11 @@ class VirtualKeyboard(QWidget):
                     key_code_hex = hex(linux_code)
 
             logger.info(
-                f"[VirtualKeyboard] {(_platform)} {key_name}: {action} | key_code: {key_code_hex}"
+                "[VirtualKeyboard] %s %s: %s | key_code: %s",
+                _platform,
+                key_name,
+                action,
+                key_code_hex,
             )
             return
 
@@ -427,24 +512,77 @@ class VirtualKeyboard(QWidget):
         except OSError:
             self.close()
 
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_pos = event.globalPosition().toPoint()
+            local_pos = event.position().toPoint()
+            global_pos = QCursor.pos()
+            edges = self._hit_test_edges(local_pos)
+
+            if edges:
+                win_handle = self.windowHandle()
+                if win_handle is not None and win_handle.startSystemResize(edges):
+                    event.accept()
+                    return
+                self._resize_edges = edges
+                self._resize_start_geom = self.geometry()
+                self._resize_start_mouse = global_pos
+                event.accept()
+                return
+
+            self._drag_offset = global_pos - self.frameGeometry().topLeft()
+            event.accept()
+            return
+
         super().mousePressEvent(event)
 
-    def mouseMoveEvent(self, event):
-        if hasattr(self, "_drag_pos") and event.buttons() == Qt.MouseButton.LeftButton:
-            diff = event.globalPosition().toPoint() - self._drag_pos
-            self.move(self.pos() + diff)
-            self._drag_pos = event.globalPosition().toPoint()
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        global_pos = QCursor.pos()
+
+        if self._resize_edges and self._resize_start_geom and self._resize_start_mouse:
+            delta = global_pos - self._resize_start_mouse
+            geom = QRect(self._resize_start_geom)
+
+            if self._resize_edges & Qt.Edge.LeftEdge:
+                new_left = geom.left() + delta.x()
+                if geom.right() - new_left >= self.minimumWidth():
+                    geom.setLeft(new_left)
+            elif self._resize_edges & Qt.Edge.RightEdge:
+                geom.setWidth(max(self.minimumWidth(), geom.width() + delta.x()))
+
+            if self._resize_edges & Qt.Edge.TopEdge:
+                new_top = geom.top() + delta.y()
+                if geom.bottom() - new_top >= self.minimumHeight():
+                    geom.setTop(new_top)
+            elif self._resize_edges & Qt.Edge.BottomEdge:
+                geom.setHeight(max(self.minimumHeight(), geom.height() + delta.y()))
+
+            self.setGeometry(geom)
+            event.accept()
+            return
+
+        if self._drag_offset is not None and (
+            event.buttons() & Qt.MouseButton.LeftButton
+        ):
+            self.move(global_pos - self._drag_offset)
+            event.accept()
+            return
+
+        self._update_cursor_for_edges(self._hit_test_edges(event.position().toPoint()))
         super().mouseMoveEvent(event)
 
-    def mouseReleaseEvent(self, event):
-        if hasattr(self, "_drag_pos"):
-            del self._drag_pos
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_offset = None
+            self._resize_edges = Qt.Edge(0)
+            self._resize_start_geom = None
+            self._resize_start_mouse = None
+            self.unsetCursor()
+            event.accept()
+            return
+
         super().mouseReleaseEvent(event)
 
-    def closeEvent(self, event):
+    def closeEvent(self, event) -> None:
         self.lock_state_timer.stop()
 
         if self.conn:
@@ -456,11 +594,21 @@ class VirtualKeyboard(QWidget):
         event.accept()
 
 
-def run(conn: Connection | None = None, enforce_single_instance=True):
+def run(conn: Connection | None = None, enforce_single_instance: bool = True) -> None:
     if enforce_single_instance:
         success, _ = check_single_instance(VKB_NAME)
         if not success:
             sys.exit(0)
+
+    # # Match Engine physical DPI awareness so cursor injection and VKB geometry align 1:1
+    # try:
+    #     get_platform().SystemConfig().set_dpi_awareness()
+    # except Exception:
+    #     pass
+
+    # QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+    #     Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    # )
 
     app = QApplication(sys.argv)
     app_icon_path = ICONS_FOLDER / "app.png"
@@ -470,17 +618,18 @@ def run(conn: Connection | None = None, enforce_single_instance=True):
     # Allow Python signals to be processed periodically by running a dummy timer
     timer = QTimer()
     timer.start(500)
-    timer.timeout.connect(lambda: None)  # Kickstarts the Python interpreter loop
+    timer.timeout.connect(lambda: None)
 
     # Handle Ctrl+C cleanly
     signal.signal(signal.SIGINT, lambda *_: QCoreApplication.quit())
 
     window = VirtualKeyboard(conn)
     window.show()
+    window.raise_()
     sys.exit(app.exec())
 
 
-def virtual_keyboard_worker(conn: Connection):
+def virtual_keyboard_worker(conn: Connection) -> None:
     run(conn, False)
 
 

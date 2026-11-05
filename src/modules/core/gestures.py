@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -34,9 +35,11 @@ class _Contact:
 class TwoFingerTapTracker:
     """Recognize a synchronized two-finger tap while buffering candidate input.
 
-    ``observe`` is the engine-facing API. While a gesture is ambiguous, events
-    are retained and returned only if the candidate is rejected. This prevents
-    a delayed single-finger tap from leaking before the gesture has been decided.
+    ``observe`` is the event-driven API. While a gesture is ambiguous, events
+    are retained and returned only if the candidate is rejected. ``poll`` is the
+    time-driven API: it rejects a candidate whose deadline has passed even if
+    no further events arrive (stationary holds), so a held finger is released
+    to normal dispatch instead of waiting for its UP.
     """
 
     max_tap_duration_s: float = 0.25
@@ -47,6 +50,7 @@ class TwoFingerTapTracker:
     _buffer: list[TouchEvent] = field(default_factory=list, init=False)
     _candidate_ids: set[int] = field(default_factory=set, init=False)
     _pending_since: float | None = field(default=None, init=False)
+    _first_arrival: float | None = field(default=None, init=False)
     _recognized: bool = field(default=False, init=False)
 
     def update_dpi(self, dpi: int, max_drift_dp: float = 25.0) -> None:
@@ -55,11 +59,17 @@ class TwoFingerTapTracker:
             dp_to_px(max_drift_dp, dpi if dpi > 0 else BASELINE_DPI)
         )
 
+    @property
+    def pending(self) -> bool:
+        """True while events are buffered. Safe to read without the engine lock."""
+        return bool(self._buffer)
+
     def reset(self) -> None:
         self._contacts.clear()
         self._buffer.clear()
         self._candidate_ids.clear()
         self._pending_since = None
+        self._first_arrival = None
         self._recognized = False
 
     def _reject(self, extra: TouchEvent | None = None) -> GestureDecision:
@@ -104,6 +114,33 @@ class TwoFingerTapTracker:
             return False
         return True
 
+    def poll(self, now: float | None = None) -> GestureDecision:
+        """Time-driven resolution; call periodically while ``pending``.
+
+        Deadlines are measured from local arrival time (``time.perf_counter``),
+        not ``event.timestamp``, so this is independent of the touch source's
+        clock. Returns REJECTED (with the buffered events to replay) once:
+          - one candidate has waited past ``sync_window_s`` with no second
+            contact, or
+          - two candidates have been down past ``max_tap_duration_s``.
+        Never returns RECOGNIZED; that only happens in ``observe``.
+        """
+        if not self._buffer or self._first_arrival is None:
+            return GestureDecision(GestureStatus.IDLE)
+
+        if now is None:
+            now = time.perf_counter()
+
+        limit = (
+            self.sync_window_s
+            if len(self._candidate_ids) < 2
+            else self.max_tap_duration_s
+        )
+        if now - self._first_arrival > limit:
+            return self._reject()
+
+        return GestureDecision(GestureStatus.PENDING)
+
     def observe(self, event: TouchEvent) -> GestureDecision:
         """Examine an event and return whether it is pending, rejected or a tap.
 
@@ -126,6 +163,7 @@ class TwoFingerTapTracker:
             )
             self._candidate_ids = {cid}
             self._pending_since = now
+            self._first_arrival = time.perf_counter()
             self._buffer.append(event)
             return GestureDecision(GestureStatus.PENDING)
 

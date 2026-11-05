@@ -36,7 +36,6 @@ from modules.utils import (
     DEFAULT_ADB_RATE_CAP,
     DEFAULT_PPS,
     IPC_CMD_START,
-    M_LEFT,
     PPS_ALERT_MAX,
     PPS_ALERT_MIN,
     VISUALIZER_RUNTIME_FILE,
@@ -61,6 +60,7 @@ if TYPE_CHECKING:
     from multiprocessing.queues import Queue
 
 _HOTKEY_POLL_INTERVAL = 0.005  # 5 ms key-state polling
+_GESTURE_POLL_INTERVAL = 0.005  # 5 ms gesture-timeout polling
 _ADJUST_COMMIT_INTERVAL = 0.25  # coalesce DB write + reload while held
 _ONESHOT_COOLDOWN = 0.35  # F5 / F6 / F8 cooldown
 _ADJUST_KEYS = ("left", "right", "down", "up")
@@ -125,6 +125,7 @@ class Engine:
         self.two_finger_tap_enabled = True
         self.bezel_toggle_enabled = True
         self._mouse_flush_thread: Optional[threading.Thread] = None
+        self._gesture_thread: Optional[threading.Thread] = None
 
         # --- CLI hotkey state ---
         self.rate_cap: float = ADB_RATE_CAP_MIN
@@ -639,6 +640,36 @@ class Engine:
             if self._stop_event.wait(interval):
                 break
 
+    # ------------------------------------------------------------------
+    # Gesture timeout: resolves a pending two-finger-tap candidate when no
+    # further events arrive (stationary holds).
+    # ------------------------------------------------------------------
+    def _flush_gesture_timeout(self) -> None:
+        # Lock-free early-out: don't contend with touch processing.
+        if not self.two_finger_tap_tracker.pending:
+            return
+
+        with self.lock:
+            if (
+                self.is_shutting_down
+                or not self.is_visible
+                or not self.two_finger_tap_enabled
+                or self.output_sink is None
+            ):
+                return
+
+            decision = self.two_finger_tap_tracker.poll()
+            if decision.status is GestureStatus.REJECTED:
+                for buffered_event in decision.replay:
+                    self._dispatch_normal(buffered_event)
+
+    def _gesture_loop(self) -> None:
+        while not self._stop_event.wait(_GESTURE_POLL_INTERVAL):
+            try:
+                self._flush_gesture_timeout()
+            except Exception:
+                logger.debug("Gesture timeout poll failed", exc_info=True)
+
     def _dispatch_cursor(self, event: TouchEvent) -> None:
         if not self.output_sink:
             return
@@ -664,8 +695,6 @@ class Engine:
                 event.position.x,
                 event.position.y,
             )
-            self.output_sink.mouse_down(M_LEFT)
-
             if self.fallback_mouse_pipeline is not None:
                 self.fallback_mouse_pipeline.process(
                     event,
@@ -699,20 +728,18 @@ class Engine:
 
         # UP releases pipeline ownership and the held mouse button.
         elif event.phase is TouchPhase.UP:
-            if self.fallback_mouse_pipeline is not None:
-                self.fallback_mouse_pipeline.process(
-                    event,
-                    self.output_sink,
-                )
-
             # If the finger barely moved, preserve click placement at DOWN.
             if not self._cursor_drag_started:
                 self.output_sink.mouse_move_abs(
                     self._cursor_down_pos.x,
                     self._cursor_down_pos.y,
                 )
-
-            self.output_sink.mouse_up(M_LEFT)
+                
+            if self.fallback_mouse_pipeline is not None:
+                self.fallback_mouse_pipeline.process(
+                    event,
+                    self.output_sink,
+                )
 
             self._cursor_down_pos = None
             self._cursor_drag_started = False
@@ -1001,6 +1028,13 @@ class Engine:
         )
         self._mouse_flush_thread.start()
 
+        self._gesture_thread = threading.Thread(
+            target=self._gesture_loop,
+            daemon=True,
+            name="GestureTimeoutThread",
+        )
+        self._gesture_thread.start()
+
         self.dispatcher.register_callback(
             "ON_RELOAD",
             self._on_reload,
@@ -1119,6 +1153,18 @@ class Engine:
                 if thread.is_alive():
                     logger.warning("Mouse flush thread did not stop within timeout")
 
+            gesture_thread = self._gesture_thread
+
+            if (
+                gesture_thread is not None
+                and gesture_thread.is_alive()
+                and threading.current_thread() is not gesture_thread
+            ):
+                gesture_thread.join(timeout=1.0)
+
+                if gesture_thread.is_alive():
+                    logger.warning("Gesture timeout thread did not stop within timeout")
+
             self.close_virtual_keyboard()
 
             if self.touch_reader is not None:
@@ -1157,7 +1203,6 @@ class Engine:
             shutdown_engine_process(
                 self,
                 self.dispatcher,
-                self.conn,
             )
         else:
             self._shutdown()
@@ -1263,7 +1308,6 @@ def run_engine_process(
         shutdown_engine_process(
             engine,
             dispatcher,
-            conn,
         )
         return
 
@@ -1277,7 +1321,6 @@ def run_engine_process(
         shutdown_engine_process(
             engine,
             dispatcher,
-            conn,
         )
         return
 
@@ -1285,19 +1328,18 @@ def run_engine_process(
     shutdown_engine_process(
         engine,
         dispatcher,
-        conn,
     )
 
 
 def shutdown_engine_process(
     engine: Optional[Engine],
     dispatcher: IpcMapperEventDispatcher,
-    conn: Connection,
 ) -> None:
+    already_down = engine is not None and engine.is_shutting_down
+
     try:
         if engine is not None:
             engine._shutdown()
-
     except Exception as exc:
         logger.error(
             "[ENGINE PROCESS] Shutdown failure: %s",
@@ -1307,6 +1349,8 @@ def shutdown_engine_process(
         dispatcher.send_error(str(exc))
 
     finally:
+        if already_down:
+            return
         try:
             dispatcher.send_stopped()
         except OSError as exc:

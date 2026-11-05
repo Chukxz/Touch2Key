@@ -367,15 +367,17 @@ class LayoutStudioPage(QWidget):
 
         canvas_layout.addWidget(status_box)
 
-        # Toolbar Row 1: Image management & overlay toggles
+        # Toolbar Row 1: Image management & overlay toggles & cancel
         tools_row_1 = QHBoxLayout()
         self.select_image_btn = QPushButton("Select Image")
         self.capture_btn = QPushButton("Capture Screenshot")
         self.toggle_overlays_btn = QPushButton("Toggle Overlays (F4)")
+        self.cancel_action_btn = QPushButton("Cancel (Esc)")
 
         tools_row_1.addWidget(self.select_image_btn)
         tools_row_1.addWidget(self.capture_btn)
         tools_row_1.addWidget(self.toggle_overlays_btn)
+        tools_row_1.addWidget(self.cancel_action_btn)
         tools_row_1.addStretch()
         canvas_layout.addLayout(tools_row_1)
 
@@ -383,14 +385,12 @@ class LayoutStudioPage(QWidget):
         tools_row_2 = QHBoxLayout()
         self.add_circle_btn = QPushButton("Add Circle (F6)")
         self.add_rect_btn = QPushButton("Add Rectangle (F7)")
-        self.cancel_action_btn = QPushButton("Cancel (Esc)")
         self.save_btn = QPushButton("Save (Ctrl+S/F12)")
         self.save_btn.setStyleSheet("font-weight: bold; color: palette(highlight);")
         self.save_as_btn = QPushButton("Save As Copy… (Ctrl+Shift+S)")
 
         tools_row_2.addWidget(self.add_circle_btn)
         tools_row_2.addWidget(self.add_rect_btn)
-        tools_row_2.addWidget(self.cancel_action_btn)
         tools_row_2.addWidget(self.save_btn)
         tools_row_2.addWidget(self.save_as_btn)
         tools_row_2.addStretch()
