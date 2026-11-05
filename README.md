@@ -83,7 +83,7 @@ If you also use game streamers like **Sunshine/Moonlight** or **Apollo/Artemis**
 | `touch2key-uninstall` | Removes drivers, rules, binaries, and shortcuts. |
 | `touch2key-wireless` | Forces an ADB wireless connection. |
 | `touch2key-keyboard` | Tests the virtual keyboard output standalone. |
-| `touch2key-visualizer` | Live event visualizer with your active layout and toggle key. |
+| `touch2key-visualizer` | Live event visualizer with your active layout and toggle hotkeys. |
 
 ### One-Line Config Flag
 Comma-separated: `window_id,sprint_key,rate_cap,pps,k_device,m_device`. Use empty values for defaults/database values, e.g. `,,100,50,,`
