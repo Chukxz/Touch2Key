@@ -79,7 +79,7 @@ logger = logging.getLogger("modules.gui.layout_studio_page")
 
 STATIC_HELP = (
     "<b>Help:</b> "
-    "<span style='color: palette(highlight);'>Ctrl+S</span> Save | "
+    "<span style='color: palette(highlight);'>Ctrl+S</span> / <span style='color: palette(highlight);'>F12</span> Save | "
     "<span style='color: palette(highlight);'>Ctrl+Shift+S</span> Save As Copy | "
     "<span style='color: palette(highlight);'>Ctrl+F</span> Find | "
     "<span style='color: palette(highlight);'>Esc</span> Cancel | "
