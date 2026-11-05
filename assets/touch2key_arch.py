@@ -410,7 +410,7 @@ def build_architecture_digraph(
                         ),
                         (
                             "Live Coordinate Sync",
-                            "Monitors toggle_hotkeys to toggle cursor visibility; every 2.0s inspects telemetry snapshot to dynamically calibrate layout geometry to device DPI",
+                            "Monitors toggle_hotkeys to toggle cursor visibility; every 2.0s reads telemetry window_info &amp; screen_width/height to scale and offset layout zones to the active target window (or fullscreen viewport fallback)",
                         ),
                     ],
                     header_bg="#0891b2",
@@ -495,7 +495,7 @@ def build_architecture_digraph(
                     [
                         (
                             "Snapshot Payload",
-                            "JSON file (.touch2key_runtime): pid, timestamp, rate_hz, rate_status, rate_cap_hz, pps_threshold, menu_mode, downs/moves/ups/all, respawns, workers, device_width/height, window_lost",
+                            "JSON file (.touch2key_runtime): pid, updated_at, rate_hz, rate_status, rate_cap_hz, pps_threshold, menu_mode, downs/moves/ups/all, respawns, workers, window_info, screen_width/height, window_lost",
                         ),
                         (
                             "Consumers",
@@ -548,7 +548,7 @@ def build_architecture_digraph(
                     [
                         (
                             "LayoutLoader",
-                            "load_layout() extracts SQLite snapshot: Layout (width, height, dpi), Settings, Zones, Bezels",
+                            "load_layout() extracts SQLite snapshot and normalizes zones into oriented device pixels (dev_w, dev_h, dev_dpi)",
                         ),
                         (
                             "Hotkeys Guard",
@@ -1036,7 +1036,7 @@ def build_architecture_digraph(
     dot.edge(
         "RuntimeSnapshot",
         "VisualizerOverlay",
-        label=" 2.0s live device_width/height sync",
+        label=" 2.0s live window_info &amp; screen bounds sync",
         color="#0891b2",
     )
     dot.edge(
