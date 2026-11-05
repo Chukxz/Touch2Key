@@ -92,16 +92,15 @@ class DiagnosticView(QGraphicsView):
     mouse_pressed = Signal(str, int, int)  # (button name, x, y)
     mouse_released = Signal(str)  # (button name)
     arrow_pressed = Signal()
-    resized = Signal(int, int)  # (viewport width, viewport height)
+    resized = Signal()
 
     def __init__(
         self,
-        loc_dict: dict[int, tuple[float, float]],
         parent: MainWindow | None = None,
     ) -> None:
         super().__init__(parent)
 
-        self._loc_dict: dict[int, tuple[float, float]] = loc_dict
+        self._loc_dict: dict[int, tuple[float, float]] = {}
         self.cursor_visible = True
         self.data: deque[dict] = deque(maxlen=MAX_EVENT_LOG)
         self.pressed_keys: dict[int, str] = {}
@@ -223,18 +222,15 @@ class DiagnosticView(QGraphicsView):
         if changed:
             self.arrow_pressed.emit()
 
-        # Silently sync live device dimensions from the engine every 2.0 seconds
+        # Silently sync live window geometry from the engine every 2.0 seconds
         if now - self._last_dim_check > 2.0:
             self._last_dim_check = now
             viewport_size = self.viewport().size()
-            new_locs = MainWindow.get_locations_dict(
+            new_locs = self.get_locations_dict(
                 viewport_size.width(), viewport_size.height()
             )
             if new_locs and new_locs != self._loc_dict:
                 self._loc_dict = new_locs
-                _parent = self.parent()
-                if isinstance(_parent, MainWindow):
-                    _parent.loc_dict = new_locs
 
     def set_active_text(self, text: str) -> None:
         self.active_buttons.setPlainText(text)
@@ -291,8 +287,65 @@ class DiagnosticView(QGraphicsView):
         if item.scene() is self._scene:
             self._scene.removeItem(item)
 
-    def set_loc_dict(self, loc_dict: dict[int, tuple[float, float]]) -> None:
-        self._loc_dict = loc_dict
+    @staticmethod
+    def get_locations_dict(
+        width: int,
+        height: int,
+    ) -> dict[int, tuple[float, float]]:
+        loc_dict: dict[int, tuple[float, float]] = {}
+
+        if width <= 0 or height <= 0:
+            return loc_dict
+
+        layout = store.get_active_layout()
+        if layout is None:
+            return loc_dict
+
+        # Base coordinate space from the static layout canvas dimensions
+        layout_w = float(layout.width or 0)
+        layout_h = float(layout.height or 0)
+        if layout_w <= 0.0 or layout_h <= 0.0:
+            return loc_dict
+
+        # Default target space uses the visualizer viewport dimensions
+        target_w = float(width)
+        target_h = float(height)
+        offset_x = 0.0
+        offset_y = 0.0
+
+        # Live window space overrides target bounds and applies screen-normalized offsets
+        attached = attach()
+        if attached is not None:
+            _, snap = attached
+            win_info = snap.get("window_info")
+            if isinstance(win_info, (tuple, list)) and len(win_info) == 4:
+                left, top, win_w, win_h = win_info
+                if win_w and win_h and win_w > 0 and win_h > 0:
+                    screen_w = float(snap.get("screen_width") or 0)
+                    screen_h = float(snap.get("screen_height") or 0)
+
+                    norm_x = float(width) / screen_w if screen_w > 0.0 else 1.0
+                    norm_y = float(height) / screen_h if screen_h > 0.0 else 1.0
+
+                    offset_x = float(left) * norm_x
+                    offset_y = float(top) * norm_y
+                    target_w = float(win_w) * norm_x
+                    target_h = float(win_h) * norm_y
+
+        if target_w <= 0.0 or target_h <= 0.0:
+            return loc_dict
+
+        zones = store.get_active_layout_zones()
+        scale_x = target_w / layout_w
+        scale_y = target_h / layout_h
+
+        for zone in zones:
+            loc_dict[zone.scancode] = (
+                offset_x + float(zone.cx or 0.0) * scale_x,
+                offset_y + float(zone.cy or 0.0) * scale_y,
+            )
+
+        return loc_dict
 
     def _update_active_display(self) -> None:
         parts = list(self.pressed_keys.values()) + sorted(self.pressed_mouse_buttons)
@@ -358,7 +411,8 @@ class DiagnosticView(QGraphicsView):
         width, height = viewport_size.width(), viewport_size.height()
 
         self.setSceneRect(0.0, 0.0, float(width), float(height))
-        self.resized.emit(width, height)
+        self._loc_dict = self.get_locations_dict(width, height)
+        self.resized.emit()
 
     @staticmethod
     def _key_identity(event: QKeyEvent) -> int:
@@ -471,15 +525,14 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
 
-        self.loc_dict: dict[int, tuple[float, float]] = {}
         self.setWindowTitle(VISUALIZER_NAME)
         self.setWindowOpacity(0.4)
 
-        self.view = DiagnosticView(self.loc_dict, self)
+        self.view = DiagnosticView(self)
         self.view.mouse_pressed.connect(self._on_mouse_pressed)
         self.view.mouse_released.connect(self._on_mouse_released)
         self.view.arrow_pressed.connect(self._update_instruction_text)
-        self.view.resized.connect(self._on_view_resized)
+        self.view.resized.connect(self._position_instruction)
         self.setCentralWidget(self.view)
 
         self.instruction = self.view._scene.addText(
@@ -490,11 +543,6 @@ class MainWindow(QMainWindow):
         self.instruction.setGraphicsEffect(_create_high_visibility_shadow())
 
         self.showFullScreen()
-        self._on_view_resized(
-            self.view.viewport().width(),
-            self.view.viewport().height(),
-        )
-        self._position_instruction()
 
     def _instruction_text(self) -> str:
         curve_name = self.view.get_current_curve_name()
@@ -524,50 +572,6 @@ class MainWindow(QMainWindow):
         x = (viewport.width() - bounds.width()) * 0.5
         y = (viewport.height() - bounds.height()) * 0.2
         instruction.setPos(x, y)
-
-    def _on_view_resized(self, width: int, height: int) -> None:
-        self.loc_dict = self.get_locations_dict(width, height)
-        self.view.set_loc_dict(self.loc_dict)
-        self._position_instruction()
-
-    @staticmethod
-    def get_locations_dict(
-        width: int,
-        height: int,
-    ) -> dict[int, tuple[float, float]]:
-        loc_dict: dict[int, tuple[float, float]] = {}
-
-        layout = store.get_active_layout()
-        if layout is None:
-            return loc_dict
-
-        # Default fallback to static layout dimensions
-        dev_w = float(layout.width or 0)
-        dev_h = float(layout.height or 0)
-
-        # Silently check for live engine telemetry snapshot dimensions
-        attached = attach()
-        if attached is not None:
-            _, snap = attached
-            live_w = snap.get("device_width")
-            live_h = snap.get("device_height")
-            if live_w and live_h:
-                dev_w, dev_h = float(live_w), float(live_h)
-
-        if dev_w <= 0.0 or dev_h <= 0.0:
-            return loc_dict
-
-        zones = store.get_active_layout_zones()
-        scale_x = width / dev_w
-        scale_y = height / dev_h
-
-        for zone in zones:
-            loc_dict[zone.scancode] = (
-                float(zone.cx or 0) * scale_x,
-                float(zone.cy or 0) * scale_y,
-            )
-
-        return loc_dict
 
     def _on_mouse_pressed(self, btn_name: str, x: int, y: int) -> None:
         self.view.pressed_mouse_buttons.add(btn_name)
