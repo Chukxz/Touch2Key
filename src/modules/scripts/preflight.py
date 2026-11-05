@@ -8,7 +8,6 @@ import sys
 import logging
 import shutil
 from pathlib import Path
-from PySide6.QtWidgets import QApplication
 
 from modules import ADB
 from modules import AppLogManager
