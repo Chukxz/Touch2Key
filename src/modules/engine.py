@@ -1172,13 +1172,22 @@ class Engine:
         if mapper is not None:
             mapper._pulse_status()
 
-        touch_reader = self.touch_reader
+        window_info: Optional[tuple[int, int, int, int]] = None
+        screen_w: int = 0
+        screen_h: int = 0
 
-        if touch_reader is not None:
-            dev_w, dev_h = touch_reader.get_oriented_dimensions()
-            rotation = touch_reader.get_rotation()
-        else:
-            dev_w, dev_h, rotation = 1920, 1080, 0
+        if mapper is not None:
+            screen_w = int(mapper.screen_w)
+            screen_h = int(mapper.screen_h)
+            with mapper.lock:
+                win = mapper.game_window_info
+                if win is not None:
+                    window_info = (
+                        int(win["left"]),
+                        int(win["top"]),
+                        int(win["width"]),
+                        int(win["height"]),
+                    )
 
         def alive_pid(proc) -> Optional[int]:
             try:
@@ -1199,9 +1208,9 @@ class Engine:
             "moves": self.touch_event_counter.event_count_move,
             "ups": self.touch_event_counter.event_count_up,
             "all": self.touch_event_counter.event_count,
-            "device_width": dev_w,
-            "device_height": dev_h,
-            "device_rotation": rotation,
+            "window_info": window_info,
+            "screen_width": screen_w,
+            "screen_height": screen_h,
             "workers": {
                 "keyboard": alive_pid(getattr(bridge, "k_proc", None)),
                 "mouse": alive_pid(getattr(bridge, "m_proc", None)),
