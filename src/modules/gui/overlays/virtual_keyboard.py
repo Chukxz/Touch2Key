@@ -5,7 +5,7 @@ import signal
 import sys
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QCoreApplication, QPoint, QRect, Qt, QTimer
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import (
     QCursor,
     QIcon,
@@ -180,7 +180,7 @@ NUMPAD_LAYOUT = [
 
 
 class VirtualKeyButton(QPushButton):
-    """Custom button that emits key_codes and explicitly ignores OS focus."""
+    """Custom button with explicit logical key-state handling."""
 
     LONG_PRESS_INTERVAL_MS = 300
 
@@ -193,6 +193,7 @@ class VirtualKeyButton(QPushButton):
         lock_codes: list[int],
     ):
         super().__init__(key_label, parent_ref)
+
         self.key_code = key_code
         self.parent_ref = parent_ref
         self.is_lock_key = key_code in lock_codes
@@ -238,29 +239,34 @@ class VirtualKeyButton(QPushButton):
             self._timer = QTimer(self)
             self._timer.setSingleShot(True)
             self._timer.setInterval(self.LONG_PRESS_INTERVAL_MS)
-
-            self.pressed.connect(self._on_standard_pressed)
-            self.released.connect(self._on_standard_released)
             self._timer.timeout.connect(self._on_long_press_threshold)
 
+            # DOWN still originates from QPushButton's press signal.
+            # UP is handled by VirtualKeyboard's application-level
+            # event filter, including releases outside this button.
+            self.pressed.connect(self._on_standard_pressed)
+
     def was_pressed(self, key_code: int) -> bool:
-        """Check whether a key is currently held."""
+        """Check whether a key is currently logically held."""
         return key_code in self.parent_ref._pressed_keys
 
-    def _on_modifier_toggled(self, checked: bool):
+    def _key_name(self) -> str:
+        return self.text().upper()
+
+    def _on_modifier_toggled(self, checked: bool) -> None:
         self.set_active(checked)
         self.parent_ref._set_key_state(
             self.key_code,
             checked,
-            self.text().upper(),
+            self._key_name(),
         )
 
-    def _on_standard_pressed(self):
+    def _on_standard_pressed(self) -> None:
         if self.is_lock_key:
             self.parent_ref._set_key_state(
                 self.key_code,
                 True,
-                self.text().upper(),
+                self._key_name(),
             )
             return
 
@@ -268,7 +274,7 @@ class VirtualKeyButton(QPushButton):
             self.parent_ref._set_key_state(
                 self.key_code,
                 False,
-                self.text().upper(),
+                self._key_name(),
             )
             self._locked = False
             self._suppress_release = True
@@ -281,17 +287,21 @@ class VirtualKeyButton(QPushButton):
         self.parent_ref._set_key_state(
             self.key_code,
             True,
-            self.text().upper(),
+            self._key_name(),
         )
 
         self._timer.start()
 
-    def _on_standard_released(self):
+    def _on_standard_released(self) -> None:
+        """Finish the logical press, regardless of cursor position."""
+        if self.is_mod_key:
+            return
+
         if self.is_lock_key:
             self.parent_ref._set_key_state(
                 self.key_code,
                 False,
-                self.text().upper(),
+                self._key_name(),
             )
             return
 
@@ -308,10 +318,10 @@ class VirtualKeyButton(QPushButton):
             self.parent_ref._set_key_state(
                 self.key_code,
                 False,
-                self.text().upper(),
+                self._key_name(),
             )
 
-    def _on_long_press_threshold(self):
+    def _on_long_press_threshold(self) -> None:
         self._long_press_fired = True
 
     def set_active(self, active: bool) -> None:
@@ -322,13 +332,19 @@ class VirtualKeyButton(QPushButton):
         self.style().unpolish(self)
         self.style().polish(self)
 
+
 class VirtualKeyboard(QWidget):
     LOCK_POLL_INTERVAL_MS = 250
 
     def __init__(self, conn: Connection | None):
         super().__init__()
+
         self.conn = conn
         self._pressed_keys: set[int] = set()
+
+        # Tracks the button that received the physical mouse press.
+        # Its release is handled even if the cursor leaves the button.
+        self._active_mouse_button: VirtualKeyButton | None = None
 
         self.modifier_key_codes = [
             code
@@ -379,10 +395,56 @@ class VirtualKeyboard(QWidget):
 
         self._setup_ui()
 
+        # Observe mouse events before individual widgets process them.
+        # This lets us pair a key's DOWN with its UP even when the
+        # release is delivered to a different widget.
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+
         self._poll_lock_states()
+
         self.lock_state_timer = QTimer(self)
         self.lock_state_timer.timeout.connect(self._poll_lock_states)
         self.lock_state_timer.start(self.LOCK_POLL_INTERVAL_MS)
+
+    def eventFilter(self, watched, event) -> bool:
+        """Track key mouse presses/releases independently of button bounds."""
+        event_type = event.type()
+
+        if (
+            event_type == QEvent.Type.MouseButtonPress
+            and event.button() == Qt.MouseButton.LeftButton
+            and isinstance(watched, VirtualKeyButton)
+        ):
+            # Recover from an interrupted previous interaction.
+            previous = self._active_mouse_button
+
+            if previous is not None and previous is not watched:
+                self._finish_button_mouse_press(previous)
+
+            self._active_mouse_button = watched
+
+        elif (
+            event_type == QEvent.Type.MouseButtonRelease
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            button = self._active_mouse_button
+
+            if button is not None:
+                self._active_mouse_button = None
+                self._finish_button_mouse_press(button)
+
+        return super().eventFilter(watched, event)
+
+    @staticmethod
+    def _finish_button_mouse_press(button: VirtualKeyButton) -> None:
+        """End a button interaction without relying on its hit area."""
+        if not button.is_mod_key:
+            button._on_standard_released()
+
+        # A release outside the button may not reset its visual down state.
+        button.setDown(False)
 
     def _setup_ui(self) -> None:
         outer_layout = QVBoxLayout(self)
@@ -565,7 +627,7 @@ class VirtualKeyboard(QWidget):
 
         if self.conn is None:
             action = "DOWN" if state == 0 else "UP"
-            _platform = "Unsupported Platform"
+            platform = "Unsupported Platform"
 
             if key_code in (TOP_BEZEL_ID, M_LEFT, M_RIGHT, M_MIDDLE):
                 key_code_hex = "Internal"
@@ -573,10 +635,10 @@ class VirtualKeyboard(QWidget):
                 key_code_hex = hex(key_code)
 
             if sys.platform == "win32":
-                _platform = "Windows"
+                platform = "Windows"
 
             elif sys.platform == "linux":
-                _platform = "Linux"
+                platform = "Linux"
                 linux_code = self._linux_key_map.get(key_code)
 
                 if linux_code is None:
@@ -586,7 +648,7 @@ class VirtualKeyboard(QWidget):
 
             logger.info(
                 "[VirtualKeyboard] %s %s: %s | key_code: %s",
-                _platform,
+                platform,
                 key_name,
                 action,
                 key_code_hex,
@@ -601,6 +663,13 @@ class VirtualKeyboard(QWidget):
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             local_pos = event.position().toPoint()
+
+            # Never interpret a propagated child-button press as a
+            # window drag or resize operation.
+            if self.childAt(local_pos) is not None:
+                event.accept()
+                return
+
             global_pos = QCursor.pos()
             edges = self._hit_test_edges(local_pos)
 
@@ -624,6 +693,11 @@ class VirtualKeyboard(QWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        # Child key interactions take precedence over window movement.
+        if self._active_mouse_button is not None:
+            event.accept()
+            return
+
         global_pos = QCursor.pos()
 
         if (
@@ -686,6 +760,11 @@ class VirtualKeyboard(QWidget):
         super().mouseReleaseEvent(event)
 
     def closeEvent(self, event) -> None:
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+
+        self._active_mouse_button = None
         self.lock_state_timer.stop()
 
         if self.conn:
