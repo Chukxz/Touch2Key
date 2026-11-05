@@ -384,7 +384,7 @@ class LayoutStudioPage(QWidget):
         self.add_circle_btn = QPushButton("Add Circle (F6)")
         self.add_rect_btn = QPushButton("Add Rectangle (F7)")
         self.cancel_action_btn = QPushButton("Cancel (Esc)")
-        self.save_btn = QPushButton("Save (Ctrl+S)")
+        self.save_btn = QPushButton("Save (Ctrl+S/F12)")
         self.save_btn.setStyleSheet("font-weight: bold; color: palette(highlight);")
         self.save_as_btn = QPushButton("Save As Copy… (Ctrl+Shift+S)")
 
