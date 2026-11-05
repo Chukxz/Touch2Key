@@ -127,7 +127,7 @@ In CLI mode these hotkeys tune the engine live. They only trigger while your ter
 | `Esc` | Shutdown | — | Gracefully stops the engine and its worker processes. |
 | `F5` | Handedness Toggle | `True` / `False` | Switches between left- and right-handed layouts, then reloads. |
 | `F6` | Reload | — | Reloads the layout, pipelines, and settings (including typematic) from SQLite. |
-| `F8` | Input Curve Cycle | Linear / Cubic / Exponential | Cycles through easing curves for arrow key incrementing speed. |
+| `F8` | Input Curve Cycle | Linear / Cubic / Exponential / Logarithmic | Cycles through easing curves for arrow key incrementing speed. |
 | `Left` / `Right` | Rate Cap (Hz) | ±10.0 Hz `[30.0 – 1000.0]` | Tunes the mouse flush and touch reader polling rate. Hold to repeat. |
 | `Down` / `Up` | PPS Alert Threshold | ±5.0 PPS `[10.0 – 500.0]` | Tunes the touch monitoring threshold. Hold to repeat. |
 
