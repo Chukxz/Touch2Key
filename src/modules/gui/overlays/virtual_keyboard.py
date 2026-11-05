@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QCoreApplication, QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import (
     QCursor,
-    QGuiApplication,
     QIcon,
     QMouseEvent,
     QPainter,
@@ -26,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from modules import AppLogManager
-from modules.platforms import check_single_instance, get_lock_states, get_platform
+from modules.platforms import check_single_instance, get_lock_states
 from modules.utils import (
     CLOSE_VKB_ID,
     ICONS_FOLDER,
@@ -198,8 +197,11 @@ class VirtualKeyButton(QPushButton):
         self.parent_ref = parent_ref
         self.is_lock_key = key_code in lock_codes
         self.is_mod_key = key_code in mod_codes
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         self.setStyleSheet("""
@@ -214,7 +216,7 @@ class VirtualKeyButton(QPushButton):
                 margin: 1px;
             }
             QPushButton:pressed {
-                background-color: #4a90e2; 
+                background-color: #4a90e2;
                 color: white;
                 border: 1px solid #357abd;
             }
@@ -232,33 +234,42 @@ class VirtualKeyButton(QPushButton):
             self._locked = False
             self._long_press_fired = False
             self._suppress_release = False
+
             self._timer = QTimer(self)
             self._timer.setSingleShot(True)
             self._timer.setInterval(self.LONG_PRESS_INTERVAL_MS)
+
             self.pressed.connect(self._on_standard_pressed)
             self.released.connect(self._on_standard_released)
             self._timer.timeout.connect(self._on_long_press_threshold)
-    
+
     def was_pressed(self, key_code: int) -> bool:
-        """Check if the button was pressed and is currently active."""
-        if self.key_code in self.parent_ref._pressed_keys:
-            return True
-        return False
+        """Check whether a key is currently held."""
+        return key_code in self.parent_ref._pressed_keys
 
     def _on_modifier_toggled(self, checked: bool):
         self.set_active(checked)
-        if checked:
-            self._send_ipc_message(0, self.key_code)
-        else:
-            self._send_ipc_message(1, self.key_code)
+        self.parent_ref._set_key_state(
+            self.key_code,
+            checked,
+            self.text().upper(),
+        )
 
     def _on_standard_pressed(self):
         if self.is_lock_key:
-            self._send_ipc_message(0, self.key_code)
+            self.parent_ref._set_key_state(
+                self.key_code,
+                True,
+                self.text().upper(),
+            )
             return
 
         if self._locked:
-            self._send_ipc_message(1, self.key_code)
+            self.parent_ref._set_key_state(
+                self.key_code,
+                False,
+                self.text().upper(),
+            )
             self._locked = False
             self._suppress_release = True
             self.set_active(False)
@@ -266,12 +277,22 @@ class VirtualKeyButton(QPushButton):
 
         self._suppress_release = False
         self._long_press_fired = False
-        self._send_ipc_message(0, self.key_code)
+
+        self.parent_ref._set_key_state(
+            self.key_code,
+            True,
+            self.text().upper(),
+        )
+
         self._timer.start()
 
     def _on_standard_released(self):
         if self.is_lock_key:
-            self._send_ipc_message(1, self.key_code)
+            self.parent_ref._set_key_state(
+                self.key_code,
+                False,
+                self.text().upper(),
+            )
             return
 
         if self._suppress_release:
@@ -279,25 +300,27 @@ class VirtualKeyButton(QPushButton):
             return
 
         self._timer.stop()
+
         if self._long_press_fired:
             self._locked = True
             self.set_active(True)
         else:
-            self._send_ipc_message(1, self.key_code)
+            self.parent_ref._set_key_state(
+                self.key_code,
+                False,
+                self.text().upper(),
+            )
 
     def _on_long_press_threshold(self):
         self._long_press_fired = True
 
-    def _send_ipc_message(self, state: int, key_code: int):
-        self.parent_ref._send_key(state, key_code, self.text().upper())
-
     def set_active(self, active: bool) -> None:
         if self.property("active") == active:
             return
+
         self.setProperty("active", active)
         self.style().unpolish(self)
         self.style().polish(self)
-
 
 class VirtualKeyboard(QWidget):
     LOCK_POLL_INTERVAL_MS = 250
@@ -306,7 +329,7 @@ class VirtualKeyboard(QWidget):
         super().__init__()
         self.conn = conn
         self._pressed_keys: set[int] = set()
-        
+
         self.modifier_key_codes = [
             code
             for key in MODIFIER_KEYS.split(",")
@@ -318,11 +341,13 @@ class VirtualKeyboard(QWidget):
             for key in LOCK_KEYS.split(",")
             if (code := get_scancode_from_key(key)) is not None
         ]
+
         self.lock_name_to_key_code = {
             name: code
             for name in LOCK_KEYS.split(",")
             if (code := get_scancode_from_key(name)) is not None
         }
+
         self.lock_buttons: dict[int, VirtualKeyButton] = {}
 
         self._linux_key_map = {}
@@ -348,6 +373,7 @@ class VirtualKeyboard(QWidget):
             | Qt.WindowType.WindowDoesNotAcceptFocus
             | Qt.WindowType.FramelessWindowHint
         )
+
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, True)
 
@@ -361,7 +387,10 @@ class VirtualKeyboard(QWidget):
     def _setup_ui(self) -> None:
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(
-            RESIZE_MARGIN, RESIZE_MARGIN, RESIZE_MARGIN, RESIZE_MARGIN
+            RESIZE_MARGIN,
+            RESIZE_MARGIN,
+            RESIZE_MARGIN,
+            RESIZE_MARGIN,
         )
         outer_layout.setSpacing(0)
 
@@ -371,8 +400,10 @@ class VirtualKeyboard(QWidget):
 
         main_grid = QGridLayout()
         main_grid.setSpacing(2)
+
         for row_idx, row_data in enumerate(MAIN_LAYOUT):
             col_idx = 0
+
             for label, key_code, col_span in row_data:
                 btn = self._create_btn(label, key_code)
                 main_grid.addWidget(btn, row_idx, col_idx, 1, col_span)
@@ -380,14 +411,26 @@ class VirtualKeyboard(QWidget):
 
         nav_grid = QGridLayout()
         nav_grid.setSpacing(2)
+
         for label, key_code, r, c, r_span, c_span in NAV_LAYOUT:
-            nav_grid.addWidget(self._create_btn(label, key_code), r, c, r_span, c_span)
+            nav_grid.addWidget(
+                self._create_btn(label, key_code),
+                r,
+                c,
+                r_span,
+                c_span,
+            )
 
         numpad_grid = QGridLayout()
         numpad_grid.setSpacing(2)
+
         for label, key_code, r, c, r_span, c_span in NUMPAD_LAYOUT:
             numpad_grid.addWidget(
-                self._create_btn(label, key_code), r, c, r_span, c_span
+                self._create_btn(label, key_code),
+                r,
+                c,
+                r_span,
+                c_span,
             )
 
         master_layout.addLayout(main_grid, 15)
@@ -404,30 +447,66 @@ class VirtualKeyboard(QWidget):
             self,
             lock_codes=self.lock_key_codes,
         )
+
         if btn.is_lock_key:
             self.lock_buttons[key_code] = btn
 
         if key_code == CLOSE_VKB_ID:
             btn.setStyleSheet(btn.styleSheet() + """
-                QPushButton { background-color: #7f1d1d; border: 1px solid #450a0a; }
-                QPushButton:pressed, QPushButton[pressed_state="true"] { background-color: #991b1b; }
+                QPushButton {
+                    background-color: #7f1d1d;
+                    border: 1px solid #450a0a;
+                }
+                QPushButton:pressed,
+                QPushButton[pressed_state="true"] {
+                    background-color: #991b1b;
+                }
             """)
 
         return btn
 
+    def _set_key_state(
+        self,
+        key_code: int,
+        pressed: bool,
+        key_name: str,
+    ) -> None:
+        """Send key transitions only when the logical state changes."""
+        if pressed:
+            if key_code in self._pressed_keys:
+                return
+
+            self._pressed_keys.add(key_code)
+            self._send_key(0, key_code, key_name)
+
+        else:
+            if key_code not in self._pressed_keys:
+                return
+
+            self._pressed_keys.remove(key_code)
+            self._send_key(1, key_code, key_name)
+
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
-        # Draw a subtle border and bottom-right resize grip indicator
+
         painter = QPainter(self)
+
         pen = QPen(QColor("#333333"), 1)
         painter.setPen(pen)
         painter.drawRect(0, 0, self.width() - 1, self.height() - 1)
 
         grip_pen = QPen(QColor("#666666"), 2)
         painter.setPen(grip_pen)
+
         w, h = self.width(), self.height()
+
         for offset in (4, 8, 12):
-            painter.drawLine(w - offset, h - 2, w - 2, h - offset)
+            painter.drawLine(
+                w - offset,
+                h - 2,
+                w - 2,
+                h - offset,
+            )
 
     def _hit_test_edges(self, local_pos: QPoint) -> Qt.Edge:
         edges = Qt.Edge(0)
@@ -452,23 +531,29 @@ class VirtualKeyboard(QWidget):
             Qt.Edge.BottomEdge | Qt.Edge.RightEdge,
         ):
             self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+
         elif edges in (
             Qt.Edge.TopEdge | Qt.Edge.RightEdge,
             Qt.Edge.BottomEdge | Qt.Edge.LeftEdge,
         ):
             self.setCursor(Qt.CursorShape.SizeBDiagCursor)
+
         elif edges in (Qt.Edge.LeftEdge, Qt.Edge.RightEdge):
             self.setCursor(Qt.CursorShape.SizeHorCursor)
+
         elif edges in (Qt.Edge.TopEdge, Qt.Edge.BottomEdge):
             self.setCursor(Qt.CursorShape.SizeVerCursor)
+
         else:
             self.unsetCursor()
 
     def _poll_lock_states(self) -> None:
         states = get_lock_states()
+
         if states is not None:
             for name, key_code in self.lock_name_to_key_code.items():
                 btn = self.lock_buttons.get(key_code)
+
                 if btn is not None:
                     btn.set_active(states.get(name, False))
 
@@ -493,6 +578,7 @@ class VirtualKeyboard(QWidget):
             elif sys.platform == "linux":
                 _platform = "Linux"
                 linux_code = self._linux_key_map.get(key_code)
+
                 if linux_code is None:
                     key_code_hex = "None"
                 else:
@@ -520,9 +606,11 @@ class VirtualKeyboard(QWidget):
 
             if edges:
                 win_handle = self.windowHandle()
+
                 if win_handle is not None and win_handle.startSystemResize(edges):
                     event.accept()
                     return
+
                 self._resize_edges = edges
                 self._resize_start_geom = self.geometry()
                 self._resize_start_mouse = global_pos
@@ -538,36 +626,51 @@ class VirtualKeyboard(QWidget):
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         global_pos = QCursor.pos()
 
-        if self._resize_edges and self._resize_start_geom and self._resize_start_mouse:
+        if (
+            self._resize_edges
+            and self._resize_start_geom
+            and self._resize_start_mouse
+        ):
             delta = global_pos - self._resize_start_mouse
             geom = QRect(self._resize_start_geom)
 
             if self._resize_edges & Qt.Edge.LeftEdge:
                 new_left = geom.left() + delta.x()
+
                 if geom.right() - new_left >= self.minimumWidth():
                     geom.setLeft(new_left)
+
             elif self._resize_edges & Qt.Edge.RightEdge:
-                geom.setWidth(max(self.minimumWidth(), geom.width() + delta.x()))
+                geom.setWidth(
+                    max(self.minimumWidth(), geom.width() + delta.x())
+                )
 
             if self._resize_edges & Qt.Edge.TopEdge:
                 new_top = geom.top() + delta.y()
+
                 if geom.bottom() - new_top >= self.minimumHeight():
                     geom.setTop(new_top)
+
             elif self._resize_edges & Qt.Edge.BottomEdge:
-                geom.setHeight(max(self.minimumHeight(), geom.height() + delta.y()))
+                geom.setHeight(
+                    max(self.minimumHeight(), geom.height() + delta.y())
+                )
 
             self.setGeometry(geom)
             event.accept()
             return
 
-        if self._drag_offset is not None and (
-            event.buttons() & Qt.MouseButton.LeftButton
+        if (
+            self._drag_offset is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
         ):
             self.move(global_pos - self._drag_offset)
             event.accept()
             return
 
-        self._update_cursor_for_edges(self._hit_test_edges(event.position().toPoint()))
+        self._update_cursor_for_edges(
+            self._hit_test_edges(event.position().toPoint())
+        )
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -594,38 +697,35 @@ class VirtualKeyboard(QWidget):
         event.accept()
 
 
-def run(conn: Connection | None = None, enforce_single_instance: bool = True) -> None:
+def run(
+    conn: Connection | None = None,
+    enforce_single_instance: bool = True,
+) -> None:
     if enforce_single_instance:
         success, _ = check_single_instance(VKB_NAME)
+
         if not success:
             sys.exit(0)
 
-    # # Match Engine physical DPI awareness so cursor injection and VKB geometry align 1:1
-    # try:
-    #     get_platform().SystemConfig().set_dpi_awareness()
-    # except Exception:
-    #     pass
-
-    # QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
-    #     Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
-    # )
-
     app = QApplication(sys.argv)
+
     app_icon_path = ICONS_FOLDER / "app.png"
+
     if app_icon_path.exists():
         app.setWindowIcon(QIcon(str(app_icon_path)))
 
-    # Allow Python signals to be processed periodically by running a dummy timer
+    # Allow Python signals to be processed periodically.
     timer = QTimer()
     timer.start(500)
     timer.timeout.connect(lambda: None)
 
-    # Handle Ctrl+C cleanly
+    # Handle Ctrl+C cleanly.
     signal.signal(signal.SIGINT, lambda *_: QCoreApplication.quit())
 
     window = VirtualKeyboard(conn)
     window.show()
     window.raise_()
+
     sys.exit(app.exec())
 
 
