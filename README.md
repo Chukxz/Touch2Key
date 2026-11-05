@@ -57,6 +57,7 @@ pip install .
    touch2key         # CLI
    ```
 4. Pick your target game window, draw your layout in **Layout Studio** (GUI), and start the engine.
+5. Ensure you set the sprint key and toggle hotkeys (if applicable).
 
 > **Wireless play:** connect your PC to your phone's hotspot (5GHz WiFi recommended) and plug in the USB cable for the initial handshake. Once the app logs that the device connected wirelessly, you can unplug the cable.
 
