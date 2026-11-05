@@ -389,6 +389,9 @@ class SettingsPage(QWidget):
         input_layout = QVBoxLayout(input_group)
 
         self.left_handed_check = QCheckBox("Left-handed mode")
+        self.left_handed_check.setToolTip(
+            "Flips the joystick region to the left and the mouse region to the right (if applicable)."
+        )
         input_layout.addWidget(self.left_handed_check)
 
         self.floating_check = QCheckBox("Floating Joystick")
@@ -699,7 +702,7 @@ class SettingsPage(QWidget):
         self.export_bundle_btn.clicked.connect(self._on_export_bundle)
         self.reset_defaults_btn.clicked.connect(self._on_reset_defaults)
         self.delete_all_btn.clicked.connect(self._on_delete_all)
-        
+
         # Anchored overrides floating, so if anchored is checked, floating must be unchecked.
         self._on_anchored_joystick_changed(store.settings.get().anchored_joystick)
 
@@ -891,6 +894,9 @@ class SettingsPage(QWidget):
         try:
             settings = store.settings.get()
 
+            # Anchored overrides floating, so if anchored is checked, floating must be unchecked.
+            self.floating_check.setEnabled(not settings.anchored_joystick)
+
             self.toggle_hotkeys.set_sequence(parse_seq(settings.toggle_hotkeys, ","))
 
             self.sprint_key_label.setText(settings.sprint_key or "Not set")
@@ -946,11 +952,11 @@ class SettingsPage(QWidget):
 
     def _on_anchored_joystick_changed(self, checked: bool) -> None:
         """Grays out floating if anchored is checked, since anchored overrides floating."""
-        
+
         self.floating_check.setEnabled(not checked)
         if checked:
             self.floating_check.setChecked(False)
-            
+
         try:
             store.settings.update(anchored_joystick=checked)
             self._notify_reload()
