@@ -154,7 +154,12 @@ class WindowManager(AbstractWindowManager):
             win = self._get_window_obj(window_id)
             if not win:
                 return 0, 0
-            coords = win.translate_coords(self.root, 0, 0)
+            # Window.translate_coords(src, x, y) converts (x, y) from src's
+            # space into *this* window's space. To get the window origin in
+            # root (screen) space, the root must be the receiver and the
+            # window the source: root.translate_coords(win, 0, 0). The reverse
+            # call returns the negated position.
+            coords = self.root.translate_coords(win, 0, 0)
             return coords.x, coords.y
         except Exception:
             return 0, 0
