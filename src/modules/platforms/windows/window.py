@@ -104,10 +104,14 @@ class WindowManager(AbstractWindowManager):
         except Exception:
             return last_state, now
 
-    def get_screen_dimensions(self) -> tuple[int, int]:
-        w = ctypes.windll.user32.GetSystemMetrics(0)
-        h = ctypes.windll.user32.GetSystemMetrics(1)
-        return w, h
+    def get_screen_dimensions(self) -> tuple[int, int, int, int]:
+        user32 = ctypes.windll.user32
+        return (
+            user32.GetSystemMetrics(76),
+            user32.GetSystemMetrics(77),
+            user32.GetSystemMetrics(78),
+            user32.GetSystemMetrics(79),
+        )
 
     def _enum_visible_windows_callback(self, hwnd: int, results: dict) -> bool:
         if not win32gui.IsWindowVisible(hwnd):

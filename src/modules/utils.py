@@ -51,9 +51,9 @@ PACK_REL_STRUCT_SIZE = 32767  # (2 ** (16 - 1) - 1)
 KEY_PING = 2
 KEY_CONFIG = 3  # Configuration payload for typematic timing & exclusions
 
-# Structure: <B (Task ID = 3) ? (enabled) I (initial_delay_ns) f (repeat_rate_sec) H (excluded_count)
+# Structure: <B (Task ID = 3) ? (enabled) I (initial_delay_ns) f (repeat_rate_sec) ? (ignore_typematic) H (excluded_count)
 # Followed by a dynamically populated array of H (unsigned short scancodes)
-PACK_TYPEMATIC_STRUCT = struct.Struct("<B?IfH")
+PACK_TYPEMATIC_STRUCT = struct.Struct("<B?If?H")
 
 BUTTON_PING = 0x0000
 KEEPALIVE_INTERVAL = 5.0

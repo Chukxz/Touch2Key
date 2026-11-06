@@ -893,7 +893,7 @@ def build_architecture_digraph(
                         ),
                         (
                             "Bottom Bezel Callback",
-                            "Engine.toggle_virtual_keyboard(): spawns/stops VKB process -&gt; VKB_STRUCT (&lt;BH) pipe to Mapper",
+                            "Engine.toggle_virtual_keyboard(): spawns/stops VKB process -&gt (suspends typematic while virtual keyboard is active); VKB_STRUCT (&lt;BH) pipe to Mapper",
                         ),
                     ],
                     header_bg="#1d4ed8",

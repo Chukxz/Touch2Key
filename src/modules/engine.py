@@ -36,6 +36,7 @@ from modules.utils import (
     DEFAULT_ADB_RATE_CAP,
     DEFAULT_PPS,
     IPC_CMD_START,
+    M_LEFT,
     PPS_ALERT_MAX,
     PPS_ALERT_MIN,
     VISUALIZER_RUNTIME_FILE,
@@ -103,6 +104,7 @@ class Engine:
 
         self.fallback_mouse_pipeline: Optional[Pipeline] = None
         self._cursor_down_pos: Optional[Point] = None
+        self._cursor_contact: Optional[int] = None
         self._cursor_drag_started: bool = False
         self._cursor_down_time: float = 0.0
         self._cursor_slop_sq: int = 0
@@ -446,6 +448,13 @@ class Engine:
         self._contact_owners.clear()
         self.two_finger_tap_tracker.reset()
 
+        if self._cursor_contact is not None and self.output_sink:
+            try:
+                self.output_sink.mouse_up(M_LEFT)
+            except Exception:
+                logger.exception("Failed to release cursor button on state transition")
+        self._cursor_contact = None
+
         self._cursor_down_pos = None
         self._cursor_drag_started = False
         self._cursor_slop_sq = 0
@@ -677,6 +686,10 @@ class Engine:
         # DOWN establishes the cursor contact and initializes the fallback
         # pipeline's ownership/origin state.
         if event.phase is TouchPhase.DOWN:
+            if self._cursor_contact is not None:
+                return  # one cursor contact at a time
+
+            self._cursor_contact = event.contact_id
             self._cursor_down_pos = event.position
             self._cursor_drag_started = False
             self._cursor_down_time = event.timestamp
@@ -695,12 +708,18 @@ class Engine:
                 event.position.x,
                 event.position.y,
             )
+
             if self.fallback_mouse_pipeline is not None:
                 self.fallback_mouse_pipeline.process(
                     event,
                     self.output_sink,
                 )
 
+            self.output_sink.mouse_down(M_LEFT)
+
+            return
+
+        if event.contact_id != self._cursor_contact:
             return
 
         # Ignore MOVE/UP events that do not belong to an active cursor contact.
@@ -729,18 +748,21 @@ class Engine:
         # UP releases pipeline ownership and the held mouse button.
         elif event.phase is TouchPhase.UP:
             # If the finger barely moved, preserve click placement at DOWN.
-            if not self._cursor_drag_started:
-                self.output_sink.mouse_move_abs(
-                    self._cursor_down_pos.x,
-                    self._cursor_down_pos.y,
-                )
-                
+            # if not self._cursor_drag_started:
+            #     self.output_sink.mouse_move_abs(
+            #         self._cursor_down_pos.x,
+            #         self._cursor_down_pos.y,
+            #     )
+
             if self.fallback_mouse_pipeline is not None:
                 self.fallback_mouse_pipeline.process(
                     event,
                     self.output_sink,
                 )
 
+            self.output_sink.mouse_up(M_LEFT)
+
+            self._cursor_contact = None
             self._cursor_down_pos = None
             self._cursor_drag_started = False
             self._cursor_slop_sq = 0
@@ -856,6 +878,17 @@ class Engine:
             shutdown_thread.start()
             shutdown_thread.join(timeout=2.0)
             return
+        
+    
+    def set_ignore_typematic(self, ignore: bool) -> None:
+        """Temporarily suspend/resume typematic."""
+        self.bridge.update_typematic(
+            enabled=self.bridge._cached_typematic["enabled"],
+            delay_ms=self.bridge._cached_typematic["delay_ms"],
+            rate_hz=self.bridge._cached_typematic["rate_hz"],
+            exclude_scancodes=self.bridge._cached_typematic["exclude_scancodes"],
+            ignore_typematic=ignore,
+        )
 
     def start_virtual_keyboard(self) -> None:
         with self.vkb_lock:
@@ -867,14 +900,21 @@ class Engine:
                     self.vkb_reader.recv_bytes()
                 except Exception:
                     break
-
-            self.vkb_process = multiprocessing.Process(
-                target=virtual_keyboard_worker,
-                name="Virtual Keyboard",
-                args=(self.vkb_writer,),
-                daemon=True,
-            )
-            self.vkb_process.start()
+            
+            try:
+                self.set_ignore_typematic(True)  # Suspend typematic while virtual keyboard is active
+                self.vkb_process = multiprocessing.Process(
+                    target=virtual_keyboard_worker,
+                    name="Virtual Keyboard",
+                    args=(self.vkb_writer,),
+                    daemon=True,
+                )
+                self.vkb_process.start()
+                 
+            except Exception as exc:
+                logger.error("Failed to start virtual keyboard: %s", exc, exc_info=True)
+                self.vkb_process = None
+                self.set_ignore_typematic(False)  # Resume typematic if virtual keyboard fails to start
 
     def close_virtual_keyboard(self) -> None:
         with self.vkb_lock:
@@ -890,6 +930,8 @@ class Engine:
 
             if self.mapper:
                 self.mapper.release_vkb_keys()
+
+            self.set_ignore_typematic(False)  # Resume typematic after virtual keyboard is closed
 
     def toggle_virtual_keyboard(self) -> None:
         if self.vkb_process is not None and self.vkb_process.is_alive():

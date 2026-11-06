@@ -168,7 +168,7 @@ In **GUI mode** the arrow keys belong to Qt. Change the same values on the **Set
   * **Menu (cursor visible):** game buttons deactivate and single touches become absolute desktop clicks, for lobby, map, and inventory navigation.
   * **Touchscreen-only switching:** *both are toggleable in settings, and the bezel zones are seeded in every layout automatically.*
     * **Top Bezel:** toggles cursor visibility (Game Mode / Menu Mode) by executing the configured toggle hotkeys sequence.
-    * **Bottom Bezel:** opens the Virtual Keyboard (direct IPC to the engine for low-latency typing).
+    * **Bottom Bezel:** opens the Virtual Keyboard (direct IPC to the engine for low-latency typing - suspends typematic while active).
     * **Two-Finger Tap:** only works in Menu Mode (cursor visible). Tap with two fingers anywhere on the screen to gracefully shut down the engine process. Ignored while in-game. Uses time-driven polling to avoid stationary holds.
 
 * **Camera & Joysticks:**

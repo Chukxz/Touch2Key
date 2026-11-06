@@ -46,7 +46,7 @@ class AbstractWindowManager(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_screen_dimensions(self) -> tuple[int, int]:
+    def get_screen_dimensions(self) -> tuple[int, int, int, int]:
         raise NotImplementedError
 
     @abstractmethod
@@ -141,6 +141,7 @@ class AbstractBridge(ABC):
         delay_ms: float,
         rate_hz: float,
         exclude_scancodes: set[int],
+        ignore_typematic: bool | None = None,
     ) -> None:
         raise NotImplementedError
 

@@ -46,8 +46,12 @@ class UInputBridge(AbstractBridge):
     def __init__(self, window_manager, system_config):
         self.window_manager = window_manager
         self.system_config = system_config
-        self.screen_w, self.screen_h = window_manager.get_screen_dimensions()
+        self.screen_x, self.screen_y, self.screen_w, self.screen_h = (
+            self.window_manager.get_screen_dimensions()
+        )
         self.bridge_lock = threading.RLock()
+        # Serializes writers on the motion pipe (flush, wheel threads).
+        self._motion_lock = threading.Lock()
         self._is_shutting_down = False
 
         self._mouse_left_down = False
@@ -62,6 +66,7 @@ class UInputBridge(AbstractBridge):
             "delay_ms": 250.0,
             "rate_hz": 30.0,
             "exclude_scancodes": set(),
+            "ignore_typematic": False,
         }
 
         self._k_respawn_lock = threading.Lock()
@@ -98,12 +103,17 @@ class UInputBridge(AbstractBridge):
         delay_ms: float,
         rate_hz: float,
         exclude_scancodes: set[int],
+        ignore_typematic: bool | None = None
     ) -> None:
+        """Pushes typematic timing and exclusion rules to the keyboard worker over IPC."""
         with self.bridge_lock:
             self._cached_typematic["enabled"] = enabled
             self._cached_typematic["delay_ms"] = delay_ms
             self._cached_typematic["rate_hz"] = rate_hz
             self._cached_typematic["exclude_scancodes"] = set(exclude_scancodes)
+
+            if ignore_typematic is not None:
+                self._cached_typematic["ignore_typematic"] = ignore_typematic
 
             delay_ns = int(delay_ms * 1_000_000)
             interval_sec = 1.0 / max(1.0, rate_hz)
@@ -111,7 +121,7 @@ class UInputBridge(AbstractBridge):
 
             payload = bytearray(
                 PACK_TYPEMATIC_STRUCT.pack(
-                    KEY_CONFIG, enabled, delay_ns, interval_sec, len(codes)
+                    KEY_CONFIG, enabled, delay_ns, interval_sec, ignore_typematic, len(codes)
                 )
             )
             for code in codes:
@@ -200,33 +210,42 @@ class UInputBridge(AbstractBridge):
             else:
                 self._pressed_keys.discard(code)
 
+    def _send_motion(self, payload: bytes) -> None:
+        with self._motion_lock:
+            try:
+                self.m_pipe_write.send_bytes(payload)
+            except OSError:
+                pass
+
     def mouse_move_rel(self, dx: int, dy: int) -> None:
-        try:
-            self.m_pipe_write.send_bytes(
-                PACK_REL_STRUCT.pack(TASK_REL, int(dx), int(dy))
-            )
-        except OSError:
-            pass
+        self._send_motion(PACK_REL_STRUCT.pack(TASK_REL, int(dx), int(dy)))
 
     def mouse_move_abs(self, x: int, y: int) -> None:
-        abs_x = clamp(int(round((x / self.screen_w) * ABS_CONST)), 0, ABS_CONST)
-        abs_y = clamp(int(round((y / self.screen_h) * ABS_CONST)), 0, ABS_CONST)
-        try:
-            self.m_pipe_write.send_bytes(
-                PACK_ABS_STRUCT.pack(TASK_ABS, int(abs_x), int(abs_y))
-            )
-        except OSError:
-            pass
+        """Sent on the button pipe so it is ordered with click events."""
+        abs_x = clamp(
+            round((x - self.screen_x) * ABS_CONST / max(1, self.screen_w - 1)),
+            0,
+            ABS_CONST,
+        )
+        abs_y = clamp(
+            round((y - self.screen_y) * ABS_CONST / max(1, self.screen_h - 1)),
+            0,
+            ABS_CONST,
+        )
 
-    def wheel(self, dx: float, dy: float) -> None:
-        """Dispatches wheel motion deltas to the motion pipe where TASK_WHEEL is handled."""
         with self.bridge_lock:
             try:
-                self.m_pipe_write.send_bytes(
-                    PACK_WHEEL_STRUCT.pack(TASK_WHEEL, int(round(dx)), int(round(dy)))
+                self.mb_pipe_write.send_bytes(
+                    PACK_ABS_STRUCT.pack(TASK_ABS, abs_x, abs_y)
                 )
             except OSError:
                 pass
+
+    def wheel(self, dx: float, dy: float) -> None:
+        """Dispatches wheel motion deltas to the motion pipe where TASK_WHEEL is handled."""
+        self._send_motion(
+            PACK_WHEEL_STRUCT.pack(TASK_WHEEL, int(round(dx)), int(round(dy)))
+        )
 
     def left_click_down(self) -> None:
         with self.bridge_lock:
@@ -348,6 +367,13 @@ class UInputBridge(AbstractBridge):
     mouse5_down = button5_down
     mouse5_up = button5_up
 
+    def _clear_button_flags(self) -> None:
+        self._mouse_left_down = False
+        self._mouse_right_down = False
+        self._mouse_middle_down = False
+        self._mouse_button4_down = False
+        self._mouse_button5_down = False
+
     def _heartbeat_loop(self):
         while not self._stop_heartbeat.wait(KEEPALIVE_INTERVAL):
             self.health_check()
@@ -402,21 +428,35 @@ class UInputBridge(AbstractBridge):
                     return
 
                 old_proc = self.k_proc
-                try:
-                    self.k_pipe_write.close()
-                except Exception:
-                    pass
-                self.k_pipe_read, self.k_pipe_write = multiprocessing.Pipe(duplex=False)
-                self.k_proc = multiprocessing.Process(
+                k_read, k_write = multiprocessing.Pipe(duplex=False)
+                proc = multiprocessing.Process(
                     target=keyboard_worker,
-                    args=(self.k_pipe_read, self.log_queue),
+                    name="Keyboard Worker (Revived)",
+                    args=(k_read, self.log_queue),
                     daemon=True,
                 )
-                self.k_proc.start()
-                self.system_config.set_high_priority(
-                    self.k_proc.pid, "Revived Keyboard"
-                )
-                self.k_pipe_read.close()
+                try:
+                    proc.start()
+                except Exception:
+                    k_read.close()
+                    k_write.close()
+                    logger.exception("[BRIDGE] - Keyboard worker respawn failed")
+                    return
+
+                k_read.close()
+                old_write = self.k_pipe_write
+                self.k_pipe_write = k_write
+                self.k_proc = proc
+                try:
+                    old_write.close()
+                except Exception:
+                    pass
+
+                self.system_config.set_high_priority(proc.pid, "Revived Keyboard")
+
+                # The old worker's uinput device died with it, so the OS already
+                # released its keys. Stop heartbeating them.
+                self._pressed_keys.clear()
 
                 self.update_typematic(
                     self._cached_typematic["enabled"],
@@ -461,25 +501,41 @@ class UInputBridge(AbstractBridge):
                     return
 
                 old_proc = self.m_proc
-                try:
-                    self.m_pipe_write.close()
-                    self.mb_pipe_write.close()
-                except Exception:
-                    pass
-                self.m_pipe_read, self.m_pipe_write = multiprocessing.Pipe(duplex=False)
-                self.mb_pipe_read, self.mb_pipe_write = multiprocessing.Pipe(
-                    duplex=False
-                )
-                self.m_proc = multiprocessing.Process(
+                m_read, m_write = multiprocessing.Pipe(duplex=False)
+                mb_read, mb_write = multiprocessing.Pipe(duplex=False)
+                proc = multiprocessing.Process(
                     target=mouse_worker,
-                    name="Mouse Worker",
-                    args=(self.m_pipe_read, self.mb_pipe_read, self.log_queue),
+                    name="Mouse Worker (Revived)",
+                    args=(m_read, mb_read, self.log_queue),
                     daemon=True,
                 )
-                self.m_proc.start()
-                self.system_config.set_high_priority(self.m_proc.pid, "Revived Mouse")
-                self.m_pipe_read.close()
-                self.mb_pipe_read.close()
+                try:
+                    proc.start()
+                except Exception:
+                    for c in (m_read, m_write, mb_read, mb_write):
+                        c.close()
+                    logger.exception("[BRIDGE] - Mouse worker respawn failed")
+                    return
+
+                m_read.close()
+                mb_read.close()
+
+                old_writes = (self.m_pipe_write, self.mb_pipe_write)
+                with self._motion_lock:
+                    self.m_pipe_write = m_write
+                self.mb_pipe_write = mb_write
+                self.m_proc = proc
+                for c in old_writes:
+                    try:
+                        c.close()
+                    except Exception:
+                        pass
+
+                self.system_config.set_high_priority(proc.pid, "Revived Mouse")
+
+                # The old worker's uinput device died with it; stop heartbeating
+                # buttons that the OS already saw released.
+                self._clear_button_flags()
 
             if old_proc is not None:
                 old_proc.join(timeout=1.0)
@@ -521,11 +577,7 @@ class UInputBridge(AbstractBridge):
                     except OSError:
                         pass
 
-            self._mouse_left_down = False
-            self._mouse_right_down = False
-            self._mouse_middle_down = False
-            self._mouse_button4_down = False
-            self._mouse_button5_down = False
+            self._clear_button_flags()
 
     def release_all(self):
         with self.bridge_lock:
@@ -552,11 +604,7 @@ class UInputBridge(AbstractBridge):
                 except OSError:
                     pass
 
-            self._mouse_left_down = False
-            self._mouse_right_down = False
-            self._mouse_middle_down = False
-            self._mouse_button4_down = False
-            self._mouse_button5_down = False
+            self._clear_button_flags()
 
     def shutdown(self):
         with self.bridge_lock:

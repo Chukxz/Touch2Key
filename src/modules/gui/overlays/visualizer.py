@@ -320,8 +320,8 @@ class DiagnosticView(QGraphicsView):
             if isinstance(win_info, (tuple, list)) and len(win_info) == 4:
                 left, top, win_w, win_h = win_info
                 if win_w and win_h and win_w > 0 and win_h > 0:
-                    screen_w = float(snap.get("screen_width") or 0)
-                    screen_h = float(snap.get("screen_height") or 0)
+                    screen_w = max(0, float(snap.get("screen_width") or 0) - 1)
+                    screen_h = max(0, float(snap.get("screen_height") or 0) - 1)
 
                     norm_x = float(width) / screen_w if screen_w > 0.0 else 1.0
                     norm_y = float(height) / screen_h if screen_h > 0.0 else 1.0

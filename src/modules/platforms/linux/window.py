@@ -18,6 +18,7 @@ class WindowManager(AbstractWindowManager):
             # X11 uses "Atoms" (cached strings) to query window properties
             self.NET_ACTIVE_WINDOW = self.disp.intern_atom("_NET_ACTIVE_WINDOW")
             self.NET_WM_NAME = self.disp.intern_atom("_NET_WM_NAME")
+            self.NET_CLIENT_LIST = self.disp.intern_atom("_NET_CLIENT_LIST")
         except Exception as e:
             print(
                 f"[WINDOW MANAGER] - Failed to connect to X11 Display. Ensure you are on X11. {e}"
@@ -31,10 +32,30 @@ class WindowManager(AbstractWindowManager):
         return self.disp.create_resource_object("window", xid)
 
     def _get_all_top_level_windows(self) -> list:
-        """Returns a flat list of immediate top-level windows under the X11 root."""
+        """Returns a flat list of client windows using EWMH _NET_CLIENT_LIST, falling back to query_tree."""
         if not self.disp:
             return []
 
+        try:
+            # Attempt modern EWMH client list first to avoid WM decoration frames
+            prop = self.root.get_full_property(self.NET_CLIENT_LIST, X.AnyPropertyType)
+            if prop and prop.value:
+                windows = []
+                for xid in prop.value:
+                    try:
+                        win = self._get_window_obj(xid)
+                        # Verify window is still valid
+                        if win:
+                            win.get_attributes()
+                            windows.append(win)
+                    except error.BadWindow:
+                        continue
+                if windows:
+                    return windows
+        except Exception:
+            pass
+
+        # Fallback to query_tree if EWMH is unavailable
         try:
             return self.root.query_tree().children
         except error.BadWindow:
@@ -48,7 +69,7 @@ class WindowManager(AbstractWindowManager):
                 self.NET_ACTIVE_WINDOW, X.AnyPropertyType
             )
             if win_id and win_id.value:
-                return win_id.value
+                return int(win_id.value[0])
         except Exception:
             pass
         return 0
@@ -95,7 +116,6 @@ class WindowManager(AbstractWindowManager):
     def find_window_by_title(self, title: str) -> Any | None:
         if not self.disp:
             return None
-        # X11 requires searching the tree to find titles
         titles_dict = self._find_window_titles()
         for hwnd, win_title in titles_dict.items():
             if win_title == title:
@@ -123,7 +143,6 @@ class WindowManager(AbstractWindowManager):
             if not win:
                 return 0, 0
             geom = win.get_geometry()
-            # X11 get_geometry returns inner client dimensions, excluding WM borders
             return geom.width, geom.height
         except Exception:
             return 0, 0
@@ -135,7 +154,6 @@ class WindowManager(AbstractWindowManager):
             win = self._get_window_obj(window_id)
             if not win:
                 return 0, 0
-            # Translate local coordinates (0, 0) to global root/screen coordinates
             coords = win.translate_coords(self.root, 0, 0)
             return coords.x, coords.y
         except Exception:
@@ -147,10 +165,7 @@ class WindowManager(AbstractWindowManager):
             return self.xfixes_supported
 
         try:
-            # Negotiate version 5.0 (which is required for get_cursor_image)
             version = xfixes.query_version(self.disp, 5, 0)
-
-            # Verify if the server actually gave us what we need
             if version.major_version >= 5:
                 self.xfixes_supported = True
             else:
@@ -174,21 +189,45 @@ class WindowManager(AbstractWindowManager):
         if now - last_check_time < CURSOR_CHECK_DELAY_NS:
             return last_state, last_check_time
 
-        # Check if XFixes is supported before attempting to use it
         if not self._ensure_xfixes():
-            return (
-                last_state,
-                last_check_time,
-            )  # Fallback if xFixes extension is not available
+            return last_state, last_check_time
 
-        cursor = xfixes.get_cursor_image(self.disp, self.root)
-        return cursor.width > 0 and cursor.height > 0, now
+        try:
+            cursor = xfixes.get_cursor_image(self.disp, self.root)
+        except Exception:
+            return last_state, now
 
-    def get_screen_dimensions(self) -> tuple[int, int]:
+        if not cursor or cursor.width <= 0 or cursor.height <= 0:
+            return False, now
+
+        # Check alpha channel to handle engines rendering hidden cursors as transparent 1x1 textures
+        has_visible_pixels = False
+        if hasattr(cursor, "cursor_image") and cursor.cursor_image:
+            # XFixes cursor image pixels are usually 32-bit ARGB values.
+            # We check if any pixel has a non-zero alpha channel value (> 0).
+            # Depending on python-xlib version, cursor_image might be a list/bytes of ints.
+            pixels = cursor.cursor_image
+            # Fast alpha check: step through bytes/ints looking for non-zero alpha (typically highest byte in 32-bit ARGB)
+            try:
+                for pixel in pixels:
+                    # In ARGB32, alpha is the topmost byte ((pixel >> 24) & 0xFF)
+                    if ((pixel >> 24) & 0xFF) > 0:
+                        has_visible_pixels = True
+                        break
+            except TypeError:
+                # Fallback if pixel iteration format differs across bindings
+                has_visible_pixels = True
+        else:
+            has_visible_pixels = True
+
+        return has_visible_pixels, now
+
+    def get_screen_dimensions(self) -> tuple[int, int, int, int]:
         if not self.disp:
-            return 1920, 1080  # Safe fallback
+            return 0, 0, 1920, 1080
+
         screen = self.disp.screen()
-        return screen.width_in_pixels, screen.height_in_pixels
+        return 0, 0, screen.width_in_pixels, screen.height_in_pixels
 
     def _find_window_titles(self) -> dict:
         if not self.disp:
@@ -196,10 +235,8 @@ class WindowManager(AbstractWindowManager):
         results = {}
         for win in self._get_all_top_level_windows():
             try:
-                # Check legacy WM_NAME first
                 name = win.get_wm_name()
                 if not name:
-                    # Fallback to modern EWMH _NET_WM_NAME
                     net_name = win.get_full_property(self.NET_WM_NAME, 0)
                     if net_name:
                         name = net_name.value.decode("utf-8", errors="ignore")

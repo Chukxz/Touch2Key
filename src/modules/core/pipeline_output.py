@@ -28,8 +28,11 @@ class BridgeOutputSink(OutputSink):
 
     bridge: AbstractBridge
 
-    # Callback into the Mapper to retrieve: (dev_w, dev_h, win_info, screen_w, screen_h)
-    callback: Callable[[], tuple[float, float, dict | None, int, int]] | None = None
+    # Callback into the Mapper to retrieve: (dev_w, dev_h, win_info, screen_x, screen_y, screen_w, screen_h)
+    callback: (
+        Callable[[], tuple[float, float, dict[str, int] | None, int, int, int, int]]
+        | None
+    ) = None
 
     # Accumulators for fractional mouse movements to prevent slow-aim pixel loss
     _acc_x: float = field(init=False, default=0.0)
@@ -37,7 +40,11 @@ class BridgeOutputSink(OutputSink):
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def set_viewport_callback(
-        self, callback: Callable[[], tuple[float, float, dict | None, int, int]] | None
+        self,
+        callback: (
+            Callable[[], tuple[float, float, dict[str, int] | None, int, int, int, int]]
+            | None
+        ),
     ) -> None:
         """Dynamically binds or unbinds the viewport info provider from the Mapper."""
         self.callback = callback
@@ -80,7 +87,7 @@ class BridgeOutputSink(OutputSink):
             return
 
         # Query the mapper for the current device dimensions and window offsets
-        dev_w, dev_h, win, screen_w, screen_h = self.callback()
+        dev_w, dev_h, win, screen_x, screen_y, screen_w, screen_h = self.callback()
 
         dev_w = max(1.0, float(dev_w))
         dev_h = max(1.0, float(dev_h))
@@ -90,11 +97,11 @@ class BridgeOutputSink(OutputSink):
 
         # Apply offsets if the target window is valid and visible
         if win and win["width"] > 0 and win["height"] > 0:
-            target_x = win["left"] + norm_x * win["width"]
-            target_y = win["top"] + norm_y * win["height"]
+            target_x = win["left"] + norm_x * (win["width"] - 1)
+            target_y = win["top"] + norm_y * (win["height"] - 1)
         else:
-            target_x = norm_x * screen_w
-            target_y = norm_y * screen_h
+            target_x = screen_x + norm_x * (screen_w - 1)
+            target_y = screen_y + norm_y * (screen_h - 1)
 
         self.bridge.mouse_move_abs(int(round(target_x)), int(round(target_y)))
 

@@ -56,7 +56,9 @@ class Mapper:
         self.dispatcher = ref.dispatcher
 
         self.window_manager = get_platform().WindowManager()
-        self.screen_w, self.screen_h = self.window_manager.get_screen_dimensions()
+        self.screen_x, self.screen_y, self.screen_w, self.screen_h = (
+            self.window_manager.get_screen_dimensions()
+        )
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
         self.last_cursor_state = True
@@ -273,20 +275,22 @@ class Mapper:
                             with self.lock:
                                 self.game_window_info = discovered
                                 self.window_lost = False
-                    except (ValueError, RuntimeError, OSError):
+                    except Exception as e:
                         now = time.perf_counter()
                         if now - last_log_time > log_interval:
                             logger.debug(
-                                "Target window currently unavailable or minimized. Retrying..."
+                                "Target window currently unavailable or minimized. Retrying... (%s)",
+                                e,
+                                exc_info=True,
                             )
                             last_log_time = now
                         with self.lock:
                             self.game_window_info = None
 
-            except (ValueError, RuntimeError, OSError) as e:
+            except Exception as e:
                 now = time.perf_counter()
                 if now - last_log_time > log_interval:
-                    logger.debug("Window tracking exception: %s", e)
+                    logger.debug("Window tracking exception: %s", e, exc_info=True)
                     last_log_time = now
 
             sleep_duration = (
@@ -315,7 +319,7 @@ class Mapper:
 
     def get_viewport_info(
         self,
-    ) -> tuple[int, int, Optional[dict[str, int]], int, int]:
+    ) -> tuple[int, int, Optional[dict[str, int]], int, int, int, int]:
         vkb_proc = getattr(self.engine_ref, "vkb_process", None)
         vkb_active = False
         if vkb_proc is not None:
@@ -330,6 +334,8 @@ class Mapper:
                 self.device_width,
                 self.device_height,
                 win,
+                self.screen_x,
+                self.screen_y,
                 self.screen_w,
                 self.screen_h,
             )
@@ -352,6 +358,13 @@ class Mapper:
                 self.last_status = status
                 logger.info("Rate: %5.1f Hz | Status: %s", pps, status)
 
+    def _vkb_alive(self) -> bool:
+        proc = getattr(self.engine_ref, "vkb_process", None)
+        try:
+            return proc is not None and proc.is_alive()
+        except (ValueError, OSError):
+            return False
+
     def _virtual_keyboard_listener(self) -> None:
         reader = getattr(self.engine_ref, "vkb_reader", None)
         if reader is None:
@@ -360,8 +373,11 @@ class Mapper:
 
         while self.running and not self.stop_event.is_set():
             try:
-                # Non-blocking poll prevents thread hanging indefinitely on engine stop
                 if not reader.poll(VKB_SLEEP_TIME):
+                    # Pipe is drained. If the VKB is gone, no UP will ever arrive.
+                    if self.vkb_pressed_keys and not self._vkb_alive():
+                        logger.warning("VKB exited with keys held; releasing.")
+                        self.release_vkb_keys()
                     continue
 
                 payload = reader.recv_bytes()
@@ -370,8 +386,8 @@ class Mapper:
 
             except EOFError:
                 self.stop_event.wait(VKB_SLEEP_TIME)
-            except (ValueError, RuntimeError, OSError) as e:
-                logger.warning("Virtual Keyboard worker exception: %s", e)
+            except Exception:
+                logger.exception("Virtual Keyboard listener error")
                 self.stop_event.wait(VKB_SLEEP_TIME)
 
     def _virtual_keyboard_sink(self, state: int, scancode: int):

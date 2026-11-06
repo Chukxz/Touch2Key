@@ -5,6 +5,8 @@ import signal
 import sys
 from enum import Enum, auto
 from typing import TYPE_CHECKING
+import ctypes
+import ctypes.util
 
 from PySide6.QtCore import QCoreApplication, QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import (
@@ -13,6 +15,7 @@ from PySide6.QtGui import (
     QPainter,
     QColor,
     QPen,
+    QGuiApplication,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -45,7 +48,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("modules.gui.overlays.virtual_keyboard")
 
 VKB_NAME = "Touch2Key_VKB"
-RESIZE_MARGIN = 8
+RESIZE_MARGIN = 12
 MIN_VKB_WIDTH = 550
 MIN_VKB_HEIGHT = 160
 
@@ -183,6 +186,51 @@ NUMPAD_LAYOUT = [
     ("Scroll Lock", 0x46, 5, 1, 1, 2),
     ("Enter", 0xE01C, 5, 3, 1, 1),
 ]
+
+
+def _make_x11_button_probe():
+    path = ctypes.util.find_library("X11")
+    if not path:
+        return None
+    x11 = ctypes.CDLL(path)
+    x11.XOpenDisplay.restype = ctypes.c_void_p
+    x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    x11.XDefaultRootWindow.restype = ctypes.c_ulong
+    x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+    x11.XQueryPointer.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_ulong,
+        ctypes.POINTER(ctypes.c_ulong),
+        ctypes.POINTER(ctypes.c_ulong),
+        ctypes.POINTER(ctypes.c_int),
+        ctypes.POINTER(ctypes.c_int),
+        ctypes.POINTER(ctypes.c_int),
+        ctypes.POINTER(ctypes.c_int),
+        ctypes.POINTER(ctypes.c_uint),
+    ]
+    dpy = x11.XOpenDisplay(None)
+    if not dpy:
+        return None
+    root = x11.XDefaultRootWindow(dpy)
+
+    def left_down() -> bool:
+        r, c = ctypes.c_ulong(), ctypes.c_ulong()
+        rx, ry, wx, wy = (ctypes.c_int() for _ in range(4))
+        mask = ctypes.c_uint()
+        x11.XQueryPointer(
+            dpy,
+            root,
+            ctypes.byref(r),
+            ctypes.byref(c),
+            ctypes.byref(rx),
+            ctypes.byref(ry),
+            ctypes.byref(wx),
+            ctypes.byref(wy),
+            ctypes.byref(mask),
+        )
+        return bool(mask.value & 0x100)  # Button1Mask
+
+    return left_down
 
 
 class InteractionState(Enum):
@@ -598,9 +646,7 @@ class VirtualKeyButton(QPushButton):
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if self._press_active:
-            self._pointer_inside = self.rect().contains(
-                event.position().toPoint()
-            )
+            self._pointer_inside = self.rect().contains(event.position().toPoint())
             self.setDown(self._pointer_inside)
             event.accept()
             return
@@ -665,7 +711,8 @@ class VirtualKeyboard(QWidget):
         self.setStyleSheet("background-color: #121212;")
 
         self.setWindowFlags(
-            Qt.WindowType.WindowStaysOnTopHint
+            Qt.WindowType.WindowDoesNotAcceptFocus
+            | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
             | Qt.WindowType.FramelessWindowHint
         )
@@ -679,6 +726,24 @@ class VirtualKeyboard(QWidget):
         self.lock_state_timer = QTimer(self)
         self.lock_state_timer.timeout.connect(self._poll_lock_states)
         self.lock_state_timer.start(self.LOCK_POLL_INTERVAL_MS)
+
+        self._x11_left_down = (
+            _make_x11_button_probe()
+            if sys.platform == "linux"
+            and QGuiApplication.platformName() == "xcb"  # Check if running on X11
+            else None
+        )
+
+        self.watchdog_timer = QTimer(self)
+        self.watchdog_timer.timeout.connect(self._watchdog)
+        self.watchdog_timer.start(200)
+
+        self.setStyleSheet("""
+            QWidget#VirtualKeyboard {
+            border: 3px solid #666666;
+            border-radius: 8px;
+            }
+        """)
 
     def _setup_ui(self) -> None:
         outer_layout = QVBoxLayout(self)
@@ -857,6 +922,20 @@ class VirtualKeyboard(QWidget):
             if btn is not None:
                 btn.set_active(states.get(name, False))
 
+    def _watchdog(self) -> None:
+        if self._interactions.is_idle:
+            return
+        if sys.platform == "win32":
+            user32 = ctypes.windll.user32
+            vk = 0x02 if user32.GetSystemMetrics(23) else 0x01  # SM_SWAPBUTTON
+            down = bool(user32.GetAsyncKeyState(vk) & 0x8000)
+        elif self._x11_left_down is not None:
+            down = self._x11_left_down()
+        else:
+            return
+        if not down:
+            self._interactions.cancel()
+
     def _send_key(self, state: int, key_code: int, key_name: str) -> None:
         if key_code == CLOSE_VKB_ID:
             if state == 0:
@@ -921,15 +1000,11 @@ class VirtualKeyboard(QWidget):
             InteractionState.WINDOW_MOVING,
             InteractionState.WINDOW_RESIZING,
         ):
-            self._interactions.move_window_gesture(
-                event.globalPosition().toPoint()
-            )
+            self._interactions.move_window_gesture(event.globalPosition().toPoint())
             event.accept()
             return
 
-        self._update_cursor_for_edges(
-            self._hit_test_edges(event.position().toPoint())
-        )
+        self._update_cursor_for_edges(self._hit_test_edges(event.position().toPoint()))
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -947,15 +1022,27 @@ class VirtualKeyboard(QWidget):
 
         super().mouseReleaseEvent(event)
 
+    def _release_all_keys(self) -> None:
+        for code in list(self._pressed_keys):
+            if code in (TOP_BEZEL_ID, CLOSE_VKB_ID):
+                # UP on TOP_BEZEL triggers the hotkey action; never send it here.
+                self._pressed_keys.discard(code)
+                continue
+            self._set_key_state(code, False, f"0x{code:X}")
+
     def closeEvent(self, event) -> None:
+        self.watchdog_timer.stop()
         self.lock_state_timer.stop()
         self._interactions.cancel()
+        self._release_all_keys()
 
         if self.conn:
             try:
                 self.conn.close()
             except Exception:
-                logger.debug("Error closing virtual keyboard IPC connection", exc_info=True)
+                logger.debug(
+                    "Error closing virtual keyboard IPC connection", exc_info=True
+                )
 
         event.accept()
 
@@ -987,6 +1074,7 @@ def run(
 
     window = VirtualKeyboard(conn)
     window.show()
+    window.raise_()
 
     sys.exit(app.exec())
 

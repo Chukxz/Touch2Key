@@ -4,7 +4,11 @@ import queue
 import struct
 import threading
 from random import uniform as _uniform
-from time import perf_counter_ns as _perf_counter_ns, sleep as _sleep
+from time import (
+    monotonic as _monotonic,
+    perf_counter_ns as _perf_counter_ns,
+    sleep as _sleep,
+)
 from typing import TYPE_CHECKING
 
 from modules.utils import (
@@ -46,17 +50,12 @@ if TYPE_CHECKING:
     from multiprocessing.connection import Connection
     from multiprocessing.queues import Queue
 
-
-def _release_all_keys(
-    log_queue: Queue, ui_device, ecodes, keys_set: set[int], reason=""
-):
-    log_queue.put(f"{reason}.")
-    if keys_set:
-        log_queue.put(f"Releasing {len(keys_set)} keys.")
-        for linux_code in list(keys_set):
-            ui_device.write(ecodes.EV_KEY, int(linux_code), 0)
-        ui_device.syn()
-        keys_set.clear()
+# A held key/button is force-released only after this long with no traffic at
+# all. The bridge heartbeat (KEEPALIVE_INTERVAL) must be well below this.
+IDLE_RELEASE_S = 15.0
+# Poll granularity: bounds how long a worker takes to notice a dead sibling
+# thread or a closed pipe.
+POLL_S = 1.0
 
 
 def _release_all_buttons(
@@ -70,21 +69,22 @@ def _release_all_buttons(
     btn5_down: bool,
     reason="",
 ):
-    log_queue.put(f"{reason}.")
     buttons_count = sum([left_down, right_down, middle_down, btn4_down, btn5_down])
-    if buttons_count > 0:
-        log_queue.put(f"Releasing {buttons_count} buttons.")
-        if left_down:
-            ui_device.write(ecodes.EV_KEY, ecodes.BTN_LEFT, 0)
-        if right_down:
-            ui_device.write(ecodes.EV_KEY, ecodes.BTN_RIGHT, 0)
-        if middle_down:
-            ui_device.write(ecodes.EV_KEY, ecodes.BTN_MIDDLE, 0)
-        if btn4_down:
-            ui_device.write(ecodes.EV_KEY, ecodes.BTN_SIDE, 0)
-        if btn5_down:
-            ui_device.write(ecodes.EV_KEY, ecodes.BTN_EXTRA, 0)
-        ui_device.syn()
+    if buttons_count == 0:
+        return
+
+    log_queue.put(f"{reason}. Releasing {buttons_count} buttons.")
+    if left_down:
+        ui_device.write(ecodes.EV_KEY, ecodes.BTN_LEFT, 0)
+    if right_down:
+        ui_device.write(ecodes.EV_KEY, ecodes.BTN_RIGHT, 0)
+    if middle_down:
+        ui_device.write(ecodes.EV_KEY, ecodes.BTN_MIDDLE, 0)
+    if btn4_down:
+        ui_device.write(ecodes.EV_KEY, ecodes.BTN_SIDE, 0)
+    if btn5_down:
+        ui_device.write(ecodes.EV_KEY, ecodes.BTN_EXTRA, 0)
+    ui_device.syn()
 
 
 def keyboard_worker(k_pipe_read: Connection, log_queue: Queue):
@@ -92,79 +92,91 @@ def keyboard_worker(k_pipe_read: Connection, log_queue: Queue):
     from evdev import UInput, ecodes
 
     ui_device = UInput(KEYBOARD_CAP, name="Touch2Key-Keyboard")
-    pressed_keys: set[int] = set()
+    pressed_keys: set[int] = set()  # linux codes currently held by the engine
     state = {"running": True}
 
     typematic_cfg = {
         "enabled": True,
         "delay_ns": 250_000_000,
         "repeat_rate": 0.0333,
+        "ignore_typematic": False,
         "non_spamming": set(),
     }
 
-    key_queue = queue.Queue()
+    # Items: (linux_code, is_down)
+    key_queue: queue.Queue = queue.Queue()
 
     def key_injection_loop():
-        active_keys = set()
-        repeat_key = None
-        repeat_start_time = 0.0
+        active: set[int] = set()
+        repeat_key: int | None = None
+        next_repeat_ns = 0
 
         while state["running"]:
-            while not key_queue.empty():
-                try:
-                    linux_code, k_state = key_queue.get_nowait()
+            try:
+                if repeat_key is None:
+                    wait = 0.1
+                else:
+                    wait = max(0.0, (next_repeat_ns - _perf_counter_ns()) / 1e9)
 
-                    if k_state == 1:  # KEY DOWN
-                        if linux_code not in active_keys:
-                            active_keys.add(linux_code)
+                try:
+                    linux_code, is_down = key_queue.get(timeout=wait)
+                except queue.Empty:
+                    linux_code = None
+
+                if linux_code is not None:
+                    if is_down:
+                        if linux_code not in active:
+                            active.add(linux_code)
 
                             if (
-                                not typematic_cfg["enabled"]
-                                or linux_code in typematic_cfg["non_spamming"]
+                                not typematic_cfg["ignore_typematic"]
+                                and typematic_cfg["enabled"]
+                                and linux_code not in typematic_cfg["non_spamming"]
                             ):
-                                repeat_key = None
-                            else:
                                 repeat_key = linux_code
+                                next_repeat_ns = (
+                                    _perf_counter_ns() + typematic_cfg["delay_ns"]
+                                )
+                            else:
+                                repeat_key = None
 
-                            repeat_start_time = _perf_counter_ns()
                             ui_device.write(ecodes.EV_KEY, int(linux_code), 1)
                             ui_device.syn()
                             _sleep(_uniform(MIN_KEY_DWELL, MAX_KEY_DWELL))
 
-                    elif k_state == 0:  # KEY UP
-                        if linux_code in active_keys:
-                            active_keys.discard(linux_code)
-                            if repeat_key == linux_code:
-                                repeat_key = None
+                    elif linux_code in active:
+                        active.discard(linux_code)
+                        if repeat_key == linux_code:
+                            repeat_key = None
 
-                            ui_device.write(ecodes.EV_KEY, int(linux_code), 0)
-                            ui_device.syn()
-                            _sleep(CONSTANT_DWELL)
+                        ui_device.write(ecodes.EV_KEY, int(linux_code), 0)
+                        ui_device.syn()
+                        _sleep(CONSTANT_DWELL)
+                    continue
 
-                    key_queue.task_done()
-                except Exception as e:
-                    log_queue.put(f"Key Injection Error (Queue): {e}.")
-
-            if typematic_cfg["enabled"] and repeat_key is not None:
-                if repeat_key not in typematic_cfg["non_spamming"]:
-                    current_time = _perf_counter_ns()
-                    if (current_time - repeat_start_time) >= typematic_cfg["delay_ns"]:
-                        try:
-                            ui_device.write(ecodes.EV_KEY, int(repeat_key), 1)
-                            ui_device.syn()
-                        except Exception:
-                            pass
-
-            _sleep(typematic_cfg["repeat_rate"])
+                if repeat_key is not None and _perf_counter_ns() >= next_repeat_ns:
+                    # Value 2 is the evdev autorepeat value. Value 1 on a key
+                    # that is already down is dropped by the kernel input core.
+                    ui_device.write(ecodes.EV_KEY, int(repeat_key), 2)
+                    ui_device.syn()
+                    next_repeat_ns = _perf_counter_ns() + int(
+                        typematic_cfg["repeat_rate"] * 1e9
+                    )
+            except Exception as e:
+                log_queue.put(f"Key Injection Error: {e}.")
+                _sleep(0.01)
 
     injector_thread = threading.Thread(
         target=key_injection_loop, name="Keyboard-Injection-Loop", daemon=True
     )
     injector_thread.start()
 
+    last_rx = _monotonic()
+
     while state["running"]:
         try:
-            if k_pipe_read.poll(15.0):
+            if k_pipe_read.poll(POLL_S):
+                last_rx = _monotonic()
                 payload = k_pipe_read.recv_bytes()
 
                 if len(payload) == 3:
@@ -177,14 +189,14 @@ def keyboard_worker(k_pipe_read: Connection, log_queue: Queue):
 
                     if k_state == 1:
                         pressed_keys.add(linux_code)
+                        key_queue.put((linux_code, True))
                     elif k_state == 0:
                         pressed_keys.discard(linux_code)
-
-                    key_queue.put((linux_code, k_state))
+                        key_queue.put((linux_code, False))
                     continue
 
                 if payload and payload[0] == KEY_CONFIG:
-                    _, enabled, delay_ns, rate_sec, count = (
+                    _, enabled, delay_ns, rate_sec, ignore_typematic, count = (
                         PACK_TYPEMATIC_STRUCT.unpack_from(payload, 0)
                     )
                     offset = PACK_TYPEMATIC_STRUCT.size
@@ -199,14 +211,17 @@ def keyboard_worker(k_pipe_read: Connection, log_queue: Queue):
                     typematic_cfg["enabled"] = enabled
                     typematic_cfg["delay_ns"] = delay_ns
                     typematic_cfg["repeat_rate"] = rate_sec
+                    typematic_cfg["ignore_typematic"] = ignore_typematic
                     typematic_cfg["non_spamming"] = excludes
                     continue
 
-            else:
-                _release_all_keys(
-                    log_queue, ui_device, ecodes, pressed_keys, "Keyboard Timeout"
-                )
+            elif pressed_keys and (_monotonic() - last_rx) >= IDLE_RELEASE_S:
+                # Release through the injector so its repeat state stays in sync.
+                log_queue.put(f"Keyboard Timeout: releasing {len(pressed_keys)} keys.")
+                for linux_code in list(pressed_keys):
+                    key_queue.put((linux_code, False))
                 pressed_keys.clear()
+
         except EOFError:
             state["running"] = False
         except Exception as e:
@@ -215,23 +230,52 @@ def keyboard_worker(k_pipe_read: Connection, log_queue: Queue):
 
     state["running"] = False
     injector_thread.join(timeout=2.0)
+
+    # Never leave anything down on exit.
+    try:
+        for linux_code in list(pressed_keys):
+            ui_device.write(ecodes.EV_KEY, int(linux_code), 0)
+        ui_device.syn()
+    except Exception:
+        pass
     ui_device.close()
 
 
 def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Queue):
-    """Dedicated process for Linux evdev mouse events."""
+    """Dedicated process for Linux evdev mouse events.
+
+    Ordering contract: absolute moves and button events both arrive on the
+    button pipe and are executed by one thread, so "move, then click" is
+    ordered by construction. Relative motion and wheel use the motion pipe.
+    """
     from evdev import UInput, ecodes
 
     ui_device = UInput(MOUSE_CAP, name="Touch2Key-Mouse")
     send_lock = threading.Lock()
     state = {"running": True}
 
+    def _send_abs(x: int, y: int) -> None:
+        with send_lock:
+            ui_device.write(ecodes.EV_ABS, ecodes.ABS_X, int(x))
+            ui_device.write(ecodes.EV_ABS, ecodes.ABS_Y, int(y))
+            ui_device.syn()
+
     def button_loop():
         left_down = right_down = middle_down = btn4_down = btn5_down = False
+        last_rx = _monotonic()
+
         while state["running"]:
             try:
-                if mb_pipe_read.poll(15.0):
+                if mb_pipe_read.poll(POLL_S):
+                    last_rx = _monotonic()
                     payload = mb_pipe_read.recv_bytes()
+
+                    if payload[0] == TASK_ABS:
+                        _, x, y = PACK_ABS_STRUCT.unpack_from(payload, 0)
+                        _send_abs(x, y)
+                        _sleep(CONSTANT_DWELL)
+                        continue
+
                     _, data = PACK_BUTTON_STRUCT.unpack_from(payload, 0)
 
                     if data == BUTTON_PING:
@@ -269,7 +313,9 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Q
                     else:
                         _sleep(CONSTANT_DWELL)
 
-                else:
+                elif (
+                    left_down or right_down or middle_down or btn4_down or btn5_down
+                ) and (_monotonic() - last_rx) >= IDLE_RELEASE_S:
                     with send_lock:
                         _release_all_buttons(
                             log_queue,
@@ -287,8 +333,9 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Q
             except EOFError:
                 state["running"] = False
             except Exception as e:
-                log_queue.put(f"Mouse Button Worker crashed: {e}.")
-                state["running"] = False
+                # Keep running: one bad event must not silently kill all clicks.
+                log_queue.put(f"Mouse Button Worker error: {e}.")
+                _sleep(0.05)
 
     button_thread = threading.Thread(
         target=button_loop, name="Mouse-Button-Loop", daemon=True
@@ -303,12 +350,20 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Q
 
     while state["running"]:
         try:
+            # A dead button thread must take the process down quickly so the
+            # bridge health check can respawn it, rather than leaving a
+            # half-alive worker that drops every click.
+            if not button_thread.is_alive():
+                log_queue.put("Mouse Button thread exited; stopping mouse worker.")
+                state["running"] = False
+                break
+
             if pending_task:
                 payload = pending_task
                 task_id = pending_task[0]
                 pending_task = None
             else:
-                if m_pipe_read.poll(15.0):
+                if m_pipe_read.poll(POLL_S):
                     payload = m_pipe_read.recv_bytes()
                     task_id = payload[0]
                 else:
@@ -346,11 +401,9 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Q
                 _sleep(_uniform(MIN_MOUSE_DWELL, MAX_MOUSE_DWELL))
 
             elif task_id == TASK_ABS:
+                # Legacy path: the bridge now sends ABS on the button pipe.
                 _, x, y = PACK_ABS_STRUCT.unpack_from(payload, 0)
-                with send_lock:
-                    ui_device.write(ecodes.EV_ABS, ecodes.ABS_X, int(x))
-                    ui_device.write(ecodes.EV_ABS, ecodes.ABS_Y, int(y))
-                    ui_device.syn()
+                _send_abs(x, y)
                 _sleep(CONSTANT_DWELL)
 
             elif task_id == TASK_WHEEL:
@@ -392,5 +445,5 @@ def mouse_worker(m_pipe_read: Connection, mb_pipe_read: Connection, log_queue: Q
             state["running"] = False
 
     state["running"] = False
-    button_thread.join(timeout=16.0)
+    button_thread.join(timeout=2.0)
     ui_device.close()
