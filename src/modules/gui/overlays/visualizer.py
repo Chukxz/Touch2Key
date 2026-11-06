@@ -320,14 +320,20 @@ class DiagnosticView(QGraphicsView):
             if isinstance(win_info, (tuple, list)) and len(win_info) == 4:
                 left, top, win_w, win_h = win_info
                 if win_w and win_h and win_w > 0 and win_h > 0:
+                    # The screen rectangle may not start at (0, 0): on a
+                    # multi-monitor Windows desktop the virtual screen can
+                    # begin at a negative coordinate. Window positions are
+                    # absolute, so subtract the screen origin first.
+                    screen_x = float(snap.get("screen_x") or 0)
+                    screen_y = float(snap.get("screen_y") or 0)
                     screen_w = max(0, float(snap.get("screen_width") or 0) - 1)
                     screen_h = max(0, float(snap.get("screen_height") or 0) - 1)
 
                     norm_x = float(width) / screen_w if screen_w > 0.0 else 1.0
                     norm_y = float(height) / screen_h if screen_h > 0.0 else 1.0
 
-                    offset_x = float(left) * norm_x
-                    offset_y = float(top) * norm_y
+                    offset_x = (float(left) - screen_x) * norm_x
+                    offset_y = (float(top) - screen_y) * norm_y
                     target_w = float(win_w) * norm_x
                     target_h = float(win_h) * norm_y
 
