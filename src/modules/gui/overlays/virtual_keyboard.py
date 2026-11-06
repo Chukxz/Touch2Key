@@ -1,21 +1,21 @@
 from __future__ import annotations
 
+import ctypes
+import ctypes.util
 import logging
 import signal
 import sys
 from enum import Enum, auto
 from typing import TYPE_CHECKING
-import ctypes
-import ctypes.util
 
-from PySide6.QtCore import QCoreApplication, QPoint, QRect, Qt, QTimer
+from PySide6.QtCore import QCoreApplication, QPoint, QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import (
+    QColor,
+    QGuiApplication,
     QIcon,
     QMouseEvent,
     QPainter,
-    QColor,
     QPen,
-    QGuiApplication,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -48,9 +48,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger("modules.gui.overlays.virtual_keyboard")
 
 VKB_NAME = "Touch2Key_VKB"
+
+# The resize hit zone and the layout margin. It is deliberately wider than the
+# painted border so an edge or corner is easy to grab with a finger.
 RESIZE_MARGIN = 12
 MIN_VKB_WIDTH = 550
 MIN_VKB_HEIGHT = 160
+
+# Painted frame. The border sits inside the outer BORDER_WIDTH pixels of the
+# window; the rest of the RESIZE_MARGIN band is plain background.
+BORDER_WIDTH = 5
+BORDER_RADIUS = 8
+BORDER_COLOR = "#666666"
+BACKGROUND_COLOR = "#121212"
+GRIP_COLOR = "#888888"
 
 # Window move/resize begins only after the pointer has remained nearly still
 # for this long. Button presses do not use this delay.
@@ -189,29 +200,38 @@ NUMPAD_LAYOUT = [
 
 
 def _make_x11_button_probe():
-    path = ctypes.util.find_library("X11")
-    if not path:
+    """Returns a callable reporting whether X11 sees the left button down.
+
+    Returns None when libX11 is unavailable or no display can be opened (for
+    example on Wayland without XWayland).
+    """
+    try:
+        path = ctypes.util.find_library("X11")
+        if not path:
+            return None
+        x11 = ctypes.CDLL(path)
+        x11.XOpenDisplay.restype = ctypes.c_void_p
+        x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        x11.XDefaultRootWindow.restype = ctypes.c_ulong
+        x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        x11.XQueryPointer.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_ulong,
+            ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_uint),
+        ]
+        dpy = x11.XOpenDisplay(None)
+        if not dpy:
+            return None
+        root = x11.XDefaultRootWindow(dpy)
+    except Exception:
+        logger.debug("X11 pointer probe unavailable", exc_info=True)
         return None
-    x11 = ctypes.CDLL(path)
-    x11.XOpenDisplay.restype = ctypes.c_void_p
-    x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
-    x11.XDefaultRootWindow.restype = ctypes.c_ulong
-    x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
-    x11.XQueryPointer.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_ulong,
-        ctypes.POINTER(ctypes.c_ulong),
-        ctypes.POINTER(ctypes.c_ulong),
-        ctypes.POINTER(ctypes.c_int),
-        ctypes.POINTER(ctypes.c_int),
-        ctypes.POINTER(ctypes.c_int),
-        ctypes.POINTER(ctypes.c_int),
-        ctypes.POINTER(ctypes.c_uint),
-    ]
-    dpy = x11.XOpenDisplay(None)
-    if not dpy:
-        return None
-    root = x11.XDefaultRootWindow(dpy)
 
     def left_down() -> bool:
         r, c = ctypes.c_ulong(), ctypes.c_ulong()
@@ -669,12 +689,16 @@ class VirtualKeyButton(QPushButton):
 
 class VirtualKeyboard(QWidget):
     LOCK_POLL_INTERVAL_MS = 250
+    WATCHDOG_INTERVAL_MS = 200
 
     def __init__(self, conn: Connection | None):
         super().__init__()
 
         self.conn = conn
         self._pressed_keys: set[int] = set()
+        # Set once the IPC pipe to the engine fails, so shutdown does not try
+        # to send an UP for every held key over a dead connection.
+        self._ipc_dead = False
 
         self.modifier_key_codes = [
             code
@@ -708,7 +732,6 @@ class VirtualKeyboard(QWidget):
         self.setMinimumSize(MIN_VKB_WIDTH, MIN_VKB_HEIGHT)
         self.resize(1100, 300)
         self.setMouseTracking(True)
-        self.setStyleSheet("background-color: #121212;")
 
         self.setWindowFlags(
             Qt.WindowType.WindowDoesNotAcceptFocus
@@ -719,6 +742,11 @@ class VirtualKeyboard(QWidget):
 
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, True)
+        # The frame, background and rounded corners are all painted in
+        # paintEvent(). A translucent window is what lets the corners outside
+        # the radius show the desktop. On X11 this needs a compositor;
+        # without one the corners render as solid black instead.
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
 
         self._setup_ui()
 
@@ -727,23 +755,17 @@ class VirtualKeyboard(QWidget):
         self.lock_state_timer.timeout.connect(self._poll_lock_states)
         self.lock_state_timer.start(self.LOCK_POLL_INTERVAL_MS)
 
+        # Pointer-state probe for the stuck-press watchdog. Only X11 offers a
+        # global query; Wayland has none, so the watchdog is inactive there.
         self._x11_left_down = (
             _make_x11_button_probe()
-            if sys.platform == "linux"
-            and QGuiApplication.platformName() == "xcb"  # Check if running on X11
+            if sys.platform == "linux" and QGuiApplication.platformName() == "xcb"
             else None
         )
 
         self.watchdog_timer = QTimer(self)
         self.watchdog_timer.timeout.connect(self._watchdog)
-        self.watchdog_timer.start(200)
-
-        self.setStyleSheet("""
-            QWidget#VirtualKeyboard {
-            border: 3px solid #666666;
-            border-radius: 8px;
-            }
-        """)
+        self.watchdog_timer.start(self.WATCHDOG_INTERVAL_MS)
 
     def _setup_ui(self) -> None:
         outer_layout = QVBoxLayout(self)
@@ -852,24 +874,29 @@ class VirtualKeyboard(QWidget):
         self._pressed_keys.discard(key_code)
 
     def paintEvent(self, event) -> None:
-        super().paintEvent(event)
-
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        pen = QPen(QColor("#333333"), 1)
-        painter.setPen(pen)
-        painter.drawRect(0, 0, self.width() - 1, self.height() - 1)
+        # Background plus border as one rounded rectangle. The stroke is
+        # centred on its path, so inset by half the width to keep the whole
+        # border inside the window.
+        half = BORDER_WIDTH / 2.0
+        frame = QRectF(self.rect()).adjusted(half, half, -half, -half)
+        painter.setPen(QPen(QColor(BORDER_COLOR), BORDER_WIDTH))
+        painter.setBrush(QColor(BACKGROUND_COLOR))
+        painter.drawRoundedRect(frame, BORDER_RADIUS, BORDER_RADIUS)
 
-        grip_pen = QPen(QColor("#666666"), 2)
-        painter.setPen(grip_pen)
+        # Resize grip in the bottom-right corner, just inside the border.
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(GRIP_COLOR), 2))
 
         w, h = self.width(), self.height()
 
-        for offset in (4, 8, 12):
+        for offset in (10, 14, 18):
             painter.drawLine(
                 w - offset,
-                h - 2,
-                w - 2,
+                h - 7,
+                w - 7,
                 h - offset,
             )
 
@@ -923,8 +950,19 @@ class VirtualKeyboard(QWidget):
                 btn.set_active(states.get(name, False))
 
     def _watchdog(self) -> None:
+        """Cancel an interaction whose release never reached Qt.
+
+        Qt's own button state cannot be used for this: if the UP was lost, Qt
+        still believes the button is down. The OS is asked directly instead.
+        Windows uses GetAsyncKeyState; X11 uses XQueryPointer; Wayland has no
+        global pointer query, so nothing happens there.
+
+        Note this follows the OS mouse button. A press that originates from a
+        real touchscreen may not set it, and would be cancelled after one tick.
+        """
         if self._interactions.is_idle:
             return
+
         if sys.platform == "win32":
             user32 = ctypes.windll.user32
             vk = 0x02 if user32.GetSystemMetrics(23) else 0x01  # SM_SWAPBUTTON
@@ -933,6 +971,7 @@ class VirtualKeyboard(QWidget):
             down = self._x11_left_down()
         else:
             return
+
         if not down:
             self._interactions.cancel()
 
@@ -940,6 +979,9 @@ class VirtualKeyboard(QWidget):
         if key_code == CLOSE_VKB_ID:
             if state == 0:
                 self.close()
+            return
+
+        if self._ipc_dead:
             return
 
         if self.conn is None:
@@ -976,6 +1018,7 @@ class VirtualKeyboard(QWidget):
             self.conn.send_bytes(VKB_STRUCT.pack(state, int(key_code)))
         except (BrokenPipeError, EOFError, OSError):
             logger.exception("Virtual keyboard IPC connection failed")
+            self._ipc_dead = True
             self.close()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
