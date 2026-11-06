@@ -51,7 +51,6 @@ class InterceptionBridge(AbstractBridge):
             self.window_manager.get_screen_dimensions()
         )
         self.bridge_lock = threading.RLock()
-        # Serializes writers on the motion pipe (flush, wheel threads).
         self._motion_lock = threading.Lock()
         self._is_shutting_down = False
 
@@ -106,13 +105,12 @@ class InterceptionBridge(AbstractBridge):
         exclude_scancodes: set[int],
         ignore_typematic: bool | None = None,
     ) -> None:
-        """Pushes typematic timing and exclusion rules to the keyboard worker over IPC."""
         with self.bridge_lock:
             self._cached_typematic["enabled"] = enabled
             self._cached_typematic["delay_ms"] = delay_ms
             self._cached_typematic["rate_hz"] = rate_hz
             self._cached_typematic["exclude_scancodes"] = set(exclude_scancodes)
-            
+
             if ignore_typematic is None:
                 ignore_typematic = self._cached_typematic["ignore_typematic"]
             self._cached_typematic["ignore_typematic"] = ignore_typematic
@@ -140,7 +138,6 @@ class InterceptionBridge(AbstractBridge):
                 pass
 
     def _consume_worker_logs(self) -> None:
-        """Reads worker log messages from the IPC queue and forwards to logger."""
         while not self._stop_log_event.is_set():
             try:
                 msg = self.log_queue.get(timeout=0.1)
@@ -168,7 +165,6 @@ class InterceptionBridge(AbstractBridge):
             )
             self.k_proc.start()
             self.system_config.set_high_priority(self.k_proc.pid, "Keyboard")
-            # Close the read end of the pipe in the main process (Worker holds it)
             self.k_pipe_read.close()
 
             self.m_proc = multiprocessing.Process(
@@ -206,16 +202,9 @@ class InterceptionBridge(AbstractBridge):
     ) -> None:
         with self.bridge_lock:
             if self._is_shutting_down:
-                logger.debug("Shutdown started, skipping devices reloading.")
                 return
 
-            logger.info(
-                f"[BRIDGE] - Hot-Reloading Devices -> K:{new_k_handle}, M:{new_m_handle}"
-            )
-
             self.release_all()
-            # Give the workers time to consume the queued UPs before they are
-            # terminated; Interception does not release injected state itself.
             time.sleep(0.1)
 
             self.k_device_handle = new_k_handle
@@ -223,7 +212,7 @@ class InterceptionBridge(AbstractBridge):
 
             if self.k_proc is not None:
                 try:
-                    self.k_pipe_write.close()  # Safely drop the engine's write pipe
+                    self.k_pipe_write.close()
                 except Exception:
                     pass
                 if self.k_proc.is_alive():
@@ -284,10 +273,6 @@ class InterceptionBridge(AbstractBridge):
             self.mb_pipe_read.close()
             self.m_pipe_read.close()
 
-            logger.info(
-                f"[BRIDGE] - Workers Reloaded. K-PID: {self.k_proc.pid} | M-PID: {self.m_proc.pid}"
-            )
-
     def key_down(self, code: int) -> None:
         with self.bridge_lock:
             self._pressed_keys.add(code)
@@ -316,7 +301,6 @@ class InterceptionBridge(AbstractBridge):
         self._send_motion(PACK_REL_STRUCT.pack(TASK_REL, int(dx), int(dy)))
 
     def mouse_move_abs(self, x: int, y: int) -> None:
-        """Sent on the button pipe so it is ordered with click events."""
         abs_x = clamp(
             round((x - self.screen_x) * ABS_CONST / max(1, self.screen_w - 1)),
             0,
@@ -337,7 +321,6 @@ class InterceptionBridge(AbstractBridge):
                 pass
 
     def wheel(self, dx: float, dy: float) -> None:
-        """Dispatches scroll ticks to the mouse motion pipeline."""
         self._send_motion(
             PACK_WHEEL_STRUCT.pack(TASK_WHEEL, int(round(dx)), int(round(dy)))
         )
@@ -409,7 +392,6 @@ class InterceptionBridge(AbstractBridge):
                 self._mouse_middle_down = False
 
     def button4_down(self) -> None:
-        """Dispatches Mouse 4 (XBUTTON1 / Back) press."""
         with self.bridge_lock:
             try:
                 self.mb_pipe_write.send_bytes(
@@ -421,7 +403,6 @@ class InterceptionBridge(AbstractBridge):
                 self._mouse_button4_down = True
 
     def button4_up(self) -> None:
-        """Dispatches Mouse 4 (XBUTTON1 / Back) release."""
         with self.bridge_lock:
             try:
                 self.mb_pipe_write.send_bytes(
@@ -433,7 +414,6 @@ class InterceptionBridge(AbstractBridge):
                 self._mouse_button4_down = False
 
     def button5_down(self) -> None:
-        """Dispatches Mouse 5 (XBUTTON2 / Forward) press."""
         with self.bridge_lock:
             try:
                 self.mb_pipe_write.send_bytes(
@@ -445,7 +425,6 @@ class InterceptionBridge(AbstractBridge):
                 self._mouse_button5_down = True
 
     def button5_up(self) -> None:
-        """Dispatches Mouse 5 (XBUTTON2 / Forward) release."""
         with self.bridge_lock:
             try:
                 self.mb_pipe_write.send_bytes(
@@ -456,7 +435,6 @@ class InterceptionBridge(AbstractBridge):
             else:
                 self._mouse_button5_down = False
 
-    # Aliases for abstract base and output sink compatibility
     mouse4_down = button4_down
     mouse4_up = button4_up
     mouse5_down = button5_down
@@ -470,7 +448,6 @@ class InterceptionBridge(AbstractBridge):
         self._mouse_button5_down = False
 
     def _release_buttons(self) -> None:
-        """Sends UP for every button the bridge believes is down, then clears flags."""
         with self.bridge_lock:
             button_releases = [
                 (self._mouse_left_down, LEFT_BUTTON_UP),
@@ -539,16 +516,9 @@ class InterceptionBridge(AbstractBridge):
 
             with self.bridge_lock:
                 if self._is_shutting_down:
-                    logger.debug(
-                        "Keyboard worker exited during shutdown, skipping restart."
-                    )
                     return
 
                 old_proc = self.k_proc
-
-                # Fresh pipe: the old read end was closed in the parent after the
-                # first start, and a closed Connection cannot be pickled for the
-                # spawn start method.
                 k_read, k_write = multiprocessing.Pipe(duplex=False)
                 proc = multiprocessing.Process(
                     target=keyboard_worker,
@@ -575,9 +545,12 @@ class InterceptionBridge(AbstractBridge):
 
                 self.system_config.set_high_priority(proc.pid, "Revived Keyboard")
 
-                # The new worker has no record of keys the old one injected, so
-                # it cannot release them (its injector ignores UP for keys it
-                # never pressed). Stop heartbeating them.
+                # Flush UP strokes for any keys the dead worker left held down
+                for code in list(self._pressed_keys):
+                    try:
+                        self.k_pipe_write.send_bytes(PACK_KEY_STRUCT.pack(int(code), 1))
+                    except OSError:
+                        pass
                 self._pressed_keys.clear()
 
                 self.update_typematic(
@@ -617,13 +590,9 @@ class InterceptionBridge(AbstractBridge):
 
             with self.bridge_lock:
                 if self._is_shutting_down:
-                    logger.debug(
-                        "Mouse worker exited during shutdown, skipping restart."
-                    )
                     return
 
                 old_proc = self.m_proc
-
                 m_read, m_write = multiprocessing.Pipe(duplex=False)
                 mb_read, mb_write = multiprocessing.Pipe(duplex=False)
                 proc = multiprocessing.Process(
@@ -656,10 +625,6 @@ class InterceptionBridge(AbstractBridge):
                         pass
 
                 self.system_config.set_high_priority(proc.pid, "Revived Mouse")
-
-                # Button UPs are sent unconditionally by the worker, so this
-                # does release anything the dead worker left down at the driver.
-                # Keys are deliberately untouched: the keyboard worker is alive.
                 self._release_buttons()
 
             if old_proc is not None:
@@ -730,7 +695,6 @@ class InterceptionBridge(AbstractBridge):
             self._log_consumer_thread.join(timeout=1.0)
 
         self.release_all()
-        # Let the workers drain the UPs before terminate().
         time.sleep(0.1)
 
         for proc in (self.k_proc, self.m_proc):
