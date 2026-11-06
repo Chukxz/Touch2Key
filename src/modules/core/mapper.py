@@ -70,7 +70,9 @@ class Mapper:
         self.device_height = 1080
         self.dpi = 160
         self.toggle_hotkeys_str: str = ""
+        # Written by the VKB listener thread, cleared by the engine thread.
         self.vkb_pressed_keys: set[int] = set()
+        self._vkb_keys_lock = threading.Lock()
 
         # Resolve target window (fallback to active foreground window)
         if window_id and self.window_manager.is_window_valid(window_id):
@@ -365,6 +367,16 @@ class Mapper:
         except (ValueError, OSError):
             return False
 
+    def _vkb_exited(self) -> bool:
+        """True when a VKB process was started and is no longer running."""
+        proc = getattr(self.engine_ref, "vkb_process", None)
+        if proc is None:
+            return False
+        try:
+            return not proc.is_alive()
+        except (ValueError, OSError):
+            return True
+
     def _virtual_keyboard_listener(self) -> None:
         reader = getattr(self.engine_ref, "vkb_reader", None)
         if reader is None:
@@ -374,7 +386,11 @@ class Mapper:
         while self.running and not self.stop_event.is_set():
             try:
                 if not reader.poll(VKB_SLEEP_TIME):
-                    # Pipe is drained. If the VKB is gone, no UP will ever arrive.
+                    # Pipe is drained. If the VKB is gone, no UP will ever
+                    # arrive, and typematic would stay suspended.
+                    if self._vkb_exited():
+                        self.engine_ref.reap_virtual_keyboard()
+
                     if self.vkb_pressed_keys and not self._vkb_alive():
                         logger.warning("VKB exited with keys held; releasing.")
                         self.release_vkb_keys()
@@ -400,7 +416,8 @@ class Mapper:
         is_mouse_forward = scancode == M_FORWARD
 
         if state == 0:  # DOWN / PRESS
-            self.vkb_pressed_keys.add(scancode)
+            with self._vkb_keys_lock:
+                self.vkb_pressed_keys.add(scancode)
 
             if is_toggle_hotkeys:
                 pass
@@ -420,7 +437,8 @@ class Mapper:
                 self.bridge.key_down(scancode)
 
         elif state == 1:  # UP / RELEASE
-            self.vkb_pressed_keys.discard(scancode)
+            with self._vkb_keys_lock:
+                self.vkb_pressed_keys.discard(scancode)
 
             if is_toggle_hotkeys:
                 self.execute_toggle_hotkeys()
@@ -440,11 +458,13 @@ class Mapper:
                 self.bridge.key_up(scancode)
 
     def release_vkb_keys(self):
-        if self.vkb_pressed_keys:
-            for code in list(self.vkb_pressed_keys):
-                if code not in (TOP_BEZEL_ID, BOTTOM_BEZEL_ID):
-                    self._virtual_keyboard_sink(1, code)
+        with self._vkb_keys_lock:
+            codes = list(self.vkb_pressed_keys)
             self.vkb_pressed_keys.clear()
+
+        for code in codes:
+            if code not in (TOP_BEZEL_ID, BOTTOM_BEZEL_ID):
+                self._virtual_keyboard_sink(1, code)
 
     def _on_worker_respawn(self, worker_type: str) -> None:
         self.dispatcher.dispatch(
