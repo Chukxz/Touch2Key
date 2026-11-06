@@ -754,11 +754,11 @@ class Engine:
         # UP releases pipeline ownership and the held mouse button.
         elif event.phase is TouchPhase.UP:
             # If the finger barely moved, preserve click placement at DOWN.
-            # if not self._cursor_drag_started:
-            #     self.output_sink.mouse_move_abs(
-            #         self._cursor_down_pos.x,
-            #         self._cursor_down_pos.y,
-            #     )
+            if not self._cursor_drag_started:
+                self.output_sink.mouse_move_abs(
+                    self._cursor_down_pos.x,
+                    self._cursor_down_pos.y,
+                )
 
             if self.fallback_mouse_pipeline is not None:
                 self.fallback_mouse_pipeline.process(
