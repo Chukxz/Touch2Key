@@ -22,8 +22,8 @@ PNG_TARGET_DPI = 300
 
 def _esc(text: str) -> str:
     """Idempotently escapes &, <, and > so raw arrows/generics never break Graphviz's HTML lexer."""
-    raw = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
-    return raw.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    raw = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return raw.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
 
 
 def _card(
@@ -495,7 +495,7 @@ def build_architecture_digraph(
                     [
                         (
                             "Snapshot Payload",
-                            "JSON file (.touch2key_runtime): pid, updated_at, rate_hz, rate_status, rate_cap_hz, pps_threshold, menu_mode, downs/moves/ups/all, respawns, workers, window_info, screen_width/height, window_lost",
+                            "JSON file (data/engine_runtime.json): pid, updated_at, rate_hz, rate_status, rate_cap_hz, pps_threshold, menu_mode, downs/moves/ups/all, respawns, workers, window_info, screen_width/height, window_lost",
                         ),
                         (
                             "Consumers",
@@ -893,7 +893,7 @@ def build_architecture_digraph(
                         ),
                         (
                             "Bottom Bezel Callback",
-                            "Engine.toggle_virtual_keyboard(): spawns/stops VKB process -&gt (suspends typematic while virtual keyboard is active); VKB_STRUCT (&lt;BH) pipe to Mapper",
+                            "Engine.toggle_virtual_keyboard(): spawns/stops VKB process -&gt; (suspends typematic while virtual keyboard is active); VKB_STRUCT (&lt;BH) pipe to Mapper",
                         ),
                     ],
                     header_bg="#1d4ed8",
@@ -1025,7 +1025,7 @@ def build_architecture_digraph(
     dot.edge(
         "ReloadTx",
         "RuntimeSnapshot",
-        label=" Publishes .touch2key_runtime (1Hz)",
+        label=" Publishes data/engine_runtime.json (1Hz)",
         style="dashed",
         color="#9a3412",
     )
