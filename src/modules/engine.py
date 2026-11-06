@@ -448,6 +448,9 @@ class Engine:
         self._contact_owners.clear()
         self.two_finger_tap_tracker.reset()
 
+        # A cursor-fallback press that is still down must be released here:
+        # once the contact state is cleared, its UP would be dropped and the
+        # OS left button would stay held (and be kept alive by the heartbeat).
         if self._cursor_contact is not None and self.output_sink:
             try:
                 self.output_sink.mouse_up(M_LEFT)
@@ -704,6 +707,8 @@ class Engine:
             slop_px = dp_to_px(CURSOR_SLOP_DP, dpi)
             self._cursor_slop_sq = slop_px * slop_px
 
+            # ABS move and button DOWN travel on the same ordered pipe/thread
+            # in the bridge workers, so no settle delay is needed here.
             self.output_sink.mouse_move_abs(
                 event.position.x,
                 event.position.y,
@@ -719,6 +724,7 @@ class Engine:
 
             return
 
+        # Only the contact that owns the cursor may move or release it.
         if event.contact_id != self._cursor_contact:
             return
 
@@ -878,8 +884,7 @@ class Engine:
             shutdown_thread.start()
             shutdown_thread.join(timeout=2.0)
             return
-        
-    
+
     def set_ignore_typematic(self, ignore: bool) -> None:
         """Temporarily suspend/resume typematic."""
         self.bridge.update_typematic(
@@ -900,9 +905,10 @@ class Engine:
                     self.vkb_reader.recv_bytes()
                 except Exception:
                     break
-            
+
             try:
-                self.set_ignore_typematic(True)  # Suspend typematic while virtual keyboard is active
+                # Suspend typematic while the virtual keyboard is active.
+                self.set_ignore_typematic(True)
                 self.vkb_process = multiprocessing.Process(
                     target=virtual_keyboard_worker,
                     name="Virtual Keyboard",
@@ -910,11 +916,12 @@ class Engine:
                     daemon=True,
                 )
                 self.vkb_process.start()
-                 
+
             except Exception as exc:
                 logger.error("Failed to start virtual keyboard: %s", exc, exc_info=True)
                 self.vkb_process = None
-                self.set_ignore_typematic(False)  # Resume typematic if virtual keyboard fails to start
+                # Resume typematic if the virtual keyboard fails to start.
+                self.set_ignore_typematic(False)
 
     def close_virtual_keyboard(self) -> None:
         with self.vkb_lock:
@@ -931,7 +938,34 @@ class Engine:
             if self.mapper:
                 self.mapper.release_vkb_keys()
 
-            self.set_ignore_typematic(False)  # Resume typematic after virtual keyboard is closed
+            # Resume typematic after the virtual keyboard is closed.
+            self.set_ignore_typematic(False)
+
+    def reap_virtual_keyboard(self) -> None:
+        """Clean up after a VKB process that exited on its own.
+
+        The VKB's Close button and a crash both end the process without going
+        through close_virtual_keyboard(), which would leave typematic
+        suspended and any held keys down. Called from the Mapper's VKB
+        listener thread; a no-op while the process is alive or already reaped.
+        """
+        with self.vkb_lock:
+            proc = self.vkb_process
+            if proc is None:
+                return
+
+            try:
+                if proc.is_alive():
+                    return
+            except (ValueError, OSError):
+                pass
+
+            self.vkb_process = None
+
+            if self.mapper:
+                self.mapper.release_vkb_keys()
+
+            self.set_ignore_typematic(False)
 
     def toggle_virtual_keyboard(self) -> None:
         if self.vkb_process is not None and self.vkb_process.is_alive():
@@ -1260,10 +1294,14 @@ class Engine:
             mapper._pulse_status()
 
         window_info: Optional[tuple[int, int, int, int]] = None
+        screen_x: int = 0
+        screen_y: int = 0
         screen_w: int = 0
         screen_h: int = 0
 
         if mapper is not None:
+            screen_x = int(mapper.screen_x)
+            screen_y = int(mapper.screen_y)
             screen_w = int(mapper.screen_w)
             screen_h = int(mapper.screen_h)
             with mapper.lock:
@@ -1296,6 +1334,8 @@ class Engine:
             "ups": self.touch_event_counter.event_count_up,
             "all": self.touch_event_counter.event_count,
             "window_info": window_info,
+            "screen_x": screen_x,
+            "screen_y": screen_y,
             "screen_width": screen_w,
             "screen_height": screen_h,
             "workers": {
