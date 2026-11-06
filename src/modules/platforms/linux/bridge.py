@@ -112,8 +112,9 @@ class UInputBridge(AbstractBridge):
             self._cached_typematic["rate_hz"] = rate_hz
             self._cached_typematic["exclude_scancodes"] = set(exclude_scancodes)
 
-            if ignore_typematic is not None:
-                self._cached_typematic["ignore_typematic"] = ignore_typematic
+            if ignore_typematic is None:
+                ignore_typematic = self._cached_typematic["ignore_typematic"]
+            self._cached_typematic["ignore_typematic"] = ignore_typematic
 
             delay_ns = int(delay_ms * 1_000_000)
             interval_sec = 1.0 / max(1.0, rate_hz)
