@@ -35,7 +35,6 @@ class WheelMapper:
     def _clear(self, reason: str | None = None) -> None:
         if reason:
             logger.warning(reason)
-        self.touch_up()
         with self.engine_ref.lock:
             self.pipeline = None
 
@@ -59,7 +58,7 @@ class WheelMapper:
             return
 
         settings = snap.settings
-        
+
         # Read pre-scaled device pixel boundaries directly from the snapshot
         inner_r = snap.wheel_radius
         outer_r = snap.sprint_distance
@@ -141,8 +140,6 @@ class WheelMapper:
             logger.info("Configured Fixed Joystick at (%.1f, %.1f)", center.x, center.y)
 
         with self.engine_ref.lock:
-            if self.pipeline is not None:
-                self.pipeline.reset(self.output_sink)
             self.pipeline = pipeline
 
     def touch_up(self) -> None:
