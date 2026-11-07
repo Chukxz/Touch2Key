@@ -24,11 +24,11 @@ from modules import (
 from modules.cli.key_capture import capture_sprint_key, capture_performance_settings
 from modules.database import store
 from modules.gui.overlays import virtual_keyboard_worker
-from modules.log_manager import AppLogManager
+from modules.scripts.log_manager import AppLogManager
 from modules.platforms import get_platform
-from modules.runtime_info import TelemetryPublisher, read_process
+from modules.scripts.runtime_info import TelemetryPublisher, read_process
 from modules.scripts.list_windows import select_window
-from modules.utils import (
+from modules.scripts.utils import (
     ADB_RATE_CAP_MAX,
     ADB_RATE_CAP_MIN,
     BASELINE_DPI,
@@ -592,7 +592,7 @@ class Engine:
         if self.bezel_mapper:
             all_pipelines.extend(self.bezel_mapper.pipelines)
 
-        # Type precedence is absolute: SystemToggle > Button > Joystick > Pointer.
+        # Type precedence is absolute: Button > Bezel > Joystick > Mouse.
         # Priority only orders pipelines within a type.
         all_pipelines.sort(
             key=lambda p: (

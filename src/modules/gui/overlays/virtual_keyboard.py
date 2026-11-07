@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 
 from modules import AppLogManager
 from modules.platforms import check_single_instance, get_lock_states
-from modules.utils import (
+from modules.scripts.utils import (
     CLOSE_VKB_ID,
     ICONS_FOLDER,
     LOCK_KEYS,

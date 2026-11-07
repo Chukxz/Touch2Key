@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 
 from modules.database import store
 from modules.platforms import get_specific_qt_key
-from modules.utils import (
+from modules.scripts.utils import (
     ADB_RATE_CAP_MAX,
     ADB_RATE_CAP_MIN,
     DEFAULT_ADB_RATE_CAP,

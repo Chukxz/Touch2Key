@@ -1,7 +1,7 @@
 from ..base import AbstractSystemConfig
 import ctypes
 import psutil
-from modules.utils import NT_TIMER_RES
+from modules.scripts.utils import NT_TIMER_RES
 
 
 class SystemConfig(AbstractSystemConfig):

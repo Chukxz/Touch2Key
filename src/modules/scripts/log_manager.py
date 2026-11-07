@@ -11,7 +11,7 @@ import shutil
 import threading
 from logging.handlers import MemoryHandler, QueueHandler
 import multiprocessing
-from modules.utils import LOGS_FOLDER, DIAGNOSTICS_FOLDER, prune_directory
+from modules.scripts.utils import LOGS_FOLDER, DIAGNOSTICS_FOLDER, prune_directory
 
 _CONSOLE_MODES = ("auto", "on", "off")
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable
 
 from modules.core.pipeline import OutputSink
-from modules.utils import (
+from modules.scripts.utils import (
     M_BACK,
     M_FORWARD,
     M_LEFT,

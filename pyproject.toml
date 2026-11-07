@@ -51,7 +51,7 @@ dev = [
 
 [project.scripts]
 # Primary Entry Points
-touch2key = "modules.main:main"
+touch2key = "modules.cli.main:main"
 touch2key-gui = "modules.gui.app:main"
 
 # CLI Profile, Layout & Typematic Management

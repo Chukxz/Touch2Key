@@ -25,7 +25,7 @@ from modules.core.pipeline import (
     Unit,
     Vector,
 )
-from modules.utils import (
+from modules.scripts.utils import (
     BASELINE_DPI,
     MIN_PRIORITY,
     dp_to_px,

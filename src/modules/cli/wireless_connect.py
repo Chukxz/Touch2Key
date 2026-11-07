@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import sys
 import logging
-from modules.log_manager import AppLogManager
-from modules.utils import wireless_connect
+from modules.scripts.log_manager import AppLogManager
+from modules.scripts.utils import wireless_connect
 
 logger = logging.getLogger("modules.scripts.wireless_connect")
 

@@ -4,7 +4,7 @@ import ctypes
 from typing import ClassVar
 
 from ..base import AbstractMapping
-from modules.utils import SCANCODES, SCANCODES_INV, SPECIAL_MAP
+from modules.scripts.utils import SCANCODES, SCANCODES_INV, SPECIAL_MAP
 
 
 class Mapping(AbstractMapping):

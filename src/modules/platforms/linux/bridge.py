@@ -6,7 +6,7 @@ import struct
 import threading
 from datetime import datetime as _datetime
 
-from modules.utils import (
+from modules.scripts.utils import (
     ABS_CONST,
     BUTTON_4_DOWN,
     BUTTON_4_UP,

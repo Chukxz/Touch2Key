@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from modules.core.pipeline import CircularRegion, RectangularRegion, Region
 from modules.database import store
-from modules.utils import (
+from modules.scripts.utils import (
     BEZEL,
     CIRCLE,
     MOUSE_WHEEL_SIMULATOR_CODE,
@@ -17,7 +17,7 @@ from modules.utils import (
 
 if TYPE_CHECKING:
     from modules.database import AppSettings, Layout, LayoutZone
-    from modules.utils import MapperEventDispatcher
+    from modules.scripts.utils import MapperEventDispatcher
     from .touch_reader import TouchReader
 
 logger = logging.getLogger("modules.core.layout_loader")

@@ -16,7 +16,7 @@ from typing import Any
 
 import psutil
 
-from modules.runtime_info import (
+from modules.scripts.runtime_info import (
     STALE_AFTER_S,
     attach,
     labeled_processes,

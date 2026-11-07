@@ -19,8 +19,8 @@ from PySide6.QtGui import QIcon
 
 from modules.gui.main_window import MainWindow
 from modules.platforms import check_single_instance, notify_existing_instance
-from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER, ICONS_FOLDER
-from modules.log_manager import AppLogManager, initialize_cleanup, modify_qt_logging_rules_on_win32
+from modules.scripts.utils import APP_NAME, DIAGNOSTICS_FOLDER, ICONS_FOLDER
+from modules.scripts.log_manager import AppLogManager, initialize_cleanup, modify_qt_logging_rules_on_win32
 
 if TYPE_CHECKING:
     from cProfile import Profile

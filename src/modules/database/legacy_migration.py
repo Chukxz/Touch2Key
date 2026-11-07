@@ -14,7 +14,7 @@ import tomlkit
 
 from modules.core.pipeline import PipelineConfig
 from modules.database import store
-from modules.utils import (
+from modules.scripts.utils import (
     ADB_RATE_CAP_MAX,
     ADB_RATE_CAP_MIN,
     BEZEL,

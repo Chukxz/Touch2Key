@@ -7,12 +7,12 @@ from PIL import Image
 from typing import TYPE_CHECKING, Optional, Any
 from enum import Enum, auto
 
-from modules.utils import clamp
+from modules.scripts.utils import clamp
 from modules.platforms import get_specific_qt_key
 from modules.database import store
 from modules.database.repositories import DuplicateNameError
 
-from modules.utils import (
+from modules.scripts.utils import (
     BASELINE_DPI,
     BEZEL,
     BEZEL_DP_THICKNESS,

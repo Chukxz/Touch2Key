@@ -10,7 +10,7 @@ from modules.core.pipeline import (
     RectangularRegion,
 )
 from modules.core.pipeline_factory import MousePointer
-from modules.utils import BASELINE_DPI, MIN_PRIORITY, look_counts_per_px
+from modules.scripts.utils import BASELINE_DPI, MIN_PRIORITY, look_counts_per_px
 
 if TYPE_CHECKING:
     from modules.core.pipeline import Pipeline

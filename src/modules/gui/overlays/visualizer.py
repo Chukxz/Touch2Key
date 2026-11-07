@@ -36,13 +36,13 @@ from PySide6.QtWidgets import (
 )
 
 from modules.database import store
-from modules.log_manager import AppLogManager, modify_qt_logging_rules_on_win32
+from modules.scripts.log_manager import AppLogManager, modify_qt_logging_rules_on_win32
 from modules.platforms import (
     check_single_instance,
     get_specific_qt_key,
 )
-from modules.runtime_info import attach, register_process, unregister_process
-from modules.utils import (
+from modules.scripts.runtime_info import attach, register_process, unregister_process
+from modules.scripts.utils import (
     ICONS_FOLDER,
     VISUALIZER_RUNTIME_FILE,
     CurveType,

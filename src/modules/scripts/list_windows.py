@@ -6,8 +6,8 @@ import time
 from typing import Optional
 
 from modules.platforms import get_platform
-from modules.utils import WINDOWS_HEADERS
-from modules.log_manager import AppLogManager
+from modules.scripts.utils import WINDOWS_HEADERS
+from modules.scripts.log_manager import AppLogManager
 
 logger = logging.getLogger("modules.platforms.windows.select_window")
 

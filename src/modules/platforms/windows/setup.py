@@ -9,7 +9,7 @@ from pathlib import Path
 
 import requests
 
-from modules.utils import BIN_FOLDER
+from modules.scripts.utils import BIN_FOLDER
 
 ADB_URL = "https://dl.google.com/android/repository/platform-tools-latest-windows.zip"
 INTERCEPTION_API_URL = (

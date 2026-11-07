@@ -22,8 +22,8 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from modules.database import store
-from modules.log_manager import AppLogManager, modify_qt_logging_rules_on_win32
-from modules.utils import (
+from modules.scripts.log_manager import AppLogManager, modify_qt_logging_rules_on_win32
+from modules.scripts.utils import (
     BIN_FOLDER,
     DATA_FOLDER,
     DIAGNOSTICS_FOLDER,

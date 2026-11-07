@@ -1,4 +1,4 @@
-from .utils import (
+from .scripts.utils import (
     MapperEventDispatcher,
     MapperEvent,
     TouchEvent,
@@ -7,7 +7,7 @@ from .utils import (
     JSONS_FOLDER,
 )
 
-from .log_manager import AppLogManager
+from .scripts.log_manager import AppLogManager
 
 from .database import store
 

@@ -34,10 +34,10 @@ from modules.gui.overlays.visualizer import run as run_visualizer
 from modules.gui.pages.dashboard_page import DashboardPage
 from modules.gui.pages.layout_studio_page import LayoutStudioPage
 from modules.gui.pages.settings_page import SettingsPage
-from modules.log_manager import AppLogManager
+from modules.scripts.log_manager import AppLogManager
 from modules.scripts.preflight import run as run_preflight
 from modules.scripts.show_adb_path import run as run_show_adb_path
-from modules.utils import (
+from modules.scripts.utils import (
     APP_NAME,
     MapperEventDispatcher,
     QtIpcMapperEventDispatcher,

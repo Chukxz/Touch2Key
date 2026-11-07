@@ -22,8 +22,8 @@ PNG_TARGET_DPI = 300
 
 def _esc(text: str) -> str:
     """Idempotently escapes &, <, and > so raw arrows/generics never break Graphviz's HTML lexer."""
-    raw = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    return raw.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    raw = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    return raw.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _card(
@@ -198,7 +198,7 @@ def build_architecture_digraph(
                     [
                         (
                             "Window Enumeration",
-                            "_gather_window_rows(WindowManager): find_visible_windows() -&gt; filters width &gt; 0 &amp; height &gt; 0 -&gt; [wid, title, class, l, t, w, h]",
+                            "_gather_window_rows(WindowManager): find_visible_windows() -&gt; filters width &gt; 0 &amp; height &gt; 0 -&gt; [wid, title, class, l, t, w, h] | X11 enumerates EWMH _NET_CLIENT_LIST (falls back to query_tree)",
                         ),
                         (
                             "CLI Selector",
@@ -410,7 +410,7 @@ def build_architecture_digraph(
                         ),
                         (
                             "Live Coordinate Sync",
-                            "Monitors toggle_hotkeys to toggle cursor visibility; every 2.0s reads telemetry window_info &amp; screen_width/height to scale and offset layout zones to the active target window (or fullscreen viewport fallback)",
+                            "Monitors toggle_hotkeys to toggle cursor visibility; every 2.0s reads telemetry window_info &amp; screen_x/screen_y/screen_width/screen_height to scale and offset layout zones (window position minus screen origin) to the active target window (or fullscreen viewport fallback)",
                         ),
                     ],
                     header_bg="#0891b2",
@@ -424,7 +424,15 @@ def build_architecture_digraph(
                     [
                         (
                             "Lifecycle &amp; Tracking",
-                            "Managed by Engine.toggle_virtual_keyboard(); PID published in runtime snapshot under workers['vkb']",
+                            "Managed by Engine.toggle_virtual_keyboard(); PID published in runtime snapshot under workers['vkb']. Typematic is suspended while it is open; Engine.reap_virtual_keyboard() (called from the Mapper VKB listener) resumes it and releases held keys if the process exits on its own (Close button or crash)",
+                        ),
+                        (
+                            "Interaction Model",
+                            "InteractionController owns one press from DOWN to UP: a key, or a window move/resize after a 300ms still-hold. Long-press (300ms) latches a non-lock key (red) until the next tap; modifiers toggle; releasing outside a key cancels; Close/Toggle act on release only. Frameless, focus-less window (WindowDoesNotAcceptFocus), painted 5px border, 8px radius, 12px resize margin",
+                        ),
+                        (
+                            "Release Safety",
+                            "200ms watchdog cancels a press the OS reports as released (Windows GetAsyncKeyState, X11 XQueryPointer; inactive on Wayland). closeEvent releases held keys; a dead IPC pipe is flagged so shutdown does not retry per key",
                         ),
                         (
                             "Direct IPC Stream",
@@ -495,7 +503,7 @@ def build_architecture_digraph(
                     [
                         (
                             "Snapshot Payload",
-                            "JSON file (data/engine_runtime.json): pid, updated_at, rate_hz, rate_status, rate_cap_hz, pps_threshold, menu_mode, downs/moves/ups/all, respawns, workers, window_info, screen_width/height, window_lost",
+                            "JSON file (.touch2key_runtime): pid, updated_at, rate_hz, rate_status, rate_cap_hz, pps_threshold, menu_mode, downs/moves/ups/all, respawns, workers, window_info, screen_x/screen_y/screen_width/screen_height (the Windows screen rectangle is the virtual desktop and may start at a negative origin), window_lost",
                         ),
                         (
                             "Consumers",
@@ -562,7 +570,7 @@ def build_architecture_digraph(
                         ),
                         (
                             "_release_active_inputs()",
-                            "_dispatch_generation += 1 | clears _contact_owners | resets all active pipelines &amp; releases held keys/buttons",
+                            "_dispatch_generation += 1 | clears _contact_owners | releases the cursor-fallback button (mouse_up(M_LEFT)) if a cursor contact is active | resets all active pipelines &amp; releases held keys/buttons. Also runs on every Menu/Game mode switch and on shutdown",
                         ),
                     ],
                     header_bg="#1d4ed8",
@@ -580,7 +588,7 @@ def build_architecture_digraph(
                         ),
                         (
                             "BezelMapper",
-                            "TOP_BEZEL (0x9905) -&gt; execute_toggle_hotkeys | BOTTOM_BEZEL (0x9906) -&gt; toggle_virtual_keyboard (Prec: 4)",
+                            "TOP_BEZEL (0x9905) -&gt; execute_toggle_hotkeys | BOTTOM_BEZEL (0x9906) -&gt; toggle_virtual_keyboard (Prec: 2)",
                         ),
                         (
                             "MouseMapper (Game)",
@@ -592,7 +600,7 @@ def build_architecture_digraph(
                         ),
                         (
                             "KeyMapper",
-                            "update_bridge_typematics() (&lt;B?IfH) + Button Pipelines (Button + optional PointerSemantic, Prec: 2)",
+                            "update_bridge_typematics() (PACK_TYPEMATIC_STRUCT &lt;B?If?H: KEY_CONFIG, enabled, delay_ns, rate, ignore_typematic, count + &lt;H excluded codes, pushed to the keyboard worker) + Button Pipelines (Button + optional PointerSemantic, Prec: 3)",
                         ),
                         (
                             "WheelMapper",
@@ -819,8 +827,16 @@ def build_architecture_digraph(
                     "Menu Mode Absolute Desktop Cursor Fallback",
                     [
                         (
-                            "Absolute Coordinates",
-                            "output_sink.mouse_move_abs(x, y) + DOWN: mouse_down(M_LEFT) | UP: mouse_up(M_LEFT)",
+                            "Single Cursor Contact",
+                            "The first unclaimed DOWN becomes self._cursor_contact; other contacts are ignored until its UP (or until _release_active_inputs() clears it and releases the button)",
+                        ),
+                        (
+                            "Click Sequence",
+                            "DOWN: mouse_move_abs(x, y) -&gt; fallback_mouse_pipeline.process() -&gt; mouse_down(M_LEFT), with no sleeps (ABS and button share one ordered pipe) | UP: pipeline.process() -&gt; mouse_up(M_LEFT)",
+                        ),
+                        (
+                            "Slop Deadzone",
+                            "MOVE is ignored until the finger leaves a CURSOR_SLOP_DP radius around DOWN; the first forwarded MOVE then carries the accumulated displacement",
                         ),
                         (
                             "Fallback Pipeline",
@@ -884,6 +900,10 @@ def build_architecture_digraph(
                             "key_down/up(scancode) | mouse_down/up(0x9900..0x9904) -&gt; immediate Bridge call",
                         ),
                         (
+                            "Absolute Move",
+                            "mouse_move_abs(dev_x, dev_y): normalizes by the device size, then maps into the target window rect (left + norm * (w - 1)) or, with no window (or while the VKB is alive), into the screen rect (screen_x + norm * (screen_w - 1)); the viewport tuple is (dev_w, dev_h, win, screen_x, screen_y, screen_w, screen_h)",
+                        ),
+                        (
                             "Fractional Move",
                             "mouse_move(dx, dy) -&gt; under _lock: accumulates _acc_x += dx, _acc_y += dy",
                         ),
@@ -893,7 +913,7 @@ def build_architecture_digraph(
                         ),
                         (
                             "Bottom Bezel Callback",
-                            "Engine.toggle_virtual_keyboard(): spawns/stops VKB process -&gt; (suspends typematic while virtual keyboard is active); VKB_STRUCT (&lt;BH) pipe to Mapper",
+                            "Engine.toggle_virtual_keyboard(): spawns/stops the VKB process and suspends typematic while it is open (resumed on close, or by reap_virtual_keyboard() if the VKB exits on its own); VKB_STRUCT (&lt;BH) pipe to Mapper",
                         ),
                     ],
                     header_bg="#1d4ed8",
@@ -928,20 +948,28 @@ def build_architecture_digraph(
                             "Win32: keyboard_worker(k_pipe, log_q, k_handle), mouse_worker(m_pipe, mb_pipe, log_q, m_handle), NtSetTimerResolution | Linux: UInput(KEYBOARD_CAP / MOUSE_CAP)",
                         ),
                         (
+                            "Pipes",
+                            "k_pipe: keys + KEY_CONFIG | m_pipe: REL + WHEEL (coalesced) | mb_pipe: ABS + BUTTON, executed in arrival order by one thread so 'move, then click' is ordered by construction",
+                        ),
+                        (
                             "k_proc Main Thread",
-                            "Polls k_pipe (15s timeout -&gt; _release_all_keys): unpacks PACK_KEY (&lt;HB, maps E0/LINUX_KEY_MAP) -&gt; key_queue | unpacks KEY_CONFIG (&lt;B?IfH)",
+                            "Polls k_pipe every 1s; held keys with no traffic for 15s are released through the injector (the bridge heartbeat KEY_PING keeps genuinely held keys alive): unpacks PACK_KEY (&lt;HB) -&gt; key_queue (Win32 keeps the E0 prefix in the full code, so numpad/nav and left/right Ctrl/Alt never collide; Linux maps via LINUX_KEY_MAP) | applies (PACK_TYPEMATIC_STRUCT &lt;B?If?H: KEY_CONFIG, enabled, delay_ns, rate, ignore_typematic, count + &lt;H excluded codes). Releases anything still held on exit",
                         ),
                         (
                             "k_proc Injector Thread",
-                            "Drains key_queue: DOWN sleeps 40-70ms dwell, UP sleeps 1ms (stretches fast taps) | Outer loop fires typematic repeat_key after delay_ns at repeat_rate",
+                            "Event-driven: blocks on key_queue until the next repeat deadline, with an outer try so it never dies silently. DOWN sleeps 40-70ms dwell, UP sleeps 1ms (stretches fast taps) | Typematic repeat fires after delay_ns at repeat_rate unless ignore_typematic is set (VKB open) or the key is excluded; Linux repeats as evdev value 2",
                         ),
                         (
                             "m_proc Main Thread",
-                            "Polls m_pipe: coalesces up to MAX_COALESCE=20 TASK_REL (&lt;Bhh, 0.8-1.2ms dwell) or TASK_WHEEL (&lt;Bhh, 1ms dwell) + TASK_ABS (&lt;Bii, MOUSE_VIRTUAL_DESKTOP) via send_lock",
+                            "Polls m_pipe every 1s: coalesces up to MAX_COALESCE=20 TASK_REL (&lt;Bhh, 0.8-1.2ms dwell) or TASK_WHEEL (&lt;Bhh, 1ms dwell) via send_lock | Exits if the button thread dies, so the bridge health check respawns the worker",
                         ),
                         (
                             "m_proc Button Thread",
-                            "Polls mb_pipe (15s timeout -&gt; _release_all_buttons): injects PACK_BUTTON (&lt;Bi) under send_lock, then sleeps 25-40ms DOWN / 1ms UP outside lock (never blocks moves)",
+                            "Polls mb_pipe in order: TASK_ABS (&lt;Bii, MOUSE_VIRTUAL_DESKTOP; Win32 state field is 0) then PACK_BUTTON (&lt;Bi) under send_lock, then sleeps 25-40ms DOWN / 1ms UP outside the lock (never blocks moves) | Releases held buttons after 15s of silence | Logs and keeps running on per-event errors",
+                        ),
+                        (
+                            "Bridge Process-Side",
+                            "bridge_lock serializes key/button/ABS writes; _motion_lock serializes REL/WHEEL writers | Heartbeat every KEEPALIVE_INTERVAL (5s) pings held keys and buttons | Respawn builds fresh pipes and swaps them in only if start() succeeds; a keyboard respawn releases keys and a mouse respawn releases buttons; | Win32 reload_devices() and shutdown() release everything and wait 0.1s before terminating workers",
                         ),
                     ],
                     header_bg="#713f12",
@@ -1025,7 +1053,7 @@ def build_architecture_digraph(
     dot.edge(
         "ReloadTx",
         "RuntimeSnapshot",
-        label=" Publishes data/engine_runtime.json (1Hz)",
+        label=" Publishes .touch2key_runtime (1Hz)",
         style="dashed",
         color="#9a3412",
     )

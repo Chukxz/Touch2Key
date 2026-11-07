@@ -4,7 +4,7 @@ import time
 from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtWidgets import QMessageBox, QProgressDialog, QWidget
 
-from modules.utils import wireless_connect
+from modules.scripts.utils import wireless_connect
 
 
 class WirelessConnectWorker(QObject):

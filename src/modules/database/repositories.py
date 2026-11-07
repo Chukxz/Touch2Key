@@ -12,7 +12,7 @@ import sqlite3
 from dataclasses import dataclass, field, fields as dataclass_fields
 from typing import Any, Optional, TYPE_CHECKING
 
-from modules.utils import (
+from modules.scripts.utils import (
     BEZEL,
     BEZEL_DP_THICKNESS,
     BOTTOM_BEZEL_ID,

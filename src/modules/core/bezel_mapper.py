@@ -4,7 +4,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from modules.core.pipeline_factory import Bezel
-from modules.utils import BOTTOM_BEZEL_ID, TOP_BEZEL_ID
+from modules.scripts.utils import BOTTOM_BEZEL_ID, TOP_BEZEL_ID
 
 if TYPE_CHECKING:
     from modules.core.mapper import Mapper

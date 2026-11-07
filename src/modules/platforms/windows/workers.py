@@ -8,7 +8,7 @@ from random import uniform as _uniform
 from time import monotonic as _monotonic, perf_counter_ns as _perf_counter_ns, sleep as _sleep
 from typing import TYPE_CHECKING
 
-from modules.utils import (
+from modules.scripts.utils import (
     BUTTON_4_DOWN,
     BUTTON_4_UP,
     BUTTON_5_DOWN,

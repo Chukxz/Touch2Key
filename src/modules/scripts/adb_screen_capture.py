@@ -12,8 +12,8 @@ import sys
 from PIL import Image
 
 from modules.database import store
-from modules.log_manager import AppLogManager
-from modules.utils import (
+from modules.scripts.log_manager import AppLogManager
+from modules.scripts.utils import (
     ADB,
     BASELINE_DPI,
     IMAGES_FOLDER,

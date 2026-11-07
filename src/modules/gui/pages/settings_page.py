@@ -32,7 +32,7 @@ from modules.database.config_io import (
 )
 from modules.platforms import get_specific_qt_key
 from modules.scripts.list_windows import select_window
-from modules.utils import (
+from modules.scripts.utils import (
     ADB_RATE_CAP_MAX,
     ADB_RATE_CAP_MIN,
     DEADZONE_MAX,
@@ -56,7 +56,7 @@ from modules.utils import (
 )
 
 if TYPE_CHECKING:
-    from modules.utils import MapperEventDispatcher
+    from modules.scripts.utils import MapperEventDispatcher
     from modules.gui.main_window import EngineProcessController
 
 logger = logging.getLogger("modules.gui.settings_page")

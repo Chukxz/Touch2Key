@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import ClassVar
 from ..base import AbstractMapping
 from .ecodes_map import LINUX_KEY_MAP, LINUX_KEY_MAP_INV
-from modules.utils import SCANCODES, SCANCODES_INV, SPECIAL_MAP
+from modules.scripts.utils import SCANCODES, SCANCODES_INV, SPECIAL_MAP
 
 
 class Mapping(AbstractMapping):
