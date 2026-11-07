@@ -68,7 +68,6 @@ class KeyMapper:
 
     def _clear(self, reason: str) -> None:
         logger.warning(reason)
-        self.release_all()
         with self.engine_ref.lock:
             self.pipelines = []
 
@@ -119,8 +118,6 @@ class KeyMapper:
             )
 
         with self.engine_ref.lock:
-            for pipeline in self.pipelines:
-                pipeline.reset(self.output_sink)
             self.pipelines = new_pipelines
 
     def release_all(self) -> None:
@@ -129,6 +126,7 @@ class KeyMapper:
                 pipeline.reset(self.output_sink)
 
     def _on_worker_respawn_key(self, worker_type: str) -> None:
-        if worker_type == "keyboard":
+        if worker_type in ("keyboard", "mouse"):
             self.release_all()
-            self.update_bridge_typematics()
+            if worker_type == "keyboard":
+                self.update_bridge_typematics()
