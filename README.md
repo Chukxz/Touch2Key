@@ -162,6 +162,10 @@ In **GUI mode** the arrow keys belong to Qt. Change the same values on the **Set
 * **Defensive Input Ownership:**
   * **Multi-claim:** overlapping buttons in the same priority tier claim a contact together, enabling multi-key combos from one touch.
   * **Single-owner:** joysticks and camera look own exactly one contact, preventing jitter and duplicated deltas.
+  * **Reference-counted output:** every key and mouse button goes through a shared output sink with separate key and button reference counts. The driver receives DOWN only when the first owner acquires an input and UP only when the last owner releases it, so overlapping buttons and joystick directions can share a key without cutting each other off. Unmatched UP events are ignored.
+  * **Owner-tracked release:** each semantic releases only what it owns. A button releases only if it is actually down. A joystick tracks its held direction keys, releases the ones no longer needed, acquires newly required ones, and releases them all when the finger lifts or on reset. Resets are idempotent, so repeating them is harmless.
+  * **Ordered teardown at state boundaries:** on Menu/Game switches, layout reloads, and shutdown or worker teardown, the engine invalidates stale dispatch work, clears contact and gesture ownership, releases the cursor fallback, and resets every pipeline (each releasing its own references). Only then does it call `release_all_held()`, a last-resort safety net that releases any leftover key or button, clears the reference counts, and logs individual failures without skipping the remaining releases. Reference counts are never cleared before the pipelines have reset.
+  * **Direct paths untouched:** the virtual keyboard and toggle-hotkey sequences write straight to the driver bridge and sit outside the reference-counted ownership model.
 
 * **Hybrid Mode Switching (In-Game vs. Menu):**
   * **In-Game (cursor hidden):** HUD zones capture taps/drags to drive game controls.
