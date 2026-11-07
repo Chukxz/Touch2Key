@@ -1647,7 +1647,9 @@ class LayoutsPlotterWidget(QWidget):
             num_points,
             PlotterState.COLLECTING,
         )
-        self.update_title(f"MODE: {mode}. Click {num_points} points on the image (Esc to Cancel).")
+        self.update_title(
+            f"MODE: {mode}. Click {num_points} points on the image (Esc to Cancel)."
+        )
 
     def _load_active_layout_zones(self) -> None:
         if not self.active_layout:
@@ -1761,11 +1763,9 @@ class LayoutsPlotterWidget(QWidget):
 
             # Convert pixels to points (72 points per inch / figure DPI)
             px_to_pt = 72.0 / self.fig.dpi
-            print(max(5, int(round(rendered_img_height_px * px_to_pt * 0.03))))
-            return max(5, int(round(rendered_img_height_px * px_to_pt * 0.03)))
+            return max(5, int(round(rendered_img_height_px * px_to_pt * 0.02)))
 
-        print(max(5, int(round(self.fig.get_size_inches()[1] * 72 * 0.03))))
-        return max(5, int(round(self.fig.get_size_inches()[1] * 72 * 0.03)))
+        return max(5, int(round(self.fig.get_size_inches()[1] * 72 * 0.02)))
 
     def _create_label(
         self,
