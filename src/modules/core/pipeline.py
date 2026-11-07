@@ -55,20 +55,25 @@ class OutputSink(ABC):
     def mouse_down(self, button: int) -> None:
         raise NotImplementedError
 
+    def release_all_held(self) -> int:
+        return 0
 
-# ---------------------------------------------------------------------------
+
+# ------------------------------------------------------------------
 # Regions, Constraints, Origins, Transforms, Semantics
-# ---------------------------------------------------------------------------
+# ------------------------------------------------------------------
 
 
 @dataclass(slots=True)
 class Region(ABC):
     @abstractmethod
-    def activates(self, event: TouchEvent) -> bool: ...
+    def activates(self, event: TouchEvent) -> bool:
+        ...
 
     @property
     @abstractmethod
-    def area(self) -> float: ...
+    def area(self) -> float:
+        ...
 
 
 @dataclass(slots=True)
@@ -125,7 +130,8 @@ class RectangularRegion(Region):
 @dataclass(slots=True)
 class Constraint(ABC):
     @abstractmethod
-    def apply(self, origin: Point, position: Point) -> Point: ...
+    def apply(self, origin: Point, position: Point) -> Point:
+        ...
 
     def update_origin(self, origin: Point, position: Point) -> Point:
         return origin
@@ -172,13 +178,20 @@ class LeashConstraint(Constraint):
 @dataclass(slots=True)
 class Origin(ABC):
     @abstractmethod
-    def begin(self, position: Point) -> None: ...
+    def begin(self, position: Point) -> None:
+        ...
+
     @abstractmethod
-    def get(self) -> Point: ...
+    def get(self) -> Point:
+        ...
+
     @abstractmethod
-    def update(self, position: Point, constraint: Constraint) -> None: ...
+    def update(self, position: Point, constraint: Constraint) -> None:
+        ...
+
     @abstractmethod
-    def end(self) -> None: ...
+    def end(self) -> None:
+        ...
 
 
 @dataclass(slots=True)
@@ -254,7 +267,7 @@ class PipelineContext:
 
 
 class Unit:
-    __slots__ = ()
+    slots = ()
 
 
 UNIT = Unit()
@@ -264,7 +277,9 @@ T = TypeVar("T")
 @dataclass(slots=True)
 class Transformation(ABC, Generic[T]):
     @abstractmethod
-    def apply(self, context: PipelineContext) -> T: ...
+    def apply(self, context: PipelineContext) -> T:
+        ...
+
     def reset(self) -> None:
         pass
 
@@ -362,7 +377,9 @@ class Semantic(ABC, Generic[T]):
     @abstractmethod
     def process(
         self, context: PipelineContext, value: T, output_sink: OutputSink
-    ) -> None: ...
+    ) -> None:
+        ...
+
     def reset(self, output_sink: OutputSink) -> None:
         pass
 
@@ -377,28 +394,30 @@ class ButtonSemantic(Semantic[T]):
         self, context: PipelineContext, value: T, output_sink: OutputSink
     ) -> None:
         if context.event.phase is TouchPhase.DOWN:
-            (output_sink.mouse_down if self.mouse_button else output_sink.key_down)(
-                self.scancode
-            )
-            self._down = True
+            if not self._down:
+                (
+                    output_sink.mouse_down
+                    if self.mouse_button
+                    else output_sink.key_down
+                )(self.scancode)
+                self._down = True
 
         elif context.event.phase is TouchPhase.UP:
-            (output_sink.mouse_up if self.mouse_button else output_sink.key_up)(
-                self.scancode
-            )
-            self._down = False
+            self.reset(output_sink)
 
     def reset(self, output_sink: OutputSink) -> None:
-        if self._down:
-            (output_sink.mouse_up if self.mouse_button else output_sink.key_up)(
-                self.scancode
-            )
-            self._down = False
+        if not self._down:
+            return
+
+        self._down = False
+        (output_sink.mouse_up if self.mouse_button else output_sink.key_up)(
+            self.scancode
+        )
 
 
 @dataclass(slots=True)
 class DirectionalSemantic(Semantic[frozenset[int]]):
-    _active: frozenset[int] = field(init=False, default_factory=frozenset)
+    _active: set[int] = field(init=False, default_factory=set)
 
     def process(
         self, context: PipelineContext, value: frozenset[int], output_sink: OutputSink
@@ -407,16 +426,22 @@ class DirectionalSemantic(Semantic[frozenset[int]]):
             self.reset(output_sink)
             return
 
-        for key in self._active - value:
+        for key in tuple(self._active - value):
+            self._active.discard(key)
             output_sink.key_up(key)
+
         for key in value - self._active:
             output_sink.key_down(key)
-        self._active = value
+            self._active.add(key)
 
     def reset(self, output_sink: OutputSink) -> None:
-        for key in self._active:
+        if not self._active:
+            return
+
+        held = tuple(self._active)
+        self._active.clear()
+        for key in held:
             output_sink.key_up(key)
-        self._active = frozenset()
 
 
 @dataclass(slots=True)
@@ -471,9 +496,9 @@ class ToggleSemantic(Semantic[Unit]):
         self._start_pos = None
 
 
-# ---------------------------------------------------------------------------
+# ------------------------------------------------------------------
 # Pipeline with Touch Ownership & Priority Contract
-# ---------------------------------------------------------------------------
+# ------------------------------------------------------------------
 
 
 @dataclass(slots=True)
@@ -500,7 +525,14 @@ class Pipeline(Generic[T]):
 
     def reset(self, output_sink: OutputSink) -> None:
         for semantic in self.semantics:
-            semantic.reset(output_sink)
+            try:
+                semantic.reset(output_sink)
+            except Exception:
+                logger.exception(
+                    "Failed to reset semantic %r in pipeline",
+                    semantic,
+                )
+
         self.transformation.reset()
         self.origin.end()
         self._owned_contact = None
@@ -548,9 +580,9 @@ class Pipeline(Generic[T]):
         return True
 
 
-# ---------------------------------------------------------------------------
+# ------------------------------------------------------------------
 # Pipeline Configs
-# ---------------------------------------------------------------------------
+# ------------------------------------------------------------------
 
 
 @dataclass(slots=True)
