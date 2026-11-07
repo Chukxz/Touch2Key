@@ -35,7 +35,6 @@ class MouseMapper:
 
     def _clear(self, reason: str) -> None:
         logger.warning(reason)
-        self.touch_up()
         with self.engine_ref.lock:
             self.pipeline = None
 
@@ -135,8 +134,6 @@ class MouseMapper:
         )
 
         with self.engine_ref.lock:
-            if self.pipeline is not None:
-                self.pipeline.reset(self.output_sink)
             self.pipeline = pipeline
 
     def touch_up(self) -> None:
