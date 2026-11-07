@@ -50,7 +50,6 @@ from modules.database.repositories import DuplicateNameError
 from modules.gui.widgets.layouts_plotter_widget import LayoutsPlotterWidget
 from modules.scripts.adb_screen_capture import capture_android_screen
 from modules.utils import (
-    BEZEL,
     CIRCLE,
     DEADZONE_MAX,
     DEADZONE_MIN,
@@ -85,6 +84,7 @@ STATIC_HELP = (
     "<span style='color: palette(highlight);'>Esc</span> Cancel | "
     "<span style='color: palette(highlight);'>F6</span> Circle | "
     "<span style='color: palette(highlight);'>F7</span> Rect | "
+    "<span style='color: palette(highlight);'>F8</span> Discard Changes | "
     "<span style='color: palette(highlight);'>Del</span> Delete | "
     "<span style='color: palette(highlight);'>F2</span> Clear All | "
     "<span style='color: palette(highlight);'>F4</span> Overlays | "
@@ -367,17 +367,20 @@ class LayoutStudioPage(QWidget):
 
         canvas_layout.addWidget(status_box)
 
-        # Toolbar Row 1: Image management & overlay toggles & cancel
+        # Toolbar Row 1: Image management & overlay toggles & cancel & discard
         tools_row_1 = QHBoxLayout()
         self.select_image_btn = QPushButton("Select Image")
         self.capture_btn = QPushButton("Capture Screenshot")
         self.toggle_overlays_btn = QPushButton("Toggle Overlays (F4)")
         self.cancel_action_btn = QPushButton("Cancel (Esc)")
+        self.discard_btn = QPushButton("Discard Changes (F8)")
+        self.discard_btn.setToolTip("Revert the canvas to the last saved state")
 
         tools_row_1.addWidget(self.select_image_btn)
         tools_row_1.addWidget(self.capture_btn)
         tools_row_1.addWidget(self.toggle_overlays_btn)
         tools_row_1.addWidget(self.cancel_action_btn)
+        tools_row_1.addWidget(self.discard_btn)
         tools_row_1.addStretch()
         canvas_layout.addLayout(tools_row_1)
 
@@ -422,7 +425,7 @@ class LayoutStudioPage(QWidget):
         layout_form.addWidget(lbl_global)
         layout_form.addSpacing(10)
 
-        bezels_group = QGroupBox("System Bezels")
+        bezels_group = QGroupBox("Bezels")
         bezels_form = QFormLayout(bezels_group)
         self.top_bezel_spin = QDoubleSpinBox()
         self.top_bezel_spin.setRange(MIN_BEZEL_DP, MAX_BEZEL_DP)
@@ -592,6 +595,7 @@ class LayoutStudioPage(QWidget):
         self.add_rect_btn.clicked.connect(lambda: self._start_draw_mode(RECTANGLE, 4))
         self.toggle_overlays_btn.clicked.connect(self.plotter_widget.toggle_visibility)
         self.cancel_action_btn.clicked.connect(self.plotter_widget.reset_state)
+        self.discard_btn.clicked.connect(self.plotter_widget.discard_changes)
         self.save_btn.clicked.connect(self._save)
         self.save_as_btn.clicked.connect(self._save_as_copy)
 
@@ -678,6 +682,7 @@ class LayoutStudioPage(QWidget):
         fatal = self.plotter_widget.is_fatal_state
         self.unsaved_label.setVisible(dirty)
         self.save_btn.setEnabled(dirty and not fatal)
+        self.discard_btn.setEnabled(dirty and not fatal)
 
         loaded_id = self.plotter_widget.loaded_layout_id
         for index in range(self.profile_list.count()):
@@ -708,6 +713,7 @@ class LayoutStudioPage(QWidget):
         self.select_image_btn.setEnabled(has_active)
         self.capture_btn.setEnabled(has_active)
         self.save_btn.setEnabled(self.plotter_widget.is_dirty and not fatal)
+        self.discard_btn.setEnabled(self.plotter_widget.is_dirty and not fatal)
 
     def _confirm_unsaved(
         self, action: str, discard_text: str = "Discard Changes"
@@ -1194,7 +1200,7 @@ class LayoutStudioPage(QWidget):
         )
         if confirm == QMessageBox.StandardButton.Yes:
             try:
-                # Keep the system bezels: deleting them would reset their thickness to the
+                # Keep the bezels: deleting them would reset their thickness to the
                 # default when the layout is next auto-healed.
                 store.zones.clear_non_bezel_zones(layout_id)
 

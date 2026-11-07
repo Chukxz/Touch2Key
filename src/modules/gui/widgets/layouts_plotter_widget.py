@@ -70,6 +70,43 @@ DEFAULT_EDGE_TOLERANCE = 5
 DEFAULT_VERTEX_TOLERANCE = 10
 DEFAULT_SPEC_MAX_RATIO = 0.3
 
+# Cursors shown over draggable artists. The open hand is the hover cursor and the closed
+# hand is used while a drag is in progress. LDIAG is "\" (top-left <-> bottom-right) and
+# RDIAG is "/" (top-right <-> bottom-left).
+# SIZEALL is a fallback cursor indicating dragging or resizing in any direction.
+CURSOR_ARROW = Qt.CursorShape.ArrowCursor
+CURSOR_DRAG = Qt.CursorShape.OpenHandCursor
+CURSOR_DRAGGING = Qt.CursorShape.ClosedHandCursor
+CURSOR_HOR = Qt.CursorShape.SizeHorCursor
+CURSOR_VER = Qt.CursorShape.SizeVerCursor
+CURSOR_LDIAG = Qt.CursorShape.SizeFDiagCursor
+CURSOR_RDIAG = Qt.CursorShape.SizeBDiagCursor
+CURSOR_SIZEALL = Qt.CursorShape.SizeAllCursor
+
+# Rectangle grab modes (see _DraggableRectangle) -> resize cursor.
+RECT_MODE_CURSORS = {
+    "top_left": CURSOR_LDIAG,
+    "bottom_right": CURSOR_LDIAG,
+    "top_right": CURSOR_RDIAG,
+    "bottom_left": CURSOR_RDIAG,
+    "left": CURSOR_HOR,
+    "right": CURSOR_HOR,
+    "top": CURSOR_VER,
+    "bottom": CURSOR_VER,
+}
+
+
+def _radial_cursor(dx: float, dy: float) -> Qt.CursorShape:
+    """Resize cursor for a point on a circle's rim. `dx`/`dy` are the pointer's offset from the centre in display pixels (y up, as matplotlib reports them)."""
+    angle = math.degrees(math.atan2(dy, dx)) % 180.0
+    if angle < 22.5 or angle >= 157.5:
+        return CURSOR_HOR
+    if angle < 67.5:
+        return CURSOR_RDIAG
+    if angle < 112.5:
+        return CURSOR_VER
+    return CURSOR_LDIAG
+
 
 def calculate_raw_rectangle(values: tuple[tuple[float, float], tuple[float, float]]):
     if len(values) < 2:
@@ -134,6 +171,8 @@ class _Draggable:
         self.plotter = plotter_ref
         self.cursor_manager = plotter_ref.cursor_manager
         self.is_shape = is_shape
+        # Cursor to show once a drag/resize starts; fixed at press time.
+        self.active_cursor: Qt.CursorShape = CURSOR_ARROW
 
         if is_shape:
             self.artist_id = "shape_" + str(entry_id)
@@ -190,6 +229,9 @@ class _Draggable:
     def _on_press(self, event) -> None:
         raise NotImplementedError()
 
+    def _on_press_helper(self, event) -> None:
+        raise NotImplementedError()
+
     def _on_motion(self, event) -> None:
         raise NotImplementedError()
 
@@ -202,6 +244,10 @@ class _Draggable:
     def _move(self, dx, dy) -> None:
         raise NotImplementedError()
 
+    def cursor_for_event(self, event, pressed: bool = False) -> Qt.CursorShape:
+        """Cursor for what the pointer would grab at `event` (drag, or a resize direction)."""
+        raise NotImplementedError()
+
 
 class _DraggableLabel(_Draggable):
     def __init__(self, entry_id: int, plotter_ref: LayoutsPlotterWidget):
@@ -210,6 +256,9 @@ class _DraggableLabel(_Draggable):
         self.shape_artist = self.plotter.shapes_artists[entry_id]
         self.canvas = self.plotter.canvas
         self.press = None
+
+    def cursor_for_event(self, event, pressed: bool = False) -> Qt.CursorShape:
+        return CURSOR_DRAGGING if pressed else CURSOR_DRAG
 
     def _on_press(self, event):
         if (
@@ -236,6 +285,8 @@ class _DraggableLabel(_Draggable):
             self.plotter.ignore_current_draggable_id_n -= 1
             return
 
+        self.active_cursor = self.cursor_for_event(event, pressed=True)
+
         x, y = self.label_artist.get_position()
         self.press = x, y, event.xdata, event.ydata, event.x, event.y
 
@@ -248,6 +299,8 @@ class _DraggableLabel(_Draggable):
         self.canvas.draw_idle()
 
     def _capture_background(self):
+        self.cursor_manager.set_custom_cursor(self.active_cursor)
+
         if (label_bbox := self.label_artist.get_bbox_patch()) is not None:
             label_bbox.set_edgecolor(ACTIVE_EDGE_COLOR)
             label_bbox.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
@@ -365,6 +418,8 @@ class _DraggableShape(_Draggable):
             self.plotter.ignore_current_draggable_id_n -= 1
             return
 
+        self.active_cursor = self.cursor_for_event(event, pressed=True)
+
         coords = self._on_press_shape_helper(event)
         if coords is not None:
             self.press = *coords, event.xdata, event.ydata, event.x, event.y
@@ -377,6 +432,8 @@ class _DraggableShape(_Draggable):
         self.canvas.draw_idle()
 
     def _capture_background(self):
+        self.cursor_manager.set_custom_cursor(self.active_cursor)
+
         self.shape_artist.set_edgecolor(ACTIVE_EDGE_COLOR)
         self.shape_artist.set_linewidth(DEFAULT_LARGE_LINE_WIDTH)
         self.shape_artist.set_animated(True)
@@ -468,6 +525,20 @@ class _DraggableCircle(_DraggableShape):
             )
             self.shape_artist.set_radius(new_r)
             self.plotter.shapes[self.entry_id]["r"] = new_r
+
+    def cursor_for_event(self, event, pressed: bool = False) -> Qt.CursorShape:
+        if not isinstance(self.shape_artist, Circle) or self.shape_artist.axes is None:
+            return CURSOR_ARROW
+
+        cx, cy = self.shape_artist.get_center()  # type: ignore
+        mode = self._get_circumference(event, cx, cy)
+
+        if mode == "resize":
+            cx_px, cy_px = self.shape_artist.axes.transData.transform((cx, cy))
+            return _radial_cursor(event.x - cx_px, event.y - cy_px)
+        if mode == "drag":
+            return CURSOR_DRAGGING if pressed else CURSOR_DRAG
+        return CURSOR_ARROW
 
     def _on_press_shape_helper(self, event):
         if not isinstance(self.shape_artist, Circle):
@@ -672,6 +743,20 @@ class _DraggableRectangle(_DraggableShape):
         self._update_rectangle_safe(
             x, y, self.shape_artist.get_width(), self.shape_artist.get_height()
         )
+
+    def cursor_for_event(self, event, pressed: bool = False) -> Qt.CursorShape:
+        if (
+            not isinstance(self.shape_artist, Rectangle)
+            or self.shape_artist.axes is None
+        ):
+            return CURSOR_ARROW
+
+        mode = self._get_corner_under_mouse(event) or self._get_edge_under_mouse(event)
+        if mode == None:
+            return CURSOR_SIZEALL
+        if mode == "drag":
+            return CURSOR_DRAGGING if pressed else CURSOR_DRAG
+        return RECT_MODE_CURSORS.get(mode, CURSOR_ARROW)
 
     def _on_press_shape_helper(self, event):
         if not isinstance(self.shape_artist, Rectangle):
@@ -1442,6 +1527,25 @@ class LayoutsPlotterWidget(QWidget):
 
         return True
 
+    def discard_changes(self) -> bool:
+        """Reverts the canvas to the last saved state (reloads the active layout from the database) and clears the dirty flag. Returns True if a reload happened."""
+        if self.is_fatal_state:
+            return False
+
+        if not self._dirty:
+            self.update_title("No unsaved changes to discard.", True)
+            return False
+
+        # A pending wheel-indicator rebind would otherwise survive the reload.
+        self.mouse_wheel_indicators.current_mouse_wheel_indicator = None
+
+        if not self.reload_active_layout():
+            return False
+
+        self._set_dirty(False)
+        self.update_title("Unsaved changes discarded.", True)
+        return True
+
     def _bezel_kwargs(self, is_top: bool):
         dp = self.top_bezel_dp if is_top else self.bottom_bezel_dp
         dpi = int(self.img_dpi) if self.img_dpi > 0 else BASELINE_DPI
@@ -1884,6 +1988,29 @@ class LayoutsPlotterWidget(QWidget):
 
         self.canvas.draw_idle()
 
+    def _find_hovered(self, event) -> Optional[tuple[int, _Draggable, str]]:
+        """Topmost draggable under the pointer as (entry_id, manager, 'label' | 'shape'). Labels win over shapes."""
+        for uid, mgr in self.labels_drag_managers.items():
+            if mgr.label_artist.get_visible() and mgr.label_artist.contains(event)[0]:
+                return uid, mgr, "label"
+        for uid, mgr in self.shapes_drag_managers.items():
+            if (
+                mgr.shape_artist
+                and mgr.shape_artist.get_visible()
+                and mgr.shape_artist.contains(event)[0]
+            ):
+                return uid, mgr, "shape"
+        return None
+
+    def _apply_hover_cursor(
+        self, hovering: Optional[tuple[int, _Draggable, str]], event
+    ) -> None:
+        """Drag/resize cursor for whatever the pointer is over, else the state cursor."""
+        if hovering is None:
+            self.cursor_manager.set_state_cursor(self.state)
+        else:
+            self.cursor_manager.set_custom_cursor(hovering[1].cursor_for_event(event))
+
     def _on_mouse_move(self, event):
         if self.is_fatal_state:
             return
@@ -1926,38 +2053,26 @@ class LayoutsPlotterWidget(QWidget):
             and event.button is None
             and event.inaxes == self.ax
         ):
-            if self.ignore_current_draggable_id_n > 0:
-                return
+            hovering = self._find_hovered(event)
 
-            hovering = None
-            for uid, mgr in self.labels_drag_managers.items():
-                if (
-                    mgr.label_artist.get_visible()
-                    and mgr.label_artist.contains(event)[0]
-                ):
-                    hovering = (uid, mgr, "label")
-                    break
-            if not hovering:
-                for uid, mgr in self.shapes_drag_managers.items():
+            if self.ignore_current_draggable_id_n <= 0:
+                if hovering:
+                    uid, mgr, m_type = hovering
                     if (
-                        mgr.shape_artist
-                        and mgr.shape_artist.get_visible()
-                        and mgr.shape_artist.contains(event)[0]
-                    ):
-                        hovering = (uid, mgr, "shape")
-                        break
-
-            if hovering:
-                uid, mgr, m_type = hovering
-                if (curr_id := m_type + "_" + str(uid)) != self.current_draggable_id:
+                        curr_id := m_type + "_" + str(uid)
+                    ) != self.current_draggable_id:
+                        self._partial_release_all()
+                        mgr._on_press_helper(event)
+                        self.current_draggable_id = curr_id
+                        self._indicate_current_draggable_id()
+                        self.fire_on_motion = False
+                else:
                     self._partial_release_all()
-                    mgr._on_press_helper(event)
-                    self.current_draggable_id = curr_id
-                    self._indicate_current_draggable_id()
-                    self.fire_on_motion = False
-            else:
-                self._partial_release_all()
-                self._overlay_title(True)
+                    self._overlay_title(True)
+
+            # Runs on every move (and after the title updates above, which reset the
+            # cursor), so the cursor follows the pointer from rim to interior to corner.
+            self._apply_hover_cursor(hovering, event)
 
     def _partial_release_all(self):
         """Clears hover state. Does not touch the sticky inspector selection."""
@@ -2031,6 +2146,12 @@ class LayoutsPlotterWidget(QWidget):
             self._select_entry(None)
 
         self.mouse_wheel_indicators._on_release_mouse_wheel()
+
+        # The title updates above reset the cursor; put the hover cursor back for wherever
+        # the pointer was released.
+        if event is not None and getattr(event, "inaxes", None) == self.ax:
+            self._apply_hover_cursor(self._find_hovered(event), event)
+
         self.canvas.draw_idle()
 
     def _select_current_draggable_id(self):
@@ -2053,7 +2174,7 @@ class LayoutsPlotterWidget(QWidget):
             return self.draggables_ids[0]
 
     def _indicate_current_draggable_id(self):
-        """Highlights the current artist and updates the status text. The entry is parsed from the id itself (the caller may be another artist's manager)."""
+        """Highlights the current artist and updates the status text. The entry is parsed from the id itself (the caller may be another artist's manager). The cursor is not touched here: update_title() resets it, and callers set the drag/resize cursor afterwards."""
         curr_id = self.current_draggable_id
         if curr_id is None:
             return
@@ -2091,8 +2212,6 @@ class LayoutsPlotterWidget(QWidget):
                     True,
                 )
             self.current_draggable = mgr
-
-        self.cursor_manager.set_custom_cursor(Qt.CursorShape.SizeAllCursor)
 
     def _finish_drag_cycle(self):
         self._indicate_current_draggable_id()
@@ -2211,6 +2330,8 @@ class LayoutsPlotterWidget(QWidget):
                 self.start_mode(CIRCLE, 3)
             elif key == "f7":
                 self.start_mode(RECTANGLE, 4)
+            elif key == "f8":
+                self.discard_changes()
             elif key == "f9":
                 self._print_data()
             elif key == "f12":

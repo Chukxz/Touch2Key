@@ -63,6 +63,14 @@ BORDER_COLOR = "#666666"
 BACKGROUND_COLOR = "#121212"
 GRIP_COLOR = "#888888"
 
+# Gesture feedback, shown only once the hold delay has elapsed and the window
+# is actually moving/resizing. Moves start from the keyboard body, so they tint
+# the background; resizes start from the border band, so they tint the border
+# and grip.
+BACKGROUND_MOVE_COLOR = "#1b3350"
+BORDER_RESIZE_COLOR = "#4a90e2"
+GRIP_ACTIVE_COLOR = "#ffffff"
+
 # Window move/resize begins only after the pointer has remained nearly still
 # for this long. Button presses do not use this delay.
 WINDOW_HOLD_INTERVAL_MS = 300
@@ -385,6 +393,10 @@ class InteractionController:
             self.state = InteractionState.WINDOW_MOVING
         elif self.state is InteractionState.WINDOW_RESIZE_PENDING:
             self.state = InteractionState.WINDOW_RESIZING
+        else:
+            return
+
+        self.keyboard.set_gesture_state(self.state)
 
     def _apply_resize(self, global_pos: QPoint) -> None:
         assert self.start_global is not None
@@ -434,6 +446,7 @@ class InteractionController:
         self.start_global = None
         self.start_geometry = None
         self.resize_edges = Qt.Edge(0)
+        self.keyboard.set_gesture_state(self.state)
 
 
 class VirtualKeyButton(QPushButton):
@@ -726,6 +739,9 @@ class VirtualKeyboard(QWidget):
 
             self._linux_key_map = LINUX_KEY_MAP
 
+        # Must exist before InteractionController, whose _reset() notifies us.
+        self._gesture_state = InteractionState.IDLE
+
         self._interactions = InteractionController(self)
 
         self.setWindowTitle("Touch2Key - Virtual Keyboard")
@@ -873,22 +889,35 @@ class VirtualKeyboard(QWidget):
         """Discard a pending local state without emitting an UP event."""
         self._pressed_keys.discard(key_code)
 
+    def set_gesture_state(self, state: InteractionState) -> None:
+        """Repaint when the controller enters or leaves an active gesture."""
+        if self._gesture_state is not state:
+            self._gesture_state = state
+            self.update()
+
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        moving = self._gesture_state is InteractionState.WINDOW_MOVING
+        resizing = self._gesture_state is InteractionState.WINDOW_RESIZING
+
+        background = BACKGROUND_MOVE_COLOR if moving else BACKGROUND_COLOR
+        border = BORDER_RESIZE_COLOR if resizing else BORDER_COLOR
+        grip = GRIP_ACTIVE_COLOR if resizing else GRIP_COLOR
 
         # Background plus border as one rounded rectangle. The stroke is
         # centred on its path, so inset by half the width to keep the whole
         # border inside the window.
         half = BORDER_WIDTH / 2.0
-        frame = QRectF(self.rect()).adjusted(half, half, -half, -half)
-        painter.setPen(QPen(QColor(BORDER_COLOR), BORDER_WIDTH))
-        painter.setBrush(QColor(BACKGROUND_COLOR))
+        frame = QRectF(self.rect()).adjusted(half, half, -half, -half)  
+        painter.setPen(QPen(QColor(border), BORDER_WIDTH))
+        painter.setBrush(QColor(background))
         painter.drawRoundedRect(frame, BORDER_RADIUS, BORDER_RADIUS)
 
         # Resize grip in the bottom-right corner, just inside the border.
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(QPen(QColor(GRIP_COLOR), 2))
+        painter.setPen(QPen(QColor(grip), 2))
 
         w, h = self.width(), self.height()
 
