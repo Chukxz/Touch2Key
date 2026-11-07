@@ -58,7 +58,7 @@ PACK_TYPEMATIC_STRUCT = struct.Struct("<B?If?H")
 BUTTON_PING = 0x0000
 KEEPALIVE_INTERVAL = 5.0
 
-# IPC Struct: 1 byte for state (1=Down, 0=Up), 2 bytes for Scancode
+# IPC Struct: 1 byte for state (0=Down, 1=Up), 2 bytes for Scancode
 VKB_STRUCT = struct.Struct("<BH")
 
 
