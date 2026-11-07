@@ -5,7 +5,11 @@ import queue
 import struct
 import threading
 from random import uniform as _uniform
-from time import monotonic as _monotonic, perf_counter_ns as _perf_counter_ns, sleep as _sleep
+from time import (
+    monotonic as _monotonic,
+    perf_counter_ns as _perf_counter_ns,
+    sleep as _sleep,
+)
 from typing import TYPE_CHECKING
 
 from modules.scripts.utils import (
@@ -53,7 +57,11 @@ if TYPE_CHECKING:
     from multiprocessing.connection import Connection
     from multiprocessing.queues import Queue
 
+# A held key/button is force-released only after this long with no traffic at
+# all. The bridge heartbeat (KEEPALIVE_INTERVAL) must be well below this.
 IDLE_RELEASE_S = 15.0
+# Poll granularity: bounds how long a worker takes to notice a dead sibling
+# thread or a closed pipe.
 POLL_S = 1.0
 
 
@@ -91,6 +99,7 @@ def keyboard_worker(
     log_queue: Queue,
     k_device_handle: int | None,
 ):
+    """Dedicated process for Windows Interception driver keyboard events with typematic engine."""
     if k_device_handle is None:
         log_queue.put("Keyboard worker has an invalid Interception keyboard handle.")
         return
@@ -103,6 +112,9 @@ def keyboard_worker(
     from interception.strokes import KeyStroke
 
     k_ctx = Interception()
+    # Full codes: the 0xE0 prefix stays in bits 8+, so extended and
+    # non-extended keys that share a low byte (numpad vs nav cluster,
+    # left vs right Ctrl/Alt) never collide.
     pressed_keys: set[int] = set()
     state = {"running": True}
 
@@ -111,15 +123,16 @@ def keyboard_worker(
         "delay_ns": 250_000_000,
         "repeat_rate": 0.0333,
         "ignore_typematic": False,
-        "non_spamming": set(),
+        "non_spamming": set(),  # masked (& 0xFF) codes
     }
 
+    # Items: (full_code, is_down)
     key_queue: queue.Queue = queue.Queue()
 
     def _stroke(code: int, up: bool):
         k_state = 1 if up else 0
         if code > 0xFF:
-            k_state |= 2
+            k_state |= 2  # E0 flag
         return KeyStroke(code & 0xFF, k_state)
 
     def key_injection_loop():
@@ -156,7 +169,7 @@ def keyboard_worker(
                                 repeat_key = None
                             k_ctx.send(k_device_handle, _stroke(code, False))
                             _sleep(_uniform(MIN_KEY_DWELL, MAX_KEY_DWELL))
-                    elif is_down is False:
+                    elif code in active:
                         active.discard(code)
                         if repeat_key == code:
                             repeat_key = None
@@ -217,9 +230,8 @@ def keyboard_worker(
                     continue
 
             elif pressed_keys and (_monotonic() - last_rx) >= IDLE_RELEASE_S:
-                log_queue.put(
-                    f"Keyboard Timeout: releasing {len(pressed_keys)} keys."
-                )
+                # Release through the injector so its repeat state stays in sync.
+                log_queue.put(f"Keyboard Timeout: releasing {len(pressed_keys)} keys.")
                 for code in list(pressed_keys):
                     key_queue.put((code, False))
                 pressed_keys.clear()
@@ -233,6 +245,8 @@ def keyboard_worker(
     state["running"] = False
     injector_thread.join(timeout=2.0)
 
+    # Interception does not track injected state: anything left down here
+    # would stay down at the driver after this process exits.
     for code in list(pressed_keys):
         try:
             k_ctx.send(k_device_handle, _stroke(code, True))
@@ -246,6 +260,12 @@ def mouse_worker(
     log_queue: Queue,
     m_device_handle: int | None,
 ):
+    """Dedicated process for Windows Interception driver mouse events.
+
+    Ordering contract: absolute moves and button events both arrive on the
+    button pipe and are executed by one thread, so "move, then click" is
+    ordered by construction. Relative motion and wheel use the motion pipe.
+    """
     if m_device_handle is None:
         log_queue.put("Mouse worker has an invalid Interception mouse handle.")
         return
@@ -262,6 +282,8 @@ def mouse_worker(
     state = {"running": True}
 
     def _send_abs(x: int, y: int) -> None:
+        # State must be 0: MOUSE_MOVE_ABSOLUTE (0x001) in the state field
+        # is also LEFT_BUTTON_DOWN, which would inject an untracked click.
         with send_lock:
             m_ctx.send(
                 m_device_handle,
@@ -328,9 +350,8 @@ def mouse_worker(
                         _sleep(CONSTANT_DWELL)
 
                 elif (
-                    (left_down or right_down or middle_down or btn4_down or btn5_down)
-                    and (_monotonic() - last_rx) >= IDLE_RELEASE_S
-                ):
+                    left_down or right_down or middle_down or btn4_down or btn5_down
+                ) and (_monotonic() - last_rx) >= IDLE_RELEASE_S:
                     with send_lock:
                         _release_all_buttons(
                             log_queue,
@@ -349,6 +370,7 @@ def mouse_worker(
             except EOFError:
                 state["running"] = False
             except Exception as e:
+                # Keep running: one bad event must not silently kill all clicks.
                 log_queue.put(f"Mouse Button Worker error: {e}.")
                 _sleep(0.05)
 
@@ -365,6 +387,9 @@ def mouse_worker(
 
     while state["running"]:
         try:
+            # A dead button thread must take the process down quickly so the
+            # bridge health check can respawn it, rather than leaving a
+            # half-alive worker that drops every click.
             if not button_thread.is_alive():
                 log_queue.put("Mouse Button thread exited; stopping mouse worker.")
                 state["running"] = False
@@ -416,6 +441,7 @@ def mouse_worker(
                 _sleep(_uniform(MIN_MOUSE_DWELL, MAX_MOUSE_DWELL))
 
             elif task_id == TASK_ABS:
+                # Legacy path: the bridge now sends ABS on the button pipe.
                 _, x, y = PACK_ABS_STRUCT.unpack_from(payload, 0)
                 _send_abs(x, y)
                 _sleep(CONSTANT_DWELL)
@@ -478,4 +504,4 @@ def mouse_worker(
             state["running"] = False
 
     state["running"] = False
-    button_timer_join = button_thread.join(timeout=2.0)
+    button_thread.join(timeout=2.0)
