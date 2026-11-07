@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from evdev import AbsInfo, ecodes
 
-from modules.scripts.utils import (
+from modules.utils import (
     ABS_CONST,
     BUTTON_4_DOWN,
     BUTTON_4_UP,

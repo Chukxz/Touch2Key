@@ -5,7 +5,7 @@ import re
 from typing import Optional
 from interception.constants import FilterKeyFlag, FilterMouseButtonFlag, KeyFlag
 from interception.interception import Interception
-from modules.scripts.utils import MODIFIER_KEYS, get_scancode_from_key
+from modules.utils import MODIFIER_KEYS, get_scancode_from_key
 from modules.scripts.log_manager import AppLogManager
 
 logger = logging.getLogger("modules.platforms.windows.query_interception_device")

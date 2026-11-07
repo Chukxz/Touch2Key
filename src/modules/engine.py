@@ -28,7 +28,7 @@ from modules.scripts.log_manager import AppLogManager
 from modules.platforms import get_platform
 from modules.scripts.runtime_info import TelemetryPublisher, read_process
 from modules.scripts.list_windows import select_window
-from modules.scripts.utils import (
+from modules.utils import (
     ADB_RATE_CAP_MAX,
     ADB_RATE_CAP_MIN,
     BASELINE_DPI,

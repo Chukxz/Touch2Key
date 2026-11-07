@@ -37,7 +37,7 @@ from modules.gui.pages.settings_page import SettingsPage
 from modules.scripts.log_manager import AppLogManager
 from modules.scripts.preflight import run as run_preflight
 from modules.scripts.show_adb_path import run as run_show_adb_path
-from modules.scripts.utils import (
+from modules.utils import (
     APP_NAME,
     MapperEventDispatcher,
     QtIpcMapperEventDispatcher,

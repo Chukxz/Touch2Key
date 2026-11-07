@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar, Callable
 
-from modules.scripts.utils import (
+from modules.utils import (
     BEZEL_DP_THICKNESS,
     CONSTRAINT_MODES,
     ORIGIN_MODES,

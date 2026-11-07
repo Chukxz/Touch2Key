@@ -9,7 +9,7 @@ from modules.core.pipeline_factory import (
     FixedJoystick,
     FloatingJoystick,
 )
-from modules.scripts.utils import get_scancode_from_key
+from modules.utils import get_scancode_from_key
 
 if TYPE_CHECKING:
     from modules.core.pipeline import Pipeline

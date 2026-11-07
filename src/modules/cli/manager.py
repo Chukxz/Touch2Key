@@ -34,7 +34,7 @@ from modules.cli.key_capture import (
     capture_sprint_key_cli,
     capture_performance_settings_cli,
 )
-from modules.scripts.utils import (
+from modules.utils import (
     BEZEL,
     BOTTOM_BEZEL_ID,
     CIRCLE,

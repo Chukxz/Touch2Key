@@ -1,4 +1,4 @@
-from .scripts.utils import (
+from .utils import (
     MapperEventDispatcher,
     MapperEvent,
     TouchEvent,

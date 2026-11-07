@@ -13,7 +13,7 @@ from PIL import Image
 
 from modules.database import store
 from modules.scripts.log_manager import AppLogManager
-from modules.scripts.utils import (
+from modules.utils import (
     ADB,
     BASELINE_DPI,
     IMAGES_FOLDER,

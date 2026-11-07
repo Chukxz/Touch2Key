@@ -7,7 +7,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
-from modules.scripts.utils import (
+from modules.utils import (
     ADB,
     CREATE_NO_WINDOW,
     DEF_MOVE_INTERVAL,
@@ -29,7 +29,7 @@ from modules.scripts.utils import (
 from modules.database import store
 
 if TYPE_CHECKING:
-    from modules.scripts.utils import MapperEventDispatcher
+    from modules.utils import MapperEventDispatcher
 
 logger = logging.getLogger("modules.core.touch_reader")
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from modules.scripts.utils import (
+from modules.utils import (
     BEZEL,
     BEZEL_DP_THICKNESS,
     TOP_BEZEL_ID,

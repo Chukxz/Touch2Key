@@ -8,7 +8,7 @@ from pathlib import Path
 
 import requests
 
-from modules.scripts.utils import BIN_FOLDER, UDEV_RULE_PATH
+from modules.utils import BIN_FOLDER, UDEV_RULE_PATH
 
 ADB_URL = "https://dl.google.com/android/repository/platform-tools-latest-linux.zip"
 

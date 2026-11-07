@@ -9,7 +9,7 @@ import shutil
 from pathlib import Path
 
 from modules.scripts.log_manager import AppLogManager
-from modules.scripts.utils import ADB
+from modules.utils import ADB
 
 logger = logging.getLogger("modules.scripts.check_adb")
 

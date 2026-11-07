@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, cast
 from modules.engine import Engine
 from modules.platforms import check_single_instance
 from modules.scripts.preflight import run as run_preflight
-from modules.scripts.utils import APP_NAME, DIAGNOSTICS_FOLDER, ICONS_FOLDER
+from modules.utils import APP_NAME, DIAGNOSTICS_FOLDER, ICONS_FOLDER
 from modules.scripts.log_manager import AppLogManager, initialize_cleanup, modify_qt_logging_rules_on_win32
 
 from PySide6.QtWidgets import QApplication

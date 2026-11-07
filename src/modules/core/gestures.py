@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 
-from modules.scripts.utils import BASELINE_DPI, Point, TouchEvent, TouchPhase, dp_to_px
+from modules.utils import BASELINE_DPI, Point, TouchEvent, TouchPhase, dp_to_px
 
 
 class GestureStatus(str, Enum):

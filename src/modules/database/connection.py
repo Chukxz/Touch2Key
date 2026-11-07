@@ -12,7 +12,7 @@ import threading
 from pathlib import Path
 
 from modules.database.migrations import run_migrations, set_fresh_install_version
-from modules.scripts.utils import DB_PATH, EXCLUDED_KEYS
+from modules.utils import DB_PATH, EXCLUDED_KEYS
 
 logger = logging.getLogger("modules.database.connection")
 

@@ -11,7 +11,7 @@ from time import (
 )
 from typing import TYPE_CHECKING
 
-from modules.scripts.utils import (
+from modules.utils import (
     BUTTON_4_DOWN,
     BUTTON_4_UP,
     BUTTON_5_DOWN,

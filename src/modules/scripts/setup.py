@@ -15,7 +15,7 @@ import subprocess
 from modules.scripts.log_manager import AppLogManager, modify_qt_logging_rules_on_win32
 
 from PySide6.QtWidgets import QApplication, QMessageBox
-from modules.scripts.utils import PROJECT_ROOT, ICONS_FOLDER
+from modules.utils import PROJECT_ROOT, ICONS_FOLDER
 
 logger = logging.getLogger("modules.scripts.setup")
 

@@ -42,7 +42,7 @@ from modules.platforms import (
     get_specific_qt_key,
 )
 from modules.scripts.runtime_info import attach, register_process, unregister_process
-from modules.scripts.utils import (
+from modules.utils import (
     ICONS_FOLDER,
     VISUALIZER_RUNTIME_FILE,
     CurveType,

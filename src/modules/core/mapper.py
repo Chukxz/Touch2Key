@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Optional
 
 from modules.database import store
 from modules.platforms import get_platform
-from modules.scripts.utils import (
+from modules.utils import (
     BOTTOM_BEZEL_ID,
     LONG_DELAY,
     M_BACK,

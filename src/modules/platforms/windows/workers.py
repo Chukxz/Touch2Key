@@ -5,14 +5,10 @@ import queue
 import struct
 import threading
 from random import uniform as _uniform
-from time import (
-    monotonic as _monotonic,
-    perf_counter_ns as _perf_counter_ns,
-    sleep as _sleep,
-)
+from time import monotonic as _monotonic, perf_counter_ns as _perf_counter_ns, sleep as _sleep
 from typing import TYPE_CHECKING
 
-from modules.scripts.utils import (
+from modules.utils import (
     BUTTON_4_DOWN,
     BUTTON_4_UP,
     BUTTON_5_DOWN,
@@ -151,7 +147,7 @@ def keyboard_worker(
                     code, is_down = key_queue.get(timeout=wait)
                 except queue.Empty:
                     code = None
-
+                    
                 if code is not None:
                     if is_down:
                         if code not in active:
@@ -231,7 +227,9 @@ def keyboard_worker(
 
             elif pressed_keys and (_monotonic() - last_rx) >= IDLE_RELEASE_S:
                 # Release through the injector so its repeat state stays in sync.
-                log_queue.put(f"Keyboard Timeout: releasing {len(pressed_keys)} keys.")
+                log_queue.put(
+                    f"Keyboard Timeout: releasing {len(pressed_keys)} keys."
+                )
                 for code in list(pressed_keys):
                     key_queue.put((code, False))
                 pressed_keys.clear()
@@ -350,8 +348,9 @@ def mouse_worker(
                         _sleep(CONSTANT_DWELL)
 
                 elif (
-                    left_down or right_down or middle_down or btn4_down or btn5_down
-                ) and (_monotonic() - last_rx) >= IDLE_RELEASE_S:
+                    (left_down or right_down or middle_down or btn4_down or btn5_down)
+                    and (_monotonic() - last_rx) >= IDLE_RELEASE_S
+                ):
                     with send_lock:
                         _release_all_buttons(
                             log_queue,

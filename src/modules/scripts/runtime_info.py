@@ -13,7 +13,7 @@ from typing import Any, Callable
 from pathlib import Path
 import psutil
 
-from modules.scripts.utils import READ_ATTEMPTS, RUNTIME_FILE, VISUALIZER_RUNTIME_FILE
+from modules.utils import READ_ATTEMPTS, RUNTIME_FILE, VISUALIZER_RUNTIME_FILE
 
 logger = logging.getLogger("modules.runtime_info")
 

@@ -52,10 +52,10 @@ from modules.scripts.runtime_info import (
     snapshot_age,
 )
 
-from modules.scripts.utils import parse_seq
+from modules.utils import parse_seq
 
 if TYPE_CHECKING:
-    from modules.scripts.utils import MapperEventDispatcher
+    from modules.utils import MapperEventDispatcher
     from modules.gui.main_window import EngineProcessController
 
 logger = logging.getLogger("modules.gui.dashboard_page")

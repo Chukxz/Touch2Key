@@ -23,7 +23,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from modules.database import store
 from modules.scripts.log_manager import AppLogManager, modify_qt_logging_rules_on_win32
-from modules.scripts.utils import (
+from modules.utils import (
     BIN_FOLDER,
     DATA_FOLDER,
     DIAGNOSTICS_FOLDER,

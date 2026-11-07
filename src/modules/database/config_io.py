@@ -9,7 +9,7 @@ import tomlkit
 
 from modules.database import store
 from modules.database.legacy_migration import migrate_all, migrate_json_layout
-from modules.scripts.utils import CIRCLE, JSONS_FOLDER, PROFILES_FOLDER, TOML_PATH
+from modules.utils import CIRCLE, JSONS_FOLDER, PROFILES_FOLDER, TOML_PATH
 
 logger = logging.getLogger("modules.database.config_io")
 

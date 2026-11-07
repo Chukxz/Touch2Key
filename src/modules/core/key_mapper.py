@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 from modules.core.pipeline_factory import Button
 from modules.core.pipeline_output import BridgeOutputSink
 from modules.database import store
-from modules.scripts.utils import (
+from modules.utils import (
     MOUSE_SCANCODES,
     get_scancode_from_key,
     look_counts_per_px,

@@ -13,7 +13,7 @@ from PySide6.QtCore import QCoreApplication, QTimer
 from PySide6.QtGui import QCloseEvent, QIcon
 from PySide6.QtWidgets import QApplication, QMainWindow
 
-from modules.scripts.utils import ICONS_FOLDER
+from modules.utils import ICONS_FOLDER
 from modules.database import store
 from modules.gui.pages.layout_studio_page import LayoutStudioPage
 from modules.scripts.log_manager import AppLogManager

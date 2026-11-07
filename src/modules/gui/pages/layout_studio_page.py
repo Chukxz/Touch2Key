@@ -49,7 +49,7 @@ from modules.database.config_io import (
 from modules.database.repositories import DuplicateNameError
 from modules.gui.widgets.layouts_plotter_widget import LayoutsPlotterWidget
 from modules.scripts.adb_screen_capture import capture_android_screen
-from modules.scripts.utils import (
+from modules.utils import (
     BEZEL,
     CIRCLE,
     DEADZONE_MAX,
@@ -73,7 +73,7 @@ from modules.scripts.utils import (
 )
 
 if TYPE_CHECKING:
-    from modules.scripts.utils import MapperEventDispatcher
+    from modules.utils import MapperEventDispatcher
 
 logger = logging.getLogger("modules.gui.layout_studio_page")
 
