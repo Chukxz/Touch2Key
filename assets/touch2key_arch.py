@@ -371,7 +371,7 @@ def build_architecture_digraph(
                         ),
                         (
                             "Debounced SpinBoxes",
-                            "_queue_save() batches sensitivity_x/y, deadzone, hysteresis, adb_rate_cap, pps, typematic_delay_ms/rate_hz -&gt; _flush_pending() every 250ms",
+                            "_queue_save() batches sensitivity_x/y, deadzone, hysteresis, adb_rate_cap, pps, typematic_delay_ns/rate_hz -&gt; _flush_pending() every 250ms",
                         ),
                         (
                             "Immediate Toggles",
@@ -570,7 +570,7 @@ def build_architecture_digraph(
                         ),
                         (
                             "_release_active_inputs()",
-                            "_dispatch_generation += 1 | clears _contact_owners | releases the cursor-fallback button (mouse_up(M_LEFT)) if a cursor contact is active | resets all active pipelines &amp; releases held keys/buttons. Also runs on every Menu/Game mode switch and on shutdown",
+                            "_dispatch_generation += 1 | clears _contact_owners | releases the cursor-fallback button (mouse_up(M_LEFT)) if a cursor contact is active | resets all active pipelines &amp; releases held keys/buttons (utilizing output_sink.release_all_held()). Also runs on every Menu/Game mode switch and on shutdown",
                         ),
                     ],
                     header_bg="#1d4ed8",
@@ -893,11 +893,15 @@ def build_architecture_digraph(
                 "BridgeOutputSinkNode",
                 _card(
                     "7.2 BridgeOutputSink &amp; Bezel Callbacks",
-                    "Sub-Pixel Mouse Accumulator &amp; Action Router",
+                    "Reference-Counted Key/Button Sinks &amp; Action Router",
                     [
                         (
-                            "Keys &amp; Clicks",
-                            "key_down/up(scancode) | mouse_down/up(0x9900..0x9904) -&gt; immediate Bridge call",
+                            "Reference Counting",
+                            "Guarded by _refs_lock; _key_refs and _mouse_refs track active holds per scancode. Bridge DOWN fires on 0-&gt;1 (send-before-count), UP fires on 1-&gt;0 (delete-before-send), and unmatched UP events are ignored.",
+                        ),
+                        (
+                            "release_all_held()",
+                            "Safety net called during state transitions/reloads; snapshots/clears refs and releases leaked holds with per-scancode exception isolation.",
                         ),
                         (
                             "Absolute Move",
