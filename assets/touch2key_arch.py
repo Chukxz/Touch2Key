@@ -570,7 +570,7 @@ def build_architecture_digraph(
                         ),
                         (
                             "_release_active_inputs()",
-                            "_dispatch_generation += 1 | clears _contact_owners | releases the cursor-fallback button (mouse_up(M_LEFT)) if a cursor contact is active | resets all active pipelines &amp; releases held keys/buttons (utilizing output_sink.release_all_held()). Also runs on every Menu/Game mode switch and on shutdown",
+                            "Ordered, idempotent teardown: (1) _dispatch_generation += 1 invalidates stale dispatch work | (2) clears _contact_owners and gesture ownership (TwoFingerTapTracker) | (3) releases cursor-fallback ownership (mouse_up(M_LEFT)) if a cursor contact is active | (4) resets the fallback pipeline and every regular pipeline, so each semantic releases its own references | (5) resets only genuinely independent mapper owners, each exactly once (never the same owner through two paths) | (6) output_sink.release_all_held() LAST as the safety net | (7) clears remaining transient state. Runs at every state boundary: Menu/Game visibility change, layout reload, and shutdown &amp; worker teardown",
                         ),
                     ],
                     header_bg="#1d4ed8",
@@ -634,7 +634,11 @@ def build_architecture_digraph(
                         ),
                         (
                             "Stage 5: Semantics",
-                            "ButtonSemantic (key/mouse) | DirectionalSemantic (WASD diff) | PointerSemantic (dx,dy) | ToggleSemantic (tap)",
+                            "ButtonSemantic (key/mouse; _down flag = owns its output) | DirectionalSemantic (WASD diff; owns a set of held keys) | PointerSemantic (dx,dy) | ToggleSemantic (tap)",
+                        ),
+                        (
+                            "Owner Reset Contract",
+                            "Each semantic releases only what it owns, through the output sink. ButtonSemantic releases only when _down is true. DirectionalSemantic releases removed keys, acquires newly required keys, and releases its whole owned set on UP/reset. reset() is idempotent, so repeated resets are harmless",
                         ),
                     ],
                     header_bg="#6b21a8",
@@ -883,7 +887,11 @@ def build_architecture_digraph(
                         ),
                         (
                             "UP Teardown",
-                            "If phase is UP: origin.end(), transformation.reset(), clears _owned_contact &amp; _prev_position",
+                            "If phase is UP: each semantic releases its own outputs, then origin.end(), transformation.reset(), clears _owned_contact &amp; _prev_position",
+                        ),
+                        (
+                            "Pipeline.reset()",
+                            "Resets each semantic so it releases its own references, then clears contact, gesture and transform state | Idempotent: safe to call repeatedly, and on a pipeline that never owned a contact",
                         ),
                     ],
                     header_bg="#6b21a8",
@@ -897,11 +905,15 @@ def build_architecture_digraph(
                     [
                         (
                             "Reference Counting",
-                            "Guarded by _refs_lock; _key_refs and _mouse_refs track active holds per scancode. Bridge DOWN fires on 0-&gt;1 (send-before-count), UP fires on 1-&gt;0 (delete-before-send), and unmatched UP events are ignored.",
+                            "Guarded by _refs_lock; _key_refs and _mouse_refs track active holds per scancode. Bridge DOWN fires on 0-&gt;1 (send-before-count), UP fires on 1-&gt;0 (delete-before-send), and unmatched UP events are ignored. Key and mouse refs are separate dictionaries; owners (ButtonSemantic, DirectionalSemantic) acquire and release only through the sink, and the engine and mappers never manipulate _key_refs / _mouse_refs directly.",
                         ),
                         (
                             "release_all_held()",
-                            "Safety net called during state transitions/reloads; snapshots/clears refs and releases leaked holds with per-scancode exception isolation.",
+                            "Last-resort safety net, always called LAST in _release_active_inputs() after every owner has reset itself (ref counts are never cleared before pipeline resets). Releases every remaining held key and mouse button, clears both reference-count dicts, and logs individual failures without abandoning the other releases (per-scancode exception isolation).",
+                        ),
+                        (
+                            "Direct-Bridge Paths (unchanged)",
+                            "Virtual keyboard keystrokes (VKB_STRUCT) and toggle-hotkey macro sequences write straight to the bridge, bypassing the sink's reference counts. They are outside the ownership model and are deliberately left untouched",
                         ),
                         (
                             "Absolute Move",
@@ -973,7 +985,7 @@ def build_architecture_digraph(
                         ),
                         (
                             "Bridge Process-Side",
-                            "bridge_lock serializes key/button/ABS writes; _motion_lock serializes REL/WHEEL writers | Heartbeat every KEEPALIVE_INTERVAL (5s) pings held keys and buttons | Respawn builds fresh pipes and swaps them in only if start() succeeds; a keyboard respawn releases keys and a mouse respawn releases buttons; | Win32 reload_devices() and shutdown() release everything and wait 0.1s before terminating workers",
+                            "bridge_lock serializes key/button/ABS writes; _motion_lock serializes REL/WHEEL writers | Heartbeat every KEEPALIVE_INTERVAL (5s) pings held keys and buttons | Respawn builds fresh pipes and swaps them in only if start() succeeds; a keyboard respawn releases keys and a mouse respawn releases buttons; | Win32 reload_devices() and shutdown() release everything and wait 0.1s before terminating workers | Engine shutdown runs _release_active_inputs() first, so worker teardown only releases what the ownership layer could not",
                         ),
                     ],
                     header_bg="#713f12",
