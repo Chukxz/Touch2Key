@@ -24,7 +24,18 @@ logger = logging.getLogger("modules.core.pipeline_output")
 
 @dataclass(slots=True)
 class BridgeOutputSink(OutputSink):
-    """Bridges Semantic stage outputs to the hardware driver Bridge."""
+    """Bridges Semantic stage outputs to the hardware driver Bridge.
+
+    Keys and mouse buttons are reference-counted per scancode. Several
+    pipelines can hold the same scancode at once (two zones mapped to the same
+    key, a joystick direction plus a button, sprint plus a sprint button). The
+    bridge sees a DOWN only when the first holder arrives and an UP only when
+    the last holder lets go, so one holder releasing never drops another's key.
+
+    Only sink callers are counted (pipelines and the menu-mode cursor click).
+    The virtual keyboard and the toggle-hotkey macro talk to the bridge
+    directly and are intentionally outside this accounting.
+    """
 
     bridge: AbstractBridge
 
@@ -39,6 +50,11 @@ class BridgeOutputSink(OutputSink):
     _acc_y: float = field(init=False, default=0.0)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
+    # Active holds per scancode. A scancode is present only while count >= 1.
+    _key_refs: dict[int, int] = field(init=False, default_factory=dict)
+    _mouse_refs: dict[int, int] = field(init=False, default_factory=dict)
+    _refs_lock: threading.Lock = field(default_factory=threading.Lock)
+
     def set_viewport_callback(
         self,
         callback: (
@@ -49,36 +65,126 @@ class BridgeOutputSink(OutputSink):
         """Dynamically binds or unbinds the viewport info provider from the Mapper."""
         self.callback = callback
 
+    # ------------------------------------------------------------------
+    # Keys (reference counted)
+    # ------------------------------------------------------------------
     def key_down(self, scancode: int) -> None:
-        self.bridge.key_down(scancode)
+        with self._refs_lock:
+            count = self._key_refs.get(scancode, 0)
+
+            # Send first, count after: if the bridge raises, no hold is
+            # recorded for a key that never went down.
+            if count == 0:
+                self.bridge.key_down(scancode)
+
+            self._key_refs[scancode] = count + 1
 
     def key_up(self, scancode: int) -> None:
-        self.bridge.key_up(scancode)
+        with self._refs_lock:
+            count = self._key_refs.get(scancode, 0)
+
+            if count <= 0:
+                # Nothing routed through the sink is holding this key.
+                return
+
+            if count > 1:
+                self._key_refs[scancode] = count - 1
+                return
+
+            # Last holder: forget the hold first so a bridge error cannot
+            # leave a permanent count behind.
+            del self._key_refs[scancode]
+            self.bridge.key_up(scancode)
+
+    # ------------------------------------------------------------------
+    # Mouse buttons (reference counted)
+    # ------------------------------------------------------------------
+    def _mouse_action(self, scancode: int, down: bool) -> Callable[[], None] | None:
+        bridge = self.bridge
+
+        if scancode == M_LEFT:
+            return bridge.left_click_down if down else bridge.left_click_up
+        if scancode == M_RIGHT:
+            return bridge.right_click_down if down else bridge.right_click_up
+        if scancode == M_MIDDLE:
+            return bridge.middle_click_down if down else bridge.middle_click_up
+        if scancode == M_BACK:
+            return bridge.button4_down if down else bridge.button4_up
+        if scancode == M_FORWARD:
+            return bridge.button5_down if down else bridge.button5_up
+
+        return None
 
     def mouse_down(self, scancode: int) -> None:
-        if scancode == M_LEFT:
-            self.bridge.left_click_down()
-        elif scancode == M_RIGHT:
-            self.bridge.right_click_down()
-        elif scancode == M_MIDDLE:
-            self.bridge.middle_click_down()
-        elif scancode == M_BACK:
-            self.bridge.button4_down()
-        elif scancode == M_FORWARD:
-            self.bridge.button5_down()
+        action = self._mouse_action(scancode, True)
+        if action is None:
+            return
+
+        with self._refs_lock:
+            count = self._mouse_refs.get(scancode, 0)
+
+            if count == 0:
+                action()
+
+            self._mouse_refs[scancode] = count + 1
 
     def mouse_up(self, scancode: int) -> None:
-        if scancode == M_LEFT:
-            self.bridge.left_click_up()
-        elif scancode == M_RIGHT:
-            self.bridge.right_click_up()
-        elif scancode == M_MIDDLE:
-            self.bridge.middle_click_up()
-        elif scancode == M_BACK:
-            self.bridge.button4_up()
-        elif scancode == M_FORWARD:
-            self.bridge.button5_up()
+        action = self._mouse_action(scancode, False)
+        if action is None:
+            return
 
+        with self._refs_lock:
+            count = self._mouse_refs.get(scancode, 0)
+
+            if count <= 0:
+                return
+
+            if count > 1:
+                self._mouse_refs[scancode] = count - 1
+                return
+
+            del self._mouse_refs[scancode]
+            action()
+
+    def release_all_held(self) -> int:
+        """Release every key and button the sink still counts as held.
+
+        A safety net for state boundaries. After every pipeline has reset, all
+        counts are normally zero and this does nothing. A non-zero result means
+        some holder never sent its release (for example a lost touch UP), and
+        the leaked hold is dropped here so it cannot outlive the boundary.
+        Returns the number of scancodes released.
+        """
+        released = 0
+
+        with self._refs_lock:
+            keys = list(self._key_refs)
+            buttons = list(self._mouse_refs)
+            self._key_refs.clear()
+            self._mouse_refs.clear()
+
+            for scancode in keys:
+                try:
+                    self.bridge.key_up(scancode)
+                    released += 1
+                except Exception:
+                    logger.exception("Failed to release leaked key %#x", scancode)
+
+            for scancode in buttons:
+                action = self._mouse_action(scancode, False)
+                if action is None:
+                    continue
+                try:
+                    action()
+                    released += 1
+                except Exception:
+                    logger.exception("Failed to release leaked button %#x", scancode)
+
+        return released
+
+    # ------------------------------------------------------------------
+    # Pointer movement
+    # ------------------------------------------------------------------
     def mouse_move_abs(self, dev_x: float, dev_y: float) -> None:
         """Converts oriented device pixels into PC target window physical pixels using the callback."""
         if self.callback is None:
