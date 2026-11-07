@@ -444,49 +444,60 @@ class Engine:
 
     def _release_active_inputs(self) -> None:
         """Clear pipeline ownership and release held outputs on a state boundary."""
+        # 1. Invalidate in-flight dispatch work across re-entrant callbacks.
         self._dispatch_generation += 1
+
+        # 2. Clear contact routing and gesture recognition state.
         self._contact_owners.clear()
         self.two_finger_tap_tracker.reset()
 
-        # A cursor-fallback press that is still down must be released here:
-        # once the contact state is cleared, its UP would be dropped and the
-        # OS left button would stay held (and be kept alive by the heartbeat).
-        if self._cursor_contact is not None and self.output_sink:
-            try:
-                self.output_sink.mouse_up(M_LEFT)
-            except Exception:
-                logger.exception("Failed to release cursor button on state transition")
-        self._cursor_contact = None
+        output_sink = self.output_sink
 
+        # 3. Release cursor fallback ownership and clear cursor transient state.
+        was_cursor_active = self._cursor_contact is not None
+        self._cursor_contact = None
         self._cursor_down_pos = None
         self._cursor_drag_started = False
+        self._cursor_down_time = 0.0
         self._cursor_slop_sq = 0
 
-        if self.fallback_mouse_pipeline and self.output_sink:
-            self.fallback_mouse_pipeline.reset(self.output_sink)
+        if was_cursor_active and output_sink is not None:
+            try:
+                output_sink.mouse_up(M_LEFT)
+            except Exception:
+                logger.exception(
+                    "Failed to release cursor button on state transition"
+                )
 
-        if self.output_sink:
-            for tier in self._tiers:
-                for pipeline in tier:
-                    try:
-                        pipeline.reset(self.output_sink)
-                    except Exception:
-                        logger.exception(
-                            "Failed to reset pipeline during state transition",
-                            exc_info=True,
-                        )
+        if output_sink is None:
+            return
 
-            if self.bezel_mapper:
-                self.bezel_mapper.release_all()
+        # 4. Reset fallback mouse pipeline (not stored in self._tiers).
+        if self.fallback_mouse_pipeline is not None:
+            try:
+                self.fallback_mouse_pipeline.reset(output_sink)
+            except Exception:
+                logger.exception(
+                    "Failed to reset fallback mouse pipeline during state transition",
+                    exc_info=True,
+                )
 
-            if self.key_mapper:
-                self.key_mapper.release_all()
+        # 5. Reset all regular pipelines once via self._tiers.
+        for tier in self._tiers:
+            for pipeline in tier:
+                try:
+                    pipeline.reset(output_sink)
+                except Exception:
+                    logger.exception(
+                        "Failed to reset pipeline during state transition",
+                        exc_info=True,
+                    )
 
-            if self.wheel_mapper:
-                self.wheel_mapper.touch_up()
+        # 6. Sweep any remaining leaked holds in the sink as a final safety net.
+        output_sink.release_all_held()
 
-            if self.mouse_mapper:
-                self.mouse_mapper.touch_up()
+        # 7. Clear remaining transient state in the sink.
+        output_sink.reset_mouse_accumulators()
 
     def _apply_visibility(self, visible: bool) -> None:
         with self.lock:
@@ -497,13 +508,13 @@ class Engine:
             self.is_visible = visible
             self._release_active_inputs()
 
-        try:
-            self.bridge.health_check()
-        except Exception:
-            logger.debug(
-                "Bridge health check failed during mode switch",
-                exc_info=True,
-            )
+    try:
+        self.bridge.health_check()
+    except Exception:
+        logger.debug(
+            "Bridge health check failed during mode switch",
+            exc_info=True,
+        )
 
     def _on_reload(self) -> None:
         """Reload engine and submapper pipelines in a single lock transaction."""
@@ -578,13 +589,6 @@ class Engine:
 
         if self.mouse_mapper and self.mouse_mapper.pipeline:
             all_pipelines.append(self.mouse_mapper.pipeline)
-
-            if (
-                self.fallback_mouse_pipeline is not None
-                and self.output_sink is not None
-            ):
-                self.fallback_mouse_pipeline.reset(self.output_sink)
-
             self.fallback_mouse_pipeline = (
                 self.mouse_mapper.get_fallback_mouse_pipeline()
             )
