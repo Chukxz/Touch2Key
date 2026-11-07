@@ -28,7 +28,6 @@ class BezelMapper:
 
     def _clear(self, reason: str) -> None:
         logger.warning(reason)
-        self.release_all()
         with self.engine_ref.lock:
             self.pipelines = []
 
@@ -72,8 +71,6 @@ class BezelMapper:
             )
 
         with self.engine_ref.lock:
-            for pipeline in self.pipelines:
-                pipeline.reset(self.output_sink)
             self.pipelines = new_pipelines
 
     def release_all(self) -> None:
