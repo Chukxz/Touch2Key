@@ -595,7 +595,7 @@ class LayoutStudioPage(QWidget):
         self.add_rect_btn.clicked.connect(lambda: self._start_draw_mode(RECTANGLE, 4))
         self.toggle_overlays_btn.clicked.connect(self.plotter_widget.toggle_visibility)
         self.cancel_action_btn.clicked.connect(self.plotter_widget.reset_state)
-        self.discard_btn.clicked.connect(self.plotter_widget.discard_changes)
+        self.discard_btn.clicked.connect(self._on_discard_requested) 
         self.save_btn.clicked.connect(self._save)
         self.save_as_btn.clicked.connect(self._save_as_copy)
 
@@ -606,6 +606,7 @@ class LayoutStudioPage(QWidget):
         self.plotter_widget.send_message.connect(self._on_plotter_message_received)
         self.plotter_widget.dirty_changed.connect(self._on_dirty_changed)
         self.plotter_widget.save_requested.connect(self._save)
+        self.plotter_widget.discard_requested.connect(self._on_discard_requested)
 
         # Inspector controls
         self.top_bezel_spin.valueChanged.connect(
@@ -777,7 +778,7 @@ class LayoutStudioPage(QWidget):
             return name
 
     # ------------------------------------------------------------------
-    # Save / Save As
+    # Save / Save As / Discard
     # ------------------------------------------------------------------
     def _save(self) -> bool:
         """Saves the canvas in place (no prompt). Returns True on success."""
@@ -803,6 +804,25 @@ class LayoutStudioPage(QWidget):
         if name is None:
             return False
         return self.plotter_widget.save_to_database(name, as_copy=True)
+
+    def _on_discard_requested(self) -> None:
+        """Asks for confirmation, then reverts the canvas to the last saved state."""
+        if self.plotter_widget.is_fatal_state or not self.plotter_widget.is_dirty:
+            self.plotter_widget.discard_changes()  # just shows the "nothing to discard" status
+            return
+
+        layout = self.plotter_widget.active_layout
+        name = layout.name if layout else "this layout"
+        confirm = QMessageBox.question(
+            self,
+            "Discard Changes",
+            f"Discard all unsaved changes to '{name}'?\n"
+            "The canvas will revert to the last saved state. This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirm == QMessageBox.StandardButton.Yes:
+            self.plotter_widget.discard_changes()
 
     def save_state(self, action: str = "closing") -> bool:
         """Called by MainWindow.save_all_pages (close, setup, uninstall).
