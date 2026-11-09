@@ -1237,6 +1237,7 @@ class LayoutsPlotterWidget(QWidget):
     send_message = Signal(str, str)
     dirty_changed = Signal(bool)
     save_requested = Signal()
+    discard_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None, standalone: bool = False):
         super().__init__(parent)
@@ -1528,7 +1529,11 @@ class LayoutsPlotterWidget(QWidget):
         return True
 
     def discard_changes(self) -> bool:
-        """Reverts the canvas to the last saved state (reloads the active layout from the database) and clears the dirty flag. Returns True if a reload happened."""
+        """Reverts the canvas to the last saved state (reloads the active layout from the database) and clears the dirty flag. Returns True if a reload happened.
+
+        This method does not prompt; callers that want a confirmation (the Layout Studio
+        page) ask first and only then call it.
+        """
         if self.is_fatal_state:
             return False
 
@@ -2331,7 +2336,8 @@ class LayoutsPlotterWidget(QWidget):
             elif key == "f7":
                 self.start_mode(RECTANGLE, 4)
             elif key == "f8":
-                self.discard_changes()
+                # The host page asks for confirmation, then calls discard_changes().
+                self.discard_requested.emit()
             elif key == "f9":
                 self._print_data()
             elif key == "f12":
@@ -2549,6 +2555,10 @@ class LayoutsPlotterWidget(QWidget):
             if bb is None:
                 return False
             (x1, y1), (x2, y2) = bb
+            # Normalise first: stored/imported rectangles may have swapped corners, and
+            # the minimum-size clamp below must grow the real extent, not collapse it.
+            x1, x2 = min(x1, x2), max(x1, x2)
+            y1, y2 = min(y1, y2), max(y1, y2)
             x2 = max(x2, x1 + DEFAULT_MIN_RECTANGLE_DIST)
             y2 = max(y2, y1 + DEFAULT_MIN_RECTANGLE_DIST)
             cx, cy, _, bb = calculate_raw_rectangle(((x1, y1), (x2, y2)))
