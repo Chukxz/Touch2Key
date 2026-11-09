@@ -444,16 +444,16 @@ class Engine:
 
     def _release_active_inputs(self) -> None:
         """Clear pipeline ownership and release held outputs on a state boundary."""
-        # 1. Invalidate in-flight dispatch work across re-entrant callbacks.
+        # Invalidate in-flight dispatch work across re-entrant callbacks.
         self._dispatch_generation += 1
 
-        # 2. Clear contact routing and gesture recognition state.
+        # Clear contact routing and gesture recognition state.
         self._contact_owners.clear()
         self.two_finger_tap_tracker.reset()
 
         output_sink = self.output_sink
 
-        # 3. Release cursor fallback ownership and clear cursor transient state.
+        # Release cursor fallback ownership and clear cursor transient state.
         was_cursor_active = self._cursor_contact is not None
         self._cursor_contact = None
         self._cursor_down_pos = None
@@ -465,14 +465,12 @@ class Engine:
             try:
                 output_sink.mouse_up(M_LEFT)
             except Exception:
-                logger.exception(
-                    "Failed to release cursor button on state transition"
-                )
+                logger.exception("Failed to release cursor button on state transition")
 
         if output_sink is None:
             return
 
-        # 4. Reset fallback mouse pipeline (not stored in self._tiers).
+        # Reset fallback mouse pipeline (not stored in self._tiers).
         if self.fallback_mouse_pipeline is not None:
             try:
                 self.fallback_mouse_pipeline.reset(output_sink)
@@ -482,7 +480,7 @@ class Engine:
                     exc_info=True,
                 )
 
-        # 5. Reset all regular pipelines once via self._tiers.
+        # Reset all regular pipelines once via self._tiers.
         for tier in self._tiers:
             for pipeline in tier:
                 try:
@@ -493,10 +491,10 @@ class Engine:
                         exc_info=True,
                     )
 
-        # 6. Sweep any remaining leaked holds in the sink as a final safety net.
+        # Sweep any remaining leaked holds in the sink as a final safety net.
         output_sink.release_all_held()
 
-        # 7. Clear remaining transient state in the sink.
+        # Clear remaining transient state in the sink.
         output_sink.reset_mouse_accumulators()
 
     def _apply_visibility(self, visible: bool) -> None:
@@ -549,6 +547,14 @@ class Engine:
 
             # Release active ownership and held outputs before rebuilding.
             self._release_active_inputs()
+
+            try:
+                self.bridge.health_check()
+            except Exception:
+                logger.debug(
+                    "Bridge health check failed during engine reload",
+                    exc_info=True,
+                )
 
             if self.mapper is not None:
                 self.mapper.reload()
@@ -1205,10 +1211,11 @@ class Engine:
             self._release_active_inputs()
 
         logger.info("Engine shutting down...")
-        logger.info(f"Final DOWN Count: {self.touch_event_counter.event_count_down}")
-        logger.info(f"Final MOVE Count: {self.touch_event_counter.event_count_move}")
-        logger.info(f"Final UP Count: {self.touch_event_counter.event_count_up}")
-        logger.info(f"Final ALL Count: {self.touch_event_counter.event_count}")
+        logger.info("Final Touch Event Counts:")
+        logger.info(f"  Final DOWN Count: {self.touch_event_counter.event_count_down}")
+        logger.info(f"  Final MOVE Count: {self.touch_event_counter.event_count_move}")
+        logger.info(f"  Final UP Count: {self.touch_event_counter.event_count_up}")
+        logger.info(f"  Final ALL Count: {self.touch_event_counter.event_count}")
 
         if not self.headless:
             try:

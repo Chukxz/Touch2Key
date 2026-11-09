@@ -386,7 +386,8 @@ class DashboardPage(QWidget):
         self, proc: psutil.Process
     ) -> tuple[float | None, float, float, int] | None:
         """(cpu %, rss MB, private MB, threads); cpu is None on the first sample
-        of a process (its baseline is being primed). None if the process is gone/inaccessible."""
+        of a process (its baseline is being primed). None if the process is gone/inaccessible.
+        """
         cached = self._procs.get(proc.pid)
         first = cached is None or cached != proc
         if first:
@@ -407,7 +408,7 @@ class DashboardPage(QWidget):
         except psutil.Error:
             return None
         return (None if first else cpu), rss_mb, priv_mb, threads
-    
+
     def _render_rate(
         self, engine_running: bool, snap: dict[str, Any] | None, has_visualizer: bool
     ) -> None:
@@ -464,11 +465,11 @@ class DashboardPage(QWidget):
             f"&nbsp;(alert below {_num(threshold)} PPS{threshold_note})",
             f"ADB rate cap: <b>{_num(cap)} Hz</b>{cap_note} &nbsp;|&nbsp; "
             f"Cursor: {'Visible' if snap.get('menu_mode') else 'Not Visible'}",
-            "Touch Events Count:",
-            f"    DOWN {num_normalizer(int(snap.get('downs', 0)))}",
-            f"    MOVE {num_normalizer(int(snap.get('moves', 0)))}",
-            f"    UP   {num_normalizer(int(snap.get('ups', 0)))}",
-            f"    ALL  {num_normalizer(int(snap.get('all', 0)))}",
+            "Touch Events Count: "
+            f"DOWN {num_normalizer(int(snap.get('downs', 0)))}, "
+            f"MOVE {num_normalizer(int(snap.get('moves', 0)))}, "
+            f"UP {num_normalizer(int(snap.get('ups', 0)))}, "
+            f"ALL {num_normalizer(int(snap.get('all', 0)))}",
             f"Worker respawns: Keyboard {resp.get('keyboard', 0)}, "
             f"Mouse {resp.get('mouse', 0)}",
             f"Virtual Kbd: {'Active' if vkb_pid else 'Not Active'}",
