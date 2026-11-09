@@ -508,13 +508,13 @@ class Engine:
             self.is_visible = visible
             self._release_active_inputs()
 
-    try:
-        self.bridge.health_check()
-    except Exception:
-        logger.debug(
-            "Bridge health check failed during mode switch",
-            exc_info=True,
-        )
+        try:
+            self.bridge.health_check()
+        except Exception:
+            logger.debug(
+                "Bridge health check failed during mode switch",
+                exc_info=True,
+            )
 
     def _on_reload(self) -> None:
         """Reload engine and submapper pipelines in a single lock transaction."""
@@ -1205,6 +1205,10 @@ class Engine:
             self._release_active_inputs()
 
         logger.info("Engine shutting down...")
+        logger.info(f"Final DOWN Count: {self.touch_event_counter.event_count_down}")
+        logger.info(f"Final MOVE Count: {self.touch_event_counter.event_count_move}")
+        logger.info(f"Final UP Count: {self.touch_event_counter.event_count_up}")
+        logger.info(f"Final ALL Count: {self.touch_event_counter.event_count}")
 
         if not self.headless:
             try:

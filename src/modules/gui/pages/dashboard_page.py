@@ -52,7 +52,7 @@ from modules.scripts.runtime_info import (
     snapshot_age,
 )
 
-from modules.utils import parse_seq
+from modules.utils import num_normalizer, parse_seq
 
 if TYPE_CHECKING:
     from modules.utils import MapperEventDispatcher
@@ -465,10 +465,10 @@ class DashboardPage(QWidget):
             f"ADB rate cap: <b>{_num(cap)} Hz</b>{cap_note} &nbsp;|&nbsp; "
             f"Cursor: {'Visible' if snap.get('menu_mode') else 'Not Visible'}",
             "Touch Events Count:",
-            f"    DOWN {snap.get('downs', 0)}",
-            f"    MOVE {snap.get('moves', 0)}",
-            f"    UP {snap.get('ups', 0)}",
-            f"    ALL {snap.get('all', 0)}",
+            f"    DOWN {num_normalizer(int(snap.get('downs', 0)))}",
+            f"    MOVE {num_normalizer(int(snap.get('moves', 0)))}",
+            f"    UP   {num_normalizer(int(snap.get('ups', 0)))}",
+            f"    ALL  {num_normalizer(int(snap.get('all', 0)))}",
             f"Worker respawns: Keyboard {resp.get('keyboard', 0)}, "
             f"Mouse {resp.get('mouse', 0)}",
             f"Virtual Kbd: {'Active' if vkb_pid else 'Not Active'}",
@@ -595,10 +595,10 @@ class DashboardPage(QWidget):
             _num(snap.get("rate_cap_hz")),
             _num(snap.get("pps_threshold")),
             "visible" if snap.get("menu_mode") else "hidden",
-            snap.get("downs", 0),
-            snap.get("moves", 0),
-            snap.get("ups", 0),
-            snap.get("all", 0),
+            num_normalizer(int(snap.get("downs", 0))),
+            num_normalizer(int(snap.get("moves", 0))),
+            num_normalizer(int(snap.get("ups", 0))),
+            num_normalizer(int(snap.get("all", 0))),
             resp.get("keyboard", 0),
             resp.get("mouse", 0),
             "on" if workers.get("vkb") is not None else "off",

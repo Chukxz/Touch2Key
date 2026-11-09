@@ -54,7 +54,7 @@ from modules.utils import (
 )
 
 if TYPE_CHECKING:
-    from PySide6.QtWidgets import QGraphicsItem
+    from PySide6.QtWidgets import QGraphicsItem, QGraphicsLineItem
 
 
 logger = logging.getLogger("modules.gui.overlays.visualizer")
@@ -88,8 +88,6 @@ def _create_high_visibility_shadow() -> QGraphicsDropShadowEffect:
 
 
 class DiagnosticView(QGraphicsView):
-    mouse_pressed = Signal(str, int, int)  # (button name, x, y)
-    mouse_released = Signal(str)  # (button name)
     arrow_pressed = Signal()
     resized = Signal()
 
@@ -106,6 +104,8 @@ class DiagnosticView(QGraphicsView):
         self.pressed_mouse_buttons: set[str] = set()
         self.pressed_scancodes_list: list[int] = []
         self._hotkey_triggered = False
+        self.last_click_id = -1
+        self.indicator_line: QGraphicsLineItem | None = None
         self.setMouseTracking(True)
 
         self._scene = QGraphicsScene(self)
@@ -268,15 +268,30 @@ class DiagnosticView(QGraphicsView):
         label.setGraphicsEffect(_create_high_visibility_shadow())
         label.setPos(pos_x, pos_y + 15)
 
-        self._expire_later([ripple, label], RIPPLE_LIFETIME_MS)
+        if self.indicator_line is not None:
+            self._scene.removeItem(self.indicator_line)
+        self.indicator_line = self._scene.addLine(
+            x, y, pos_x, pos_y, QPen(QColor("#cccccc"), 2)
+        )
 
-    def _expire_later(self, items: list[QGraphicsItem], msec: int) -> None:
+        self.last_click_id += 1
+        self._expire_later([ripple, label], RIPPLE_LIFETIME_MS, self.last_click_id)
+
+    def _expire_later(
+        self, items: list[QGraphicsItem], msec: int, click_id: int
+    ) -> None:
         timer = QTimer(self)
         timer.setSingleShot(True)
 
         def _expire() -> None:
             for item in items:
                 self._remove_scene_item(item)
+
+            if self.last_click_id == click_id:
+                if self.indicator_line is not None:
+                    self._scene.removeItem(self.indicator_line)
+                    self.indicator_line = None
+
             timer.deleteLater()
 
         timer.timeout.connect(_expire)
@@ -388,7 +403,7 @@ class DiagnosticView(QGraphicsView):
 
         self.f_p_x = pos_x
         self.f_p_y = pos_y
-        self.active_buttons.setPos(pos_x + 20, pos_y - 20)
+        self._set_active_buttons_pos(pos_x, pos_y)
 
         super().mouseMoveEvent(event)
 
@@ -399,14 +414,27 @@ class DiagnosticView(QGraphicsView):
         pos = event.position().toPoint()
         btn_name, color = self._mouse_button_info(event.button())
 
-        self.set_labelled_ripple(pos.x(), pos.y(), btn_name, scancode, color)
-        self.mouse_pressed.emit(btn_name, pos.x(), pos.y())
+        self.pressed_mouse_buttons.add(btn_name)
+        mouse_x, mouse_y = pos.x(), pos.y()
 
+        self.data.append(
+            {
+                "x": mouse_x,
+                "y": mouse_y,
+                "type": f"{btn_name} Click",
+                "time": time.time(),
+            }
+        )
+
+        self.set_labelled_ripple(mouse_x, mouse_y, btn_name, scancode, color)
+        self._update_active_display()
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         btn_name, _color = self._mouse_button_info(event.button())
-        self.mouse_released.emit(btn_name)
+        self.pressed_mouse_buttons.discard(btn_name)
+
+        self._update_active_display()
         super().mouseReleaseEvent(event)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
@@ -488,13 +516,8 @@ class DiagnosticView(QGraphicsView):
         )
 
         self.set_labelled_ripple(mouse_x, mouse_y, key_name, scancode, "red")
-
         self._update_active_display()
         super().keyPressEvent(event)
-
-    def focusOutEvent(self, event) -> None:
-        self._clear_pressed_state()
-        super().focusOutEvent(event)
 
     def keyReleaseEvent(self, event: QKeyEvent) -> None:
         if event.isAutoRepeat():
@@ -525,6 +548,10 @@ class DiagnosticView(QGraphicsView):
         self._update_active_display()
         super().keyReleaseEvent(event)
 
+    def focusOutEvent(self, event) -> None:
+        self._clear_pressed_state()
+        super().focusOutEvent(event)
+
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
@@ -534,8 +561,6 @@ class MainWindow(QMainWindow):
         self.setWindowOpacity(0.4)
 
         self.view = DiagnosticView(self)
-        self.view.mouse_pressed.connect(self._on_mouse_pressed)
-        self.view.mouse_released.connect(self._on_mouse_released)
         self.view.arrow_pressed.connect(self._update_instruction_text)
         self.view.resized.connect(self._position_instruction)
         self.setCentralWidget(self.view)
@@ -577,22 +602,6 @@ class MainWindow(QMainWindow):
         x = (viewport.width() - bounds.width()) * 0.5
         y = (viewport.height() - bounds.height()) * 0.2
         instruction.setPos(x, y)
-
-    def _on_mouse_pressed(self, btn_name: str, x: int, y: int) -> None:
-        self.view.pressed_mouse_buttons.add(btn_name)
-        self.view.data.append(
-            {
-                "x": x,
-                "y": y,
-                "type": f"{btn_name} Click",
-                "time": time.time(),
-            }
-        )
-        self.view._update_active_display()
-
-    def _on_mouse_released(self, btn_name: str) -> None:
-        self.view.pressed_mouse_buttons.discard(btn_name)
-        self.view._update_active_display()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.isAutoRepeat():

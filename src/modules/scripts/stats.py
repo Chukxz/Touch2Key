@@ -16,6 +16,8 @@ from typing import Any
 
 import psutil
 
+from modules.utils import num_normalizer
+
 from modules.scripts.runtime_info import (
     STALE_AFTER_S,
     attach,
@@ -78,8 +80,10 @@ def _summary_lines(snap: dict[str, Any]) -> list[str]:
     ]
 
     parts_2 = [
-        f"Touch Events: DOWN {snap.get('downs', 0)}, MOVE {snap.get('moves', 0)}, "
-        f"UP {snap.get('ups', 0)}, ALL {snap.get('all', 0)}",
+        f"Touch Events: DOWN {num_normalizer(int(snap.get('downs', 0)))}",
+        f"MOVE {num_normalizer(int(snap.get('moves', 0)))}",
+        f"UP {num_normalizer(int(snap.get('ups', 0)))}",
+        f"ALL {num_normalizer(int(snap.get('all', 0)))}",
     ]
 
     parts_3 = [
@@ -105,12 +109,8 @@ def _format_table(stamp: str, uptime: str, rows: list[dict[str, Any]]) -> list[s
     lines: list[str] = []
     # Header definitions:
     # ROLE: 12 (left) | PID: 7 (right) | CPU: 7 (right) | RSS: 10 (right) | PRIV: 10 (right) | THR: 4 (right)
-    header = (
-        f"{stamp}  {'ROLE':<12} {'PID':>7}  {'CPU':>7}  {'RSS':>10}  {'PRIV':>10}  {'THR':>4}"
-    )
-    divider = (
-        f"{stamp}  {'-'*12} {'-'*7}  {'-'*7}  {'-'*10}  {'-'*10}  {'-'*4}"
-    )
+    header = f"{stamp}  {'ROLE':<12} {'PID':>7}  {'CPU':>7}  {'RSS':>10}  {'PRIV':>10}  {'THR':>4}"
+    divider = f"{stamp}  {'-'*12} {'-'*7}  {'-'*7}  {'-'*10}  {'-'*10}  {'-'*4}"
 
     for r in rows:
         role = r["role"]

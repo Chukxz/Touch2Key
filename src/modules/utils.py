@@ -1194,7 +1194,7 @@ def wireless_connect(device: str | None = None, continuous: bool = True):
         except Exception:
             if continuous:
                 time.sleep(SHORT_DELAY)
-                # If the caller didn't ask for a specific device, clear it 
+                # If the caller didn't ask for a specific device, clear it
                 # so we can auto-discover the new one instead of loop-failing
                 if requested_device is None:
                     device = None
@@ -1434,3 +1434,19 @@ def parse_seq(val: str | None, sep: str | None = None) -> list[str]:
     if not val or not val.strip():
         return []
     return [k.strip().lower() for k in val.split(sep) if k.strip()]
+
+
+def num_normalizer(val: int, max_digits=10):
+    """
+    Normalizes a number to a string with a maximum number of `max_digits`.
+    If the number exceeds `max_digits`, it will be expressed in scientific notation.
+    Positive numbers are suffixed with a space `" "`.
+    """
+
+    digits_n = len(str(abs(val)))
+    suffix = "" if val < 0 else " "
+
+    if digits_n > max_digits:
+        return f"{val:.{max_digits - 1}e}{suffix}"
+    else:
+        return f"{val}{suffix}"
