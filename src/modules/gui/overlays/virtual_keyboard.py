@@ -339,11 +339,17 @@ class InteractionController:
         if self.state is InteractionState.IDLE:
             return
 
+        # Every non-idle window state is entered through begin_window_gesture(),
+        # which sets both of these. If they are missing, the state is corrupt:
+        # drop the gesture rather than act on it.
+        if self.start_global is None or self.start_geometry is None:
+            self.cancel()
+            return
+
         if self.state in (
             InteractionState.WINDOW_MOVE_PENDING,
             InteractionState.WINDOW_RESIZE_PENDING,
         ):
-            assert self.start_global is not None
             delta = global_pos - self.start_global
 
             if (
@@ -356,9 +362,6 @@ class InteractionController:
             return
 
         if self.state is InteractionState.WINDOW_MOVING:
-            assert self.start_global is not None
-            assert self.start_geometry is not None
-
             delta = global_pos - self.start_global
             self.keyboard.move(self.start_geometry.topLeft() + delta)
             return
@@ -399,8 +402,8 @@ class InteractionController:
         self.keyboard.set_gesture_state(self.state)
 
     def _apply_resize(self, global_pos: QPoint) -> None:
-        assert self.start_global is not None
-        assert self.start_geometry is not None
+        if self.start_global is None or self.start_geometry is None:
+            return
 
         delta = global_pos - self.start_global
         start = self.start_geometry
@@ -910,7 +913,7 @@ class VirtualKeyboard(QWidget):
         # centred on its path, so inset by half the width to keep the whole
         # border inside the window.
         half = BORDER_WIDTH / 2.0
-        frame = QRectF(self.rect()).adjusted(half, half, -half, -half)  
+        frame = QRectF(self.rect()).adjusted(half, half, -half, -half)
         painter.setPen(QPen(QColor(border), BORDER_WIDTH))
         painter.setBrush(QColor(background))
         painter.drawRoundedRect(frame, BORDER_RADIUS, BORDER_RADIUS)
