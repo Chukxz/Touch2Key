@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QEvent, QObject, Qt, QCoreApplication, QTimer
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
-    QApplication,
     QCheckBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -577,10 +576,22 @@ class SettingsPage(QWidget):
         self._refresh_hw_ui()
         self.load_settings()
 
-    def _app(self) -> QCoreApplication:
-        app = QApplication.instance()
-        assert app is not None  # a widget can't exist without one
-        return app
+    def _app(self) -> QCoreApplication | None:
+        return QCoreApplication.instance()
+
+    def _install_filter(self, event_filter: QObject) -> bool:
+        """Install an application-wide event filter. False if no app exists."""
+        app = self._app()
+        if app is None:
+            logger.error("No QCoreApplication instance; cannot install event filter")
+            return False
+        app.installEventFilter(event_filter)
+        return True
+
+    def _remove_filter(self, event_filter: QObject) -> None:
+        app = self._app()
+        if app is not None:
+            app.removeEventFilter(event_filter)
 
     def on_page_shown(self) -> None:
         self.refresh_state()
@@ -801,7 +812,7 @@ class SettingsPage(QWidget):
 
     def _cancel_captures(self) -> None:
         if self._single_key_filter is not None:
-            self._app().removeEventFilter(self._single_key_filter)
+            self._remove_filter(self._single_key_filter)
             self._single_key_filter.deleteLater()
             self._single_key_filter = None
 
@@ -824,12 +835,9 @@ class SettingsPage(QWidget):
         btn = self.sprint_key_btn
         lbl = self.sprint_key_label
 
-        lbl.setText("Press any key (Esc to cancel)...")
-        btn.setEnabled(False)
-
         def on_captured(key_name: str | None):
             if self._single_key_filter is not None:
-                self._app().removeEventFilter(self._single_key_filter)
+                self._remove_filter(self._single_key_filter)
                 self._single_key_filter.deleteLater()
                 self._single_key_filter = None
 
@@ -839,8 +847,14 @@ class SettingsPage(QWidget):
                 self.persist_binding(target_field, key_name)
             self.load_settings()
 
-        self._single_key_filter = KeyCaptureFilter(on_captured, self)
-        self._app().installEventFilter(self._single_key_filter)
+        key_filter = KeyCaptureFilter(on_captured, self)
+        if not self._install_filter(key_filter):
+            key_filter.deleteLater()
+            return
+
+        self._single_key_filter = key_filter
+        lbl.setText("Press any key (Esc to cancel)...")
+        btn.setEnabled(False)
         self.setFocus()
 
     def _on_clear_key(self, target_field: str) -> None:
@@ -854,17 +868,25 @@ class SettingsPage(QWidget):
 
         self._active_seq_row = row
         if self._sequence_filter is not None:
-            self._app().removeEventFilter(self._sequence_filter)
+            self._remove_filter(self._sequence_filter)
+            self._sequence_filter.deleteLater()
+            self._sequence_filter = None
 
-        self._sequence_filter = ContinuousSequenceFilter(
+        seq_filter = ContinuousSequenceFilter(
             key_callback=self._on_seq_key_captured, parent=self
         )
-        self._app().installEventFilter(self._sequence_filter)
+        if not self._install_filter(seq_filter):
+            seq_filter.deleteLater()
+            self._active_seq_row = None
+            row.stop_recording()
+            return
+
+        self._sequence_filter = seq_filter
         self.setFocus()
 
     def end_sequence_capture(self, row: KeySequenceRow) -> None:
         if self._sequence_filter is not None:
-            self._app().removeEventFilter(self._sequence_filter)
+            self._remove_filter(self._sequence_filter)
             self._sequence_filter.deleteLater()
             self._sequence_filter = None
 
