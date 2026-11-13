@@ -61,9 +61,16 @@ class WheelMapper:
 
         # Read pre-scaled device pixel boundaries directly from the snapshot
         inner_r = snap.wheel_radius
-        outer_r = snap.sprint_distance
         w = float(snap.width)
         h = float(snap.height)
+
+        # The stored sprint_distance is only meaningful when the layout has a sprint
+        # zone. Otherwise it is the DB default (10 px), which would clamp the stick
+        # to 10 px and make sprint fire almost immediately. With outer_r = 0 the
+        # factories fall back to inner_radius for the clamp/leash, and
+        # JoystickTransform disables sprint (radius <= 0).
+        has_sprint = snap.has_sprint
+        outer_r = snap.sprint_distance if has_sprint else 0.0
 
         if settings.left_handed:
             half_screen_region = RectangularRegion(Point(w / 2.0, 0.0), Point(w, h))
@@ -76,9 +83,11 @@ class WheelMapper:
         )
         sprint = (
             get_scancode_from_key(settings.sprint_key)
-            if settings.sprint_key is not None
+            if has_sprint and settings.sprint_key is not None
             else None
         )
+        if settings.sprint_key is not None and not has_sprint:
+            logger.info("Layout has no sprint zone; sprint is disabled.")
 
         center = wheel.center
         up, left, down, right = snap.wheel_keys
