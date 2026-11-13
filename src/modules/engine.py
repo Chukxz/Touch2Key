@@ -595,6 +595,8 @@ class Engine:
 
         if self.mouse_mapper and self.mouse_mapper.pipeline:
             all_pipelines.append(self.mouse_mapper.pipeline)
+
+        if self.mouse_mapper:
             self.fallback_mouse_pipeline = (
                 self.mouse_mapper.get_fallback_mouse_pipeline()
             )
@@ -806,7 +808,8 @@ class Engine:
 
         # DOWN Phase: evaluate sorted tiers in strict precedence order.
         if event.phase is TouchPhase.DOWN:
-            for tier in self._tiers or self._build_pipeline_tiers():
+            # Iterate the prebuilt tiers only.
+            for tier in self._tiers:
                 claimed: list[Pipeline] = []
                 allow_multi = bool(getattr(tier[0], "allow_multi_claim", False))
 
