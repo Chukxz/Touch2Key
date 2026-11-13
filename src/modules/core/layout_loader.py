@@ -94,8 +94,6 @@ class LayoutLoader:
 
     Mappers read `loader.snapshot` (a single atomic attribute read) instead of
     hitting the database themselves, so every mapper sees the same layout.
-    ON_RELOAD callbacks run in registration order, and this loader is created
-    before any mapper, so the snapshot is always fresh when they rebuild.
     """
 
     def __init__(self, dispatcher: MapperEventDispatcher, touch_reader: TouchReader):
