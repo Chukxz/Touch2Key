@@ -125,17 +125,20 @@ class Mapper:
         self.bridge.set_respawn_callback(self._on_worker_respawn)
 
     def reload(self) -> None:
-        settings = store.settings.get()
-        layout = store.get_active_layout()
-        if layout is None:
+        loader = self.engine_ref.layout_loader
+        snap = loader.snapshot if loader is not None else None
+
+        if snap is None or snap.layout is None:
             logger.warning(
                 "No active layout found in SQLite database. Mapper configuration update aborted."
             )
             return
 
-        self.device_width = layout.width
-        self.device_height = layout.height
-        self.dpi = layout.dpi
+        settings = snap.settings
+
+        self.device_width = snap.width
+        self.device_height = snap.height
+        self.dpi = snap.dpi
         self.toggle_hotkeys_str = settings.toggle_hotkeys or ""
 
         if settings.pps_alert_threshold > 0:
