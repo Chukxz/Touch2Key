@@ -153,7 +153,10 @@ class BridgeOutputSink(OutputSink):
         counts are normally zero and this does nothing. A non-zero result means
         some holder never sent its release (for example a lost touch UP), and
         the leaked hold is dropped here so it cannot outlive the boundary.
-        Returns the number of scancodes released.
+
+        If a bridge release fails, the hold is restored with a count of 1 so
+        the next sweep retries it instead of leaving the key physically down
+        with no record. Returns the number of scancodes actually released.
         """
         released = 0
 
@@ -169,6 +172,7 @@ class BridgeOutputSink(OutputSink):
                     released += 1
                 except Exception:
                     logger.exception("Failed to release leaked key %#x", scancode)
+                    self._key_refs[scancode] = 1
 
             for scancode in buttons:
                 action = self._mouse_action(scancode, False)
@@ -179,6 +183,7 @@ class BridgeOutputSink(OutputSink):
                     released += 1
                 except Exception:
                     logger.exception("Failed to release leaked button %#x", scancode)
+                    self._mouse_refs[scancode] = 1
 
         return released
 
