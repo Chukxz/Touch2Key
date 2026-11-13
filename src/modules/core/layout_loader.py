@@ -22,6 +22,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("modules.core.layout_loader")
 
+# SEMANTIC_MODES index of the pointer-only semantic (a zone that only moves the
+# camera and presses nothing). The layout plotter imports this so it can preserve
+# it on save.
 POINTER_SEMANTIC_IDX = 2
 # up, left, down, right (W, A, S, D)
 _DEFAULT_WHEEL_KEYS: tuple[int, int, int, int] = (0x11, 0x1E, 0x1F, 0x20)
@@ -30,7 +33,8 @@ _WHEEL_KEY_NAMES = ("up", "left", "down", "right")
 
 @dataclass(frozen=True, slots=True)
 class ZoneData:
-    """One zone in DEVICE PIXELS (the layout's own coordinate space)."""
+    """One zone in DEVICE PIXELS (scaled from the layout's coordinate space by
+    LayoutLoader)."""
 
     id: int
     scancode: int
@@ -80,12 +84,16 @@ class LayoutSnapshot:
     dpi: int = 160
     wheel_radius: float = 0.0
     sprint_distance: float = 0.0
+    # True only when the layout actually contains a sprint zone. Without one,
+    # sprint_distance is just the stored default and must not enable sprint.
+    has_sprint: bool = False
 
     keys: tuple[ZoneData, ...] = ()  # circle/rect zones, wheel and sprint excluded
     bezels: tuple[ZoneData, ...] = ()
     wheel: ZoneData | None = None
     wheel_keys: tuple[int, int, int, int] = _DEFAULT_WHEEL_KEYS
-    look_zone: ZoneData | None = None  # first zone whose semantic is POINTER
+    # First pointer-only zone (semantic POINTER_SEMANTIC_IDX); extras are ignored.
+    look_zone: ZoneData | None = None
 
 
 class LayoutLoader:
@@ -144,7 +152,7 @@ class LayoutLoader:
         _, _, _, priority = helper.get_region_config()
         sem_idx, _, pointer = helper.get_semantic_config()
         _, _, sens_x, sens_y, deadzone, hysteresis = helper.get_transform_config()
-        
+
         sr = min(sx, sy)
         return ZoneData(
             id=zone.id,
@@ -189,9 +197,11 @@ class LayoutLoader:
         wheel: ZoneData | None = None
         wheel_keys = _DEFAULT_WHEEL_KEYS
         look_zone: ZoneData | None = None
+        has_sprint = False
 
         for zone in zones:
             if zone.scancode == SPRINT_DISTANCE_CODE:
+                has_sprint = True
                 continue
 
             data = self._to_zone_data(zone, sx, sy)
@@ -211,6 +221,13 @@ class LayoutLoader:
             if data.semantic_idx == POINTER_SEMANTIC_IDX:
                 if look_zone is None:
                     look_zone = data
+                else:
+                    logger.warning(
+                        "Ignoring extra pointer zone '%s' (id=%d); "
+                        "only the first one is used.",
+                        zone.name,
+                        zone.id,
+                    )
                 continue
 
             keys.append(data)
@@ -223,6 +240,7 @@ class LayoutLoader:
             dpi=dev_dpi,
             wheel_radius=scaled_wheel_radius,
             sprint_distance=scaled_sprint_distance,
+            has_sprint=has_sprint,
             keys=tuple(keys),
             bezels=tuple(bezels),
             wheel=wheel,
