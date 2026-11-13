@@ -78,10 +78,17 @@ def FixedJoystick(
     priority: int = 0,
     creation_id: int = 0,
 ) -> Pipeline[frozenset[int]]:
+    effective_radius = (
+        outer_radius
+        if outer_radius > 0.0
+        else (
+            inner_radius if inner_radius > 0.0 else float(dp_to_px(60.0, BASELINE_DPI))
+        )
+    )
     return Pipeline(
         region=CircularRegion(center=center, radius=inner_radius),
         origin=FixedOrigin(position=center),
-        constraint=RadialConstraint(radius=outer_radius),
+        constraint=RadialConstraint(radius=effective_radius),
         transformation=JoystickTransform(
             dead_zone=dead_zone,
             radius=outer_radius,
