@@ -250,7 +250,7 @@ class TouchReader:
     def get_rotation(self) -> int:
         with self.rotation_lock:
             return self.rotation
-            
+
     def get_oriented_dimensions(self) -> tuple[int, int]:
         """
         Returns the current dimensions of the device's touch output,
@@ -259,7 +259,7 @@ class TouchReader:
         """
         with self.rotation_lock:
             rot = self.rotation
-            
+
         # rot 1 and 3 are landscape; 0 and 2 are portrait
         if rot in (1, 3):
             return self.portrait_h, self.portrait_w
@@ -300,7 +300,7 @@ class TouchReader:
             self.width, self.height = res
             self.portrait_w = min(res)
             self.portrait_h = max(res)
-            
+
         self.dpi = get_dpi(self.device)
 
         real_slots, self.max_x, self.max_y = self._get_device_bounds_and_slots()

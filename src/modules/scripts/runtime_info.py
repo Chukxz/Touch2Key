@@ -272,7 +272,7 @@ def labeled_processes(
             role = roles.get(child.pid, "other")
             out.append((role, child))
             seen.add(child.pid)
-    
+
         # Inspect visualizer reported by the engine's snapshot
         visualizer_pid = workers.get("visualizer")
         if visualizer_pid and visualizer_pid not in seen:

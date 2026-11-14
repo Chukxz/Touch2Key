@@ -34,7 +34,9 @@ class BezelMapper:
     def rebuild_pipelines(self) -> None:
         loader = self.engine_ref.layout_loader
         if loader is None:
-            self._clear("Layout Loader not initialized. BezelMapper pipelines will be empty.")
+            self._clear(
+                "Layout Loader not initialized. BezelMapper pipelines will be empty."
+            )
             return
 
         snap = loader.snapshot

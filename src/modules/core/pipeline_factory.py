@@ -32,7 +32,6 @@ from modules.utils import (
     Point,
 )
 
-
 # ---------------------------------------------------------------------------
 # Factory Constructors
 # ---------------------------------------------------------------------------
@@ -220,9 +219,9 @@ def Bezel(
     creation_id: int = 0,
 ) -> Pipeline[Unit]:
     """Factory for standardizing Bezel/System boundary zones defined in the layout."""
-    
+
     max_drift_px = float(dp_to_px(max_drift_dp, dpi))
-    
+
     return Pipeline(
         region=region,
         origin=FixedOrigin(Point(0.0, 0.0)),

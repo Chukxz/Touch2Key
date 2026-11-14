@@ -41,7 +41,9 @@ class WheelMapper:
     def rebuild_pipeline(self) -> None:
         loader = self.engine_ref.layout_loader
         if loader is None:
-            self._clear("Layout Loader not initialized. WheelMapper pipeline will be empty.")
+            self._clear(
+                "Layout Loader not initialized. WheelMapper pipeline will be empty."
+            )
             return
 
         snap = loader.snapshot
@@ -77,9 +79,13 @@ class WheelMapper:
         else:
             half_screen_region = RectangularRegion(Point(0.0, 0.0), Point(w / 2.0, h))
 
-        deadzone = wheel.deadzone if wheel.ignore_app_settings else float(settings.deadzone)
+        deadzone = (
+            wheel.deadzone if wheel.ignore_app_settings else float(settings.deadzone)
+        )
         hysteresis = (
-            wheel.hysteresis if wheel.ignore_app_settings else float(settings.hysteresis)
+            wheel.hysteresis
+            if wheel.ignore_app_settings
+            else float(settings.hysteresis)
         )
         sprint = (
             get_scancode_from_key(settings.sprint_key)

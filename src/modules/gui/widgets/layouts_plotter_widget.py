@@ -337,7 +337,7 @@ class _DraggableLabel(_Draggable):
         dx_press = event.x - xpx_press
         dy_press = event.y - ypx_press
         self.plotter.current_move_distance = ((dx_press**2) + (dy_press**2)) ** 0.5
-        
+
         if not self.plotter.captured:
             self._capture_background()
 

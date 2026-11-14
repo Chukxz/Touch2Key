@@ -595,7 +595,7 @@ class LayoutStudioPage(QWidget):
         self.add_rect_btn.clicked.connect(lambda: self._start_draw_mode(RECTANGLE, 4))
         self.toggle_overlays_btn.clicked.connect(self.plotter_widget.toggle_visibility)
         self.cancel_action_btn.clicked.connect(self.plotter_widget.reset_state)
-        self.discard_btn.clicked.connect(self._on_discard_requested) 
+        self.discard_btn.clicked.connect(self._on_discard_requested)
         self.save_btn.clicked.connect(self._save)
         self.save_as_btn.clicked.connect(self._save_as_copy)
 

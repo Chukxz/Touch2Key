@@ -343,9 +343,7 @@ class DiagnosticView(QGraphicsView):
             items.extend((ripple, label))
 
         # The indicator line points at the bound zone nearest the cursor.
-        near_x, near_y = min(
-            targets, key=lambda p: (p[0] - x) ** 2 + (p[1] - y) ** 2
-        )
+        near_x, near_y = min(targets, key=lambda p: (p[0] - x) ** 2 + (p[1] - y) ** 2)
         if self.indicator_line is not None:
             self._scene.removeItem(self.indicator_line)
         self.indicator_line = self._scene.addLine(

@@ -107,7 +107,9 @@ class LayoutLoader:
         self.snapshot: LayoutSnapshot
         self.load_layout()
 
-    def _resolve_target_space(self, layout: Layout) -> tuple[int, int, int, float, float]:
+    def _resolve_target_space(
+        self, layout: Layout
+    ) -> tuple[int, int, int, float, float]:
         """Resolves target dimensions and scale factors, falling back to layout properties."""
         layout_is_landscape = layout.width >= layout.height
 

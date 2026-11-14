@@ -67,13 +67,11 @@ class OutputSink(ABC):
 @dataclass(slots=True)
 class Region(ABC):
     @abstractmethod
-    def activates(self, event: TouchEvent) -> bool:
-        ...
+    def activates(self, event: TouchEvent) -> bool: ...
 
     @property
     @abstractmethod
-    def area(self) -> float:
-        ...
+    def area(self) -> float: ...
 
 
 @dataclass(slots=True)
@@ -130,8 +128,7 @@ class RectangularRegion(Region):
 @dataclass(slots=True)
 class Constraint(ABC):
     @abstractmethod
-    def apply(self, origin: Point, position: Point) -> Point:
-        ...
+    def apply(self, origin: Point, position: Point) -> Point: ...
 
     def update_origin(self, origin: Point, position: Point) -> Point:
         return origin
@@ -178,20 +175,16 @@ class LeashConstraint(Constraint):
 @dataclass(slots=True)
 class Origin(ABC):
     @abstractmethod
-    def begin(self, position: Point) -> None:
-        ...
+    def begin(self, position: Point) -> None: ...
 
     @abstractmethod
-    def get(self) -> Point:
-        ...
+    def get(self) -> Point: ...
 
     @abstractmethod
-    def update(self, position: Point, constraint: Constraint) -> None:
-        ...
+    def update(self, position: Point, constraint: Constraint) -> None: ...
 
     @abstractmethod
-    def end(self) -> None:
-        ...
+    def end(self) -> None: ...
 
 
 @dataclass(slots=True)
@@ -277,8 +270,7 @@ T = TypeVar("T")
 @dataclass(slots=True)
 class Transformation(ABC, Generic[T]):
     @abstractmethod
-    def apply(self, context: PipelineContext) -> T:
-        ...
+    def apply(self, context: PipelineContext) -> T: ...
 
     def reset(self) -> None:
         pass
@@ -377,8 +369,7 @@ class Semantic(ABC, Generic[T]):
     @abstractmethod
     def process(
         self, context: PipelineContext, value: T, output_sink: OutputSink
-    ) -> None:
-        ...
+    ) -> None: ...
 
     def reset(self, output_sink: OutputSink) -> None:
         pass
@@ -395,11 +386,9 @@ class ButtonSemantic(Semantic[T]):
     ) -> None:
         if context.event.phase is TouchPhase.DOWN:
             if not self._down:
-                (
-                    output_sink.mouse_down
-                    if self.mouse_button
-                    else output_sink.key_down
-                )(self.scancode)
+                (output_sink.mouse_down if self.mouse_button else output_sink.key_down)(
+                    self.scancode
+                )
                 self._down = True
 
         elif context.event.phase is TouchPhase.UP:

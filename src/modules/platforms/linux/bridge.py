@@ -103,7 +103,7 @@ class UInputBridge(AbstractBridge):
         delay_ms: float,
         rate_hz: float,
         exclude_scancodes: set[int],
-        ignore_typematic: bool | None = None
+        ignore_typematic: bool | None = None,
     ) -> None:
         """Pushes typematic timing and exclusion rules to the keyboard worker over IPC."""
         with self.bridge_lock:
@@ -122,7 +122,12 @@ class UInputBridge(AbstractBridge):
 
             payload = bytearray(
                 PACK_TYPEMATIC_STRUCT.pack(
-                    KEY_CONFIG, enabled, delay_ns, interval_sec, ignore_typematic, len(codes)
+                    KEY_CONFIG,
+                    enabled,
+                    delay_ns,
+                    interval_sec,
+                    ignore_typematic,
+                    len(codes),
                 )
             )
             for code in codes:

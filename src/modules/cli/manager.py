@@ -171,16 +171,12 @@ def _normalize_key_seq(
     return ",".join(seq)
 
 
-def _normalize_toggle_hotkeys(
-    raw_csv: str, current_csv: Optional[str] = None
-) -> str:
+def _normalize_toggle_hotkeys(raw_csv: str, current_csv: Optional[str] = None) -> str:
     """Validates comma-separated toggle hotkeys ('k1, k2' replaces, '+k1, +k2' appends, 'clear'/'none' wipes)."""
     return _normalize_key_seq(raw_csv, current_csv, allow_presets=False)
 
 
-def _normalize_excluded_keys(
-    raw_csv: str, current_csv: Optional[str] = None
-) -> str:
+def _normalize_excluded_keys(raw_csv: str, current_csv: Optional[str] = None) -> str:
     """Validates comma-separated excluded keys ('k1, k2' replaces, '+k1, +k2' appends, '+wasd'/'+arrows' expands presets, 'clear'/'none' wipes)."""
     return _normalize_key_seq(raw_csv, current_csv, allow_presets=True)
 
