@@ -480,16 +480,16 @@ def build_architecture_digraph(
             c.node(
                 "ConfigIOAndMigration",
                 _card(
-                    "4B. Config I/O &amp; Legacy Migration Engine",
-                    "modules/database/config_io.py &amp; legacy_migration.py",
+                    "4B. Config I/O &amp; Migration Engine",
+                    "modules/database/config_io.py",
                     [
                         (
                             "Import Pipeline",
-                            "import_any() auto-detects .json layouts (migrate_json_layout), .toml settings (migrate_toml_config), or bundle directories",
+                            "import_any() auto-detects .json layouts (migrate_json_layout), .toml settings (migrate_toml_config), or bundle directories; layout imports are atomic and replace same-name layouts",
                         ),
                         (
                             "Export Pipeline",
-                            "export_layout_json(), export_settings_toml(linked_json_path), export_bundle() writing portable TOML + JSON pairs to data/profiles/",
+                            "export_layout_json() (nested per-zone pipeline objects), export_settings_toml(linked_json_path), export_bundle() writing portable TOML + JSON pairs to data/profiles/",
                         ),
                     ],
                     header_bg="#c2410c",
