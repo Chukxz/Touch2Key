@@ -337,9 +337,7 @@ class _DraggableLabel(_Draggable):
         dx_press = event.x - xpx_press
         dy_press = event.y - ypx_press
         self.plotter.current_move_distance = ((dx_press**2) + (dy_press**2)) ** 0.5
-        if self.plotter.current_move_distance > DEFAULT_MIN_MOVE_DIST:
-            self.plotter.mark_dirty()
-
+        
         if not self.plotter.captured:
             self._capture_background()
 
@@ -363,7 +361,6 @@ class _DraggableLabel(_Draggable):
         x, y = self.label_artist.get_position()
         self.press = x, y, xdata_press, ydata_press, xpx_press, ypx_press
         self._move_label(dx, dy)
-        self.plotter.mark_dirty()
         self.canvas.draw()
         self.plotter.captured = False
 
