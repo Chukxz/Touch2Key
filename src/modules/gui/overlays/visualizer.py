@@ -10,6 +10,7 @@ import ctypes
 import logging
 import signal
 import sys
+import threading
 import time
 from collections import deque
 from typing import TYPE_CHECKING
@@ -36,12 +37,19 @@ from PySide6.QtWidgets import (
 )
 
 from modules.database import store
+from modules.database.connection import connection_manager
 from modules.scripts.log_manager import AppLogManager, modify_qt_logging_rules_on_win32
 from modules.platforms import (
     check_single_instance,
     get_specific_qt_key,
 )
-from modules.scripts.runtime_info import attach, register_process, unregister_process
+from modules.scripts.runtime_info import (
+    STALE_AFTER_S,
+    attach,
+    register_process,
+    snapshot_age,
+    unregister_process,
+)
 from modules.utils import (
     ICONS_FOLDER,
     VISUALIZER_RUNTIME_FILE,
@@ -67,6 +75,7 @@ MAX_TRAIL_NUMBER = 5000
 MIN_TRAIL_NUMBER = 500
 MAX_TRAIL_WIDTH = 100
 MAX_TRAIL_HEIGHT = 100
+LOCATION_REFRESH_INTERVAL_S = 2.0
 
 
 MOUSE_BUTTON_INFO: dict[Qt.MouseButton, tuple[str, str]] = {
@@ -90,6 +99,8 @@ def _create_high_visibility_shadow() -> QGraphicsDropShadowEffect:
 class DiagnosticView(QGraphicsView):
     arrow_pressed = Signal()
     resized = Signal()
+    # (viewport width, viewport height, locations or None when the refresh failed)
+    locations_ready = Signal(int, int, object)
 
     def __init__(
         self,
@@ -97,7 +108,9 @@ class DiagnosticView(QGraphicsView):
     ) -> None:
         super().__init__(parent)
 
-        self._loc_dict: dict[int, tuple[float, float]] = {}
+        # scancode -> every zone position bound to it (several zones can share a key)
+        self._loc_dict: dict[int, list[tuple[float, float]]] = {}
+        self._refresh_in_flight = False
         self.cursor_visible = True
         self.data: deque[dict] = deque(maxlen=MAX_EVENT_LOG)
         self.pressed_keys: dict[int, str] = {}
@@ -151,6 +164,8 @@ class DiagnosticView(QGraphicsView):
         self._pressed_keys: set[int] = set()
         self._last_f8_time = 0.0
         self._last_dim_check = 0.0
+
+        self.locations_ready.connect(self._apply_locations)
 
         # Poll timer for smooth typematic curve evaluation & live engine sync (5 ms interval)
         self._poll_timer = QTimer(self)
@@ -221,15 +236,70 @@ class DiagnosticView(QGraphicsView):
         if changed:
             self.arrow_pressed.emit()
 
-        # Silently sync live window geometry from the engine every 2.0 seconds
-        if now - self._last_dim_check > 2.0:
+        # Sync live window geometry from the engine periodically. The DB / file /
+        # process lookups run on a worker thread so they never stall the UI thread.
+        if now - self._last_dim_check > LOCATION_REFRESH_INTERVAL_S:
             self._last_dim_check = now
-            viewport_size = self.viewport().size()
-            new_locs = self.get_locations_dict(
-                viewport_size.width(), viewport_size.height()
-            )
-            if new_locs and new_locs != self._loc_dict:
-                self._loc_dict = new_locs
+            self._refresh_locations_async()
+
+    # ------------------------------------------------------------------
+    # Off-thread location refresh
+    # ------------------------------------------------------------------
+    def _refresh_locations_async(self) -> None:
+        if self._refresh_in_flight:
+            return
+
+        viewport_size = self.viewport().size()
+        width, height = viewport_size.width(), viewport_size.height()
+        if width <= 0 or height <= 0:
+            return
+
+        self._refresh_in_flight = True
+        threading.Thread(
+            target=self._refresh_locations_worker,
+            args=(width, height),
+            daemon=True,
+            name="VisualizerLocationRefresh",
+        ).start()
+
+    def _refresh_locations_worker(self, width: int, height: int) -> None:
+        locs: dict[int, list[tuple[float, float]]] | None = None
+        try:
+            locs = self.get_locations_dict(width, height)
+        except Exception:
+            logger.debug("Location refresh failed.", exc_info=True)
+        finally:
+            # DB connections are thread-local; release this worker's promptly.
+            try:
+                connection_manager.close_current_thread_connection()
+            except Exception:
+                pass
+
+        try:
+            self.locations_ready.emit(width, height, locs)
+        except RuntimeError:
+            pass  # view was destroyed while the refresh was running
+
+    def _apply_locations(
+        self,
+        width: int,
+        height: int,
+        locs: dict[int, list[tuple[float, float]]] | None,
+    ) -> None:
+        self._refresh_in_flight = False
+
+        # Failed refresh: keep the last good data. An EMPTY dict is a legitimate
+        # result (no active layout / no zones) and clears the markers.
+        if locs is None:
+            return
+
+        # Drop results computed for a viewport size that has since changed.
+        size = self.viewport().size()
+        if (size.width(), size.height()) != (width, height):
+            return
+
+        if locs != self._loc_dict:
+            self._loc_dict = locs
 
     def set_active_text(self, text: str) -> None:
         self.active_buttons.setPlainText(text)
@@ -257,25 +327,33 @@ class DiagnosticView(QGraphicsView):
     ) -> None:
         self._set_active_buttons_pos(x, y)
 
-        loc = self._loc_dict.get(scancode) if scancode is not None else None
-        pos_x, pos_y = loc if loc is not None else (x, y)
+        # Every zone bound to this key gets a ripple; fall back to the cursor.
+        locs = self._loc_dict.get(scancode) if scancode is not None else None
+        targets: list[tuple[float, float]] = list(locs) if locs else [(x, y)]
 
-        ripple = self._scene.addEllipse(
-            pos_x - 15, pos_y - 15, 30, 30, QPen(QColor(color), 2)
+        items: list[QGraphicsItem] = []
+        for pos_x, pos_y in targets:
+            ripple = self._scene.addEllipse(
+                pos_x - 15, pos_y - 15, 30, 30, QPen(QColor(color), 2)
+            )
+            label = self._scene.addText(name, QFont("Arial", 8))
+            label.setDefaultTextColor(QColor(color))
+            label.setGraphicsEffect(_create_high_visibility_shadow())
+            label.setPos(pos_x, pos_y + 15)
+            items.extend((ripple, label))
+
+        # The indicator line points at the bound zone nearest the cursor.
+        near_x, near_y = min(
+            targets, key=lambda p: (p[0] - x) ** 2 + (p[1] - y) ** 2
         )
-        label = self._scene.addText(name, QFont("Arial", 8))
-        label.setDefaultTextColor(QColor(color))
-        label.setGraphicsEffect(_create_high_visibility_shadow())
-        label.setPos(pos_x, pos_y + 15)
-
         if self.indicator_line is not None:
             self._scene.removeItem(self.indicator_line)
         self.indicator_line = self._scene.addLine(
-            x, y, pos_x, pos_y, QPen(QColor("#cccccc"), 2)
+            x, y, near_x, near_y, QPen(QColor("#cccccc"), 2)
         )
 
         self.last_click_id += 1
-        self._expire_later([ripple, label], RIPPLE_LIFETIME_MS, self.last_click_id)
+        self._expire_later(items, RIPPLE_LIFETIME_MS, self.last_click_id)
 
     def _expire_later(
         self, items: list[QGraphicsItem], msec: int, click_id: int
@@ -305,8 +383,12 @@ class DiagnosticView(QGraphicsView):
     def get_locations_dict(
         width: int,
         height: int,
-    ) -> dict[int, tuple[float, float]]:
-        loc_dict: dict[int, tuple[float, float]] = {}
+    ) -> dict[int, list[tuple[float, float]]]:
+        """Zone positions in viewport coordinates, grouped by scancode.
+
+        Safe to call from a worker thread (no Qt access, thread-local DB connection).
+        """
+        loc_dict: dict[int, list[tuple[float, float]]] = {}
 
         if width <= 0 or height <= 0:
             return loc_dict
@@ -331,7 +413,15 @@ class DiagnosticView(QGraphicsView):
         attached = attach()
         if attached is not None:
             _, snap = attached
-            win_info = snap.get("window_info")
+
+            # Mirror the engine's abs-cursor mapping: with the virtual keyboard
+            # open it targets the full screen instead of the game window, and a
+            # stuck engine's last window geometry must not be trusted.
+            workers = snap.get("workers") or {}
+            vkb_open = bool(workers.get("vkb"))
+            fresh = snapshot_age(snap) <= STALE_AFTER_S
+
+            win_info = snap.get("window_info") if (fresh and not vkb_open) else None
             if isinstance(win_info, (tuple, list)) and len(win_info) == 4:
                 left, top, win_w, win_h = win_info
                 if win_w and win_h and win_w > 0 and win_h > 0:
@@ -360,9 +450,11 @@ class DiagnosticView(QGraphicsView):
         scale_y = target_h / layout_h
 
         for zone in zones:
-            loc_dict[zone.scancode] = (
-                offset_x + float(zone.cx or 0.0) * scale_x,
-                offset_y + float(zone.cy or 0.0) * scale_y,
+            loc_dict.setdefault(zone.scancode, []).append(
+                (
+                    offset_x + float(zone.cx or 0.0) * scale_x,
+                    offset_y + float(zone.cy or 0.0) * scale_y,
+                )
             )
 
         return loc_dict
@@ -444,7 +536,10 @@ class DiagnosticView(QGraphicsView):
         width, height = viewport_size.width(), viewport_size.height()
 
         self.setSceneRect(0.0, 0.0, float(width), float(height))
-        self._loc_dict = self.get_locations_dict(width, height)
+        try:
+            self._loc_dict = self.get_locations_dict(width, height)
+        except Exception:
+            logger.debug("Location refresh on resize failed.", exc_info=True)
         self.resized.emit()
 
     @staticmethod
