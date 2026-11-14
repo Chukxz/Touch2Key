@@ -26,7 +26,7 @@ from .core.mapper import Mapper
 from .core.bezel_mapper import BezelMapper
 from .core.key_mapper import KeyMapper
 from .core.mouse_mapper import MouseMapper
-from .core.wheelmapper import WheelMapper
+from .core.wheel_mapper import WheelMapper
 from .core.pipeline_output import BridgeOutputSink
 from .core.gestures import GestureStatus, TwoFingerTapTracker
 
