@@ -825,6 +825,8 @@ class LayoutZonesRepository:
         if auto_heal:
             layouts_repo = LayoutsRepository()
             layout = layouts_repo.get(layout_id)
+            # ensure_bezels returns True when it created, deleted OR rewrote a
+            # bezel row, so the list is re-read and never carries stale geometry.
             if layout and self.ensure_bezels(layout, zones):
                 rows = conn.execute(
                     "SELECT * FROM layout_zones WHERE layout_id = ? ORDER BY id;",
@@ -839,8 +841,10 @@ class LayoutZonesRepository:
     ) -> bool:
         """Guarantees the existence of top and bottom bezels in the layout while removing all duplicates of each.
 
-        Returns True only if rows were created or deleted. Re-syncing an existing bezel's
-        geometry is a no-op write when nothing differs, so reads no longer bump updated_at.
+        Returns True if any bezel row was created, deleted or rewritten, i.e. whenever
+        a previously read zone list is out of date. Re-syncing an existing bezel whose
+        geometry already matches is a no-op write and returns False, so plain reads
+        still don't bump updated_at.
         """
         if current_zones is None:
             conn = connection_manager.get_connection()
@@ -864,7 +868,8 @@ class LayoutZonesRepository:
 
         if top_bezels:
             top_bezel = top_bezels[0]
-            self.update_bezel(layout, top_bezel, True)
+            _, rewritten = self._sync_bezel(layout, top_bezel, True)
+            healed = healed or rewritten
 
             for dup in top_bezels[1:]:
                 self._force_delete(dup.id)
@@ -875,7 +880,8 @@ class LayoutZonesRepository:
 
         if bottom_bezels:
             bottom_bezel = bottom_bezels[0]
-            self.update_bezel(layout, bottom_bezel, False)
+            _, rewritten = self._sync_bezel(layout, bottom_bezel, False)
+            healed = healed or rewritten
 
             for dup in bottom_bezels[1:]:
                 self._force_delete(dup.id)
@@ -977,16 +983,17 @@ class LayoutZonesRepository:
         except (TypeError, ValueError):
             return False
 
-    def update_bezel(
+    def _sync_bezel(
         self,
         layout: Layout,
         zone: LayoutZone,
         is_top: bool,
         thickness_dp: int | None = None,
-    ):
-        """If thickness_dp is None, it uses the parsed dp thickness from its region config.
+    ) -> tuple[int, bool]:
+        """Brings one bezel row in line with `layout`. Returns (zone id, rewritten).
 
-        Skips the write entirely when geometry and config already match.
+        If thickness_dp is None, it uses the parsed dp thickness from its region config.
+        Skips the write entirely (rewritten=False) when geometry and config already match.
         """
         zone.set_parsed_config_from_json()
 
@@ -1002,9 +1009,9 @@ class LayoutZonesRepository:
         new_json = zone.CONFIG_HELPER.get_pipeline_json_from_config()
 
         if self._bezel_unchanged(zone, cx, cy, _x1, _y1, _x2, _y2, new_json):
-            return zone.id
+            return zone.id, False
 
-        return self.update(
+        updated = self.update(
             zone_id=zone.id,
             cx=cx,
             cy=cy,
@@ -1014,7 +1021,22 @@ class LayoutZonesRepository:
             x2=_x2,
             y2=_y2,
             pipeline_json=new_json,
-        ).id
+        )
+        return updated.id, True
+
+    def update_bezel(
+        self,
+        layout: Layout,
+        zone: LayoutZone,
+        is_top: bool,
+        thickness_dp: int | None = None,
+    ):
+        """If thickness_dp is None, it uses the parsed dp thickness from its region config.
+
+        Skips the write entirely when geometry and config already match.
+        """
+        zone_id, _ = self._sync_bezel(layout, zone, is_top, thickness_dp)
+        return zone_id
 
     def _resync_bezels_in_txn(self, conn: sqlite3.Connection, layout: Layout) -> None:
         """Recomputes bezel geometry from `layout` using the caller's transaction (no commit)."""
