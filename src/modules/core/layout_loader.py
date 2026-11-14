@@ -10,6 +10,7 @@ from modules.utils import (
     BEZEL,
     CIRCLE,
     MOUSE_WHEEL_SIMULATOR_CODE,
+    POINTER_SEMANTIC_IDX,
     RECTANGLE,
     SPRINT_DISTANCE_CODE,
     Point,
@@ -22,10 +23,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("modules.core.layout_loader")
 
-# SEMANTIC_MODES index of the pointer-only semantic (a zone that only moves the
-# camera and presses nothing). The layout plotter imports this so it can preserve
-# it on save.
-POINTER_SEMANTIC_IDX = 2
 # up, left, down, right (W, A, S, D)
 _DEFAULT_WHEEL_KEYS: tuple[int, int, int, int] = (0x11, 0x1E, 0x1F, 0x20)
 _WHEEL_KEY_NAMES = ("up", "left", "down", "right")

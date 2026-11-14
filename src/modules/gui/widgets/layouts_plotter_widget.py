@@ -24,6 +24,7 @@ from modules.utils import (
     MIN_BEZEL_DP,
     MIN_PRIORITY,
     MOUSE_WHEEL_SIMULATOR_CODE,
+    POINTER_SEMANTIC_IDX,
     RECTANGLE,
     SPRINT_DISTANCE_CODE,
     TOP_BEZEL_ID,
@@ -2664,10 +2665,13 @@ class LayoutsPlotterWidget(QWidget):
         rows: list[dict[str, Any]] = []
         for _, data in self.shapes.items():
             entry_scancode = int(data["scancode"])
+            is_wheel = entry_scancode == MOUSE_WHEEL_SIMULATOR_CODE
             p_cfg = PipelineConfig()
             p_cfg.set_pipeline_config_from_json(
                 pipeline_json=data.get("pipeline_json", "{}")
             )
+            # Read BEFORE the set_* calls below can overwrite it.
+            stored_sem_idx, _, _ = p_cfg.get_semantic_config()
 
             row: dict[str, Any] = {
                 "scancode": entry_scancode,
@@ -2692,25 +2696,23 @@ class LayoutsPlotterWidget(QWidget):
                 row["x1"], row["y1"] = float(x_min), float(y_min)
                 row["x2"], row["y2"] = float(x_max), float(y_max)
 
-            if entry_scancode == MOUSE_WHEEL_SIMULATOR_CODE:
+            if is_wheel:
                 indicators_map = self.mouse_wheel_indicators.mouse_wheel_indicators_map
                 p_cfg.pipeline_config["up"] = indicators_map[0]
                 p_cfg.pipeline_config["left"] = indicators_map[1]
                 p_cfg.pipeline_config["down"] = indicators_map[2]
                 p_cfg.pipeline_config["right"] = indicators_map[3]
 
-            p_cfg.set_origin_config(
-                idx=0 if entry_scancode == MOUSE_WHEEL_SIMULATOR_CODE else 1
-            )
-            p_cfg.set_constraint_config(
-                idx=1 if entry_scancode == MOUSE_WHEEL_SIMULATOR_CODE else 0
-            )
-            p_cfg.set_transform_config(
-                idx=2 if entry_scancode == MOUSE_WHEEL_SIMULATOR_CODE else 1
-            )
-            p_cfg.set_semantic_config(
-                idx=1 if entry_scancode == MOUSE_WHEEL_SIMULATOR_CODE else 0
-            )
+            p_cfg.set_origin_config(idx=0 if is_wheel else 1)
+            p_cfg.set_constraint_config(idx=1 if is_wheel else 0)
+            p_cfg.set_transform_config(idx=2 if is_wheel else 1)
+
+            # A pointer-only zone (created outside the plotter) keeps its semantic;
+            # everything else is a wheel (directional) or a button.
+            if is_wheel:
+                p_cfg.set_semantic_config(idx=1)
+            elif stored_sem_idx != POINTER_SEMANTIC_IDX:
+                p_cfg.set_semantic_config(idx=0)
 
             p_cfg.set_region_config(idx=region_idx, priority=data.get("priority", 0))
             p_cfg.set_semantic_config(pointer=data.get("pointer", False))

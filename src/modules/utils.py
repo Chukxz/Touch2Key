@@ -239,6 +239,7 @@ ALLOWED_PIPELINE_FIELDS = {
     "snap_radius",
     "radius",
 }
+POINTER_SEMANTIC_IDX = 2
 
 # Low-level worker constants
 MAX_COALESCE = 20
