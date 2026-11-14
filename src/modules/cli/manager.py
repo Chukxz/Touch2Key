@@ -23,11 +23,9 @@ from modules.database.config_io import (
     export_layout_json,
     export_settings_toml,
     import_any,
-    safe_filename,
-)
-from modules.database.legacy_migration import (
     migrate_json_layout,
     migrate_toml_config,
+    safe_filename,
 )
 from modules.database.repositories import DuplicateNameError
 from modules.cli.key_capture import (
